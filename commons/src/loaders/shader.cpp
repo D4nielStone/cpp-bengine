@@ -27,23 +27,53 @@ SOFTWARE.
 #include "glad.h"
 #include "loaders/shader.hpp"
 #include <filesystem>
-#include "assets/shaders_in_memory.hpp"
+#include <stdexcept>
 
 using namespace COMMONS_NS;
 
-// Mapeia os shaders na memória para facilitar o acesso aos shaders embutidos
-inline const std::unordered_map<std::string, const char*> shader_memory{
-    {"quad.frag", quad_frag},
-    {"image.vert", imagem_vert},
-    {"image.frag", imagem_frag},
-    {"framebuffer.frag", imagem_frag},
-    {"vintage.frag", vintega_frag},
-    {"text.frag", texto_frag},
-    {"skybox.vs", skybox_vert},
-    {"skybox.fs", skybox_frag},
-    {"phong.vert", phong_vert},
-    {"phong.frag", phong_frag}
-};
+namespace {
+    std::filesystem::path resolve_shader_path(const char* requested_path)
+    {
+        const std::filesystem::path requested(requested_path);
+        const auto filename = requested.filename().string();
+
+        std::string normalized_name = filename;
+        if (filename == "skybox.vs")
+            normalized_name = "skybox.vert";
+        else if (filename == "skybox.fs")
+            normalized_name = "skybox.frag";
+
+        const std::filesystem::path shader_dir = "commons/assets/shaders";
+        const std::filesystem::path candidates[] = {
+            requested,
+            std::filesystem::path("assets/shaders") / normalized_name,
+            shader_dir / normalized_name,
+            std::filesystem::path("../") / shader_dir / normalized_name,
+            std::filesystem::path(COMMONS_SHADER_ASSET_DIR) / normalized_name
+        };
+
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::is_regular_file(candidate))
+                return candidate;
+        }
+
+        throw std::runtime_error(
+            "Shader file not found: " + std::string(requested_path) +
+            ". Expected a runtime asset under assets/shaders or commons/assets/shaders."
+        );
+    }
+
+    std::string read_shader_file(const std::filesystem::path& path)
+    {
+        std::ifstream file(path);
+        if (!file)
+            throw std::runtime_error("Failed to open shader file: " + path.string());
+
+        std::stringstream source;
+        source << file.rdbuf();
+        return source.str();
+    }
+}
 
 void COMMONS_NS::desload_shaders()
 {
@@ -76,51 +106,12 @@ void shader::compilar(const char* vertexPath, const char* fragmentPath) {
         std::cerr << "Erro ao create shader_program: " << e.what() << std::endl;
     }
 
-    const char* vertexshaderSource{};
-    const char* fragmentshaderSource{};
-
-    // Abre e lê os arquivos de shader
-    std::string vertexCode;
-    std::string fragmentCode;
-    std::ifstream vshaderFile, fshaderFile;
-
-    vshaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-    vshaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-
-    if (!std::filesystem::exists(vertexPath) || !std::filesystem::exists(fragmentPath))
-    {
-        // Verifica se o shader está na memória
-        if (shader_memory.find(std::filesystem::path(vertexPath).filename().string()) != shader_memory.end()) {
-            vertexshaderSource = shader_memory.at(std::filesystem::path(vertexPath).filename().string());
-        }
-        else
-            return;
-        if (shader_memory.find(std::filesystem::path(fragmentPath).filename().string()) != shader_memory.end()) {
-            fragmentshaderSource = shader_memory.at(std::filesystem::path(fragmentPath).filename().string());
-        }
-        else
-            return;
-    }
-    else
-    {
-        try {
-            vshaderFile.open(vertexPath);
-            fshaderFile.open(fragmentPath);
-            std::stringstream vshaderStream, fshaderStream;
-
-            vshaderStream << vshaderFile.rdbuf();
-            fshaderStream << fshaderFile.rdbuf();
-
-            vertexCode = vshaderStream.str();
-            fragmentCode = fshaderStream.str();
-            vertexshaderSource = vertexCode.c_str();
-            fragmentshaderSource = fragmentCode.c_str();
-        }
-        catch (const std::ifstream::failure& e)
-        {
-            std::cerr << e.what() << "\n";
-        }
-    }
+    const auto vertex_file = resolve_shader_path(vertexPath);
+    const auto fragment_file = resolve_shader_path(fragmentPath);
+    const std::string vertexCode = read_shader_file(vertex_file);
+    const std::string fragmentCode = read_shader_file(fragment_file);
+    const char* vertexshaderSource = vertexCode.c_str();
+    const char* fragmentshaderSource = fragmentCode.c_str();
     // Compilação do Malha shader
     GLuint vertexshader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexshader, 1, &vertexshaderSource, NULL);
@@ -190,7 +181,7 @@ void shader::setVec4(const std::string& name, const fvector_type4& vec4 ) const 
 void shader::setVec3(const std::string& name, const float& r, const float& g, const float& b) const {
     glUniform3f(glGetUniformLocation(ID, name.c_str()), r, g, b);
 }
-void shader::setVec3(const std::string& name, const fvector_type3& vector_type) const {
+void shader::setVec3(const std::string& name, const fvec3& vector_type) const {
     glUniform3f(glGetUniformLocation(ID, name.c_str()), vector_type.x, vector_type.y, vector_type.z);
 }
 

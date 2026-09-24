@@ -9,9 +9,9 @@ bool directional_light::analyze(const rapidjson::Value& value)
     if(!value.HasMember("color") || !value["color"].IsArray()) return false;
     if(!value.HasMember("intensity") || !value["intensity"].IsFloat()) return false;
 
-	direction = fvector_type3(value["direction"].GetArray()[0].GetFloat(),value["direction"].GetArray()[1].GetFloat(),value["direction"].GetArray()[2].GetFloat());
-    ambient = fvector_type3(value["ambient"].GetArray()[0].GetFloat(),value["ambient"].GetArray()[1].GetFloat(),value["ambient"].GetArray()[2].GetFloat());
-    color = fvector_type3(value["color"].GetArray()[0].GetFloat(),value["color"].GetArray()[1].GetFloat(),value["color"].GetArray()[2].GetFloat());
+	direction = {value["direction"].GetArray()[0].GetFloat(), value["direction"].GetArray()[1].GetFloat(), value["direction"].GetArray()[2].GetFloat()};
+    ambient = {value["ambient"].GetArray()[0].GetFloat(), value["ambient"].GetArray()[1].GetFloat(), value["ambient"].GetArray()[2].GetFloat()};
+    color = {value["color"].GetArray()[0].GetFloat(), value["color"].GetArray()[1].GetFloat(), value["color"].GetArray()[2].GetFloat()};
     intensity = value["intensity"].GetFloat();
 
     return true;

@@ -3,9 +3,9 @@
 
 using namespace COMMONS_NS;
 
-transform::transform(const fvector_type3& p, const fvector_type3& r, const fvector_type3& e) :
-			position(p), up(fvector_type3(0.f, 1.f, 0.f)),
-			rotation(r), target(new fvector_type3(1.f)), m_target_novo(true),
+transform::transform(const fvec3& p, const fvec3& r, const fvec3& e) :
+			position(p), up({0.f, 1.f, 0.f}),
+			rotation(r), target(new fvec3(1.f)), m_target_novo(true),
 			scale(e), m_usar_target(false) {}
 
 transform::~transform() {
@@ -65,31 +65,31 @@ bool transform::serialize(rapidjson::Value& value, rapidjson::Document::Allocato
 
 glm::mat4 transform::get_model_matrix() {
     matrizmodelo = glm::mat4(1.0f);
-    matrizmodelo = glm::translate(matrizmodelo, position.to_glm());
+    matrizmodelo = glm::translate(matrizmodelo, to_glm(position));
     matrizmodelo = glm::rotate(matrizmodelo, glm::radians(rotation.x), glm::vec3(1.f, 0.f, 0.f));
     matrizmodelo = glm::rotate(matrizmodelo, glm::radians(rotation.y), glm::vec3(0.f, 1.f, 0.f));
     matrizmodelo = glm::rotate(matrizmodelo, glm::radians(rotation.z), glm::vec3(0.f, 0.f, 1.f));
-    matrizmodelo = glm::scale(matrizmodelo, scale.to_glm());
+    matrizmodelo = glm::scale(matrizmodelo, to_glm(scale));
     return matrizmodelo;
 }
 
-fvector_type3 transform::get_position() const {
+fvec3 transform::get_position() const {
     return position;
 }
 
-fvector_type3 transform::get_scale() const {
+fvec3 transform::get_scale() const {
     return scale;
 }
 
-fvector_type3 transform::get_rotation() const {
+fvec3 transform::get_rotation() const {
     return rotation;
 }
 
-fvector_type3 transform::get_target() const {
+fvec3 transform::get_target() const {
     return *target;
 }
 
-fvector_type3 transform::get_up() const {
+fvec3 transform::get_up() const {
     return up;
 }
 
@@ -101,46 +101,46 @@ void transform::set_model_matrix(const glm::mat4& m) {
     matrizmodelo = m;
 }
 
-void transform::set_up(const fvector_type3& c) {
+void transform::set_up(const fvec3& c) {
     up = c;
 }
 
-void  transform::set_position(const fvector_type3& v) {
+void  transform::set_position(const fvec3& v) {
     position = v;
 }
 
-void  transform::set_scale(const fvector_type3& v) {
+void  transform::set_scale(const fvec3& v) {
     scale = v;
 }
 
-void  transform::set_rotation(const fvector_type3& v) {
+void  transform::set_rotation(const fvec3& v) {
     m_usar_target = false;
     rotation = v;
 }
 
 void  transform::set_rotation(const fvector_type4& v) {
     m_usar_target = false;
-    glm::vec3 euler = glm::eulerAngles(glm::quat(v.to_glm()));
-    rotation = fvector_type3(euler);
+    glm::vec3 euler = glm::eulerAngles(glm::quat(to_glm(v)));
+    rotation = {euler.x, euler.y, euler.z};
 }
 
-void  transform::move(const fvector_type3& v) {
-    position += v;
+void  transform::move(const fvec3& v) {
+    position = position + v;
 }
 
-void  transform::apply_scale(const fvector_type3& v) {
-    scale += v;
+void  transform::apply_scale(const fvec3& v) {
+    scale = scale + v;
 }
 
-void  transform::rotate(const fvector_type3& v) {
+void  transform::rotate(const fvec3& v) {
     m_usar_target = false;
-    rotation += v;
+    rotation = rotation + v;
 }
 
-void  transform::look_at_vector(const fvector_type3& pos) {
+void  transform::look_at_vector(const fvec3& pos) {
     m_usar_target = true;
     if(!m_target_novo)
-        target = new fvector_type3(1.f);
+        target = new fvec3(1.f);
     m_target_novo = true;
     *target = pos;
 }

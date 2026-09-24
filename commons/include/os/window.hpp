@@ -7,7 +7,7 @@
 #include <GLFW/glfw3.h>
 #include "commons_namespace.hpp"
 #include "time.hpp"
-#include "util/vector2.hpp"
+#include "utils/vec.hpp"
 #include "inputs/inputs.hpp"
 #include "systems/system.hpp"
 
@@ -34,8 +34,8 @@ namespace COMMONS_NS {
             static ivec2 get_window_size                ();
             static bool hasInstance();
             static window& get_instance();
-            static window& newInstance(const char* nome, fvector_type2 bounds = fvector_type2(600, 400), const char* icon_path = nullptr);
-    		static window& newInstance(const char* nome, const bool f, fvector_type2 bounds = fvector_type2(600, 400), const char* icon_path = nullptr);
+            static window& newInstance(const char* nome, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
+    		static window& newInstance(const char* nome, const bool f, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
 
     		time m_time;
             std::string m_nome{""};
@@ -44,8 +44,8 @@ namespace COMMONS_NS {
     		inputs m_inputs;
             std::shared_ptr<ecs> m_ecs;
             std::vector<std::shared_ptr<system>> m_systems;
-    		window(const char* nome, fvector_type2 bounds = fvector_type2(600, 400), const char* icon_path = nullptr);
-    		window(const char* nome, const bool f, fvector_type2 bounds = fvector_type2(600, 400), const char* icon_path = nullptr);
+    		window(const char* nome, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
+    		window(const char* nome, const bool f, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
     		~window();
     		void poll();
             void loop();

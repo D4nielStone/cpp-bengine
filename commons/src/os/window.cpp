@@ -9,6 +9,7 @@
 #include "loaders/font.hpp"
 #include "inputs/inputs.hpp"
 #include "systems/system.hpp"
+#include <bgui.hpp>
 using namespace COMMONS_NS;
 
 void errorCallback(int error, const char* description) {
@@ -24,12 +25,12 @@ window& window::get_instance() {
        throw std::runtime_error("Instância da window não foi gerada!");
     return *instanceAtual;
 }
-window& window::newInstance(const char* nome, fvector_type2 bounds , const char* icon_path ) {
+window& window::newInstance(const char* nome, fvec2 bounds , const char* icon_path ) {
     if(instanceAtual) delete instanceAtual;
     instanceAtual = new window(nome, bounds, icon_path);
     return *instanceAtual;
 }
-window& window::newInstance(const char* nome, const bool f, fvector_type2 bounds , const char* icon_path ) {
+window& window::newInstance(const char* nome, const bool f, fvec2 bounds , const char* icon_path ) {
     if(instanceAtual) delete instanceAtual;
     instanceAtual = new window(nome, f, bounds, icon_path);
     return *instanceAtual;
@@ -50,9 +51,8 @@ void window::posicionarCursor(double x, double y)
 
 window::~window() {
     desload_shaders();
-    font_manager::limparFontes();
 }
-window::window(const char* nome, fvector_type2 bounds, const char* icon_path)
+window::window(const char* nome, fvec2 bounds, const char* icon_path)
 {
     m_ecs = std::make_shared<ecs>();
     glfwSetErrorCallback(errorCallback);
@@ -103,7 +103,7 @@ window::window(const char* nome, fvector_type2 bounds, const char* icon_path)
     size.x = tam.z;
 }
 
-window::window(const char* nome, const bool f, fvector_type2 bounds , const char* icon_path)
+window::window(const char* nome, const bool f, fvec2 bounds , const char* icon_path)
 {
     m_ecs = std::make_shared<ecs>();
     glfwSetErrorCallback(errorCallback);
@@ -191,12 +191,27 @@ void window::modoLegado() {
 }
 
 void window::loop() {
+    auto& refresh_func = bgui::get_context().m_refresh_func;
+    const bool installed_refresh_func = !refresh_func;
+
+    if (installed_refresh_func) {
+        refresh_func = [this] {
+            for (const auto& system : m_systems) {
+                system->update(m_ecs);
+            }
+            swap();
+        };
+    }
+
     while(!glfwWindowShouldClose(m_window)) {
         poll();
-        for (const auto& system : m_systems) {
-            system->update(m_ecs);
+        if (refresh_func) {
+            refresh_func();
         }
-        swap();
+    }
+
+    if (installed_refresh_func) {
+        refresh_func = {};
     }
 }
 

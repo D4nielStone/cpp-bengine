@@ -29,10 +29,8 @@
 #include <memory>
 #include <vector>
 #include "material.hpp"
-#include "vector2.hpp"
-#include "vector3.hpp"
+#include "utils/vec.hpp"
 #include "color.hpp"
-#include "vector4.hpp"
 #include <glm/glm.hpp>
 #include "loaders/shader.hpp"
 #include "commons_namespace.hpp"

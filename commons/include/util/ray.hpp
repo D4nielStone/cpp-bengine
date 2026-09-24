@@ -26,7 +26,6 @@ SOFTWARE.
 
 #pragma once
 #include <glm/glm.hpp>
-#include "vector3.hpp"
 #include <bullet/btBulletDynamicsCommon.h>
 #include "commons_namespace.hpp"
 
@@ -34,13 +33,13 @@ namespace COMMONS_NS {
     // Estrutura para armazenar os resultados do Raycast
     struct ray
     {
-        fvector_type3 origem;
-        fvector_type3 direction;
+        fvec3 origem;
+        fvec3 direction;
     };
     struct ray_result {
         bool atingiu;                      // Se o ray atingiu algo
-        fvector_type3 pontoDeColisao;            // Ponto de colis�o
-        fvector_type3 normalAtingida;           // Normal da superf�cie atingida
+        fvec3 pontoDeColisao;            // Ponto de colis�o
+        fvec3 normalAtingida;           // Normal da superf�cie atingida
         const btCollisionObject* objetoAtingido; // Objeto atingido
     };
 }

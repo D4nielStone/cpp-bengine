@@ -99,31 +99,31 @@ void physics::setModelo(model* p_modelo) {
 }
 
 // Aplicar força
-void physics::setForca(const fvector_type3& vector) {
+void physics::setForca(const fvec3& vector) {
     m_rigid_body->activate();
-    m_rigid_body->applyCentralForce(vector.to_btvec());
+    m_rigid_body->applyCentralForce(to_btvec(vector));
 }
 
 // Aplicar speed
-void physics::setVelocidade(const fvector_type3& speed) {
+void physics::setVelocidade(const fvec3& speed) {
     m_rigid_body->activate();
-    m_rigid_body->setLinearVelocity(speed.to_btvec());
+    m_rigid_body->setLinearVelocity(to_btvec(speed));
 }
 
 // Obter speed
-fvector_type3 physics::getVelocidade() const {
+fvec3 physics::getVelocidade() const {
     return { m_rigid_body->getLinearVelocity().getX(),
             m_rigid_body->getLinearVelocity().getY(),
             m_rigid_body->getLinearVelocity().getZ() };
 }
-void physics::setFatorLinear(const fvector_type3& fator) {
+void physics::setFatorLinear(const fvec3& fator) {
         m_rigid_body->activate();
-        m_rigid_body->setLinearFactor(fator.to_btvec());
+        m_rigid_body->setLinearFactor(to_btvec(fator));
 }
 
-void physics::setFatorAngular(const fvector_type3& fator){
+void physics::setFatorAngular(const fvec3& fator){
         m_rigid_body->activate();
-        m_rigid_body->setAngularFactor(fator.to_btvec());
+        m_rigid_body->setAngularFactor(to_btvec(fator));
 }
 
 void physics::setRestituicao(const float fator) {

@@ -57,7 +57,7 @@ void physics_system::update(const std::shared_ptr<ecs>& reg) {
         btTransform bt;
         btQuaternion btRot;
         // define position
-        bt.setOrigin(t->position.to_btvec());
+        bt.setOrigin(to_btvec(t->position));
         // define rotação
         btRot.setEulerZYX(t->rotation.x, t->rotation.y, t->rotation.z);
         bt.setRotation(btRot);
@@ -74,7 +74,7 @@ void physics_system::update(const std::shared_ptr<ecs>& reg) {
         auto t = reg->get<transform>(entity);
         btTransform bt;
         f->m_estado_de_movimento->getWorldTransform(bt);
-        t->position = fvector_type3(bt.getOrigin());
+        t->position = fvec3(bt.getOrigin());
         t->set_rotation(fvector_type4(bt.getRotation()));
     });
 }
@@ -123,7 +123,7 @@ ray_result physics_system::cast_ray(const ray& ray)
 
     dynamic_world->rayTest(origem, destino, callback);
 
-    ray_result resultado = { false, fvector_type3(0.0f), fvector_type3(0.0f), nullptr };
+    ray_result resultado = { false, fvec3(0.0f), fvec3(0.0f), nullptr };
 
     if (callback.hasHit()) {
         btVector3 ponto = callback.m_hitPointWorld;

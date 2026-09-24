@@ -5,11 +5,10 @@
 #include "commons_namespace.hpp"
 #include "component.hpp"
 #include "transform.hpp"
-#include "elements/image.hpp"
 #include "util/skybox.hpp"
-#include "util/vector3.hpp"
 #include "util/color.hpp"
 #include "util/ray.hpp"
+#include "elements/image.hpp"
 
 namespace COMMONS_NS {
 	/**
@@ -28,7 +27,7 @@ namespace COMMONS_NS {
         std::unique_ptr<elements::image> framebuffer_ptr{nullptr};
 		color ceu				{0.43F, 0.78F, 0.86F, 1.0F};
 
-		fvector_type3 forward, right, up, position;
+		fvec3 forward, right, up, position;
 		transform* m_transform{ nullptr };
 
 		glm::mat4 viewMatrix = glm::mat4(1.f), projMatriz = glm::mat4(1.f);
@@ -66,10 +65,10 @@ namespace COMMONS_NS {
 
 		glm::mat4 obtProjectionMatrix();
 
-		ray point_to_ray(const fvector_type2& screenPoint) const;
-		fvector_type3 telaParaMundo(const fvector_type2& screenPoint, float profundidade) const;
-        ivec2 worldParaTela(const fvector_type3& worldPos);
+		ray point_to_ray(const fvec2& screenPoint) const;
+		fvec3 telaParaMundo(const fvec2& screenPoint, float profundidade) const;
+        ivec2 worldParaTela(const fvec3& worldPos);
 
-		void move(const fvector_type3& pos);
+		void move(const fvec3& pos);
 	};
 }

@@ -26,7 +26,6 @@
 #include "commons_namespace.hpp"
 #include "loaders/model.hpp"
 #include "component.hpp"
-#include "util/vector3.hpp"
 
 namespace COMMONS_NS {
     struct physics : component {
@@ -47,14 +46,14 @@ namespace COMMONS_NS {
         virtual ~physics();
 
         void setModelo(model*);
-        void setForca(const fvector_type3& vector);
-        void setVelocidade(const fvector_type3& vector);
-        void setFatorLinear(const fvector_type3& fator);
-        void setFatorAngular(const fvector_type3& fator);
+        void setForca(const fvec3& vector);
+        void setVelocidade(const fvec3& vector);
+        void setFatorLinear(const fvec3& fator);
+        void setFatorAngular(const fvec3& fator);
         void setFriccao(const float fator);
         void setRestituicao(const float fator);
         void setRaioCCD(const float fator);
-        fvector_type3 getVelocidade() const;
+        fvec3 getVelocidade() const;
         unsigned int m_massa;
         model* m_modelo{ nullptr };
         btCollisionShape* m_forma{ nullptr };

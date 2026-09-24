@@ -34,9 +34,9 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         const auto projection = camera_component->obtProjectionMatrix();
 
         directional_light direction_light{
-            fvector_type3(-0.2f, -1.0f, -0.3f),
-            fvector_type3(0.15f),
-            fvector_type3(1.0f),
+            {-0.2f, -1.0f, -0.3f},
+            fvec3(0.15f),
+            fvec3(1.0f),
             1.0f
         };
         std::vector<point_light> point_lights;

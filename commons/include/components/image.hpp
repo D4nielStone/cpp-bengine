@@ -30,15 +30,15 @@ SOFTWARE.
 #include "commons_namespace.hpp"
 #include "loaders/image_loader.hpp"
 #include "component.hpp"
-#include "util/vector2.hpp"
+#include "utils/vec.hpp"
 
 namespace COMMONS_NS {
 	struct image : component
 	{
 		constexpr static component::mask mask = component::COMPONENTE_IMAGEM;
 		std::string file	{ "" };
-		fvector_type2 limite			{ 20.0, 20.0 };
-		fvector_type2 padding			{ 0.0,0.0 };
+		fvec2 limite			{ 20.0, 20.0 };
+		fvec2 padding			{ 0.0,0.0 };
 		bool flip					{ false };
 		unsigned int id;
 		color diffuse					{ 1.f, 1.f, 1.f, 1.f };

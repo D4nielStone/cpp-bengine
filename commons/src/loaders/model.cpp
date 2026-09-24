@@ -3,17 +3,34 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <filesystem>
-#include <map>
+#include <stdexcept>
 #include "debugging/debug.hpp"
 #include "loaders/image_loader.hpp"
-#include "assets/objects/cube.hpp"
-#include "assets/objects/sphere.hpp"
 #include "util/material.hpp"
 
 using namespace COMMONS_NS;
 
-std::map<std::string, mesh> primitives =  { {"cube", cube_mesh}, {"sphere", malha_esfera}
-};
+namespace {
+    std::filesystem::path resolve_model_path(const std::string& requested)
+    {
+        const std::filesystem::path input(requested);
+        const std::string name = input.filename().string();
+        const std::filesystem::path candidates[] = {
+            input,
+            std::filesystem::path("assets/models") / (name + ".obj"),
+            std::filesystem::path("commons/assets/models") / (name + ".obj"),
+            std::filesystem::path("../commons/assets/models") / (name + ".obj"),
+            std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / (name + ".obj")
+        };
+
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::is_regular_file(candidate))
+                return std::filesystem::absolute(candidate);
+        }
+
+        return std::filesystem::absolute(input);
+    }
+}
 
 model::model(const char* directory) {
     load_model(std::filesystem::absolute(directory).string().c_str());
@@ -46,17 +63,13 @@ std::string model::getDiretorio() const {
 
 void model::load_model(const std::string& path) {
     meshes.clear();
-    if(primitives.find(std::filesystem::path(path).filename().string()) != primitives.end()) {
-        directory = path;
-        meshes.push_back(primitives[std::filesystem::path(path).filename().string()]);
-        meshes.back().load();
-        return;
-    }
+    const auto resolved_path = resolve_model_path(path);
+    const auto resolved_string = resolved_path.string();
     Assimp::Importer importer;
     auto flags = aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_JoinIdenticalVertices;
 
     // Carrega a cena sem colapsar ainda
-    const aiScene* scene = importer.ReadFile(path, flags);
+    const aiScene* scene = importer.ReadFile(resolved_string, flags);
     if (!scene || !scene->HasMeshes() || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
         // erro de carregamento
         debugging::emit(erro, importer.GetErrorString());
@@ -76,12 +89,12 @@ void model::load_model(const std::string& path) {
             break;
         }
     }
-    if (is_static && std::filesystem::path(path).extension() != ".dae") {
+    if (is_static && resolved_path.extension() != ".dae") {
         importer.FreeScene(); // limpa a cena anterior
 
         flags |= aiProcess_PreTransformVertices;
 
-        scene = importer.ReadFile(path, flags);
+        scene = importer.ReadFile(resolved_string, flags);
         if (!scene || !scene->HasMeshes() || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
             // erro de carregamento
             debugging::emit(erro, importer.GetErrorString());
@@ -89,7 +102,7 @@ void model::load_model(const std::string& path) {
         }
     }
 
-    directory = path.substr(0, path.find_last_of('\\'));
+    directory = resolved_path.parent_path().string();
 
     /// Processa o no principal
     process_node(scene->mRootNode, scene);
@@ -142,7 +155,7 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
             vertex.uvcoords = vec;
         }
         else
-            vertex.uvcoords = vector2<float>(0.0f, 0.0f);
+            vertex.uvcoords = {0.0f, 0.0f};
 
         vertices.push_back(vertex);
     }

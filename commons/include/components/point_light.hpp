@@ -27,18 +27,17 @@ SOFTWARE.
 #pragma once
 #include "commons_namespace.hpp"
 #include "component.hpp"
-#include "util/vector3.hpp"
 
 namespace COMMONS_NS {
     struct point_light : public component
     {
-        fvector_type3 position;
-        fvector_type3 color;
+        fvec3 position;
+        fvec3 color;
         float intensity;
         float constant;
         float linear;
         float quadratic;
-        explicit  point_light(fvector_type3 position = fvector_type3(0, 2, -2), fvector_type3 color = fvector_type3(1, 1, 1), float intensity = 5.f , float constant = 1.f, float linear = 0.09f, float quadratic = 0.032f) :
+        explicit  point_light(fvec3 position = {0, 2, -2}, fvec3 color = {1, 1, 1}, float intensity = 5.f , float constant = 1.f, float linear = 0.09f, float quadratic = 0.032f) :
             position(position), color(color), intensity(intensity), constant(constant), linear(linear), quadratic(quadratic)
         {}
         static constexpr mask mask = {COMPONENTE_LUZ_PONTUAL};

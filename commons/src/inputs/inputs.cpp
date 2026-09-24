@@ -32,6 +32,7 @@ SOFTWARE.
 #include "debugging/debug.hpp"
 #include <GLFW/glfw3.h>
 #include "os/window.hpp"
+#include <os/os.hpp>
 
 using namespace COMMONS_NS;
 
@@ -90,13 +91,32 @@ void inputs::soltar(const inputs::key& key) {
     m_keys[key] = false;
 }
 bool inputs::get(const inputs::key& key) {
-    auto &input = window::get_instance().m_inputs;
-    return input.m_keys[key];
+    static const std::unordered_map<inputs::key, bgui::input_key> mapping = {
+        {Q, bgui::input_key::q}, {W, bgui::input_key::w}, {E, bgui::input_key::e},
+        {R, bgui::input_key::r}, {T, bgui::input_key::t}, {Y, bgui::input_key::y},
+        {U, bgui::input_key::u}, {I, bgui::input_key::i}, {O, bgui::input_key::o},
+        {P, bgui::input_key::p}, {A, bgui::input_key::a}, {S, bgui::input_key::s},
+        {D, bgui::input_key::d}, {F, bgui::input_key::f}, {G, bgui::input_key::g},
+        {H, bgui::input_key::h}, {J, bgui::input_key::j}, {K, bgui::input_key::k},
+        {L, bgui::input_key::l}, {Z, bgui::input_key::z}, {X, bgui::input_key::x},
+        {C, bgui::input_key::c}, {V, bgui::input_key::v}, {B, bgui::input_key::b},
+        {N, bgui::input_key::n}, {M, bgui::input_key::m},
+        {DIREITA, bgui::input_key::right}, {ESQUERDA, bgui::input_key::left},
+        {BAIXO, bgui::input_key::down}, {CIMA, bgui::input_key::up},
+        {E_SHIFT, bgui::input_key::left_shift}, {D_SHIFT, bgui::input_key::right_shift},
+        {E_CTRL, bgui::input_key::left_control}, {D_CTRL, bgui::input_key::right_control},
+        {E_ALT, bgui::input_key::left_alt}, {D_ALT, bgui::input_key::right_alt},
+        {BACKSPACE, bgui::input_key::backspace}, {ENTER, bgui::input_key::enter},
+        {KP_ENTER, bgui::input_key::keypad_enter}, {DELETE, bgui::input_key::delete_key},
+        {F5, bgui::input_key::f5}, {MOUSE_MEIO, bgui::input_key::mouse_middle},
+        {MOUSE_E, bgui::input_key::mouse_left}, {MOUSE_D, bgui::input_key::mouse_right}
+    };
+    const auto it = mapping.find(key);
+    return it != mapping.end() && bgui::get_pressed(it->second);
 }
 bool inputs::get_str(const std::string& key) {
-    auto &input = window::get_instance().m_inputs;
-    inputs::key key_ = mapa_string[key];
-    return input.m_keys[key_];
+    const auto it = mapa_string.find(key);
+    return it != mapa_string.end() && get(it->second);
 }
 
 void COMMONS_NS::keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -156,6 +176,6 @@ void COMMONS_NS::charCallback(GLFWwindow* window, unsigned int codepoint)
 }
 
 dvector_type2 inputs::get_mouse_position() {
-    auto& input = window::get_instance().m_inputs;
-   return dvector_type2(input.m_mousex, input.m_mousey);
+   const auto position = bgui::get_mouse_position();
+   return {static_cast<double>(position.x), static_cast<double>(position.y)};
 };

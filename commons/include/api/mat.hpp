@@ -27,23 +27,21 @@
  */
 #pragma once
 #include "commons_namespace.hpp"
-#include "util/vector2.hpp"
-#include "util/vector3.hpp"
-#include "util/vector4.hpp"
+#include "utils/vec.hpp"
 
 /** namespace commons */
 namespace COMMONS_NS {
     static inline float lerp(const float& start, const float& end, const float& alpha) {
         return start + alpha * (end - start);
     }
-    static inline fvector_type2 lerp(const fvector_type2& start, const fvector_type2& end, const float& alpha) {
-        return fvector_type2(
+    static inline fvec2 lerp(const fvec2& start, const fvec2& end, const float& alpha) {
+        return fvec2(
                 start.x + alpha * (end.x - start.x),
                 start.y + alpha * (end.y - start.y)
                 );
     }
-    static inline fvector_type3 lerp(const fvector_type3& start, const fvector_type3& end, const float& alpha) {
-        return fvector_type3(
+    static inline fvec3 lerp(const fvec3& start, const fvec3& end, const float& alpha) {
+        return fvec3(
                 start.x + alpha * (end.x - start.x),
                 start.y + alpha * (end.y - start.y),
                 start.z + alpha * (end.z - start.z)

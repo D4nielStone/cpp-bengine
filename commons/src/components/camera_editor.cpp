@@ -27,18 +27,19 @@ void camera_editor::updateMovimentacao()
     float mousex_atual = inputs::get_mouse_position().x;
     float mousey_atual = inputs::get_mouse_position().y;
     // Movement
-    if (inputs::get(inputs::W)) move(glm::vec3(0, 0, sens * delta));
-    if (inputs::get(inputs::A)) move(glm::vec3(-sens * delta, 0, 0));
-    if (inputs::get(inputs::S)) move(glm::vec3(0, 0, -sens * delta));
-    if (inputs::get(inputs::D)) move(glm::vec3(sens * delta, 0, 0));
+    if (inputs::get(inputs::W)) move({0, 0, sens * delta});
+    if (inputs::get(inputs::A)) move({-sens * delta, 0, 0});
+    if (inputs::get(inputs::S)) move({0, 0, -sens * delta});
+    if (inputs::get(inputs::D)) move({sens * delta, 0, 0});
 
     if (inputs::get(inputs::MOUSE_E))
     {
         float mx = mousex_antigo - mousex_atual;
         float my = mousey_antigo - mousey_atual;
         m_transform->rotate({my * 0.1f, -mx * 0.1f, 0.f});
-        fvector_type3 rot = m_transform->get_rotation();
-        m_transform->set_rotation(fvector_type3(glm::clamp(rot.x, -89.f, 89.f), rot.y, rot.z));
+        fvec3 rot = m_transform->get_rotation();
+        const fvec3 clamped_rotation = {glm::clamp(rot.x, -89.f, 89.f), rot.y, rot.z};
+        m_transform->set_rotation(clamped_rotation);
     }
     mousex_antigo = mousex_atual;
     mousey_antigo = mousey_atual;

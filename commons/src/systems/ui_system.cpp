@@ -22,39 +22,39 @@ void ui_system::setup(const std::shared_ptr<ecs>& registry)
 
     bgui::attach_glfw_window(window::get_instance().m_window);
     bgui::set_up_gl3();
-    bgui::font_manager::get_instance().set_font_loaded_callback(
-        [](const bgui::font& loaded_font) {
-            debugging::emit(
-                debug,
-                "ui.font",
-                "Fonte carregada: " + loaded_font.family +
-                " / " + loaded_font.style +
-                " (" + std::to_string(loaded_font.atlas.m_size.x) +
-                "x" + std::to_string(loaded_font.atlas.m_size.y) + ")"
-            );
-        }
-    );
     bgui::set_up_freetype();
     bgui::set_up();
-    bgui::style_manager::get_instance().apply_theme(bgui::dark_theme());
+    bgui::style_manager::get_instance().apply_theme(bgui::light_theme());
 
     auto& root = bgui::get_layout();
-    bool main_camera_found = false;
-    registry->cada<camera>([&](const uint32_t entity) {
-        if (main_camera_found)
-            return;
-        auto main_camera = registry->get<camera>(entity);
-        if (main_camera && !main_camera->flag_fb) {
-            main_camera->createFB();
-        }
-        main_camera_found = main_camera != nullptr;
-    });
 
     auto& framebuffer = root.add<bgui::image>();
     framebuffer.style.layout.require_width(bgui::mode::match_parent);
     framebuffer.style.layout.require_height(bgui::mode::match_parent);
     framebuffer.style.visual.visible = true;
     m_camera_image = &framebuffer;
+
+    bool main_camera_found = false;
+    registry->cada<camera>([&](const uint32_t entity) {
+        if (main_camera_found)
+            return;
+        auto main_camera = registry->get<camera>(entity);
+        if (!main_camera) {
+            return;
+        }
+
+        main_camera->createFB();
+
+        m_camera_image->set_external_texture(
+            main_camera->framebuffer_texture(),
+            bgui::vec2{
+                static_cast<float>(window::get_instance().size.x),
+                static_cast<float>(window::get_instance().size.y)
+            },
+            true
+        );
+        main_camera_found = true;
+    });
 
     auto& panel = root.add<bgui::linear>(bgui::orientation::vertical);
     panel.style.layout.require_width(bgui::mode::pixel, 320.f);
@@ -63,7 +63,6 @@ void ui_system::setup(const std::shared_ptr<ecs>& registry)
     panel.style.visual.visible = true;
 
     auto& title = panel.add<bgui::text>("cpp-bgui debug scene", 0.4f);
-    title.style.visual.text.normal = bgui::color{1.f, 1.f, 1.f, 1.f};
     panel.add<bgui::button>("Button", 0.4f, [] {
         debugging::emit(debug, "ui", "botao cpp-bgui pressionado");
     });
@@ -75,28 +74,13 @@ void ui_system::setup(const std::shared_ptr<ecs>& registry)
     debugging::emit(debug, "ui", "cpp-bgui inicializado");
 }
 
-void ui_system::update(const std::shared_ptr<ecs>& registry)
+void ui_system::update(const std::shared_ptr<ecs>&)
 {
     if (!m_initialized)
         return;
 
-    bool main_camera_found = false;
-    registry->cada<camera>([&](const uint32_t entity) {
-        if (main_camera_found)
-            return;
-        auto main_camera = registry->get<camera>(entity);
-        if (main_camera && m_camera_image) {
-            m_camera_image->set_external_texture(
-                main_camera->framebuffer_texture(),
-                bgui::vec2{
-                    static_cast<float>(window::get_instance().size.x),
-                    static_cast<float>(window::get_instance().size.y)
-                }
-            );
-        }
-        main_camera_found = main_camera != nullptr;
-    });
-
+    // The render system has already rendered the camera into its persistent
+    // framebuffer. The UI only composites that texture on the default target.
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(
         0,

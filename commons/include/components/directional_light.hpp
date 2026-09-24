@@ -27,15 +27,15 @@ SOFTWARE.
 #pragma once
 #include "commons_namespace.hpp"
 #include "component.hpp"
-#include "util/vector3.hpp"
 #include "util/color.hpp"
+#include "utils/vec.hpp"
 
 namespace COMMONS_NS {
     struct directional_light : public component
     {
-        fvector_type3 direction, ambient, color; float intensity = 1.f;
+        fvec3 direction, ambient, color; float intensity = 1.f;
         directional_light() = default;
-        explicit  directional_light(fvector_type3 direction, fvector_type3 ambient, fvector_type3 color, float intensity) :
+        explicit  directional_light(fvec3 direction, fvec3 ambient, fvec3 color, float intensity) :
         direction(direction), ambient(ambient), color(color), intensity(intensity){}
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override;
         bool analyze(const rapidjson::Value& value) override;

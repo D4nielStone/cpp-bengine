@@ -2,7 +2,6 @@
 #include "loaders/image_loader.hpp"
 #include "debugging/debug.hpp"
 #include "util/vertex.hpp"
-#include "util/vector3.hpp"
 #include <iostream>
 
 using namespace COMMONS_NS;
@@ -45,8 +44,8 @@ void terrain::gerarHeightMap(unsigned char* data, int width, int height)
         for (int i = 0; i < width; i++)
         {
             vertex v;
-            v.position = fvector_type3(i/(float)(width-1), heightmap[j][i], j/(float)(height-1));
-            v.uvcoords = vector2<float>(i / (float)width, j / (float)height);
+            v.position = {i/(float)(width-1), heightmap[j][i], j/(float)(height-1)};
+            v.uvcoords = {i / (float)width, j / (float)height};
 
             vertices.push_back(v);
         }
@@ -77,7 +76,7 @@ void terrain::gerarHeightMap(unsigned char* data, int width, int height)
     // Inicializar as normais como (0, 0, 0)
     for (auto &v : vertices)
     {
-    v.normal = fvector_type3(0.0f, 0.0f, 0.0f);
+    v.normal = {0.0f, 0.0f, 0.0f};
     }
 
     // Percorrer os triângulos e calculate as normais das faces
@@ -92,22 +91,18 @@ void terrain::gerarHeightMap(unsigned char* data, int width, int height)
     glm::vec3 v3 = {vertices[i3].position.x,vertices[i3].position.y,vertices[i3].position.z};
 
     glm::vec3 _normal = glm::normalize(glm::cross(v2 - v1, v3 - v1));
-    fvector_type3 normal = fvector_type3(
-        _normal.x,
-        _normal.y,
-        _normal.z
-    );
+    fvec3 normal = {_normal.x, _normal.y, _normal.z};
 
     // Adicionar a normal ao vértice (antes de normalize no final)
-    vertices[i1].normal += normal;
-    vertices[i2].normal += normal;
-    vertices[i3].normal += normal;
+    vertices[i1].normal = vertices[i1].normal + normal;
+    vertices[i2].normal = vertices[i2].normal + normal;
+    vertices[i3].normal = vertices[i3].normal + normal;
     }
 
     // Normalizar todas as normais dos vértices
     for (auto &v : vertices)
     {
-        v.normal.normalize();
+        v.normal = normalized(v.normal);
     }
     // Criar a mesh
     m_mesh.set_vertices(vertices);

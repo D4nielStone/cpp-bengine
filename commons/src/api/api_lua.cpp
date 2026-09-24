@@ -35,9 +35,7 @@
 #include "util/mesh.hpp"
 #include "util/vertex.hpp"
 #include "api/mat.hpp"
-#include "util/vector2.hpp"
-#include "util/vector3.hpp"
-#include "util/vector4.hpp"
+#include "utils/vec.hpp"
 
 using namespace COMMONS_NS;
 template <typename T>
@@ -78,12 +76,12 @@ void commons::api::setClasses(sol::state& lua) {
     // \brief definindo classes:
     // \{
     // - vector_typeores
-    registrar_vector3<float>(lua, "fvector_type3");
+    registrar_vector3<float>(lua, "fvec3");
     registrar_vector3<double>(lua, "dvector_type3");
     registrar_vector3<int>(lua, "ivector_type3");
     // - components
     lua.new_usertype<transform>("transform",
-            sol::constructors<transform(const fvector_type3&, const fvector_type3&, const fvector_type3&)>(),
+            sol::constructors<transform(const fvec3&, const fvec3&, const fvec3&)>(),
             "position", &transform::position,
             "scale", &transform::scale,
             "rotation", &transform::rotation,

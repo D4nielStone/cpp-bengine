@@ -34,4 +34,10 @@ out/.ninja_log
 out/.ninja_deps
 /out
 */assets/*
+!commons/assets/
+!commons/assets/shaders/
+!commons/assets/shaders/*.vert
+!commons/assets/shaders/*.frag
+!commons/assets/models/
+!commons/assets/models/*.obj
 editor/include/assets/runtime_embutido.hpp

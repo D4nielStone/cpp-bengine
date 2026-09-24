@@ -27,7 +27,6 @@ SOFTWARE.
 #pragma once
 #include "commons_namespace.hpp"
 #include "loaders/shader.hpp"
-#include "loaders/image_loader.hpp"
 #include "loaders/model.hpp"
 #include <glm/glm.hpp>
 
@@ -37,14 +36,6 @@ namespace COMMONS_NS {
         public:
         unsigned int id_skybox = 0;
         skybox() : model("cube") {
-            id_skybox = texture_loader::get_instance().load_skybox_from_memory(
-                    {
-                    "skybox_right.png",
-                    "skybox_left.png",
-                    "skybox_top.png",
-                    "skybox_bottom.png",
-                    "skybox_front.png",
-                    "skybox_back.png"});
             setShader(shader("skybox.vs", "skybox.fs"));
             meshes.back().load();
         }

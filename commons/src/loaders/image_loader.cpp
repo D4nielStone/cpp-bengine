@@ -28,45 +28,14 @@ SOFTWARE.
 #include "loaders/image_loader.hpp"
 #include "glad.h"
 #include <GLFW/glfw3.h>
-#include "assets/images_in_memory.hpp"
 #include <map>
 #include <filesystem>
 #include "debugging/debug.hpp"
 #include <iostream>
+#include <bgui_backend_gl3.hpp>
 
 using namespace COMMONS_NS;
 
-static const std::map<const std::string, std::pair<BYTE*, const unsigned int>> imagems_memoria
-{
-    {"abrir.png", std::pair(abrir_png, abrir_png_len)},
-    {"add.png", std::pair(add_png, add_png_len)},
-    {"remove.png", std::pair(remove_png, remove_png_len)},
-    {"white_cube", std::pair(white_cube, cubo_branco_len)},
-    {"skybox_right.png", std::pair(DaylightBox_Right, DaylightBox_Right_size)},
-    {"skybox_left.png", std::pair(DaylightBox_Left, DaylightBox_Left_size)},
-    {"skybox_top.png", std::pair(DaylightBox_Top, DaylightBox_Top_size)},
-    {"skybox_back.png", std::pair(DaylightBox_Back, DaylightBox_Back_size)},
-    {"skybox_bottom.png", std::pair(DaylightBox_Bottom, DaylightBox_Bottom_size)},
-    {"skybox_front.png", std::pair(DaylightBox_Front, DaylightBox_Front_size)},
-    {"icon.ico", std::pair(icon_png, icon_png_len)},
-    {"banner.png", std::pair(banner_png, banner_png_len)},
-    {"info.png", std::pair(info_png, info_png_len)},
-    {"color_wheel.png", std::pair(arco_cor_png, arco_cor_png_len)},
-    {"Camera.png", std::pair(camera_png, camera_png_len)},
-    {"check.png", std::pair(check_png, check_png_len)},
-    {"Codigo.png", std::pair(codigo_png, codigo_png_len)},
-    {"cube.png", std::pair(cube_png, cube_png_len)},
-    {"joystick.png", std::pair(joystick_png, joystick_png_len)},
-    {"Fisica.png", std::pair(fisica_png, fisica_png_len)},
-    {"Iluminacao.png", std::pair(iluminacao_png, iluminacao_png_len)},
-    {"Play.png", std::pair(play_png, play_png_len)},
-    {"Renderizador.png", std::pair(renderizador_png, renderizador_png_len)},
-    {"scene.png", std::pair(scene_png, scene_png_len)},
-    {"stop.png", std::pair(stop_png, stop_png_len)},
-    {"Terreno.png", std::pair(terreno_png, terreno_png_len)},
-    {"Transformacao.png", std::pair(transform_png, transform_png_len)},
-    {"folder.png", std::pair(folder_png, folder_png_len)}
-};
 void image_loader::shutdown()
 { FreeImage_DeInitialise(); imagens_carregadas.clear(); }
 image_loader::image_loader()
@@ -111,12 +80,6 @@ void image_loader::load_image(const std::string& filepath)
     }
      debugging::emit(debug, "image_loader", "new image: " + filepath);
 
-    const std::string file_name = std::filesystem::path(filepath).filename().string();
-    if (imagems_memoria.find(file_name) != imagems_memoria.end())
-    {
-        embutida(imagems_memoria.at(file_name).first, imagems_memoria.at(file_name).second);
-        return;
-    }
     // Determina o formato da image
     FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path, 0);
     if (format == FIF_UNKNOWN) {
@@ -402,6 +365,33 @@ texture_loader& COMMONS_NS::texture_loader::get_instance()
     return instance;
 }
 
+static GLuint load_bgui_texture(const std::string& path, int* width, int* height)
+{
+    image_loader image(path);
+    if (!image.loaded)
+        return 0;
+
+    const int image_width = image.get_width();
+    const int image_height = image.get_height();
+    const int channels = image.getCanal();
+
+    bgui::texture texture;
+    texture.m_path = path;
+    texture.m_size = {static_cast<float>(image_width), static_cast<float>(image_height)};
+    texture.m_has_alpha = channels == 4;
+    texture.m_buffer.assign(
+        image.getDados(),
+        image.getDados() + static_cast<std::size_t>(image_width) *
+            static_cast<std::size_t>(image_height) *
+            static_cast<std::size_t>(channels));
+
+    if (width)
+        *width = image_width;
+    if (height)
+        *height = image_height;
+    return bgui::gl3_get_texture(texture);
+}
+
 GLuint texture_loader::load_texture(const std::string& path, int *width, int *height)
 {
     // Verificar se a texture j� foi carregada
@@ -410,7 +400,7 @@ GLuint texture_loader::load_texture(const std::string& path, int *width, int *he
     }
 
     // Carregar nova texture
-    GLuint id = texture_from_file(path.c_str(), width, height);
+    GLuint id = load_bgui_texture(path, width, height);
     loaded_textures[path] = id; // Armazena o ID da texture no mapa
 
     return id;
@@ -424,7 +414,7 @@ GLuint texture_loader::load_texture(const std::string& path, ivec2& vector_type2
 
     int width, height;
     // Carregar nova texture
-    GLuint id = texture_from_file(path.c_str(), &width, &height);
+    GLuint id = load_bgui_texture(path, &width, &height);
     loaded_textures[path] = id; // Armazena o ID da texture no mapa
 
     vector_type2.x = width;
@@ -441,7 +431,7 @@ GLuint texture_loader::load_texture(const std::string& path, fvector_type2& vect
 
     int width, height;
     // Carregar nova texture
-    GLuint id = texture_from_file(path.c_str(), &width, &height);
+    GLuint id = load_bgui_texture(path, &width, &height);
     loaded_textures[path] = id; // Armazena o ID da texture no mapa
 
     vector_type2.x = width;
@@ -458,7 +448,13 @@ GLuint texture_loader::load_texture(const std::string& path, double *width, doub
     }
 
     // Carregar nova texture
-    GLuint id = texture_from_file(path.c_str(), width, height);
+    int width_i = 0;
+    int height_i = 0;
+    GLuint id = load_bgui_texture(path, &width_i, &height_i);
+    if (width)
+        *width = width_i;
+    if (height)
+        *height = height_i;
     loaded_textures[path] = id; // Armazena o ID da texture no mapa
 
     return id;
@@ -471,7 +467,7 @@ GLuint texture_loader::load_texture(const std::string& path)
     }
 
     // Carregar nova texture
-    GLuint id = texture_from_file(path.c_str(), GL_TEXTURE_2D);
+    GLuint id = load_bgui_texture(path, nullptr, nullptr);
     loaded_textures[path] = id; // Armazena o ID da texture no mapa
 
     return id;
@@ -545,11 +541,8 @@ GLuint texture_loader::load_skybox_from_memory(const std::vector<std::string> fa
     int width, height, nrChannels;
     // Itera sobre cada face do skybox
     for (unsigned int i = 0; i < faces.size(); i++) {
-        auto it = imagems_memoria.find(faces[i]);
-        if (it != imagems_memoria.end()) {
-            image_loader img;
-            // Carrega a image diretamente da memória
-            img.embutida(it->second.first, it->second.second);
+        {
+            image_loader img(faces[i]);
             width = img.get_width();
             height = img.get_height();
             nrChannels = img.getCanal();
@@ -566,8 +559,6 @@ GLuint texture_loader::load_skybox_from_memory(const std::vector<std::string> fa
             } else {
                 std::cerr << "Failure ao load a texture da skybox da memória: " << faces[i] << std::endl;
             }
-        } else {
-            std::cerr << "Imagem não encontrada na memória: " << faces[i] << std::endl;
         }
     }
 

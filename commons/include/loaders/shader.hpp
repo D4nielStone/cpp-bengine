@@ -37,9 +37,7 @@ SOFTWARE.
 #include <unordered_map>
 #include <glm/gtc/type_ptr.hpp>
 #include "commons_namespace.hpp"
-#include "util/vector4.hpp"
-#include "util/vector2.hpp"
-#include "util/vector3.hpp"
+#include "utils/vec.hpp"
 #include "util/color.hpp"
 
 namespace COMMONS_NS {
@@ -74,7 +72,7 @@ namespace COMMONS_NS {
         void set_color  (const std::string& name, const color& m_color) const;
         void setVec4 (const std::string& name, const fvector_type4& vec4) const;
         void setVec3 (const std::string& name, const float& r, const float& g, const float& b) const;
-        void setVec3 (const std::string &name, const fvector_type3 &vector_type) const;
+        void setVec3 (const std::string &name, const fvec3 &vector_type) const;
         void setVec2 (const std::string &name, const float &r, const float &g) const;
         void setMat4 (const std::string& name, const float* value) const;
         void setMat3 (const std::string& name, const float* value) const;
