@@ -1,11 +1,14 @@
 #include "systems/ui_system.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <vector>
 
 #include "glad.h"
 #include "components/camera.hpp"
 
 #include <bgui.hpp>
+#include <elem/details.hpp>
 #include <bgui_backend_gl3.hpp>
 #include <bgui_backend_glfw.hpp>
 #include <bgui_backend_freetype.hpp>
@@ -15,6 +18,25 @@
 #include "debugging/debug.hpp"
 
 using namespace COMMONS_NS;
+
+namespace {
+    void add_asset_group(bgui::linear& window, const std::string& title,
+                         const std::filesystem::path& directory) {
+        auto& section = window.add_persistent<bgui::details>(title);
+        std::vector<std::filesystem::path> files;
+        std::error_code error;
+        for (std::filesystem::directory_iterator it(directory, error), end;
+             !error && it != end; it.increment(error)) {
+            if (it->is_regular_file(error))
+                files.push_back(it->path());
+        }
+        std::sort(files.begin(), files.end());
+        for (const auto& file : files) {
+            auto& item = section.content().add_persistent<bgui::text>(file.filename().string(), 0.35f);
+            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        }
+    }
+}
 
 void ui_system::setup(const std::shared_ptr<ecs>&reg)
 {
@@ -29,7 +51,11 @@ void ui_system::setup(const std::shared_ptr<ecs>&reg)
     auto& dock = root.add_persistent<bgui::dock>();
     auto& window = dock.add_window("Main Window", bgui::dock_area::left);
     auto& window_assets = dock.add_window("Assets Window", bgui::dock_area::right);
+    auto& m_window_assets_context = window_assets.add_persistent<bgui::linear>(bgui::orientation::vertical);
+    m_window_assets_context.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
     window.style.layout.padding = bgui::vec4i{0};
+    add_asset_group(m_window_assets_context, "Models", COMMONS_MODEL_ASSET_DIR);
+    add_asset_group(m_window_assets_context, "Shaders", COMMONS_SHADER_ASSET_DIR);
 
     m_window_context = &window.add_persistent<bgui::linear>(bgui::orientation::vertical);
     m_window_context->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
