@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstddef>
-#include "../../../libs/cpp-bgui/core/include/utils/vec.hpp"
+#include "../../../external/cpp-bgui/core/include/utils/vec.hpp"
 #include <glm/glm.hpp>
 #include <btBulletDynamicsCommon.h>
 

@@ -32,7 +32,7 @@ run the main example:
 Structure
  * commons/: reusable static library of the engine.
  * examples/: small programs utilizing the library.
- * libs/: dependencies included in the project.
+ * external/: dependencies included in the project.
 Installing
 To install the library and headers to a specific prefix:
 ```

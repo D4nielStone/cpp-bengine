@@ -1,9 +1,9 @@
-[submodule "libs/sol2"]
-	path = libs/sol2
+[submodule "external/sol2"]
+	path = external/sol2
 	url = https://github.com/ThePhD/sol2.git
-[submodule "libs/rapidjson"]
-	path = libs/rapidjson
+[submodule "external/rapidjson"]
+	path = external/rapidjson
 	url = https://github.com/Tencent/rapidjson.git
-[submodule "libs/cpp-bgui"]
-	path = libs/cpp-bgui
+[submodule "external/cpp-bgui"]
+	path = external/cpp-bgui
 	url = https://github.com/D4nielStone/cpp-bgui.git
