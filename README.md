@@ -1,6 +1,8 @@
 Bubble Engine
 ===
 
+![alt text](preview.png)
+
 Bubble Engine is an experimental C++ engine for windowing, rendering,
 physics, and component-based entities. The project is still under
 development and includes a minimal example in examples/exemplo1.cpp.
