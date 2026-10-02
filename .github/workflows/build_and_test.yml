@@ -1,19 +1,19 @@
-name: 🐧 Build and Test
+name: Build and Test
 
 on:
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
 jobs:
   build_and_test:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Set up CMake
       uses: jwlawson/actions-setup-cmake@v1

@@ -3,6 +3,8 @@ Bubble Engine
 
 ![preview](image.png)
 
+[![Build and Test](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml)
+
 Bubble Engine is an experimental C++ engine for windowing, rendering,
 physics, and component-based entities. The project is still under
 development and includes a minimal example in examples/cube_example.cpp.
