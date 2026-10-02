@@ -14,6 +14,7 @@ add_subdirectory(external/cpp-bgui)
 
 # The reusable engine library.
 add_subdirectory(commons)
+add_subdirectory(editor)
 
 # Small programs used to exercise the engine.
 add_subdirectory(examples)

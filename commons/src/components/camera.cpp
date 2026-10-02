@@ -193,15 +193,14 @@ void camera::viewport(const ivec2& viewp) {
 }
 
 glm::mat4 camera::obtProjectionMatrix() {
-    ivec2 viewp;
-    if (flag_fb && !viewport_ptr)
-        viewp = viewportFBO;
-    else if(viewport_ptr)
-    {
+    ivec2 viewp = viewportFBO;
+    if (viewport_ptr) {
         viewp = *viewport_ptr;
         viewportFBO = *viewport_ptr;
     }
-    else return glm::mat4(1.f);
+
+    if (viewp.x <= 0 || viewp.y <= 0)
+        return glm::mat4(1.f);
 
     if (flag_orth)
     {

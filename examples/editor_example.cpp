@@ -1,11 +1,12 @@
 #include "os/window.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
+#include "editor/editor_system.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
 
 int main() {
-    commons::window window("Bubble Engine - exemplo 1");
+    commons::window window("Bubble Engine - Editor");
     auto registry = window.get_ecs();
     auto camera_entity = registry->create();
     auto cube_entity = registry->create();
@@ -16,6 +17,7 @@ int main() {
 
     window.add<commons::render_system>();
     window.add<commons::ui_system>();
+    window.add<editor::editor_system>();
     window.loop();
 
     return 0;
