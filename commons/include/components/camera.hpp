@@ -46,7 +46,7 @@ namespace COMMONS_NS {
 		static constexpr mask mask = COMPONENTE_CAM;
 
 		ivec2* viewport_ptr{ nullptr };
-		ivec2 viewportFBO{ 400, 400 };
+		ivec2 viewportFBO{ 800, 600 };
 
 		void drawFB();
         bool analyze(const rapidjson::Value&) override;

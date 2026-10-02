@@ -10,32 +10,50 @@
 using namespace COMMONS_NS;
 
 namespace {
+    std::filesystem::path safe_absolute(const std::filesystem::path& p)
+    {
+        std::error_code ec;
+        const auto absolute = std::filesystem::absolute(p, ec);
+        if (!ec)
+            return absolute;
+        return p.empty() ? std::filesystem::path{} : p.lexically_normal();
+    }
+
     std::filesystem::path resolve_model_path(const std::string& requested)
     {
         const std::filesystem::path input(requested);
         const std::string name = input.filename().string();
-        const std::filesystem::path candidates[] = {
+        const std::vector<std::filesystem::path> candidates = {
             input,
             std::filesystem::path("assets/models") / (name + ".obj"),
             std::filesystem::path("commons/assets/models") / (name + ".obj"),
             std::filesystem::path("../commons/assets/models") / (name + ".obj"),
-            std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / (name + ".obj")
+            std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / (name + ".obj"),
+            std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / input.filename()
         };
 
         for (const auto& candidate : candidates) {
-            if (std::filesystem::is_regular_file(candidate))
-                return std::filesystem::absolute(candidate);
+            std::error_code ec;
+            const auto absolute_candidate = safe_absolute(candidate);
+            if (std::filesystem::is_regular_file(absolute_candidate, ec) || std::filesystem::is_regular_file(candidate, ec))
+                return absolute_candidate;
         }
 
-        return std::filesystem::absolute(input);
+        try {
+            return safe_absolute(input);
+        } catch (...) {
+            return std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / (name + ".obj");
+        }
     }
 }
 
 model::model(const char* directory) {
-    load_model(std::filesystem::absolute(directory).string().c_str());
+    if (directory) {
+        load_model(std::string(directory));
+    }
 }
 model::model(const std::string& directory) {
-    load_model(std::filesystem::absolute(directory).string().c_str());
+    load_model(directory);
 }
 mesh& model::getMalha(size_t i) {
     if(i < meshes.size()) {

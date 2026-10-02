@@ -25,7 +25,6 @@ window::window(const std::string& title, const int width, const int height)
     m_window = bgui::set_up_glfw(width, height, title.c_str());
 
     try {
-        glfwSetWindowAttrib(m_window, GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FALSE);
         initialize_opengl_state();
         m_interface = std::make_unique<bgui::scoped_interface>();
     } catch (...) {
@@ -78,7 +77,6 @@ void window::refresh() {
         }
     }
 
-    bgui::swap_glfw();
 }
 
 void window::loop() {
@@ -92,7 +90,13 @@ void window::loop() {
 
     auto& refresh_callback = bgui::get_context().m_refresh_func;
     const auto previous_callback = refresh_callback;
-    refresh_callback = [this] { refresh(); };
+    refresh_callback = [this, previous_callback] {
+        refresh();
+        if (previous_callback) {
+            previous_callback();
+        }
+        bgui::swap_glfw();
+    };
     m_looping = true;
 
     try {

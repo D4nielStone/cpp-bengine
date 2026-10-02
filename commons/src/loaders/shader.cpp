@@ -32,6 +32,15 @@ SOFTWARE.
 using namespace COMMONS_NS;
 
 namespace {
+    std::filesystem::path safe_absolute(const std::filesystem::path& p)
+    {
+        std::error_code ec;
+        const auto absolute = std::filesystem::absolute(p, ec);
+        if (!ec)
+            return absolute;
+        return p.empty() ? std::filesystem::path{} : p.lexically_normal();
+    }
+
     std::filesystem::path resolve_shader_path(const char* requested_path)
     {
         const std::filesystem::path requested(requested_path);
@@ -44,17 +53,20 @@ namespace {
             normalized_name = "skybox.frag";
 
         const std::filesystem::path shader_dir = "commons/assets/shaders";
-        const std::filesystem::path candidates[] = {
+        const std::vector<std::filesystem::path> candidates = {
             requested,
             std::filesystem::path("assets/shaders") / normalized_name,
             shader_dir / normalized_name,
             std::filesystem::path("../") / shader_dir / normalized_name,
-            std::filesystem::path(COMMONS_SHADER_ASSET_DIR) / normalized_name
+            std::filesystem::path(COMMONS_SHADER_ASSET_DIR) / normalized_name,
+            std::filesystem::path(COMMONS_SHADER_ASSET_DIR) / requested.filename()
         };
 
         for (const auto& candidate : candidates) {
-            if (std::filesystem::is_regular_file(candidate))
-                return candidate;
+            std::error_code ec;
+            const auto absolute_candidate = safe_absolute(candidate);
+            if (std::filesystem::is_regular_file(absolute_candidate, ec) || std::filesystem::is_regular_file(candidate, ec))
+                return absolute_candidate;
         }
 
         throw std::runtime_error(

@@ -4,10 +4,6 @@
 
 #include "systems/system.hpp"
 
-namespace bgui {
-    class image;
-}
-
 namespace COMMONS_NS {
     class ui_system final : public system {
     public:
@@ -18,6 +14,5 @@ namespace COMMONS_NS {
 
     private:
         bool m_initialized{false};
-        bgui::image* m_camera_image{nullptr};
     };
 }
