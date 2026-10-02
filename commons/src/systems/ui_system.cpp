@@ -23,10 +23,12 @@ void ui_system::setup(const std::shared_ptr<ecs>&reg)
 
     bgui::set_up_gl3();
     bgui::set_up_freetype();
-    bgui::style_manager::get_instance().apply_theme(bgui::light_theme());
+    bgui::style_manager::get_instance().apply_theme(bgui::dark_theme());
 
     auto& root = bgui::get_layout();
-    auto& window = root.add_persistent<bgui::window>("Main Window");
+    auto& dock = root.add_persistent<bgui::dock>();
+    auto& window = dock.add_window("Main Window", bgui::dock_area::left);
+    auto& window_assets = dock.add_window("Assets Window", bgui::dock_area::right);
     window.style.layout.padding = bgui::vec4i{0};
 
     m_window_context = &window.add_persistent<bgui::linear>(bgui::orientation::vertical);
