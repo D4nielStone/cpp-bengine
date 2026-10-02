@@ -3,7 +3,6 @@
 #include "components/camera.hpp"
 #include "components/transform.hpp"
 #include "core/ecs.hpp"
-#include "os/window.hpp"
 
 using namespace COMMONS_NS;
 
@@ -29,7 +28,6 @@ void camera::drawFB() {
         glViewport(0, 0, viewportFBO.x, viewportFBO.y);
     } else {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, window::get_instance().size.x, window::get_instance().size.y);
     }
     glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -50,7 +48,6 @@ camera::camera(const bool orth)
 
 bool camera::analyze(const rapidjson::Value& value)
 {
-	viewport_ptr = &window::get_instance().size;
     m_skybox = new skybox();
 
     if(value.HasMember("fov"))

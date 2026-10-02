@@ -1,228 +1,108 @@
-#include <stdexcept>
-#include "commons_namespace.hpp"
-#include "glad.h"
-#include "GLFW/glfw3.h"
 #include "os/window.hpp"
-#include "debugging/debug.hpp"
-#include "loaders/image_loader.hpp"
-#include "loaders/shader.hpp"
-#include "loaders/font.hpp"
-#include "inputs/inputs.hpp"
-#include "systems/system.hpp"
+
+#include <stdexcept>
+
+#include <glad.h>
 #include <bgui.hpp>
+#include <bgui_backend_glfw.hpp>
+
 using namespace COMMONS_NS;
 
-void errorCallback(int error, const char* description) {
-    std::cerr << "GLFW Error (" << error << "): " << description << std::endl;
+namespace {
+    void initialize_opengl_state() {
+        if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+            throw std::runtime_error("Failed to initialize OpenGL loader.");
+        }
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_FRAMEBUFFER_SRGB);
+    }
 }
 
-bool window::hasInstance() {
-    return instanceAtual;
-}
+window::window(const std::string& title, const int width, const int height)
+    : m_ecs(std::make_shared<ecs>()) {
+    m_window = bgui::set_up_glfw(width, height, title.c_str());
 
-window& window::get_instance() {
-    if (!hasInstance())
-       throw std::runtime_error("Instância da window não foi gerada!");
-    return *instanceAtual;
-}
-window& window::newInstance(const char* nome, fvec2 bounds , const char* icon_path ) {
-    if(instanceAtual) delete instanceAtual;
-    instanceAtual = new window(nome, bounds, icon_path);
-    return *instanceAtual;
-}
-window& window::newInstance(const char* nome, const bool f, fvec2 bounds , const char* icon_path ) {
-    if(instanceAtual) delete instanceAtual;
-    instanceAtual = new window(nome, f, bounds, icon_path);
-    return *instanceAtual;
-}
-
-ivec2 window::get_window_size() {
-    return window::get_instance().size;
-};
-
-void window::posicionarCursor(double x, double y)
-{
-    auto& input = window::get_instance().m_inputs;
-
-    input.m_mousex = x;
-    input.m_mousey = y;
-    glfwSetCursorPos(window::get_instance().m_window, x, y);
+    try {
+        glfwSetWindowAttrib(m_window, GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FALSE);
+        initialize_opengl_state();
+        m_interface = std::make_unique<bgui::scoped_interface>();
+    } catch (...) {
+        if (m_window) {
+            bgui::shutdown_glfw();
+            m_window = nullptr;
+        }
+        throw;
+    }
 }
 
 window::~window() {
-    desload_shaders();
-}
-window::window(const char* nome, fvec2 bounds, const char* icon_path)
-{
-    m_ecs = std::make_shared<ecs>();
-    glfwSetErrorCallback(errorCallback);
-    // inicia glfw
-    if (!glfwInit())
-    {
-        debugging::emit(erro, "Iniciando window glfw");
-        abort();
+    bgui::get_context().m_refresh_func = {};
+    m_systems.clear();
+    m_interface.reset();
+
+    if (m_window) {
+        bgui::shutdown_glfw();
+        m_window = nullptr;
     }
-
-    m_window = glfwCreateWindow(bounds.x, bounds.y, nome, NULL, NULL);
-    m_nome = nome;
-    if (!m_window) {
-        debugging::emit(erro, "Janla invalida");
-        abort();
-    };
-
-    glfwMakeContextCurrent(m_window);
-
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
-    {
-        debugging::emit(erro, "Glad");
-        abort();
-    }
-
-
-    if(icon_path)
-    {
-    image_loader _icone(icon_path);
-    auto glfw_icone = _icone.convert_to_glfw();
-    glfwSetWindowIcon(m_window, 1, &glfw_icone);
-    }
-    // ativa blend
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    glEnable(GL_FRAMEBUFFER_SRGB);
-
-    glfwSetCursorPosCallback(m_window,mousePosCallback);
-    glfwSetCharCallback(m_window, charCallback);
-    glfwSetMouseButtonCallback(m_window, mouseButtonCallback);
-    glfwSetKeyCallback(m_window,keyCallback);
-    glfwSetWindowUserPointer(m_window, this);
-
-    vector4<int> tam{};
-    glfwGetWindowSize(m_window, &tam.z, &tam.w);
-    size.y = tam.w;
-    size.x = tam.z;
 }
 
-window::window(const char* nome, const bool f, fvec2 bounds , const char* icon_path)
-{
-    m_ecs = std::make_shared<ecs>();
-    glfwSetErrorCallback(errorCallback);
-    // inicia glfw
-    if (!glfwInit())
-    {
-        debugging::emit(erro, "Iniciando window glfw");
-        abort();
-    }
-if(f)
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-    m_window = glfwCreateWindow(bounds.x, bounds.y, nome, NULL, NULL);
-    m_nome = nome;
-    if (!m_window) {
-        debugging::emit(erro, "Janla invalida");
-        abort();
-    };
-
-    glfwMakeContextCurrent(m_window);
-
-
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        debugging::emit(erro, "Glad");
-        abort();
+void window::add(const std::shared_ptr<system>& instance) {
+    if (!instance) {
+        throw std::invalid_argument("Cannot add a null system to the window.");
     }
 
-    if(icon_path) {
-        image_loader _icone(icon_path);
-        auto glfw_icone = _icone.convert_to_glfw();
-        glfwSetWindowIcon(m_window, 1, &glfw_icone);
-    }
-    // ativa blend
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    glfwSetCursorPosCallback(m_window,mousePosCallback);
-    glfwSetCharCallback(m_window, charCallback);
-    glfwSetMouseButtonCallback(m_window, mouseButtonCallback);
-    glfwSetKeyCallback(m_window,keyCallback);
-    glfwSetWindowUserPointer(m_window, this);
-
-    glfwGetWindowSize(m_window, &size.x, &size.y);
-}
-void window::poll()
-{
-    m_inputs.m_backspace_pressionado = false;
-    m_inputs.m_backspace_repetido = false;
-
-    glfwPollEvents();
-    glfwGetWindowSize(m_window, &size.x, &size.y);
+    instance->setup(m_ecs);
+    m_systems.push_back(instance);
 }
 
-void window::swap()
-{
-    if(m_cursor != m_cursor_antigo)
-    {
-        auto cursor_glfw = glfwCreateStandardCursor((int)m_cursor);
-        if(cursor_glfw)
-        glfwSetCursor(m_window, cursor_glfw);
-        m_cursor_antigo = m_cursor;
+std::shared_ptr<ecs> window::get_ecs() const noexcept {
+    return m_ecs;
+}
+
+double window::delta_time() const noexcept {
+    return m_time.delta.count();
+}
+
+void window::refresh() {
+    if (!m_window || glfwWindowShouldClose(m_window)) {
+        return;
     }
+
     m_time.calculateDT();
-    m_inputs.m_letra_pressionada = false;
-    glfwSwapBuffers(m_window);
-}
 
-void window::viewport() const
-{
-    glViewport(0, 0, size.x, size.y);
-}
-
-void window::nome(const char* novo_nome)
-{
-    glfwSetWindowTitle(m_window, novo_nome);
-    m_nome = novo_nome;
-}
-
-std::string window::nome() const
-{
-    return m_nome;
-}
-
-void window::modoLegado() {
-// TODO modo legado / legacy mode
-}
-
-void window::loop() {
-    auto& refresh_func = bgui::get_context().m_refresh_func;
-    const bool installed_refresh_func = !refresh_func;
-
-    if (installed_refresh_func) {
-        refresh_func = [this] {
-            for (const auto& system : m_systems) {
-                system->update(m_ecs);
-            }
-            swap();
-        };
-    }
-
-    while(!glfwWindowShouldClose(m_window)) {
-        poll();
-        if (refresh_func) {
-            refresh_func();
+    for (const auto& instance : m_systems) {
+        if (instance) {
+            instance->update(m_ecs);
         }
     }
 
-    if (installed_refresh_func) {
-        refresh_func = {};
-    }
+    bgui::swap_glfw();
 }
 
-void window::add(const std::shared_ptr<system>& system) {
-    if (!system) {
-        throw std::invalid_argument("Não é possível adicionar um system nulo à window.");
+void window::loop() {
+    if (!m_window) {
+        throw std::logic_error("The window is not initialized.");
     }
-    system->setup(m_ecs);
-    m_systems.push_back(system);
-}
 
-std::shared_ptr<ecs> window::get_ecs() const {
-    return m_ecs;
-}
+    if (m_looping) {
+        throw std::logic_error("The window loop is already running.");
+    }
+
+    auto& refresh_callback = bgui::get_context().m_refresh_func;
+    const auto previous_callback = refresh_callback;
+    refresh_callback = [this] { refresh(); };
+    m_looping = true;
+
+    try {
+        bgui::glfw_main_loop();
+    } catch (...) {
+        refresh_callback = previous_callback;
+        m_looping = false;
+        throw;
+    }
+
+    refresh_callback = previous_callback;
+    m_looping = false;
+} 

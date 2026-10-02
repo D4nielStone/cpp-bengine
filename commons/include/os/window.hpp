@@ -1,74 +1,51 @@
 #pragma once
-#include <functional>
+
 #include <memory>
-#include <unordered_map>
+#include <string>
+#include <utility>
 #include <vector>
-#include "glad.h"
-#include <GLFW/glfw3.h>
-#include "commons_namespace.hpp"
-#include "time.hpp"
-#include "utils/vec.hpp"
-#include "inputs/inputs.hpp"
+
+#include "core/ecs.hpp"
+#include "os/time.hpp"
 #include "systems/system.hpp"
 
-namespace COMMONS_NS {
-	/**
-	* @struct window
-	* @brief facilita o uso da window glfw
-	* @brief cuida dos callbacks, parametros iniciais etc.
-	*/
-	struct window {
-        enum class cursor : int {
-            mao = 0x00036004,
-            i   = 0x00036002,
-            seta= 0x00036001,
-            re_h= 0x00036005,
-            re_v= 0x00036006
-        };
-        private:
-    	    cursor m_cursor = cursor::seta;
-	    cursor m_cursor_antigo = cursor::seta;
-	    static void modoLegado();
-        public:
-            static void posicionarCursor                   (double x, double y);
-            static ivec2 get_window_size                ();
-            static bool hasInstance();
-            static window& get_instance();
-            static window& newInstance(const char* nome, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
-    		static window& newInstance(const char* nome, const bool f, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
+struct GLFWwindow;
 
-    		time m_time;
-            std::string m_nome{""};
-            ivec2 size;
-    		GLFWwindow* m_window;
-    		inputs m_inputs;
-            std::shared_ptr<ecs> m_ecs;
-            std::vector<std::shared_ptr<system>> m_systems;
-    		window(const char* nome, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
-    		window(const char* nome, const bool f, fvec2 bounds = {600, 400}, const char* icon_path = nullptr);
-    		~window();
-    		void poll();
-            void loop();
-            void add(const std::shared_ptr<system>& system);
-            template <typename T, typename... Args>
-            std::shared_ptr<T> add(Args&&... args);
-            std::shared_ptr<ecs> get_ecs() const;
-            inline void defCursor(const cursor c) {
-                if(c == m_cursor) return;
-                m_cursor = c;
-            }
-    		void swap();
-	    	void viewport() const;
-            std::string nome() const;
-    		void nome(const char* novo_nome);
-            window() = default;
-	};
-    inline static window* instanceAtual { nullptr };
-
-    template <typename T, typename... Args>
-    std::shared_ptr<T> window::add(Args&&... args) {
-        auto system = std::make_shared<T>(std::forward<Args>(args)...);
-        add(system);
-        return system;
-    }
+namespace bgui {
+    class scoped_interface;
 }
+
+namespace COMMONS_NS {
+    class window final {
+    public:
+        window(const std::string& title, int width = 800, int height = 600);
+        ~window();
+
+        window(const window&) = delete;
+        window& operator=(const window&) = delete;
+        window(window&&) = delete;
+        window& operator=(window&&) = delete;
+
+        void add(const std::shared_ptr<system>& system);
+
+        template <typename T, typename... Args>
+        std::shared_ptr<T> add(Args&&... args) {
+            auto instance = std::make_shared<T>(std::forward<Args>(args)...);
+            add(instance);
+            return instance;
+        }
+
+        std::shared_ptr<ecs> get_ecs() const noexcept;
+        double delta_time() const noexcept;
+        void refresh();
+        void loop();
+
+    private:
+        GLFWwindow* m_window{nullptr};
+        std::unique_ptr<bgui::scoped_interface> m_interface;
+        std::shared_ptr<ecs> m_ecs;
+        std::vector<std::shared_ptr<system>> m_systems;
+        time m_time;
+        bool m_looping{false};
+    };
+} 

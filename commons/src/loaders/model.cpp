@@ -5,7 +5,6 @@
 #include <filesystem>
 #include <stdexcept>
 #include "debugging/debug.hpp"
-#include "loaders/image_loader.hpp"
 #include "util/material.hpp"
 
 using namespace COMMONS_NS;
@@ -224,7 +223,6 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
         mat->GetTexture(type, 0, &str);
 
         tex.path = std::filesystem::path(directory).parent_path().string() + "/" + std::filesystem::path(str.C_Str()).filename().string();
-        tex.id = texture_loader::get_instance().load_texture(tex.path);
     }
     return tex;
 }

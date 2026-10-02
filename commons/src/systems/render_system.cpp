@@ -9,7 +9,6 @@
 #include "components/transform.hpp"
 #include "debugging/debug.hpp"
 #include "glad.h"
-#include "os/window.hpp"
 
 using namespace COMMONS_NS;
 
@@ -17,7 +16,7 @@ void render_system::setup(const std::shared_ptr<ecs>&) {
 }
 
 void render_system::update(const std::shared_ptr<ecs>& reg) {
-    if (!reg || !window::hasInstance()) {
+    if (!reg) {
         return;
     }
 
@@ -27,7 +26,6 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             return;
         }
 
-        camera_component->viewport_ptr = &window::get_instance().size;
         camera_component->drawFB();
 
         const auto view = camera_component->getViewMatrix();
@@ -49,12 +47,6 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         reg->cada<point_light>([&](const uint32_t light_entity) {
             if (auto light = reg->get<point_light>(light_entity)) {
                 point_lights.push_back(*light);
-            }
-        });
-
-        reg->cada<transform>([&](const uint32_t transform_entity) {
-            if (auto transform_component = reg->get<transform>(transform_entity)) {
-                transform_component->get_model_matrix();
             }
         });
 

@@ -8,7 +8,6 @@
 #include "util/skybox.hpp"
 #include "util/color.hpp"
 #include "util/ray.hpp"
-#include "elements/image.hpp"
 
 namespace COMMONS_NS {
 	/**
@@ -24,7 +23,6 @@ namespace COMMONS_NS {
 
         skybox* m_skybox{nullptr};
         bool m_use_skybox { false };
-        std::unique_ptr<elements::image> framebuffer_ptr{nullptr};
 		color ceu				{0.43F, 0.78F, 0.86F, 1.0F};
 
 		fvec3 forward, right, up, position;

@@ -1,5 +1,4 @@
 #include "components/terrain.hpp"
-#include "loaders/image_loader.hpp"
 #include "debugging/debug.hpp"
 #include "util/vertex.hpp"
 #include <iostream>
@@ -9,11 +8,6 @@ using namespace COMMONS_NS;
 bool terrain::analyze(const rapidjson::Value& value) {
     if(value.HasMember("heightmap") && value["heightmap"].IsString())
         directory = value["heightmap"].GetString();
-    // Carregar image como Heightmap
-    image_loader image(directory);
-    width = image.get_width();
-    height = image.get_height();
-    gerarHeightMap(image.getDados(), width, height);
     return true;
 }
 
@@ -114,10 +108,6 @@ void terrain::gerarHeightMap(unsigned char* data, int width, int height)
 terrain::terrain(const std::string &path) : directory(path)
 {
     // Carregar image como Heightmap
-    image_loader image(path);
-    width = image.get_width();
-    height = image.get_height();
-    gerarHeightMap(image.getDados(), width, height);
 }
 
 // Método para draw o terrain

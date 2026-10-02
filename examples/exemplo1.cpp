@@ -6,7 +6,7 @@
 #include "systems/ui_system.hpp"
 
 int main() {
-    auto& window = commons::window::newInstance("Bubble Engine - exemplo 1");
+    commons::window window("Bubble Engine - exemplo 1");
     auto scene = window.get_ecs();
 
     auto object = scene->create();
@@ -24,5 +24,6 @@ int main() {
     window.add<commons::render_system>();
     window.add<commons::ui_system>();
     window.loop();
+
     return 0;
 }
