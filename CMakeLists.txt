@@ -10,7 +10,7 @@ include(CTest)
 
 set(BGUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BGUI_TESTS ${BUILD_TESTING} CACHE BOOL "" FORCE)
-add_subdirectory(libs/cpp-bgui)
+add_subdirectory(external/cpp-bgui)
 
 # The reusable engine library.
 add_subdirectory(commons)
