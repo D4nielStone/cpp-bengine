@@ -17,3 +17,7 @@ add_subdirectory(commons)
 
 # Small programs used to exercise the engine.
 add_subdirectory(examples)
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
