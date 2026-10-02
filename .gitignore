@@ -32,6 +32,9 @@
 out/.ninja_log
 out/.ninja_deps
 /out
+/build
+build/*
+build
 */assets/*
 !commons/assets/
 !commons/assets/shaders/
