@@ -1,7 +1,7 @@
 Bubble Engine
 ===
 
-<video controls src="gif.gif" title="Bubble Engine"></video>
+![gif](gif.gif)
 
 # About
 
