@@ -12,6 +12,7 @@ namespace bgui {
     class image;
     class input_area;
     class linear;
+    class window;
 }
 
 namespace COMMONS_NS {
@@ -21,6 +22,7 @@ namespace COMMONS_NS {
 namespace editor {
     class editor_system final : public COMMONS_NS::system {
     public:
+        ~editor_system() override;
         void setup(const std::shared_ptr<COMMONS_NS::ecs>& registry) override;
         void create_editor_camera_settings();
         void open_editor_camera_settings();
@@ -44,8 +46,6 @@ namespace editor {
         uint32_t m_selected_entity{0};
         uint32_t m_editor_camera_entity{0};
         unsigned int m_framebuffer_texture{0};
-        int m_framebuffer_display_width{0};
-        int m_framebuffer_display_height{0};
         int m_last_mouse_x{0};
         int m_last_mouse_y{0};
         float m_last_update_time{0.f};
@@ -56,6 +56,11 @@ namespace editor {
 
         void refresh_scene(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void select_entity(uint32_t entity_id, const std::shared_ptr<COMMONS_NS::ecs>& registry);
+        void setup_scene_view_panel(bgui::window& window);
+        void setup_entities_panel(bgui::window& window);
+        void setup_components_panel(bgui::window& window);
+        void setup_assets_panel(bgui::window& window);
+        void update_scene_view_panel(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void rebuild_entities(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void rebuild_components(const std::shared_ptr<COMMONS_NS::ecs>& registry);
     };

@@ -1,24 +1,26 @@
 Bubble Engine
 ===
 
-![preview](image.png)
+![preview](image-1.png)
 
 [![Build and Test](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml)
 
+    
 Bubble Engine is an experimental C++ engine for windowing, rendering,
 physics, and component-based entities. The project is still under
 development and includes a minimal example in examples/cube_example.cpp.
 Dependencies
 The following must be installed:
- * CMake 3.20 or higher
- * A compiler with C++23 support
- * Lua 5.3
- * GLFW
- * GLM
- * Assimp
- * FreeImage
- * FreeType
- * Bullet
+ - CMake 3.20 or higher
+ - A compiler with C++23 support
+ - Lua 5.3
+ - GLFW
+ - GLM
+ - Assimp
+ - FreeImage
+ - FreeType
+ - Bullet
+
 The sol2, rapidjson, and glad libraries are maintained in the repository or
 as submodules. When cloning the project, initialize them with:
 git submodule update --init --recursive

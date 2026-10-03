@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "components/component.hpp"
+#include "components/transform.hpp"
+#include "core/scene.hpp"
 #include "entities/entity.hpp"
 #include "util/color.hpp"
 
@@ -47,4 +49,20 @@ TEST(EntityTest, EqualityDependsOnEntityId)
 
     EXPECT_EQ(first, same_id);
     EXPECT_FALSE(first == other_id);
+}
+
+TEST(SceneTest, OwnsAnIndependentEcs)
+{
+    scene first("First");
+    scene second("Second");
+
+    const entity first_entity = first.get_ecs()->create(7);
+    const entity second_entity = second.get_ecs()->create(7);
+
+    EXPECT_EQ(first.get_name(), "First");
+    EXPECT_EQ(second.get_name(), "Second");
+    EXPECT_EQ(first_entity.id, second_entity.id);
+    EXPECT_TRUE(first.get_ecs()->has<transform>(first_entity.id));
+    EXPECT_TRUE(second.get_ecs()->has<transform>(second_entity.id));
+    EXPECT_NE(first.get_ecs(), second.get_ecs());
 }

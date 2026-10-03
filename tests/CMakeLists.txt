@@ -5,6 +5,7 @@ add_executable(commons_tests
 target_link_libraries(commons_tests
     PRIVATE
         GTest::gtest_main
+        commons
 )
 
 target_include_directories(commons_tests
