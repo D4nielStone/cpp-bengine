@@ -61,6 +61,25 @@ void editor::editor_ui::create_editor_camera_settings(editor_config& config) {
     add_setting("Zoom sensitivity", "3.0", [&config](const std::string value) {
         config.set_camera_zoom_sensitivity(setting_value(value, config.camera_zoom_sensitivity(), 0.1f, 20.f));
     });
+    add_setting("UI scale", "0.7", [this](const std::string value) {
+        m_ui_scale = setting_value(value, m_ui_scale, 0.5f, 2.f);
+        bgui::set_global_scale(m_ui_scale);
+    });
+    add_setting("Min Z far", "0.01", [this](const std::string value) {
+        m_camera_min_z_far = setting_value(value, m_camera_min_z_far, 0.01f, 100.f);
+    });
+    auto& grid_visibility = settings_window.add_persistent<bgui::checkbox>(
+        "Show grid", 0.35f, m_grid_gizmo.enabled);
+    grid_visibility.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    grid_visibility.set_on_change([this](const bool checked) {
+        m_grid_gizmo.enabled = checked;
+    });
+    add_setting("Grid spacing", "1.0", [this](const std::string value) {
+        m_grid_gizmo.spacing = setting_value(value, m_grid_gizmo.spacing, 0.5f, 20.f);
+    });
+    add_setting("Grid extent", "50.0", [this](const std::string value) {
+        m_grid_gizmo.extent = setting_value(value, m_grid_gizmo.extent, 1.f, 50.f);
+    });
     add_setting("UI scale", "0.7", [&config](const std::string value) {
         config.set_ui_scale(setting_value(value, config.ui_scale(), 0.5f, 2.f));
     });
