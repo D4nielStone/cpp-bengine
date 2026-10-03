@@ -8,6 +8,7 @@
 
 #include "debugging/debug.hpp"
 
+#include <array>
 #include <iostream>
 
 using namespace COMMONS_NS;
@@ -20,13 +21,24 @@ void ui_system::setup(const std::shared_ptr<ecs>&)
     bgui::set_up_gl3();
     bgui::set_up_freetype();
 #ifdef _WIN32
-    bgui::ft_search_system_fonts("arial,Arial,ARIAL,consolas,Consolas,CONSOLAS");
-    constexpr char default_font[] = "Consolas Regular";
-    bgui::ft_load_system_font(default_font);
-    if (bgui::font_manager::get_instance().has_font(default_font))
-        bgui::font_manager::get_instance().set_default_font(default_font);
-    else
-        std::cerr << "[ui] Consolas Regular not found; keeping the FreeType default font.\n";
+    bgui::ft_search_system_fonts(
+        "consolas,Consolas,CONSOLAS,cascadia,Cascadia,CASCADIA,lucida,Lucida,LUCIDA");
+    constexpr std::array<const char*, 3> monospace_fonts = {
+        "Consolas Regular",
+        "Cascadia Mono Regular",
+        "Lucida Console Regular"
+    };
+    bool monospace_font_loaded = false;
+    for (const char* font_name : monospace_fonts) {
+        bgui::ft_load_system_font(font_name);
+        if (bgui::font_manager::get_instance().has_font(font_name)) {
+            bgui::font_manager::get_instance().set_default_font(font_name);
+            monospace_font_loaded = true;
+            break;
+        }
+    }
+    if (!monospace_font_loaded)
+        std::cerr << "[ui] No supported monospace font found; keeping the FreeType default font.\n";
 #endif
     bgui::load_font_queue();
     m_initialized = true;

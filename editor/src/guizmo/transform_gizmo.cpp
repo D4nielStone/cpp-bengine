@@ -134,35 +134,41 @@ namespace {
 
     void add_clipped_line(
         bgui::draw_list& draw_list,
-        const bgui::vec4i& viewport,
+        const std::vector<bgui::vec4i>& visible_regions,
         bgui::vec2 start,
         bgui::vec2 end,
         const float thickness)
     {
         const int inset = static_cast<int>(std::ceil(thickness * 0.5f));
-        const bgui::vec4i bounds{
-            viewport.x + inset,
-            viewport.y + inset,
-            std::max(0, viewport.z - inset * 2),
-            std::max(0, viewport.w - inset * 2)
-        };
-        if (clip_segment(bounds, start, end))
-            draw_list.add_line(start, end, thickness);
+        for (const auto& region : visible_regions) {
+            const bgui::vec4i bounds{
+                region.x + inset,
+                region.y + inset,
+                std::max(0, region.z - inset * 2),
+                std::max(0, region.w - inset * 2)
+            };
+            auto clipped_start = start;
+            auto clipped_end = end;
+            if (clip_segment(bounds, clipped_start, clipped_end))
+                draw_list.add_line(clipped_start, clipped_end, thickness);
+        }
     }
 
     void add_clipped_polygon(
         bgui::draw_list& draw_list,
-        const bgui::vec4i& viewport,
+        const std::vector<bgui::vec4i>& visible_regions,
         std::vector<bgui::vec2> polygon)
     {
-        polygon = clip_polygon(viewport, std::move(polygon));
-        if (polygon.size() >= 3)
-            draw_list.add_convexpolyfilled(polygon);
+        for (const auto& region : visible_regions) {
+            auto clipped = clip_polygon(region, polygon);
+            if (clipped.size() >= 3)
+                draw_list.add_convexpolyfilled(clipped);
+        }
     }
 
     void add_clipped_polyline(
         bgui::draw_list& draw_list,
-        const bgui::vec4i& viewport,
+        const std::vector<bgui::vec4i>& visible_regions,
         const std::vector<bgui::vec2>& points,
         const float thickness,
         const bool closed)
@@ -170,9 +176,9 @@ namespace {
         if (points.size() < 2)
             return;
         for (std::size_t index = 1; index < points.size(); ++index)
-            add_clipped_line(draw_list, viewport, points[index - 1], points[index], thickness);
+            add_clipped_line(draw_list, visible_regions, points[index - 1], points[index], thickness);
         if (closed)
-            add_clipped_line(draw_list, viewport, points.back(), points.front(), thickness);
+            add_clipped_line(draw_list, visible_regions, points.back(), points.front(), thickness);
     }
 
     float distance_to_segment(
@@ -228,6 +234,7 @@ bool editor::transform_gizmo::update(
     const COMMONS_NS::camera& camera,
     COMMONS_NS::transform* target,
     const bgui::vec4i& viewport,
+    const std::vector<bgui::vec4i>& visible_regions,
     const bgui::vec2i& mouse_position,
     const bgui::vec2i& mouse_delta,
     const bool mouse_over_view,
@@ -386,22 +393,22 @@ bool editor::transform_gizmo::update(
         if (m_mode == mode::rotate) {
             if (!rings[axis_index].empty())
                 add_clipped_polyline(
-                    draw_list, viewport, rings[axis_index], highlighted ? 4.f : 2.5f, true);
+                    draw_list, visible_regions, rings[axis_index], highlighted ? 4.f : 2.5f, true);
             continue;
         }
 
         const auto end = axis_ends[axis_index];
-        add_clipped_line(draw_list, viewport, m_center, end, highlighted ? 5.f : 3.5f);
+        add_clipped_line(draw_list, visible_regions, m_center, end, highlighted ? 5.f : 3.5f);
         if (m_mode == mode::translate) {
             const auto direction = axis_directions[axis_index];
             const bgui::vec2 normal{-direction.y, direction.x};
-            add_clipped_polygon(draw_list, viewport, {
+            add_clipped_polygon(draw_list, visible_regions, {
                 end,
                 end - direction * 11.f + normal * 5.f,
                 end - direction * 11.f - normal * 5.f
             });
         } else {
-            add_clipped_polygon(draw_list, viewport, {
+            add_clipped_polygon(draw_list, visible_regions, {
                 end - bgui::vec2{5.f, 5.f},
                 {end.x + 5.f, end.y - 5.f},
                 end + bgui::vec2{5.f, 5.f},
@@ -419,6 +426,6 @@ bool editor::transform_gizmo::update(
             m_center.y + std::sin(angle) * 4.f
         });
     }
-    add_clipped_polygon(draw_list, viewport, std::move(center_marker));
+    add_clipped_polygon(draw_list, visible_regions, std::move(center_marker));
     return m_dragging && left_down;
 }

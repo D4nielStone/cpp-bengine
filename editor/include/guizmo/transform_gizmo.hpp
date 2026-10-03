@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include <utils/vec.hpp>
 
 #include "commons_namespace.hpp"
@@ -16,6 +18,7 @@ namespace editor {
             const COMMONS_NS::camera& camera,
             COMMONS_NS::transform* target,
             const bgui::vec4i& viewport,
+            const std::vector<bgui::vec4i>& visible_regions,
             const bgui::vec2i& mouse_position,
             const bgui::vec2i& mouse_delta,
             bool mouse_over_view,

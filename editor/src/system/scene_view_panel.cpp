@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <vector>
 
 #include "components/camera.hpp"
 #include "components/transform.hpp"
@@ -12,36 +13,81 @@
 #include <os/os.hpp>
 
 namespace {
-    bool overlaps(const bgui::vec4i& first, const bgui::vec4i& second) {
-        return first.x < second.x + second.z &&
-            first.x + first.z > second.x &&
-            first.y < second.y + second.w &&
-            first.y + first.w > second.y;
+    bgui::vec4i intersection(const bgui::vec4i& first, const bgui::vec4i& second) {
+        const int left = std::max(first.x, second.x);
+        const int top = std::max(first.y, second.y);
+        const int right = std::min(first.x + first.z, second.x + second.z);
+        const int bottom = std::min(first.y + first.w, second.y + second.w);
+        return {left, top, std::max(0, right - left), std::max(0, bottom - top)};
     }
 
-    bool floating_window_overlaps_view(const bgui::vec4i& viewport, bgui::window* exclude = nullptr) {
-        std::function<bool(bgui::layout&)> visit = [&](bgui::layout& layout) -> bool {
+    bool contains(const bgui::vec4i& rectangle, const bgui::vec2i& point) {
+        return point.x >= rectangle.x && point.x < rectangle.x + rectangle.z &&
+            point.y >= rectangle.y && point.y < rectangle.y + rectangle.w;
+    }
+
+    std::vector<bgui::vec4i> floating_window_rects(
+        const bgui::vec4i& viewport,
+        bgui::window* exclude)
+    {
+        std::vector<bgui::vec4i> result;
+        std::function<void(bgui::layout&)> visit = [&](bgui::layout& layout) {
             for (auto& [layer, elements] : layout.get_elements()) {
                 (void)layer;
                 for (auto& element : elements) {
                     if (!element || !element->is_enabled())
                         continue;
                     if (auto* window = dynamic_cast<bgui::window*>(element.get())) {
-                        if (window == exclude || !window->is_floating())
-                            continue;
-                        if (overlaps(window->processed_rect(), viewport))
-                            return true;
+                        if (window != exclude && window->is_floating()) {
+                            const auto clipped = intersection(window->processed_rect(), viewport);
+                            if (clipped.z > 0 && clipped.w > 0)
+                                result.push_back(clipped);
+                        }
                     }
                     if (auto* child_layout = element->as_layout()) {
-                        if (visit(*child_layout))
-                            return true;
+                        visit(*child_layout);
                     }
                 }
             }
-            return false;
         };
+        visit(bgui::get_layout());
+        return result;
+    }
 
-        return visit(bgui::get_layout());
+    std::vector<bgui::vec4i> unobscured_regions(
+        const bgui::vec4i& viewport,
+        const std::vector<bgui::vec4i>& occluders)
+    {
+        std::vector<bgui::vec4i> regions{viewport};
+        for (const auto& occluder : occluders) {
+            std::vector<bgui::vec4i> remaining;
+            for (const auto& region : regions) {
+                const auto cut = intersection(region, occluder);
+                if (cut.z == 0 || cut.w == 0) {
+                    remaining.push_back(region);
+                    continue;
+                }
+
+                const int region_right = region.x + region.z;
+                const int region_bottom = region.y + region.w;
+                if (cut.y > region.y)
+                    remaining.push_back({region.x, region.y, region.z, cut.y - region.y});
+                if (cut.y + cut.w < region_bottom)
+                    remaining.push_back({
+                        region.x, cut.y + cut.w, region.z, region_bottom - cut.y - cut.w
+                    });
+                if (cut.x > region.x)
+                    remaining.push_back({region.x, cut.y, cut.x - region.x, cut.w});
+                if (cut.x + cut.z < region_right)
+                    remaining.push_back({
+                        cut.x + cut.z, cut.y, region_right - cut.x - cut.z, cut.w
+                    });
+            }
+            regions = std::move(remaining);
+            if (regions.empty())
+                break;
+        }
+        return regions;
     }
 }
 
@@ -85,9 +131,14 @@ void editor::editor_system::update_scene_view_panel(
         m_framebuffer_image->processed_width(),
         m_framebuffer_image->processed_height()
     };
-    const bool scene_blocked_by_floating_window = m_scene_view_window &&
-        floating_window_overlaps_view(viewport, m_scene_view_window);
-    const bool mouse_over_view = !scene_blocked_by_floating_window &&
+    const auto occluders = floating_window_rects(viewport, m_scene_view_window);
+    const auto visible_regions = unobscured_regions(viewport, occluders);
+    const bool mouse_over_floating_window = std::any_of(
+        occluders.begin(), occluders.end(),
+        [&mouse_position](const bgui::vec4i& rectangle) {
+            return contains(rectangle, mouse_position);
+        });
+    const bool mouse_over_view = !mouse_over_floating_window &&
         bgui::get_mouse_target() == m_framebuffer_image;
     const float scroll_delta = bgui::get_context().m_scroll_delta_y;
     bgui::get_context().m_scroll_delta_y = 0.f;
@@ -105,13 +156,6 @@ void editor::editor_system::update_scene_view_panel(
         mouse_position.x - m_last_mouse_x,
         mouse_position.y - m_last_mouse_y
     };
-    if (scene_blocked_by_floating_window) {
-        m_left_view_active = false;
-        m_right_move_active = false;
-        m_left_mouse_was_down = false;
-        m_right_mouse_was_down = false;
-        return;
-    }
 
     m_grid_gizmo.draw(*camera_component, viewport);
 
@@ -122,6 +166,7 @@ void editor::editor_system::update_scene_view_panel(
         *camera_component,
         selected_transform.get(),
         viewport,
+        visible_regions,
         mouse_position,
         gizmo_mouse_delta,
         mouse_over_view,
