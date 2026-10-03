@@ -6,7 +6,7 @@
 
 void editor::editor_config::initialize_interface() const {
     bgui::style_manager::get_instance().apply_theme(bgui::dark_theme());
-    bgui::set_global_scale(0.8f);
+    bgui::set_global_scale(0.9f);
 }
 
 void editor::editor_config::load_interface() const {

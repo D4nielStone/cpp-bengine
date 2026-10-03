@@ -8,6 +8,8 @@
 
 #include "debugging/debug.hpp"
 
+#include <iostream>
+
 using namespace COMMONS_NS;
 
 void ui_system::setup(const std::shared_ptr<ecs>&)
@@ -17,6 +19,15 @@ void ui_system::setup(const std::shared_ptr<ecs>&)
 
     bgui::set_up_gl3();
     bgui::set_up_freetype();
+#ifdef _WIN32
+    bgui::ft_search_system_fonts("arial,Arial,ARIAL,consolas,Consolas,CONSOLAS");
+    constexpr char default_font[] = "Consolas Regular";
+    bgui::ft_load_system_font(default_font);
+    if (bgui::font_manager::get_instance().has_font(default_font))
+        bgui::font_manager::get_instance().set_default_font(default_font);
+    else
+        std::cerr << "[ui] Consolas Regular not found; keeping the FreeType default font.\n";
+#endif
     bgui::load_font_queue();
     m_initialized = true;
     debugging::emit(debug, "ui", "cpp-bgui inicializado");

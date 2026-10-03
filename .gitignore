@@ -43,3 +43,4 @@ build
 !commons/assets/models/
 !commons/assets/models/*.obj
 .vscode
+editor.cfg
