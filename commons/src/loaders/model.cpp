@@ -225,9 +225,9 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
         diffuse.a = diffuse_color.a;
     }
     bmat.set_uniform("material.albedo", diffuse);
-    bmat.set_uniform("material.metallic", 0.5f);
-    bmat.set_uniform("material.ao", 0.2f);
-    bmat.set_uniform("material.roughness", 0.3f);
+    bmat.set_uniform("material.metallic", 0.0f);
+    bmat.set_uniform("material.ao", 1.0f);
+    bmat.set_uniform("material.roughness", 0.5f);
 
     COMMONS_NS::mesh m_(vertices, indices, bmat);
     return m_;

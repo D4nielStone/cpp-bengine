@@ -18,7 +18,7 @@ namespace bgui {
 namespace COMMONS_NS {
     class window final {
     public:
-        window(const std::string& title, int width = 800, int height = 600);
+        window(const std::string& title, int width = 1200, int height = 600);
         ~window();
 
         window(const window&) = delete;

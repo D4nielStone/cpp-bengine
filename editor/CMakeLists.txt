@@ -2,9 +2,13 @@ cmake_minimum_required(VERSION 3.20)
 
 project(editor VERSION 0.1.0 LANGUAGES CXX)
 
-add_library(editor STATIC
-    src/editor_system.cpp
+file(GLOB COMMONS_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/**/*.cpp"
 )
+
+add_library(editor STATIC ${COMMONS_SOURCES})
 
 target_include_directories(editor
     PUBLIC

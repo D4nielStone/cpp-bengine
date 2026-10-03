@@ -1,7 +1,7 @@
 #include "os/window.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
-#include "editor/editor_system.hpp"
+#include "system/editor_system.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
 
