@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "guizmo/grid_gizmo.hpp"
 #include "guizmo/transform_gizmo.hpp"
 #include "systems/system.hpp"
 
@@ -40,12 +41,14 @@ namespace editor {
         bgui::linear* m_config_menu{nullptr};
         bgui::linear* m_editor_settings{nullptr};
         bgui::button* m_config_button{nullptr};
+        bgui::window* m_scene_view_window{nullptr};
         bgui::window* m_scene_file_dialog{nullptr};
         bgui::input_area* m_scene_file_input{nullptr};
         bgui::text* m_scene_file_status{nullptr};
         bgui::text* m_model_import_status{nullptr};
         bgui::text* m_project_status{nullptr};
         bgui::linear* m_project_scenes_list{nullptr};
+        std::weak_ptr<COMMONS_NS::ecs> m_registry;
         std::weak_ptr<COMMONS_NS::ecs> m_scene_file_registry;
         std::string m_project_config_path;
         std::string m_project_name;
@@ -69,7 +72,9 @@ namespace editor {
         float m_camera_move_speed{4.f};
         float m_camera_look_sensitivity{0.12f};
         float m_camera_zoom_sensitivity{3.f};
+        float m_camera_min_z_far{0.01f};
         float m_ui_scale{1.f};
+        grid_gizmo m_grid_gizmo;
 
         void refresh_scene(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void select_entity(uint32_t entity_id, const std::shared_ptr<COMMONS_NS::ecs>& registry);
@@ -85,6 +90,7 @@ namespace editor {
         void apply_scene_file_path(const std::string& path);
         void create_project(const std::string& directory);
         void open_project(const std::string& path);
+        void save_project(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         bool save_project_config();
         void refresh_project_scenes();
         void load_project_scene(const std::string& scene, const std::shared_ptr<COMMONS_NS::ecs>& registry);

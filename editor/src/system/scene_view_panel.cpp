@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 #include "components/camera.hpp"
 #include "components/transform.hpp"
@@ -11,9 +12,41 @@
 #include <os/os.hpp>
 
 namespace {
+    bool overlaps(const bgui::vec4i& first, const bgui::vec4i& second) {
+        return first.x < second.x + second.z &&
+            first.x + first.z > second.x &&
+            first.y < second.y + second.w &&
+            first.y + first.w > second.y;
+    }
+
+    bool floating_window_overlaps_view(const bgui::vec4i& viewport, bgui::window* exclude = nullptr) {
+        std::function<bool(bgui::layout&)> visit = [&](bgui::layout& layout) -> bool {
+            for (auto& [layer, elements] : layout.get_elements()) {
+                (void)layer;
+                for (auto& element : elements) {
+                    if (!element || !element->is_enabled())
+                        continue;
+                    if (auto* window = dynamic_cast<bgui::window*>(element.get())) {
+                        if (window == exclude || !window->is_floating())
+                            continue;
+                        if (overlaps(window->processed_rect(), viewport))
+                            return true;
+                    }
+                    if (auto* child_layout = element->as_layout()) {
+                        if (visit(*child_layout))
+                            return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        return visit(bgui::get_layout());
+    }
 }
 
 void editor::editor_system::setup_scene_view_panel(bgui::window& window) {
+    m_scene_view_window = &window;
     m_window_context = &window.add_persistent<bgui::linear>(bgui::orientation::vertical);
     m_window_context->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
     m_window_context->style.layout.padding = bgui::vec4i{0};
@@ -46,7 +79,16 @@ void editor::editor_system::update_scene_view_panel(
     }
 
     const auto mouse_position = bgui::get_mouse_position();
-    const bool mouse_over_view = bgui::get_mouse_target() == m_framebuffer_image;
+    const bgui::vec4i viewport{
+        m_framebuffer_image->processed_x(),
+        m_framebuffer_image->processed_y(),
+        m_framebuffer_image->processed_width(),
+        m_framebuffer_image->processed_height()
+    };
+    const bool scene_blocked_by_floating_window = m_scene_view_window &&
+        floating_window_overlaps_view(viewport, m_scene_view_window);
+    const bool mouse_over_view = !scene_blocked_by_floating_window &&
+        bgui::get_mouse_target() == m_framebuffer_image;
     const float scroll_delta = bgui::get_context().m_scroll_delta_y;
     bgui::get_context().m_scroll_delta_y = 0.f;
     const auto& inputs = bgui::get_context().m_input_map;
@@ -59,16 +101,20 @@ void editor::editor_system::update_scene_view_panel(
     const bool right_down = input_down(bgui::input_key::mouse_right);
     const bool left_just_pressed = left_down && !m_left_mouse_was_down;
     const bool right_just_pressed = right_down && !m_right_mouse_was_down;
-    const bgui::vec4i viewport{
-        m_framebuffer_image->processed_x(),
-        m_framebuffer_image->processed_y(),
-        m_framebuffer_image->processed_width(),
-        m_framebuffer_image->processed_height()
-    };
     const bgui::vec2i gizmo_mouse_delta{
         mouse_position.x - m_last_mouse_x,
         mouse_position.y - m_last_mouse_y
     };
+    if (scene_blocked_by_floating_window) {
+        m_left_view_active = false;
+        m_right_move_active = false;
+        m_left_mouse_was_down = false;
+        m_right_mouse_was_down = false;
+        return;
+    }
+
+    m_grid_gizmo.draw(*camera_component, viewport);
+
     const auto selected_transform = m_selected_entity != 0
         ? registry->get<COMMONS_NS::transform>(m_selected_entity)
         : nullptr;

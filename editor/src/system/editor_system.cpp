@@ -6,7 +6,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <unordered_set>
 #include <vector>
 
 #include "components/camera.hpp"
@@ -162,6 +164,133 @@ namespace {
         return path.lexically_relative(std::filesystem::path(COMMONS_ASSET_DIR)).generic_string();
     }
 
+    bool package_scene_assets(
+        const std::filesystem::path& scene_path,
+        const std::filesystem::path& project_root)
+    {
+        std::ifstream input(scene_path, std::ios::binary);
+        if (!input)
+            return false;
+        const std::string contents((std::istreambuf_iterator<char>(input)), {});
+        rapidjson::Document document;
+        document.Parse(contents.c_str());
+        if (document.HasParseError() || !document.IsObject())
+            return false;
+
+        const auto project_assets = project_root / "Assets";
+        const auto scene_directory = scene_path.parent_path();
+        const auto package_model = [&](rapidjson::Value& model) {
+            if (!model.IsString())
+                return true;
+
+            const std::filesystem::path requested(model.GetString());
+            std::vector<std::filesystem::path> candidates;
+            if (requested.is_absolute()) {
+                candidates.push_back(requested);
+            } else {
+                candidates = {
+                    scene_directory / requested,
+                    project_root / requested,
+                    project_assets / requested,
+                    std::filesystem::path(COMMONS_ASSET_DIR) / requested,
+                    std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / requested
+                };
+            }
+
+            std::error_code error;
+            std::filesystem::path source;
+            for (const auto& candidate : candidates) {
+                error.clear();
+                if (std::filesystem::is_regular_file(candidate, error)) {
+                    source = std::filesystem::absolute(candidate, error);
+                    if (!error)
+                        break;
+                    source.clear();
+                }
+            }
+            if (source.empty())
+                return false;
+
+            error.clear();
+            const auto absolute_assets = std::filesystem::absolute(project_assets, error);
+            if (error)
+                return false;
+            const auto relative_source = source.lexically_relative(absolute_assets);
+            if (relative_source.empty() || *relative_source.begin() == "..") {
+                const auto source_directory = source.parent_path();
+                const auto destination_directory = project_assets / "Models" /
+                    std::to_string(std::hash<std::string>{}(source_directory.generic_string()));
+                std::filesystem::create_directories(destination_directory, error);
+                if (error)
+                    return false;
+                for (std::filesystem::recursive_directory_iterator it(source_directory, error), end;
+                     !error && it != end; it.increment(error)) {
+                    if (it->is_symlink(error) || !it->is_regular_file(error))
+                        continue;
+                    const auto relative_file = it->path().lexically_relative(source_directory);
+                    const auto destination = destination_directory / relative_file;
+                    std::filesystem::create_directories(destination.parent_path(), error);
+                    if (error)
+                        return false;
+                    std::filesystem::copy_file(
+                        it->path(), destination, std::filesystem::copy_options::overwrite_existing, error);
+                    if (error)
+                        return false;
+                }
+                if (error)
+                    return false;
+                const auto relative_model = source.lexically_relative(source_directory);
+                const auto project_relative = (std::filesystem::path("Assets") / "Models" /
+                    destination_directory.filename() / relative_model).generic_string();
+                model.SetString(project_relative.c_str(), static_cast<rapidjson::SizeType>(project_relative.size()), document.GetAllocator());
+            } else {
+                const auto project_relative = relative_source.generic_string();
+                model.SetString(project_relative.c_str(), static_cast<rapidjson::SizeType>(project_relative.size()), document.GetAllocator());
+            }
+            return true;
+        };
+
+        const auto process_value = [&](auto&& self, rapidjson::Value& value) -> bool {
+            if (value.IsArray()) {
+                for (auto& child : value.GetArray()) {
+                    if (!self(self, child))
+                        return false;
+                }
+                return true;
+            }
+            if (!value.IsObject())
+                return true;
+
+            for (auto member = value.MemberBegin(); member != value.MemberEnd(); ++member) {
+                const auto key = normalized_key(member->name.GetString());
+                const bool is_model_reference = key == "model" || key == "modelpath" || key == "mesh" ||
+                    key == "meshpath" || key == "modelfile";
+                if (is_model_reference && member->value.IsString()) {
+                    if (!package_model(member->value))
+                        return false;
+                } else if (key == "renderer" && member->value.IsString()) {
+                    if (!package_model(member->value))
+                        return false;
+                } else if (!self(self, member->value)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        if (!process_value(process_value, document))
+            return false;
+
+        rapidjson::StringBuffer buffer;
+        rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+        document.Accept(writer);
+        std::ofstream output(scene_path, std::ios::binary | std::ios::trunc);
+        if (!output)
+            return false;
+        output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
+        return output.good();
+    }
+
     void import_models(
         const rapidjson::Value& value,
         const rapidjson::Value* inherited_transform,
@@ -244,22 +373,26 @@ void editor::editor_system::setup(
     config.add_button("Editor Camera", [this]() {
         open_editor_camera_settings();
     });
+    auto& files = menu_bar.add_button("[ Files ]");
     const std::weak_ptr<COMMONS_NS::ecs> weak_registry = registry;
-    menu_bar.add_menu("[ Salvar cena ]", [this, weak_registry]() {
+    files.add_button("[ Salvar cena ]", [this, weak_registry]() {
         open_scene_file_dialog(true, weak_registry.lock());
     });
-    menu_bar.add_menu("[ Novo Projeto ]", [this]() {
+    files.add_button("[ Novo Projeto ]", [this]() {
         const auto directory = choose_project_directory();
         if (!directory.empty())
             create_project(directory);
     });
-    menu_bar.add_menu("[ Abrir Projeto ]", [this]() {
+    files.add_button("[ Abrir Projeto ]", [this]() {
         const auto path = choose_file(false, false, true);
         if (!path.empty())
             open_project(path);
     });
-    menu_bar.add_menu("[ Importar cena]", [this, weak_registry]() {
+    files.add_button("[ Importar cena ]", [this, weak_registry]() {
         open_scene_file_dialog(false, weak_registry.lock());
+    });
+    files.add_button("[ Salvar projeto ]", [this, weak_registry]() {
+        save_project(weak_registry.lock());
     });
 
     auto& dock = root.add_persistent<bgui::dock>();
@@ -289,6 +422,56 @@ void editor::editor_system::setup(
     refresh_scene(registry);
     bgui::cascade_style();
     bgui::load_font_queue();
+}
+
+void editor::editor_system::save_project(const std::shared_ptr<COMMONS_NS::ecs>& registry) {
+    if (!registry || m_project_config_path.empty()) {
+        if (m_project_status)
+            m_project_status->set_buffer("Crie ou abra um projeto antes de salvar.");
+        return;
+    }
+
+    const auto project_root = std::filesystem::path(m_project_config_path).parent_path();
+    std::filesystem::path scene_path = project_root / "Scenes" / "scene.bscene";
+    if (!m_current_scene.empty()) {
+        const auto current = std::filesystem::absolute(m_current_scene).lexically_normal();
+        const auto root = std::filesystem::absolute(project_root).lexically_normal();
+        const auto relative = current.lexically_relative(root);
+        if (!relative.empty() && *relative.begin() != "..")
+            scene_path = current;
+    }
+
+    std::error_code error;
+    std::filesystem::create_directories(scene_path.parent_path(), error);
+    if (error || !save_scene_file(scene_path.string(), registry)) {
+        if (m_project_status)
+            m_project_status->set_buffer("Não foi possível salvar as cenas e os assets do projeto.");
+        return;
+    }
+
+    m_current_scene = scene_path.lexically_normal().string();
+    const auto relative_scene = scene_path.lexically_relative(project_root).generic_string();
+    if (std::find(m_project_scenes.begin(), m_project_scenes.end(), relative_scene) == m_project_scenes.end())
+        m_project_scenes.push_back(relative_scene);
+    for (const auto& scene : m_project_scenes) {
+        auto registered_scene_path = std::filesystem::path(scene);
+        if (registered_scene_path.is_relative())
+            registered_scene_path = project_root / registered_scene_path;
+        if (!package_scene_assets(registered_scene_path, project_root)) {
+            if (m_project_status)
+                m_project_status->set_buffer("Não foi possível empacotar todos os assets do projeto.");
+            return;
+        }
+    }
+    if (!save_project_config()) {
+        if (m_project_status)
+            m_project_status->set_buffer("Cenas e assets salvos, mas não foi possível atualizar o projeto.");
+        return;
+    }
+
+    refresh_project_scenes();
+    if (m_project_status)
+        m_project_status->set_buffer("Projeto salvo: " + m_project_name);
 }
 
 void editor::editor_system::update(const std::shared_ptr<COMMONS_NS::ecs>& registry) {
@@ -362,7 +545,17 @@ void editor::editor_system::open_scene_file_dialog(
     m_scene_file_save = save;
     m_scene_file_registry = registry;
     m_scene_file_dialog->set_title(save ? "Salvar .bscene" : "Importar .bscene");
-    m_scene_file_input->set_buffer(save ? "scene.bscene" : "");
+    std::string initial_path;
+    if (save) {
+        if (!m_current_scene.empty()) {
+            initial_path = m_current_scene;
+        } else if (!m_project_config_path.empty()) {
+            initial_path = (std::filesystem::path(m_project_config_path).parent_path() / "Scenes" / "scene.bscene").string();
+        } else {
+            initial_path = "scene.bscene";
+        }
+    }
+    m_scene_file_input->set_buffer(initial_path);
     m_scene_file_status->set_buffer("Informe o caminho do arquivo .bscene.");
     const auto size = bgui::get_context_size();
     m_scene_file_dialog->set_position(
@@ -433,9 +626,40 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
 
     try {
         if (m_scene_file_save) {
+            if (scene_path.is_relative() && !m_project_config_path.empty())
+                scene_path = std::filesystem::path(m_project_config_path).parent_path() / scene_path;
+            std::error_code error;
+            if (!scene_path.parent_path().empty())
+                std::filesystem::create_directories(scene_path.parent_path(), error);
+            if (error) {
+                m_scene_file_status->set_buffer("Não foi possível criar a pasta da cena.");
+                return;
+            }
             if (!save_scene_file(scene_path.string(), registry)) {
                 m_scene_file_status->set_buffer("Não foi possível salvar o arquivo.");
                 return;
+            }
+            if (!m_project_config_path.empty() &&
+                !package_scene_assets(scene_path, std::filesystem::path(m_project_config_path).parent_path())) {
+                m_scene_file_status->set_buffer("Cena salva, mas não foi possível empacotar seus assets.");
+                return;
+            }
+            m_current_scene = scene_path.lexically_normal().string();
+            if (!m_project_config_path.empty()) {
+                const auto project_root = std::filesystem::absolute(
+                    std::filesystem::path(m_project_config_path).parent_path()).lexically_normal();
+                const auto absolute_scene = std::filesystem::absolute(scene_path).lexically_normal();
+                const auto relative_scene = absolute_scene.lexically_relative(project_root);
+                if (!relative_scene.empty() && *relative_scene.begin() != "..") {
+                    const auto relative = relative_scene.generic_string();
+                    if (std::find(m_project_scenes.begin(), m_project_scenes.end(), relative) == m_project_scenes.end())
+                        m_project_scenes.push_back(relative);
+                    if (!save_project_config()) {
+                        m_scene_file_status->set_buffer("Cena salva, mas não foi possível atualizar o projeto.");
+                        return;
+                    }
+                    refresh_project_scenes();
+                }
             }
             m_scene_file_status->set_buffer("Cena salva: " + scene_path.string());
         } else {
@@ -478,7 +702,17 @@ void editor::editor_system::create_project(const std::string& directory) {
     const auto project_root = std::filesystem::path(directory);
     std::error_code error;
     std::filesystem::create_directories(project_root / "Assets", error);
+    if (error) {
+        if (m_project_status)
+            m_project_status->set_buffer("Não foi possível criar a pasta do projeto.");
+        return;
+    }
     std::filesystem::create_directories(project_root / "Scenes", error);
+    if (error) {
+        if (m_project_status)
+            m_project_status->set_buffer("Não foi possível criar as pastas do projeto.");
+        return;
+    }
     m_project_name = project_root.filename().string();
     m_project_config_path = (project_root / "project.bproject").string();
     m_project_scenes.clear();
@@ -486,7 +720,8 @@ void editor::editor_system::create_project(const std::string& directory) {
     if (m_project_status)
         m_project_status->set_buffer("Projeto aberto: " + m_project_name);
 
-    save_project_config();
+    if (!save_project_config() && m_project_status)
+        m_project_status->set_buffer("Não foi possível salvar a configuração do projeto.");
     refresh_project_scenes();
 }
 
@@ -495,31 +730,48 @@ void editor::editor_system::open_project(const std::string& path) {
         return;
 
     const auto project_path = std::filesystem::path(path);
-    m_project_config_path = project_path.string();
-    m_project_name = project_path.parent_path().filename().string();
-    m_project_scenes.clear();
+    std::ifstream input(project_path, std::ios::binary);
+    if (!input) {
+        if (m_project_status)
+            m_project_status->set_buffer("Não foi possível abrir o arquivo do projeto.");
+        return;
+    }
+    const std::string contents((std::istreambuf_iterator<char>(input)), {});
+    rapidjson::Document document;
+    document.Parse(contents.c_str());
+    if (document.HasParseError() || !document.IsObject()) {
+        if (m_project_status)
+            m_project_status->set_buffer("Arquivo de projeto inválido.");
+        return;
+    }
 
-    if (std::filesystem::exists(project_path)) {
-        std::ifstream input(project_path, std::ios::binary);
-        if (input) {
-            std::string contents((std::istreambuf_iterator<char>(input)), {});
-            rapidjson::Document document;
-            document.Parse(contents.c_str());
-            if (!document.HasParseError() && document.IsObject()) {
-                const auto name = document.FindMember("name");
-                if (name != document.MemberEnd() && name->value.IsString())
-                    m_project_name = name->value.GetString();
-
-                const auto scenes = document.FindMember("scenes");
-                if (scenes != document.MemberEnd() && scenes->value.IsArray()) {
-                    for (const auto& scene : scenes->value.GetArray()) {
-                        if (scene.IsString())
-                            m_project_scenes.emplace_back(scene.GetString());
-                    }
-                }
-            }
+    std::string project_name = project_path.parent_path().filename().string();
+    std::vector<std::string> project_scenes;
+    const auto name = document.FindMember("name");
+    if (name != document.MemberEnd()) {
+        if (!name->value.IsString()) {
+            if (m_project_status)
+                m_project_status->set_buffer("Nome inválido na configuração do projeto.");
+            return;
+        }
+        project_name = name->value.GetString();
+    }
+    const auto scenes = document.FindMember("scenes");
+    if (scenes != document.MemberEnd()) {
+        if (!scenes->value.IsArray()) {
+            if (m_project_status)
+                m_project_status->set_buffer("Lista de cenas inválida no projeto.");
+            return;
+        }
+        for (const auto& scene : scenes->value.GetArray()) {
+            if (scene.IsString())
+                project_scenes.emplace_back(scene.GetString());
         }
     }
+
+    m_project_config_path = project_path.string();
+    m_project_name = std::move(project_name);
+    m_project_scenes = std::move(project_scenes);
 
     if (m_project_scenes.empty()) {
         const auto project_root = project_path.parent_path();
@@ -583,13 +835,100 @@ void editor::editor_system::refresh_project_scenes() {
     if (!m_project_scenes_list)
         return;
 
+    for (auto& layer_elements : m_project_scenes_list->get_elements())
+        layer_elements.second.clear();
+
     std::vector<std::string> scenes = m_project_scenes;
     std::sort(scenes.begin(), scenes.end());
+    const std::weak_ptr<COMMONS_NS::ecs> weak_registry = m_registry;
 
     for (const auto& scene : scenes) {
-        auto& item = m_project_scenes_list->add_persistent<bgui::text>(scene, 0.35f);
+        auto& item = m_project_scenes_list->add_persistent<bgui::button>(scene, 0.35f, [this, scene, weak_registry]() {
+            load_project_scene(scene, weak_registry.lock());
+        });
         item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     }
+}
+
+void editor::editor_system::load_project_scene(
+    const std::string& scene,
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    if (!registry || m_project_config_path.empty())
+        return;
+
+    auto scene_path = std::filesystem::path(scene);
+    if (scene_path.is_relative())
+        scene_path = std::filesystem::path(m_project_config_path).parent_path() / scene_path;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(scene_path, error)) {
+        if (m_project_status)
+            m_project_status->set_buffer("Cena não encontrada: " + scene);
+        return;
+    }
+
+    std::unordered_set<uint32_t> previous_entities;
+    for (const auto& entry : registry->entities)
+        previous_entities.insert(entry.first);
+
+    const auto rollback_new_entities = [&]() {
+        std::vector<uint32_t> new_entities;
+        for (const auto& entry : registry->entities) {
+            if (!previous_entities.contains(entry.first))
+                new_entities.push_back(entry.first);
+        }
+        for (const auto entity_id : new_entities)
+            registry->remove(entity_id);
+    };
+
+    std::size_t imported = 0;
+    try {
+        imported = import_scene_file(scene_path.string(), registry);
+    } catch (const std::exception& exception) {
+        rollback_new_entities();
+        if (m_project_status)
+            m_project_status->set_buffer(std::string("Falha ao carregar cena: ") + exception.what());
+        return;
+    }
+
+    if (imported == 0) {
+        std::ifstream input(scene_path, std::ios::binary);
+        const std::string contents((std::istreambuf_iterator<char>(input)), {});
+        rapidjson::Document document;
+        document.Parse(contents.c_str());
+        if (document.HasParseError()) {
+            rollback_new_entities();
+            if (m_project_status)
+                m_project_status->set_buffer("Arquivo de cena inválido; a cena atual foi mantida.");
+            return;
+        }
+        const auto entities = document.IsObject() ? document.FindMember("entities") : document.MemberEnd();
+        if (!document.IsObject() || (entities != document.MemberEnd() && entities->value.IsArray() && !entities->value.Empty())) {
+            rollback_new_entities();
+            if (m_project_status)
+                m_project_status->set_buffer("Nenhum modelo válido foi carregado; a cena atual foi mantida.");
+            return;
+        }
+    }
+
+    uint32_t first_loaded_entity = 0;
+    for (const auto& entry : registry->entities) {
+        if (previous_entities.contains(entry.first))
+            continue;
+        if (first_loaded_entity == 0)
+            first_loaded_entity = entry.first;
+    }
+    for (const auto entity_id : previous_entities) {
+        if (entity_id != m_editor_camera_entity)
+            registry->remove(entity_id);
+    }
+
+    m_current_scene = scene_path.lexically_normal().string();
+    m_selected_entity = first_loaded_entity;
+    m_scene_initialized = false;
+    refresh_scene(registry);
+    if (m_project_status)
+        m_project_status->set_buffer("Cena carregada: " + scene);
 }
 
 void editor::editor_system::import_model_file(
@@ -657,8 +996,25 @@ bool editor::editor_system::save_scene_file(
             continue;
         const auto model_member = serialized_renderer.FindMember("model");
         if (model_member != serialized_renderer.MemberEnd()) {
-            const auto relative_path = relative_asset_path(render_component->m_modelo->get_source_path());
-            model_member->value.SetString(relative_path.c_str(), static_cast<rapidjson::SizeType>(relative_path.size()), allocator);
+            const std::filesystem::path source_path(render_component->m_modelo->get_source_path());
+            std::string serialized_path;
+            if (!m_project_config_path.empty()) {
+                const auto project_root = std::filesystem::path(m_project_config_path).parent_path();
+                std::error_code error;
+                const auto absolute_source = std::filesystem::absolute(source_path, error);
+                if (error)
+                    return false;
+                const auto absolute_root = std::filesystem::absolute(project_root, error);
+                if (error)
+                    return false;
+                const auto relative_existing = absolute_source.lexically_relative(absolute_root);
+                serialized_path = relative_existing.empty() || *relative_existing.begin() == ".."
+                    ? absolute_source.generic_string()
+                    : relative_existing.generic_string();
+            } else {
+                serialized_path = relative_asset_path(source_path);
+            }
+            model_member->value.SetString(serialized_path.c_str(), static_cast<rapidjson::SizeType>(serialized_path.size()), allocator);
         }
         serialized_components.AddMember("transform", serialized_transform, allocator);
         serialized_components.AddMember("renderer", serialized_renderer, allocator);
