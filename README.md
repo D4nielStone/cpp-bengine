@@ -1,7 +1,7 @@
 Bubble Engine
 ===
 
-![preview](image-1.png)
+![preview](image.png)
 
 [![Build and Test](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml)
 

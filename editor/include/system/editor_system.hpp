@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -43,7 +44,13 @@ namespace editor {
         bgui::input_area* m_scene_file_input{nullptr};
         bgui::text* m_scene_file_status{nullptr};
         bgui::text* m_model_import_status{nullptr};
+        bgui::text* m_project_status{nullptr};
+        bgui::linear* m_project_scenes_list{nullptr};
         std::weak_ptr<COMMONS_NS::ecs> m_scene_file_registry;
+        std::string m_project_config_path;
+        std::string m_project_name;
+        std::string m_current_scene;
+        std::vector<std::string> m_project_scenes;
         bool m_scene_file_save{false};
         bgui::image* m_framebuffer_image{nullptr};
         bool m_scene_initialized{false};
@@ -76,6 +83,11 @@ namespace editor {
         void open_scene_file_dialog(bool save, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void create_scene_file_dialog();
         void apply_scene_file_path(const std::string& path);
+        void create_project(const std::string& directory);
+        void open_project(const std::string& path);
+        bool save_project_config();
+        void refresh_project_scenes();
+        void load_project_scene(const std::string& scene, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void browse_model_file(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void import_model_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         bool save_scene_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
