@@ -29,9 +29,19 @@ namespace {
     }
 }
 
-void editor::editor_system::setup_assets_panel(bgui::window& window) {
+void editor::editor_system::setup_assets_panel(
+    bgui::window& window,
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
     auto& context = window.add_persistent<bgui::linear>(bgui::orientation::vertical);
     context.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+    const std::weak_ptr<COMMONS_NS::ecs> weak_registry = registry;
+    auto& import_model = context.add_persistent<bgui::button>("Importar modelo 3D", 0.35f, [this, weak_registry]() {
+        browse_model_file(weak_registry.lock());
+    });
+    import_model.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    m_model_import_status = &context.add_persistent<bgui::text>("", 0.32f);
+    m_model_import_status->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     add_asset_group(context, "Models", COMMONS_MODEL_ASSET_DIR);
     add_asset_group(context, "Shaders", COMMONS_SHADER_ASSET_DIR);
 }

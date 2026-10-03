@@ -1,7 +1,9 @@
 #include "system/editor_system.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -19,6 +21,28 @@
 #include <utils/theme.hpp>
 
 namespace {
+    std::string choose_file(const bool save, const bool model) {
+        const char* command = model
+            ? "zenity --file-selection --title='Importar modelo 3D' --file-filter='Modelos 3D | *.obj *.dae *.fbx *.gltf *.glb *.stl *.ply' 2>/dev/null"
+            : save
+                ? "zenity --file-selection --save --confirm-overwrite --title='Salvar cena' --file-filter='Cenas | *.bscene' 2>/dev/null"
+                : "zenity --file-selection --title='Importar cena' --file-filter='Cenas | *.bscene' 2>/dev/null";
+        std::FILE* dialog = popen(command, "r");
+        if (!dialog)
+            return {};
+
+        std::string path;
+        std::array<char, 4096> buffer{};
+        while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), dialog))
+            path += buffer.data();
+        const int result = pclose(dialog);
+        if (result != 0)
+            return {};
+        while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
+            path.pop_back();
+        return path;
+    }
+
     std::string normalized_key(const std::string& key) {
         std::string normalized;
         for (const unsigned char character : key) {
@@ -229,7 +253,7 @@ void editor::editor_system::setup(
     setup_scene_view_panel(scene_window);
     setup_entities_panel(entities_window);
     setup_components_panel(components_window);
-    setup_assets_panel(assets_window);
+    setup_assets_panel(assets_window, registry);
 
     refresh_scene(registry);
     bgui::cascade_style();
@@ -330,6 +354,13 @@ void editor::editor_system::create_scene_file_dialog() {
     input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     m_scene_file_input = &input;
 
+    auto& browse = dialog.add_persistent<bgui::button>("Procurar...", 0.35f, [this]() {
+        const auto path = choose_file(m_scene_file_save, false);
+        if (!path.empty() && m_scene_file_input)
+            m_scene_file_input->set_buffer(path);
+    });
+    browse.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
+
     m_scene_file_status = &dialog.add_persistent<bgui::text>("", 0.32f);
     m_scene_file_status->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
 
@@ -387,6 +418,43 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
     } catch (const std::exception& error) {
         m_scene_file_status->set_buffer(std::string("Erro: ") + error.what());
     }
+}
+
+void editor::editor_system::import_model_file(
+    const std::string& path,
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    if (!registry || path.empty())
+        return;
+
+    try {
+        auto entity = registry->create();
+        registry->add<COMMONS_NS::renderer>(entity, path.c_str());
+        const auto renderer = registry->get<COMMONS_NS::renderer>(entity.id);
+        if (!renderer || !renderer->m_modelo || renderer->m_modelo->meshes.empty()) {
+            registry->remove(entity.id);
+            if (m_model_import_status)
+                m_model_import_status->set_buffer("Não foi possível carregar esse modelo.");
+            return;
+        }
+
+        m_selected_entity = entity.id;
+        m_scene_initialized = false;
+        refresh_scene(registry);
+        if (m_model_import_status)
+            m_model_import_status->set_buffer("Modelo importado: " + std::filesystem::path(path).filename().string());
+    } catch (const std::exception& error) {
+        if (m_model_import_status)
+            m_model_import_status->set_buffer(std::string("Erro: ") + error.what());
+    }
+}
+
+void editor::editor_system::browse_model_file(
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    const auto path = choose_file(false, true);
+    if (!path.empty())
+        import_model_file(path, registry);
 }
 
 bool editor::editor_system::save_scene_file(

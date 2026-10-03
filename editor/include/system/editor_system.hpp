@@ -41,6 +41,7 @@ namespace editor {
         bgui::window* m_scene_file_dialog{nullptr};
         bgui::input_area* m_scene_file_input{nullptr};
         bgui::text* m_scene_file_status{nullptr};
+        bgui::text* m_model_import_status{nullptr};
         std::weak_ptr<COMMONS_NS::ecs> m_scene_file_registry;
         bool m_scene_file_save{false};
         bgui::image* m_framebuffer_image{nullptr};
@@ -66,13 +67,15 @@ namespace editor {
         void setup_scene_view_panel(bgui::window& window);
         void setup_entities_panel(bgui::window& window);
         void setup_components_panel(bgui::window& window);
-        void setup_assets_panel(bgui::window& window);
+        void setup_assets_panel(bgui::window& window, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void update_scene_view_panel(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void rebuild_entities(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void rebuild_components(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void open_scene_file_dialog(bool save, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void create_scene_file_dialog();
         void apply_scene_file_path(const std::string& path);
+        void browse_model_file(const std::shared_ptr<COMMONS_NS::ecs>& registry);
+        void import_model_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         bool save_scene_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         std::size_t import_scene_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
     };
