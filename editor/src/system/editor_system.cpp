@@ -17,8 +17,6 @@
 #include <bgui.hpp>
 #include <elem/input_area.hpp>
 #include <rapidjson/prettywriter.h>
-#include <os/style_manager.hpp>
-#include <utils/theme.hpp>
 
 namespace {
     std::string choose_file(const bool save, const bool model, const bool project = false) {
@@ -229,20 +227,19 @@ namespace {
 }
 
 editor::editor_system::~editor_system() {
-    bgui::save_configuration("editor.cfg");
+    m_config.save_interface();
 }
 
 void editor::editor_system::setup(
     const std::shared_ptr<COMMONS_NS::ecs>& registry)
 {
-    bgui::style_manager::get_instance().apply_theme(bgui::dark_theme());
-    bgui::set_global_scale(0.8f);
+    m_config.initialize_interface();
 
     auto& root = bgui::set_layout<bgui::linear>(bgui::orientation::vertical);
     auto& menu_bar = root.add_persistent<bgui::menu_bar>(root);
     auto& config = menu_bar.add_button("[ Config ]");
     config.add_button("Editor Camera", [this]() {
-        open_editor_camera_settings();
+        m_ui.open_editor_camera_settings(m_config);
     });
     const std::weak_ptr<COMMONS_NS::ecs> weak_registry = registry;
     menu_bar.add_menu("[ Salvar cena ]", [this, weak_registry]() {
@@ -268,7 +265,7 @@ void editor::editor_system::setup(
     auto& entities_window = dock.add_window("Entities", bgui::dock_area::left);
     auto& components_window = dock.add_window("Components", bgui::dock_area::right);
     auto& assets_window = dock.add_window("Assets Window", bgui::dock_area::right);
-    bgui::load_configuration("editor.cfg");
+    m_config.load_interface();
 
     if (registry) {
         auto editor_camera_entity = registry->create();
@@ -299,16 +296,7 @@ void editor::editor_system::update(const std::shared_ptr<COMMONS_NS::ecs>& regis
     if (!m_framebuffer_image)
         return;
 
-    if (m_editor_settings) {
-        const auto& elements = bgui::get_layout().get_elements();
-        const auto overlays = elements.find(bgui::layer::overlay);
-        const bool settings_attached = overlays != elements.end() &&
-            std::any_of(overlays->second.begin(), overlays->second.end(), [this](const auto& element) {
-                return element.get() == m_editor_settings;
-            });
-        if (!settings_attached)
-            m_editor_settings = nullptr;
-    }
+    m_ui.update();
 
     if (m_camera.expired()) {
         registry->cada<COMMONS_NS::camera>([&](const uint32_t entity) {

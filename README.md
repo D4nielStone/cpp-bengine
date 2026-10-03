@@ -8,7 +8,7 @@ Bubble Engine
     
 Bubble Engine is an experimental C++ engine for windowing, rendering,
 physics, and component-based entities. The project is still under
-development and includes a minimal example in examples/cube_example.cpp.
+development and provides runtime and editor applications.
 Dependencies
 The following must be installed:
  - CMake 3.20 or higher
@@ -31,13 +31,16 @@ From the project root:
 cmake -S . -B out
 cmake --build out
 ```
-The example executables will be generated in the out/examples directory. To
-run the main example:
-./out/examples/scene1
+The runtime and editor applications will be generated in the out/apps
+directory. Run either application with:
+```
+./out/apps/runtime_app
+./out/apps/editor_app
+```
 
 Structure
  * commons/: reusable static library of the engine.
- * examples/: small programs utilizing the library.
+ * apps/: runtime and editor applications using the engine.
  * external/: dependencies included in the project.
 Installing
 To install the library and headers to a specific prefix:

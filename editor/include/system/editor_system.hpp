@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "system/editor_config.hpp"
+#include "system/editor_ui.hpp"
 #include "guizmo/transform_gizmo.hpp"
 #include "systems/system.hpp"
 
@@ -28,8 +30,6 @@ namespace editor {
     public:
         ~editor_system() override;
         void setup(const std::shared_ptr<COMMONS_NS::ecs>& registry) override;
-        void create_editor_camera_settings();
-        void open_editor_camera_settings();
         void update(const std::shared_ptr<COMMONS_NS::ecs> &registry) override;
 
     private:
@@ -37,9 +37,6 @@ namespace editor {
         bgui::linear* m_entities_list{nullptr};
         bgui::linear* m_components_list{nullptr};
         bgui::linear* m_window_context{nullptr};
-        bgui::linear* m_config_menu{nullptr};
-        bgui::linear* m_editor_settings{nullptr};
-        bgui::button* m_config_button{nullptr};
         bgui::window* m_scene_file_dialog{nullptr};
         bgui::input_area* m_scene_file_input{nullptr};
         bgui::text* m_scene_file_status{nullptr};
@@ -58,6 +55,8 @@ namespace editor {
         bool m_right_move_active{false};
         bool m_left_mouse_was_down{false};
         bool m_right_mouse_was_down{false};
+        editor_config m_config;
+        editor_ui m_ui;
         transform_gizmo m_transform_gizmo;
         std::vector<std::pair<uint32_t, uint32_t>> m_scene_signature;
         uint32_t m_selected_entity{0};
@@ -66,10 +65,6 @@ namespace editor {
         int m_last_mouse_x{0};
         int m_last_mouse_y{0};
         float m_last_update_time{0.f};
-        float m_camera_move_speed{4.f};
-        float m_camera_look_sensitivity{0.12f};
-        float m_camera_zoom_sensitivity{3.f};
-        float m_ui_scale{1.f};
 
         void refresh_scene(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void select_entity(uint32_t entity_id, const std::shared_ptr<COMMONS_NS::ecs>& registry);

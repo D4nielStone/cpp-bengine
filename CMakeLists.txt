@@ -16,8 +16,8 @@ add_subdirectory(external/cpp-bgui)
 add_subdirectory(commons)
 add_subdirectory(editor)
 
-# Small programs used to exercise the engine.
-add_subdirectory(examples)
+# Runtime and editor applications.
+add_subdirectory(apps)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

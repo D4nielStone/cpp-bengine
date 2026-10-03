@@ -108,7 +108,7 @@ void editor::editor_system::update_scene_view_panel(
         const auto rotation = camera_transform->get_rotation();
         const float pitch = glm::radians(rotation.x);
         const float yaw = glm::radians(rotation.y);
-        const float distance = scroll_delta * m_camera_zoom_sensitivity;
+        const float distance = scroll_delta * m_config.camera_zoom_sensitivity();
         camera_transform->move({
             std::cos(yaw) * std::cos(pitch) * distance,
             std::sin(pitch) * distance,
@@ -120,8 +120,8 @@ void editor::editor_system::update_scene_view_panel(
         if (m_left_view_active) {
             const int view_delta_x = left_just_pressed ? 0 : mouse_delta_x;
             const int view_delta_y = left_just_pressed ? 0 : mouse_delta_y;
-            rotation.x = std::clamp(rotation.x - view_delta_y * m_camera_look_sensitivity, -89.f, 89.f);
-            rotation.y += view_delta_x * m_camera_look_sensitivity;
+            rotation.x = std::clamp(rotation.x - view_delta_y * m_config.camera_look_sensitivity(), -89.f, 89.f);
+            rotation.y += view_delta_x * m_config.camera_look_sensitivity();
             camera_transform->set_rotation(rotation);
         }
 
@@ -147,7 +147,7 @@ void editor::editor_system::update_scene_view_panel(
             const float move_length = std::sqrt(move_x * move_x + move_y * move_y + move_z * move_z);
             auto position = camera_transform->get_position();
             if (move_length > 0.f) {
-                const float speed = m_camera_move_speed * (input_down(bgui::input_key::left_shift) ||
+                const float speed = m_config.camera_move_speed() * (input_down(bgui::input_key::left_shift) ||
                     input_down(bgui::input_key::right_shift) ? 3.f : 1.f);
                 const float distance = speed * delta_time / move_length;
                 position.x += move_x * distance;

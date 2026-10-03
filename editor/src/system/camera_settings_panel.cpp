@@ -1,4 +1,5 @@
-#include "system/editor_system.hpp"
+#include "system/editor_config.hpp"
+#include "system/editor_ui.hpp"
 
 #include <algorithm>
 #include <string>
@@ -18,9 +19,9 @@ namespace {
     }
 }
 
-void editor::editor_system::open_editor_camera_settings() {
+void editor::editor_ui::open_editor_camera_settings(editor_config& config) {
     if (!m_editor_settings)
-        create_editor_camera_settings();
+        create_editor_camera_settings(config);
 
     const auto size = bgui::get_context_size();
     m_editor_settings->set_position(
@@ -31,7 +32,7 @@ void editor::editor_system::open_editor_camera_settings() {
     m_editor_settings->set_flex(false);
 }
 
-void editor::editor_system::create_editor_camera_settings() {
+void editor::editor_ui::create_editor_camera_settings(editor_config& config) {
     auto& root = bgui::get_layout();
     auto& settings_window = root.add_persistent<bgui::window, bgui::layer::overlay>("Editor Camera");
     m_editor_settings = &settings_window;
@@ -51,17 +52,29 @@ void editor::editor_system::create_editor_camera_settings() {
         input.style.layout.require_size(100.f, 30.f);
     };
 
-    add_setting("Move speed", "4.0", [this](const std::string value) {
-        m_camera_move_speed = setting_value(value, m_camera_move_speed, 0.1f, 100.f);
+    add_setting("Move speed", "4.0", [&config](const std::string value) {
+        config.set_camera_move_speed(setting_value(value, config.camera_move_speed(), 0.1f, 100.f));
     });
-    add_setting("Look sensitivity", "0.12", [this](const std::string value) {
-        m_camera_look_sensitivity = setting_value(value, m_camera_look_sensitivity, 0.01f, 2.f);
+    add_setting("Look sensitivity", "0.12", [&config](const std::string value) {
+        config.set_camera_look_sensitivity(setting_value(value, config.camera_look_sensitivity(), 0.01f, 2.f));
     });
-    add_setting("Zoom sensitivity", "3.0", [this](const std::string value) {
-        m_camera_zoom_sensitivity = setting_value(value, m_camera_zoom_sensitivity, 0.1f, 20.f);
+    add_setting("Zoom sensitivity", "3.0", [&config](const std::string value) {
+        config.set_camera_zoom_sensitivity(setting_value(value, config.camera_zoom_sensitivity(), 0.1f, 20.f));
     });
-    add_setting("UI scale", "0.7", [this](const std::string value) {
-        m_ui_scale = setting_value(value, m_ui_scale, 0.5f, 2.f);
-        bgui::set_global_scale(m_ui_scale);
+    add_setting("UI scale", "0.7", [&config](const std::string value) {
+        config.set_ui_scale(setting_value(value, config.ui_scale(), 0.5f, 2.f));
     });
+}
+
+void editor::editor_ui::update() {
+    if (!m_editor_settings)
+        return;
+    const auto& elements = bgui::get_layout().get_elements();
+    const auto overlays = elements.find(bgui::layer::overlay);
+    const bool settings_attached = overlays != elements.end() &&
+        std::any_of(overlays->second.begin(), overlays->second.end(), [this](const auto& element) {
+            return element.get() == m_editor_settings;
+        });
+    if (!settings_attached)
+        m_editor_settings = nullptr;
 }

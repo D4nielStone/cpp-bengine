@@ -1,11 +1,14 @@
-#include "os/window.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
+#include "os/window.hpp"
+#include "system/editor_system.hpp"
 #include "systems/render_system.hpp"
+#include "systems/ui_system.hpp"
 
 int main() {
-    commons::window window("Bubble Engine - exemplo 1");
+    commons::window window("Bubble Engine - Editor");
     auto registry = window.get_ecs();
+
     auto camera_entity = registry->create();
     auto cube_entity = registry->create();
     registry->add<commons::camera>(camera_entity);
@@ -14,6 +17,8 @@ int main() {
     registry->get<commons::transform>(camera_entity.id)->set_rotation(commons::fvec3{0.f, 90.f, 0.f});
 
     window.add<commons::render_system>();
+    window.add<commons::ui_system>();
+    window.add<editor::editor_system>();
     window.loop();
 
     return 0;
