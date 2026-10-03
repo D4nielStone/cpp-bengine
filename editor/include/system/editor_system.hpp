@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "guizmo/transform_gizmo.hpp"
 #include "systems/system.hpp"
 
 namespace bgui {
@@ -50,6 +51,7 @@ namespace editor {
         bool m_right_move_active{false};
         bool m_left_mouse_was_down{false};
         bool m_right_mouse_was_down{false};
+        transform_gizmo m_transform_gizmo;
         std::vector<std::pair<uint32_t, uint32_t>> m_scene_signature;
         uint32_t m_selected_entity{0};
         uint32_t m_editor_camera_entity{0};

@@ -59,7 +59,30 @@ void editor::editor_system::update_scene_view_panel(
     const bool right_down = input_down(bgui::input_key::mouse_right);
     const bool left_just_pressed = left_down && !m_left_mouse_was_down;
     const bool right_just_pressed = right_down && !m_right_mouse_was_down;
-    if (left_just_pressed && mouse_over_view)
+    const bgui::vec4i viewport{
+        m_framebuffer_image->processed_x(),
+        m_framebuffer_image->processed_y(),
+        m_framebuffer_image->processed_width(),
+        m_framebuffer_image->processed_height()
+    };
+    const bgui::vec2i gizmo_mouse_delta{
+        mouse_position.x - m_last_mouse_x,
+        mouse_position.y - m_last_mouse_y
+    };
+    const auto selected_transform = m_selected_entity != 0
+        ? registry->get<COMMONS_NS::transform>(m_selected_entity)
+        : nullptr;
+    const bool gizmo_consumed_mouse = m_transform_gizmo.update(
+        *camera_component,
+        selected_transform.get(),
+        viewport,
+        mouse_position,
+        gizmo_mouse_delta,
+        mouse_over_view,
+        left_just_pressed,
+        left_down
+    );
+    if (left_just_pressed && mouse_over_view && !gizmo_consumed_mouse)
         m_left_view_active = true;
     if (right_just_pressed && mouse_over_view)
         m_right_move_active = true;
