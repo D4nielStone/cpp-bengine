@@ -81,6 +81,7 @@ std::string model::getDiretorio() const {
 void model::load_model(const std::string& path) {
     meshes.clear();
     const auto resolved_path = resolve_model_path(path);
+    source_path = resolved_path.string();
     const auto resolved_string = resolved_path.string();
     Assimp::Importer importer;
     auto flags = aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_JoinIdenticalVertices;

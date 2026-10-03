@@ -12,11 +12,13 @@ namespace bgui {
     class image;
     class input_area;
     class linear;
+    class text;
     class window;
 }
 
 namespace COMMONS_NS {
     class camera;
+    class ecs;
 }
 
 namespace editor {
@@ -36,6 +38,11 @@ namespace editor {
         bgui::linear* m_config_menu{nullptr};
         bgui::linear* m_editor_settings{nullptr};
         bgui::button* m_config_button{nullptr};
+        bgui::window* m_scene_file_dialog{nullptr};
+        bgui::input_area* m_scene_file_input{nullptr};
+        bgui::text* m_scene_file_status{nullptr};
+        std::weak_ptr<COMMONS_NS::ecs> m_scene_file_registry;
+        bool m_scene_file_save{false};
         bgui::image* m_framebuffer_image{nullptr};
         bool m_scene_initialized{false};
         bool m_left_view_active{false};
@@ -63,5 +70,10 @@ namespace editor {
         void update_scene_view_panel(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void rebuild_entities(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void rebuild_components(const std::shared_ptr<COMMONS_NS::ecs>& registry);
+        void open_scene_file_dialog(bool save, const std::shared_ptr<COMMONS_NS::ecs>& registry);
+        void create_scene_file_dialog();
+        void apply_scene_file_path(const std::string& path);
+        bool save_scene_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
+        std::size_t import_scene_file(const std::string& path, const std::shared_ptr<COMMONS_NS::ecs>& registry);
     };
 }

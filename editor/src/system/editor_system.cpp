@@ -1,15 +1,187 @@
 #include "system/editor_system.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <vector>
 
 #include "components/camera.hpp"
+#include "components/renderer.hpp"
 #include "components/transform.hpp"
 #include "elem/menu_bar.hpp"
 
 #include <bgui.hpp>
+#include <elem/input_area.hpp>
+#include <rapidjson/prettywriter.h>
 #include <os/style_manager.hpp>
 #include <utils/theme.hpp>
+
+namespace {
+    std::string normalized_key(const std::string& key) {
+        std::string normalized;
+        for (const unsigned char character : key) {
+            if (std::isalnum(character))
+                normalized.push_back(static_cast<char>(std::tolower(character)));
+        }
+        return normalized;
+    }
+
+    const rapidjson::Value* member_value(
+        const rapidjson::Value& object,
+        const std::string& normalized_name)
+    {
+        if (!object.IsObject())
+            return nullptr;
+        for (auto member = object.MemberBegin(); member != object.MemberEnd(); ++member) {
+            if (normalized_key(member->name.GetString()) == normalized_name)
+                return &member->value;
+        }
+        return nullptr;
+    }
+
+    bool read_vector(const rapidjson::Value& object, const char* key, COMMONS_NS::fvec3& result) {
+        const auto* value = member_value(object, key);
+        if (!value)
+            return false;
+        if (value->IsArray() && value->Size() >= 3 &&
+            (*value)[0].IsNumber() && (*value)[1].IsNumber() && (*value)[2].IsNumber()) {
+            result = {(*value)[0].GetFloat(), (*value)[1].GetFloat(), (*value)[2].GetFloat()};
+            return true;
+        }
+        if (value->IsObject()) {
+            const auto* x = member_value(*value, "x");
+            const auto* y = member_value(*value, "y");
+            const auto* z = member_value(*value, "z");
+            if (x && y && z && x->IsNumber() && y->IsNumber() && z->IsNumber()) {
+                result = {x->GetFloat(), y->GetFloat(), z->GetFloat()};
+                return true;
+            }
+        }
+        return false;
+    }
+
+    const rapidjson::Value* scene_transform(
+        const rapidjson::Value& object,
+        const rapidjson::Value* inherited)
+    {
+        if (const auto* components = member_value(object, "components")) {
+            if (const auto* transform = member_value(*components, "transform"))
+                return transform;
+        }
+        if (const auto* transform = member_value(object, "transform"))
+            return transform;
+        if (member_value(object, "position") || member_value(object, "rotation") || member_value(object, "scale"))
+            return &object;
+        return inherited;
+    }
+
+    bool is_ignored_gameplay_object(const rapidjson::Value& object) {
+        for (const char* key : {"type", "kind", "category", "class"}) {
+            const auto* value = member_value(object, key);
+            if (!value || !value->IsString())
+                continue;
+            const auto type = normalized_key(value->GetString());
+            if (type == "player" || type == "enemy" || type == "enemyarea" || type == "area")
+                return true;
+        }
+        return false;
+    }
+
+    std::string model_path(const rapidjson::Value& object, const bool model_context) {
+        for (const char* key : {"model", "modelpath", "mesh", "meshpath", "modelfile"}) {
+            const auto* value = member_value(object, key);
+            if (value && value->IsString())
+                return value->GetString();
+        }
+        if (const auto* renderer = member_value(object, "renderer")) {
+            if (renderer->IsString())
+                return renderer->GetString();
+            if (renderer->IsObject()) {
+                for (const char* key : {"model", "modelpath", "mesh", "meshpath", "path", "file", "directory"}) {
+                    const auto* value = member_value(*renderer, key);
+                    if (value && value->IsString())
+                        return value->GetString();
+                }
+            }
+        }
+        if (model_context) {
+            for (const char* key : {"path", "file", "directory", "source"}) {
+                const auto* value = member_value(object, key);
+                if (value && value->IsString())
+                    return value->GetString();
+            }
+        }
+        return {};
+    }
+
+    std::string relative_asset_path(const std::filesystem::path& path) {
+        return path.lexically_relative(std::filesystem::path(COMMONS_ASSET_DIR)).generic_string();
+    }
+
+    void import_models(
+        const rapidjson::Value& value,
+        const rapidjson::Value* inherited_transform,
+        const bool model_context,
+        const std::filesystem::path& scene_directory,
+        const std::shared_ptr<COMMONS_NS::ecs>& registry,
+        std::size_t& imported)
+    {
+        if (value.IsArray()) {
+            for (const auto& child : value.GetArray())
+                import_models(child, inherited_transform, model_context, scene_directory, registry, imported);
+            return;
+        }
+        if (!value.IsObject() || is_ignored_gameplay_object(value))
+            return;
+
+        const auto* transform = scene_transform(value, inherited_transform);
+        const auto path = model_path(value, model_context);
+        if (!path.empty()) {
+            std::filesystem::path resolved_model(path);
+            std::error_code error;
+            if (resolved_model.is_relative()) {
+                const auto relative_to_assets = std::filesystem::path(COMMONS_ASSET_DIR) / resolved_model;
+                if (std::filesystem::is_regular_file(relative_to_assets, error)) {
+                    resolved_model = relative_to_assets;
+                } else if (!std::filesystem::is_regular_file(resolved_model, error)) {
+                    const auto relative_to_scene = scene_directory / resolved_model;
+                    if (std::filesystem::is_regular_file(relative_to_scene, error))
+                        resolved_model = relative_to_scene;
+                }
+            }
+
+            auto entity = registry->create();
+            registry->add<COMMONS_NS::renderer>(entity, resolved_model.string().c_str());
+            auto renderer = registry->get<COMMONS_NS::renderer>(entity.id);
+            if (renderer && renderer->m_modelo && !renderer->m_modelo->meshes.empty()) {
+                if (transform) {
+                    auto entity_transform = registry->get<COMMONS_NS::transform>(entity.id);
+                    auto position = entity_transform->get_position();
+                    auto rotation = entity_transform->get_rotation();
+                    auto scale = entity_transform->get_scale();
+                    read_vector(*transform, "position", position);
+                    read_vector(*transform, "rotation", rotation);
+                    read_vector(*transform, "scale", scale);
+                    entity_transform->set_position(position);
+                    entity_transform->set_rotation(rotation);
+                    entity_transform->set_scale(scale);
+                }
+                ++imported;
+            } else {
+                registry->remove(entity.id);
+            }
+        }
+
+        for (auto member = value.MemberBegin(); member != value.MemberEnd(); ++member) {
+            const auto key = normalized_key(member->name.GetString());
+            const bool child_model_context = model_context || key == "models" || key == "model" ||
+                key == "meshes" || key == "mesh" || key == "renderer";
+            import_models(member->value, transform, child_model_context, scene_directory, registry, imported);
+        }
+    }
+}
 
 editor::editor_system::~editor_system() {
     bgui::save_configuration("editor.cfg");
@@ -26,6 +198,13 @@ void editor::editor_system::setup(
     auto& config = menu_bar.add_button(" Config ");
     config.add_button("Editor Camera", [this]() {
         open_editor_camera_settings();
+    });
+    const std::weak_ptr<COMMONS_NS::ecs> weak_registry = registry;
+    menu_bar.add_menu("Salvar .bscene", [this, weak_registry]() {
+        open_scene_file_dialog(true, weak_registry.lock());
+    });
+    menu_bar.add_menu("Importar .bscene", [this, weak_registry]() {
+        open_scene_file_dialog(false, weak_registry.lock());
     });
 
     auto& dock = root.add_persistent<bgui::dock>();
@@ -114,4 +293,164 @@ void editor::editor_system::refresh_scene(const std::shared_ptr<COMMONS_NS::ecs>
 
     rebuild_entities(registry);
     rebuild_components(registry);
+}
+
+void editor::editor_system::open_scene_file_dialog(
+    const bool save,
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    if (!registry)
+        return;
+    if (!m_scene_file_dialog)
+        create_scene_file_dialog();
+
+    m_scene_file_save = save;
+    m_scene_file_registry = registry;
+    m_scene_file_dialog->set_title(save ? "Salvar .bscene" : "Importar .bscene");
+    m_scene_file_input->set_buffer(save ? "scene.bscene" : "");
+    m_scene_file_status->set_buffer("Informe o caminho do arquivo .bscene.");
+    const auto size = bgui::get_context_size();
+    m_scene_file_dialog->set_position(
+        std::max(0, (size.x - m_scene_file_dialog->processed_width()) / 2),
+        std::max(0, (size.y - m_scene_file_dialog->processed_height()) / 2)
+    );
+    m_scene_file_dialog->set_enable(true);
+    m_scene_file_dialog->set_flex(false);
+}
+
+void editor::editor_system::create_scene_file_dialog() {
+    auto& dialog = bgui::get_layout().add_persistent<bgui::window, bgui::layer::overlay>("Arquivo de cena");
+    m_scene_file_dialog = &dialog;
+    dialog.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
+    dialog.style.layout.require_size(460.f, 190.f);
+
+    auto& input = dialog.add_persistent<bgui::input_area>("", 0.35f, [this](const std::string) {
+        apply_scene_file_path(m_scene_file_input->get_buffer());
+    }, "Caminho do arquivo .bscene");
+    input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    m_scene_file_input = &input;
+
+    m_scene_file_status = &dialog.add_persistent<bgui::text>("", 0.32f);
+    m_scene_file_status->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+
+    auto& actions = dialog.add_persistent<bgui::linear>(bgui::orientation::horizontal);
+    actions.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& confirm = actions.add_persistent<bgui::button>("Confirmar", 0.35f, [this]() {
+        if (m_scene_file_input)
+            apply_scene_file_path(m_scene_file_input->get_buffer());
+    });
+    confirm.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
+    auto& cancel = actions.add_persistent<bgui::button>("Cancelar", 0.35f, [this]() {
+        if (m_scene_file_dialog)
+            m_scene_file_dialog->set_enable(false);
+    });
+    cancel.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
+
+    dialog.set_enable(false);
+}
+
+void editor::editor_system::apply_scene_file_path(const std::string& path) {
+    const auto registry = m_scene_file_registry.lock();
+    if (!registry) {
+        m_scene_file_status->set_buffer("A cena não está mais disponível.");
+        return;
+    }
+    if (path.empty()) {
+        m_scene_file_status->set_buffer("Informe um caminho válido.");
+        return;
+    }
+
+    std::filesystem::path scene_path(path);
+    if (scene_path.extension() != ".bscene") {
+        if (!m_scene_file_save) {
+            m_scene_file_status->set_buffer("Selecione um arquivo com extensão .bscene.");
+            return;
+        }
+        scene_path += ".bscene";
+    }
+
+    try {
+        if (m_scene_file_save) {
+            if (!save_scene_file(scene_path.string(), registry)) {
+                m_scene_file_status->set_buffer("Não foi possível salvar o arquivo.");
+                return;
+            }
+            m_scene_file_status->set_buffer("Cena salva: " + scene_path.string());
+        } else {
+            const auto imported = import_scene_file(scene_path.string(), registry);
+            if (imported == 0) {
+                m_scene_file_status->set_buffer("Nenhum modelo válido foi encontrado no arquivo.");
+                return;
+            }
+            m_scene_file_status->set_buffer("Modelos importados: " + std::to_string(imported));
+        }
+    } catch (const std::exception& error) {
+        m_scene_file_status->set_buffer(std::string("Erro: ") + error.what());
+    }
+}
+
+bool editor::editor_system::save_scene_file(
+    const std::string& path,
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    rapidjson::Document document;
+    document.SetObject();
+    auto& allocator = document.GetAllocator();
+    document.AddMember("format", rapidjson::Value("cpp-bengine-scene", allocator), allocator);
+    document.AddMember("version", 1, allocator);
+    rapidjson::Value entities(rapidjson::kArrayType);
+
+    for (const auto& [entity_id, components] : registry->entities) {
+        if (entity_id == m_editor_camera_entity)
+            continue;
+        const auto render_component = registry->get<COMMONS_NS::renderer>(entity_id);
+        const auto transform_component = registry->get<COMMONS_NS::transform>(entity_id);
+        if (!render_component || !render_component->m_modelo || !transform_component)
+            continue;
+
+        rapidjson::Value entity(rapidjson::kObjectType);
+        rapidjson::Value serialized_components(rapidjson::kObjectType);
+        rapidjson::Value serialized_transform(rapidjson::kObjectType);
+        rapidjson::Value serialized_renderer(rapidjson::kObjectType);
+        transform_component->serialize(serialized_transform, allocator);
+        if (!render_component->serialize(serialized_renderer, allocator))
+            continue;
+        const auto model_member = serialized_renderer.FindMember("model");
+        if (model_member != serialized_renderer.MemberEnd()) {
+            const auto relative_path = relative_asset_path(render_component->m_modelo->get_source_path());
+            model_member->value.SetString(relative_path.c_str(), static_cast<rapidjson::SizeType>(relative_path.size()), allocator);
+        }
+        serialized_components.AddMember("transform", serialized_transform, allocator);
+        serialized_components.AddMember("renderer", serialized_renderer, allocator);
+        entity.AddMember("components", serialized_components, allocator);
+        entities.PushBack(entity, allocator);
+    }
+    document.AddMember("entities", entities, allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+    document.Accept(writer);
+    std::ofstream output(path, std::ios::binary);
+    if (!output)
+        return false;
+    output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
+    return output.good();
+}
+
+std::size_t editor::editor_system::import_scene_file(
+    const std::string& path,
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+        throw std::runtime_error("não foi possível abrir " + path);
+    const std::string contents(std::istreambuf_iterator<char>(input), {});
+    rapidjson::Document document;
+    document.Parse(contents.c_str());
+    if (document.HasParseError())
+        throw std::runtime_error("o arquivo não contém JSON válido");
+
+    std::size_t imported = 0;
+    import_models(document, nullptr, false, std::filesystem::path(path).parent_path(), registry, imported);
+    return imported;
 }

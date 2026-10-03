@@ -8,7 +8,7 @@
 namespace COMMONS_NS {
 	class renderer : public component {
     public:
-		model* m_modelo;
+        model* m_modelo{nullptr};
 		static constexpr mask mask = COMPONENTE_RENDER;
 		renderer(model* mesh) : m_modelo(mesh) {
 		}
@@ -25,18 +25,20 @@ namespace COMMONS_NS {
         };
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override
         {
-            value.AddMember("model", rapidjson::Value(m_modelo->getDiretorio().c_str(), allocator), allocator);
+            if (!m_modelo)
+                return false;
+            value.AddMember("model", rapidjson::Value(m_modelo->get_source_path().c_str(), allocator), allocator);
             return true;
         };
 
 		renderer(const char* m_directory ) : m_modelo(new model(m_directory)) {};
 		~renderer()
 		{
-			for(auto& mesh : m_modelo->meshes)
-			{
-				mesh.unload();
+            if (m_modelo) {
+                for(auto& mesh : m_modelo->meshes)
+                    mesh.unload();
+                delete m_modelo;
 			}
-			delete m_modelo;
 		}
         renderer() = default;
 	};

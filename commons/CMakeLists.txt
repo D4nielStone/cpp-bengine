@@ -17,6 +17,7 @@ add_library(commons STATIC ${COMMONS_SOURCES})
 set(COMMONS_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 target_compile_definitions(commons
     PUBLIC
+        COMMONS_ASSET_DIR="${COMMONS_ASSET_DIR}"
         COMMONS_SHADER_ASSET_DIR="${COMMONS_ASSET_DIR}/shaders"
         COMMONS_MODEL_ASSET_DIR="${COMMONS_ASSET_DIR}/models"
 )

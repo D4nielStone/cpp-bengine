@@ -48,6 +48,7 @@ namespace COMMONS_NS {
         void draw();
         void load_model(const std::string& path);
         std::string getDiretorio() const;
+        const std::string& get_source_path() const noexcept { return source_path; }
         std::vector<mesh> meshes;
 
         void process_node(aiNode* node, const aiScene* scene);
@@ -56,6 +57,7 @@ namespace COMMONS_NS {
         static bool hasTextura(aiMaterial*, const aiTextureType&);
     protected:
         std::string directory;
+        std::string source_path;
         shader m_shader;
     };
 }
