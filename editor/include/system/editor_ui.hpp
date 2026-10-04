@@ -1,19 +1,13 @@
 #pragma once
 
-#include "guizmo/grid_gizmo.hpp"
-
 namespace editor {
-    class editor_config;
+    class editor_system;
 
     class editor_ui final {
     public:
-        void open_editor_camera_settings(editor_config& config);
+        void open_editor_camera_settings(editor_system& system);
 
     private:
-        float m_camera_min_z_far{0.01f};
-        float m_ui_scale{1.f};
-        grid_gizmo m_grid_gizmo;
-
-        void create_editor_camera_settings(editor_config& config);
+        void create_editor_camera_settings(editor_system& system);
     };
 }

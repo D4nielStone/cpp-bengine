@@ -1,4 +1,4 @@
-#include "system/editor_config.hpp"
+#include "system/editor_system.hpp"
 #include "system/editor_ui.hpp"
 #include "system/editor_ui_elements.hpp"
 
@@ -21,9 +21,9 @@ namespace {
     }
 }
 
-void editor::editor_ui::open_editor_camera_settings(editor_config& config) {
+void editor::editor_ui::open_editor_camera_settings(editor_system& system) {
     if (!ui_elements::contains(ui_elements::camera_settings_window))
-        create_editor_camera_settings(config);
+        create_editor_camera_settings(system);
 
     const auto size = bgui::get_context_size();
     auto& settings_window = ui_elements::require<bgui::window>(ui_elements::camera_settings_window);
@@ -35,7 +35,7 @@ void editor::editor_ui::open_editor_camera_settings(editor_config& config) {
     settings_window.set_flex(false);
 }
 
-void editor::editor_ui::create_editor_camera_settings(editor_config& config) {
+void editor::editor_ui::create_editor_camera_settings(editor_system& system) {
     auto& root = bgui::get_layout();
     auto& settings_window = root.add_persistent<bgui::window, bgui::layer::overlay>("Editor Camera");
     settings_window.add_class(ui_elements::camera_settings_window);
@@ -55,33 +55,31 @@ void editor::editor_ui::create_editor_camera_settings(editor_config& config) {
         input.style.layout.require_size(100.f, 30.f);
     };
 
-    add_setting("Move speed", "4.0", [&config](const std::string value) {
-        config.set_camera_move_speed(setting_value(value, config.camera_move_speed(), 0.1f, 100.f));
+    add_setting("Move speed", std::to_string(system.camera_move_speed()), [&system](const std::string value) {
+        system.set_camera_move_speed(setting_value(value, system.camera_move_speed(), 0.1f, 100.f));
     });
-    add_setting("Look sensitivity", "0.12", [&config](const std::string value) {
-        config.set_camera_look_sensitivity(setting_value(value, config.camera_look_sensitivity(), 0.01f, 2.f));
+    add_setting("Look sensitivity", std::to_string(system.camera_look_sensitivity()), [&system](const std::string value) {
+        system.set_camera_look_sensitivity(setting_value(value, system.camera_look_sensitivity(), 0.01f, 2.f));
     });
-    add_setting("Zoom sensitivity", "3.0", [&config](const std::string value) {
-        config.set_camera_zoom_sensitivity(setting_value(value, config.camera_zoom_sensitivity(), 0.1f, 20.f));
+    add_setting("Zoom sensitivity", std::to_string(system.camera_zoom_sensitivity()), [&system](const std::string value) {
+        system.set_camera_zoom_sensitivity(setting_value(value, system.camera_zoom_sensitivity(), 0.1f, 20.f));
     });
-    add_setting("UI scale", "0.9", [this, &config](const std::string value) {
-        m_ui_scale = setting_value(value, m_ui_scale, 0.5f, 2.f);
-        config.set_ui_scale(m_ui_scale);
-        bgui::set_global_scale(m_ui_scale);
+    add_setting("UI scale", std::to_string(system.ui_scale()), [&system](const std::string value) {
+        system.set_ui_scale(setting_value(value, system.ui_scale(), 0.5f, 2.f));
     });
-    add_setting("Min Z far", "0.01", [this](const std::string value) {
-        m_camera_min_z_far = setting_value(value, m_camera_min_z_far, 0.01f, 100.f);
+    add_setting("Min Z far", std::to_string(system.camera_min_z_far()), [&system](const std::string value) {
+        system.set_camera_min_z_far(setting_value(value, system.camera_min_z_far(), 0.01f, 100.f));
     });
     auto& grid_visibility = settings_window.add_persistent<bgui::checkbox>(
-        "Show grid", 0.35f, m_grid_gizmo.enabled);
+        "Show grid", 0.35f, system.grid_enabled());
     grid_visibility.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    grid_visibility.set_on_change([this](const bool checked) {
-        m_grid_gizmo.enabled = checked;
+    grid_visibility.set_on_change([&system](const bool checked) {
+        system.set_grid_enabled(checked);
     });
-    add_setting("Grid spacing", "1.0", [this](const std::string value) {
-        m_grid_gizmo.spacing = setting_value(value, m_grid_gizmo.spacing, 0.5f, 20.f);
+    add_setting("Grid spacing", std::to_string(system.grid_spacing()), [&system](const std::string value) {
+        system.set_grid_spacing(setting_value(value, system.grid_spacing(), 0.5f, 20.f));
     });
-    add_setting("Grid extent", "50.0", [this](const std::string value) {
-        m_grid_gizmo.extent = setting_value(value, m_grid_gizmo.extent, 1.f, 50.f);
+    add_setting("Grid extent", std::to_string(system.grid_extent()), [&system](const std::string value) {
+        system.set_grid_extent(setting_value(value, system.grid_extent(), 1.f, 50.f));
     });
 }

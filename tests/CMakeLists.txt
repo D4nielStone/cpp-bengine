@@ -16,3 +16,15 @@ target_include_directories(commons_tests
 
 include(GoogleTest)
 gtest_discover_tests(commons_tests)
+
+add_executable(editor_tests
+    editor_assets_tests.cpp
+)
+
+target_link_libraries(editor_tests
+    PRIVATE
+        GTest::gtest_main
+        editor
+)
+
+gtest_discover_tests(editor_tests)

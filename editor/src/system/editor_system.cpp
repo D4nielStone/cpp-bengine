@@ -2,14 +2,18 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <iomanip>
+#include <sstream>
 #include <unordered_set>
 #include <vector>
 
@@ -20,11 +24,15 @@
 #include "debugging/debug.hpp"
 #include "elem/menu_bar.hpp"
 #include "system/editor_ui_elements.hpp"
+#include "system/project_assets.hpp"
 
 #include <bgui.hpp>
 #include <elem/input_area.hpp>
 #include <lay/dock.hpp>
 #include <rapidjson/prettywriter.h>
+#include <assimp/Importer.hpp>
+#include <assimp/material.h>
+#include <assimp/scene.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -35,6 +43,53 @@
 #endif
 
 namespace {
+    bool write_file_atomically(const std::filesystem::path& path, const std::string& contents) {
+        static std::atomic_uint64_t temporary_sequence{0};
+        const auto temporary_path = path.string() + ".tmp." +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "." +
+            std::to_string(temporary_sequence.fetch_add(1, std::memory_order_relaxed));
+
+        {
+            std::ofstream output(temporary_path, std::ios::binary | std::ios::trunc);
+            if (!output)
+                return false;
+            output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+            output.flush();
+            if (!output.good()) {
+                output.close();
+                std::error_code ignored;
+                std::filesystem::remove(temporary_path, ignored);
+                return false;
+            }
+            output.close();
+            if (output.fail()) {
+                std::error_code ignored;
+                std::filesystem::remove(temporary_path, ignored);
+                return false;
+            }
+        }
+
+#ifdef _WIN32
+        if (!MoveFileExW(
+                std::filesystem::path(temporary_path).c_str(),
+                path.c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary_path, ignored);
+            return false;
+        }
+#else
+        std::error_code error;
+        std::filesystem::rename(temporary_path, path, error);
+        if (error) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary_path, ignored);
+            return false;
+        }
+#endif
+        return true;
+    }
+
 #ifdef _WIN32
     std::string utf8_path(const wchar_t* path) {
         if (!path || !*path)
@@ -156,11 +211,9 @@ namespace {
         if (error)
             return false;
 
-        std::ofstream output(recent_path, std::ios::binary | std::ios::trunc);
-        if (!output)
-            return false;
-        output << std::filesystem::absolute(project_path).lexically_normal().string();
-        return output.good();
+        return write_file_atomically(
+            recent_path,
+            std::filesystem::absolute(project_path).lexically_normal().string());
     }
 
     std::string load_recent_project() {
@@ -350,7 +403,165 @@ namespace {
         return path.lexically_relative(std::filesystem::path(COMMONS_ASSET_DIR)).generic_string();
     }
 
-    bool package_scene_assets(
+    std::string stable_path_key(const std::filesystem::path& path) {
+        uint64_t hash = 14695981039346656037ull;
+        for (const unsigned char character : path.generic_string()) {
+            hash ^= character;
+            hash *= 1099511628211ull;
+        }
+        std::ostringstream output;
+        output << std::hex << std::setw(16) << std::setfill('0') << hash;
+        return output.str();
+    }
+
+    bool collect_gltf_uris(
+        const rapidjson::Value& value,
+        const std::filesystem::path& base_directory,
+        std::vector<std::filesystem::path>& dependencies)
+    {
+        if (value.IsArray()) {
+            for (const auto& child : value.GetArray()) {
+                if (!collect_gltf_uris(child, base_directory, dependencies))
+                    return false;
+            }
+            return true;
+        }
+        if (!value.IsObject())
+            return true;
+
+        for (auto member = value.MemberBegin(); member != value.MemberEnd(); ++member) {
+            const auto key = normalized_key(member->name.GetString());
+            if (key == "uri" && member->value.IsString()) {
+                const std::string uri = member->value.GetString();
+                if (uri.rfind("data:", 0) == 0)
+                    continue;
+                if (uri.find("://") != std::string::npos)
+                    return false;
+                const std::filesystem::path dependency(uri);
+                dependencies.push_back(dependency.is_absolute() ? dependency : base_directory / dependency);
+            } else if (!collect_gltf_uris(member->value, base_directory, dependencies)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool collect_model_dependencies(
+        const std::filesystem::path& model_path,
+        std::vector<std::filesystem::path>& dependencies)
+    {
+        std::vector<std::filesystem::path> pending{model_path};
+        std::unordered_set<std::string> visited;
+        while (!pending.empty()) {
+            auto current = std::move(pending.back());
+            pending.pop_back();
+            std::error_code error;
+            current = std::filesystem::absolute(current, error).lexically_normal();
+            if (error || !std::filesystem::is_regular_file(current, error) || error ||
+                std::filesystem::is_symlink(std::filesystem::symlink_status(current, error)) || error)
+                return false;
+
+            const auto identity = current.generic_string();
+            if (!visited.insert(identity).second)
+                continue;
+            dependencies.push_back(current);
+
+            const auto extension = normalized_key(current.extension().string());
+            if (extension == ".obj") {
+                std::ifstream input(current, std::ios::binary);
+                if (!input)
+                    return false;
+                std::string line;
+                while (std::getline(input, line)) {
+                    std::istringstream fields(line);
+                    std::string keyword;
+                    fields >> keyword;
+                    if (keyword != "mtllib")
+                        continue;
+                    std::string material;
+                    bool found_material = false;
+                    while (fields >> material) {
+                        pending.push_back(current.parent_path() / material);
+                        found_material = true;
+                    }
+                    if (!found_material)
+                        return false;
+                }
+                if (!input.eof())
+                    return false;
+            } else if (extension == ".mtl") {
+                std::ifstream input(current, std::ios::binary);
+                if (!input)
+                    return false;
+                std::string line;
+                while (std::getline(input, line)) {
+                    std::istringstream fields(line);
+                    std::string keyword;
+                    fields >> keyword;
+                    if (keyword.rfind("map_", 0) != 0 && keyword != "bump" &&
+                        keyword != "disp" && keyword != "decal" && keyword != "norm" &&
+                        keyword != "refl")
+                        continue;
+                    std::string token;
+                    std::string filename;
+                    while (fields >> token)
+                        filename = token;
+                    if (filename.empty())
+                        return false;
+                    pending.push_back(current.parent_path() / filename);
+                }
+                if (!input.eof())
+                    return false;
+            } else if (extension == ".gltf") {
+                std::ifstream input(current, std::ios::binary);
+                if (!input)
+                    return false;
+                const std::string contents((std::istreambuf_iterator<char>(input)), {});
+                rapidjson::Document document;
+                document.Parse(contents.c_str());
+                if (document.HasParseError() ||
+                    !collect_gltf_uris(document, current.parent_path(), pending))
+                    return false;
+            }
+        }
+
+        Assimp::Importer importer;
+        const aiScene* scene = importer.ReadFile(model_path.string(), 0);
+        if (!scene || !scene->HasMeshes())
+            return false;
+        for (unsigned int material_index = 0; material_index < scene->mNumMaterials; ++material_index) {
+            const auto* material = scene->mMaterials[material_index];
+            for (int texture_type = aiTextureType_NONE; texture_type <= aiTextureType_UNKNOWN; ++texture_type) {
+                const auto type = static_cast<aiTextureType>(texture_type);
+                for (unsigned int texture_index = 0; texture_index < material->GetTextureCount(type); ++texture_index) {
+                    aiString texture_path;
+                    if (material->GetTexture(type, texture_index, &texture_path) != AI_SUCCESS)
+                        return false;
+                    const std::string referenced = texture_path.C_Str();
+                    if (referenced.empty() || referenced[0] == '*')
+                        continue;
+                    const std::filesystem::path dependency(referenced);
+                    pending.push_back(dependency.is_absolute()
+                        ? dependency
+                        : model_path.parent_path() / dependency);
+                }
+            }
+        }
+
+        for (const auto& dependency : pending) {
+            std::error_code error;
+            const auto absolute = std::filesystem::absolute(dependency, error).lexically_normal();
+            if (error || !std::filesystem::is_regular_file(absolute, error) || error ||
+                std::filesystem::is_symlink(std::filesystem::symlink_status(absolute, error)) || error)
+                return false;
+            const auto identity = absolute.generic_string();
+            if (visited.insert(identity).second)
+                dependencies.push_back(absolute);
+        }
+        return true;
+    }
+
+    bool package_scene_assets_impl(
         const std::filesystem::path& scene_path,
         const std::filesystem::path& project_root)
     {
@@ -388,7 +599,7 @@ namespace {
             for (const auto& candidate : candidates) {
                 error.clear();
                 if (std::filesystem::is_regular_file(candidate, error)) {
-                    source = std::filesystem::absolute(candidate, error);
+                    source = std::filesystem::absolute(candidate, error).lexically_normal();
                     if (!error)
                         break;
                     source.clear();
@@ -403,31 +614,42 @@ namespace {
                 return false;
             const auto relative_source = source.lexically_relative(absolute_assets);
             if (relative_source.empty() || *relative_source.begin() == "..") {
-                const auto source_directory = source.parent_path();
-                const auto destination_directory = project_assets / "Models" /
-                    std::to_string(std::hash<std::string>{}(source_directory.generic_string()));
-                std::filesystem::create_directories(destination_directory, error);
-                if (error)
+                std::vector<std::filesystem::path> dependencies;
+                if (!collect_model_dependencies(source, dependencies))
                     return false;
-                for (std::filesystem::recursive_directory_iterator it(source_directory, error), end;
-                     !error && it != end; it.increment(error)) {
-                    if (it->is_symlink(error) || !it->is_regular_file(error))
-                        continue;
-                    const auto relative_file = it->path().lexically_relative(source_directory);
+
+                auto source_root = source.parent_path();
+                for (const auto& dependency : dependencies) {
+                    auto relative = dependency.lexically_relative(source_root);
+                    while (relative.empty() || *relative.begin() == "..") {
+                        const auto parent = source_root.parent_path();
+                        if (parent == source_root || parent.empty())
+                            return false;
+                        source_root = parent;
+                        relative = dependency.lexically_relative(source_root);
+                    }
+                }
+
+                const auto destination_directory = project_assets / "Models" /
+                    stable_path_key(source);
+                for (const auto& dependency : dependencies) {
+                    const auto relative_file = dependency.lexically_relative(source_root);
+                    if (relative_file.empty() || *relative_file.begin() == "..")
+                        return false;
                     const auto destination = destination_directory / relative_file;
                     std::filesystem::create_directories(destination.parent_path(), error);
                     if (error)
                         return false;
                     std::filesystem::copy_file(
-                        it->path(), destination, std::filesystem::copy_options::overwrite_existing, error);
+                        dependency, destination, std::filesystem::copy_options::overwrite_existing, error);
                     if (error)
                         return false;
                 }
-                if (error)
+                const auto model_relative = source.lexically_relative(source_root);
+                if (model_relative.empty() || *model_relative.begin() == "..")
                     return false;
-                const auto relative_model = source.lexically_relative(source_directory);
                 const auto project_relative = (std::filesystem::path("Assets") / "Models" /
-                    destination_directory.filename() / relative_model).generic_string();
+                    destination_directory.filename() / model_relative).generic_string();
                 model.SetString(project_relative.c_str(), static_cast<rapidjson::SizeType>(project_relative.size()), document.GetAllocator());
             } else {
                 const auto project_relative = relative_source.generic_string();
@@ -550,10 +772,81 @@ namespace {
     }
 }
 
+bool editor::project_assets::package_scene_assets(
+    const std::filesystem::path& scene_path,
+    const std::filesystem::path& project_root)
+{
+    return package_scene_assets_impl(scene_path, project_root);
+}
+
 editor::editor_system::~editor_system() {
     if (auto registry = m_registry.lock(); registry && !m_project_config_path.empty())
         save_editor_cache(registry);
     m_config.save_interface();
+}
+
+float editor::editor_system::camera_move_speed() const {
+    return m_config.camera_move_speed();
+}
+
+float editor::editor_system::camera_look_sensitivity() const {
+    return m_config.camera_look_sensitivity();
+}
+
+float editor::editor_system::camera_zoom_sensitivity() const {
+    return m_config.camera_zoom_sensitivity();
+}
+
+float editor::editor_system::ui_scale() const {
+    return m_config.ui_scale();
+}
+
+float editor::editor_system::camera_min_z_far() const {
+    return m_camera_min_z_far;
+}
+
+bool editor::editor_system::grid_enabled() const {
+    return m_grid_gizmo.enabled;
+}
+
+float editor::editor_system::grid_spacing() const {
+    return m_grid_gizmo.spacing;
+}
+
+float editor::editor_system::grid_extent() const {
+    return m_grid_gizmo.extent;
+}
+
+void editor::editor_system::set_camera_move_speed(const float value) {
+    m_config.set_camera_move_speed(value);
+}
+
+void editor::editor_system::set_camera_look_sensitivity(const float value) {
+    m_config.set_camera_look_sensitivity(value);
+}
+
+void editor::editor_system::set_camera_zoom_sensitivity(const float value) {
+    m_config.set_camera_zoom_sensitivity(value);
+}
+
+void editor::editor_system::set_ui_scale(const float value) {
+    m_config.set_ui_scale(value);
+}
+
+void editor::editor_system::set_camera_min_z_far(const float value) {
+    m_camera_min_z_far = value;
+}
+
+void editor::editor_system::set_grid_enabled(const bool value) {
+    m_grid_gizmo.enabled = value;
+}
+
+void editor::editor_system::set_grid_spacing(const float value) {
+    m_grid_gizmo.spacing = value;
+}
+
+void editor::editor_system::set_grid_extent(const float value) {
+    m_grid_gizmo.extent = value;
 }
 
 void editor::editor_system::setup(
@@ -590,7 +883,7 @@ void editor::editor_system::setup(
 
     auto& config = menu_bar.add_button("Configurações");
     config.add_button("Câmera do editor", [this]() {
-        m_ui.open_editor_camera_settings(m_config);
+        m_ui.open_editor_camera_settings(*this);
     });
 
     auto& dock = root.add_persistent<bgui::dock>();
@@ -681,7 +974,7 @@ void editor::editor_system::save_project(const std::shared_ptr<COMMONS_NS::ecs>&
             source_path = project_root / source_path;
         source_path = std::filesystem::absolute(source_path).lexically_normal();
 
-        if (!package_scene_assets(source_path, project_root)) {
+        if (!project_assets::package_scene_assets(source_path, project_root)) {
             ui_elements::set_text(ui_elements::project_status, "Não foi possível empacotar os assets de uma cena do projeto.");
             return;
         }
@@ -730,7 +1023,7 @@ void editor::editor_system::save_project(const std::shared_ptr<COMMONS_NS::ecs>&
         return;
     }
     for (const auto& scene : m_project_scenes) {
-        if (!package_scene_assets(project_root / scene, project_root)) {
+        if (!project_assets::package_scene_assets(project_root / scene, project_root)) {
             ui_elements::set_text(ui_elements::project_status, "Não foi possível empacotar todos os assets do projeto.");
             return;
         }
@@ -906,7 +1199,8 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
                 return;
             }
             if (!m_project_config_path.empty() &&
-                !package_scene_assets(scene_path, std::filesystem::path(m_project_config_path).parent_path())) {
+                !project_assets::package_scene_assets(
+                    scene_path, std::filesystem::path(m_project_config_path).parent_path())) {
                 ui_elements::set_text(ui_elements::scene_file_status, "Cena salva, mas não foi possível empacotar seus assets.");
                 return;
             }
@@ -1096,11 +1390,11 @@ bool editor::editor_system::save_project_config() {
     rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
     document.Accept(writer);
 
-    std::ofstream output(m_project_config_path, std::ios::binary);
-    if (!output)
-        return false;
-    output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
-    return output.good();
+    if (error)
+    return false;
+    return write_file_atomically(
+    m_project_config_path,
+    std::string(buffer.GetString(), buffer.GetSize()));
 }
 
 bool editor::editor_system::save_editor_cache(
@@ -1169,11 +1463,7 @@ bool editor::editor_system::save_editor_cache(
     rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
     document.Accept(writer);
 
-    std::ofstream output(cache_path, std::ios::binary | std::ios::trunc);
-    if (!output)
-        return false;
-    output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
-    if (!output.good())
+    if (!write_file_atomically(cache_path, std::string(buffer.GetString(), buffer.GetSize())))
         return false;
     m_last_editor_cache_save_time = bgui::get_time();
     return true;
@@ -1536,11 +1826,7 @@ bool editor::editor_system::save_scene_file(
     rapidjson::StringBuffer buffer;
     rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
     document.Accept(writer);
-    std::ofstream output(path, std::ios::binary);
-    if (!output)
-        return false;
-    output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
-    return output.good();
+    return write_file_atomically(path, std::string(buffer.GetString(), buffer.GetSize()));
 }
 
 std::size_t editor::editor_system::import_scene_file(

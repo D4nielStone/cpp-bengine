@@ -28,6 +28,24 @@ namespace editor {
         void setup(const std::shared_ptr<COMMONS_NS::ecs>& registry) override;
         void update(const std::shared_ptr<COMMONS_NS::ecs> &registry) override;
 
+        float camera_move_speed() const;
+        float camera_look_sensitivity() const;
+        float camera_zoom_sensitivity() const;
+        float ui_scale() const;
+        float camera_min_z_far() const;
+        bool grid_enabled() const;
+        float grid_spacing() const;
+        float grid_extent() const;
+
+        void set_camera_move_speed(float value);
+        void set_camera_look_sensitivity(float value);
+        void set_camera_zoom_sensitivity(float value);
+        void set_ui_scale(float value);
+        void set_camera_min_z_far(float value);
+        void set_grid_enabled(bool value);
+        void set_grid_spacing(float value);
+        void set_grid_extent(float value);
+
     private:
         std::weak_ptr<COMMONS_NS::camera> m_camera;
         std::weak_ptr<COMMONS_NS::ecs> m_registry;
@@ -53,11 +71,7 @@ namespace editor {
         int m_last_mouse_y{0};
         float m_last_update_time{0.f};
         float m_last_editor_cache_save_time{0.f};
-        float m_camera_move_speed{4.f};
-        float m_camera_look_sensitivity{0.12f};
-        float m_camera_zoom_sensitivity{3.f};
         float m_camera_min_z_far{0.01f};
-        float m_ui_scale{1.f};
         grid_gizmo m_grid_gizmo;
 
         void refresh_scene(const std::shared_ptr<COMMONS_NS::ecs>& registry);
