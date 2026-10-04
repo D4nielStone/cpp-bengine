@@ -13,11 +13,6 @@
 #include "systems/system.hpp"
 
 namespace bgui {
-    class button;
-    class image;
-    class input_area;
-    class linear;
-    class text;
     class window;
 }
 
@@ -35,19 +30,6 @@ namespace editor {
 
     private:
         std::weak_ptr<COMMONS_NS::camera> m_camera;
-        bgui::linear* m_entities_list{nullptr};
-        bgui::linear* m_components_list{nullptr};
-        bgui::linear* m_window_context{nullptr};
-        bgui::linear* m_config_menu{nullptr};
-        bgui::linear* m_editor_settings{nullptr};
-        bgui::button* m_config_button{nullptr};
-        bgui::window* m_scene_view_window{nullptr};
-        bgui::window* m_scene_file_dialog{nullptr};
-        bgui::input_area* m_scene_file_input{nullptr};
-        bgui::text* m_scene_file_status{nullptr};
-        bgui::text* m_model_import_status{nullptr};
-        bgui::text* m_project_status{nullptr};
-        bgui::linear* m_project_scenes_list{nullptr};
         std::weak_ptr<COMMONS_NS::ecs> m_registry;
         std::weak_ptr<COMMONS_NS::ecs> m_scene_file_registry;
         std::string m_project_config_path;
@@ -55,7 +37,6 @@ namespace editor {
         std::string m_current_scene;
         std::vector<std::string> m_project_scenes;
         bool m_scene_file_save{false};
-        bgui::image* m_framebuffer_image{nullptr};
         bool m_scene_initialized{false};
         bool m_left_view_active{false};
         bool m_right_move_active{false};
@@ -71,6 +52,7 @@ namespace editor {
         int m_last_mouse_x{0};
         int m_last_mouse_y{0};
         float m_last_update_time{0.f};
+        float m_last_editor_cache_save_time{0.f};
         float m_camera_move_speed{4.f};
         float m_camera_look_sensitivity{0.12f};
         float m_camera_zoom_sensitivity{3.f};
@@ -94,6 +76,8 @@ namespace editor {
         void open_project(const std::string& path);
         void save_project(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         bool save_project_config();
+        bool save_editor_cache(const std::shared_ptr<COMMONS_NS::ecs>& registry);
+        bool load_editor_cache(const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void refresh_project_scenes();
         void load_project_scene(const std::string& scene, const std::shared_ptr<COMMONS_NS::ecs>& registry);
         void browse_model_file(const std::shared_ptr<COMMONS_NS::ecs>& registry);

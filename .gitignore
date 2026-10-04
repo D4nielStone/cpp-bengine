@@ -44,3 +44,4 @@ build
 !commons/assets/models/*.obj
 .vscode
 editor.cfg
+Cache/

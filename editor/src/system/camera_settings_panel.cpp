@@ -1,5 +1,6 @@
 #include "system/editor_config.hpp"
 #include "system/editor_ui.hpp"
+#include "system/editor_ui_elements.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -21,22 +22,23 @@ namespace {
 }
 
 void editor::editor_ui::open_editor_camera_settings(editor_config& config) {
-    if (!m_editor_settings)
+    if (!ui_elements::contains(ui_elements::camera_settings_window))
         create_editor_camera_settings(config);
 
     const auto size = bgui::get_context_size();
-    m_editor_settings->set_position(
-        std::max(0, (size.x - m_editor_settings->processed_width()) / 2),
-        std::max(0, (size.y - m_editor_settings->processed_height()) / 2)
+    auto& settings_window = ui_elements::require<bgui::window>(ui_elements::camera_settings_window);
+    settings_window.set_position(
+        std::max(0, (size.x - settings_window.processed_width()) / 2),
+        std::max(0, (size.y - settings_window.processed_height()) / 2)
     );
-    m_editor_settings->set_enable(true);
-    m_editor_settings->set_flex(false);
+    settings_window.set_enable(true);
+    settings_window.set_flex(false);
 }
 
 void editor::editor_ui::create_editor_camera_settings(editor_config& config) {
     auto& root = bgui::get_layout();
     auto& settings_window = root.add_persistent<bgui::window, bgui::layer::overlay>("Editor Camera");
-    m_editor_settings = &settings_window;
+    settings_window.add_class(ui_elements::camera_settings_window);
 
     auto add_setting = [this, &settings_window](
         const std::string& title,
@@ -82,17 +84,4 @@ void editor::editor_ui::create_editor_camera_settings(editor_config& config) {
     add_setting("Grid extent", "50.0", [this](const std::string value) {
         m_grid_gizmo.extent = setting_value(value, m_grid_gizmo.extent, 1.f, 50.f);
     });
-}
-
-void editor::editor_ui::update() {
-    if (!m_editor_settings)
-        return;
-    const auto& elements = bgui::get_layout().get_elements();
-    const auto overlays = elements.find(bgui::layer::overlay);
-    const bool settings_attached = overlays != elements.end() &&
-        std::any_of(overlays->second.begin(), overlays->second.end(), [this](const auto& element) {
-            return element.get() == m_editor_settings;
-        });
-    if (!settings_attached)
-        m_editor_settings = nullptr;
 }

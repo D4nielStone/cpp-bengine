@@ -7,6 +7,7 @@
 
 #include "components/camera.hpp"
 #include "components/transform.hpp"
+#include "system/editor_ui_elements.hpp"
 
 #include <bgui.hpp>
 #include <elem/window.hpp>
@@ -28,7 +29,7 @@ namespace {
 
     std::vector<bgui::vec4i> floating_window_rects(
         const bgui::vec4i& viewport,
-        bgui::window* exclude)
+        const std::string& exclude_class)
     {
         std::vector<bgui::vec4i> result;
         std::function<void(bgui::layout&)> visit = [&](bgui::layout& layout) {
@@ -38,7 +39,7 @@ namespace {
                     if (!element || !element->is_enabled())
                         continue;
                     if (auto* window = dynamic_cast<bgui::window*>(element.get())) {
-                        if (window != exclude && window->is_floating()) {
+                        if (!window->has_class(exclude_class) && window->is_floating()) {
                             const auto clipped = intersection(window->processed_rect(), viewport);
                             if (clipped.z > 0 && clipped.w > 0)
                                 result.push_back(clipped);
@@ -92,22 +93,26 @@ namespace {
 }
 
 void editor::editor_system::setup_scene_view_panel(bgui::window& window) {
-    m_scene_view_window = &window;
-    m_window_context = &window.add_persistent<bgui::linear>(bgui::orientation::vertical);
-    m_window_context->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-    m_window_context->style.layout.padding = bgui::vec4i{0};
-    m_window_context->style.layout.align = bgui::vec<2, bgui::alignment>{
+    window.add_class(ui_elements::scene_view_window);
+    auto& window_context = window.add_persistent<bgui::linear>(bgui::orientation::vertical);
+    window_context.add_class(ui_elements::scene_view_context);
+    window_context.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    window_context.style.layout.padding = bgui::vec4i{0};
+    window_context.style.layout.align = bgui::vec<2, bgui::alignment>{
         bgui::alignment::center,
         bgui::alignment::center
     };
-    m_framebuffer_image = &m_window_context->add_persistent<bgui::image>();
-    m_framebuffer_image->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-    m_framebuffer_image->recives_input(true);
+    auto& framebuffer_image = window_context.add_persistent<bgui::image>();
+    framebuffer_image.add_class(ui_elements::framebuffer_image);
+    framebuffer_image.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    framebuffer_image.recives_input(true);
 }
 
 void editor::editor_system::update_scene_view_panel(
     const std::shared_ptr<COMMONS_NS::ecs>& registry)
 {
+    auto& framebuffer_image = ui_elements::require<bgui::image>(ui_elements::framebuffer_image);
+    auto& window_context = ui_elements::require<bgui::linear>(ui_elements::scene_view_context);
     const auto camera_component = m_camera.lock();
     if (!camera_component)
         return;
@@ -115,7 +120,7 @@ void editor::editor_system::update_scene_view_panel(
         camera_component->createFB();
     if (m_framebuffer_texture != camera_component->framebuffer_texture()) {
         m_framebuffer_texture = camera_component->framebuffer_texture();
-        m_framebuffer_image->set_external_texture(
+        framebuffer_image.set_external_texture(
             m_framebuffer_texture,
             bgui::vec2{
                 static_cast<float>(camera_component->viewportFBO.x),
@@ -126,12 +131,12 @@ void editor::editor_system::update_scene_view_panel(
 
     const auto mouse_position = bgui::get_mouse_position();
     const bgui::vec4i viewport{
-        m_framebuffer_image->processed_x(),
-        m_framebuffer_image->processed_y(),
-        m_framebuffer_image->processed_width(),
-        m_framebuffer_image->processed_height()
+        framebuffer_image.processed_x(),
+        framebuffer_image.processed_y(),
+        framebuffer_image.processed_width(),
+        framebuffer_image.processed_height()
     };
-    const auto occluders = floating_window_rects(viewport, m_scene_view_window);
+    const auto occluders = floating_window_rects(viewport, ui_elements::scene_view_window);
     const auto visible_regions = unobscured_regions(viewport, occluders);
     const bool mouse_over_floating_window = std::any_of(
         occluders.begin(), occluders.end(),
@@ -139,7 +144,7 @@ void editor::editor_system::update_scene_view_panel(
             return contains(rectangle, mouse_position);
         });
     const bool mouse_over_view = !mouse_over_floating_window &&
-        bgui::get_mouse_target() == m_framebuffer_image;
+        bgui::get_mouse_target() == &framebuffer_image;
     const float scroll_delta = bgui::get_context().m_scroll_delta_y;
     bgui::get_context().m_scroll_delta_y = 0.f;
     const auto& inputs = bgui::get_context().m_input_map;
@@ -255,9 +260,9 @@ void editor::editor_system::update_scene_view_panel(
     }
 
     const auto source_size = camera_component->viewportFBO;
-    const auto padding = m_window_context->computed_style.layout.padding;
-    const int available_width = std::max(0, m_window_context->processed_width() - padding.x - padding.z);
-    const int available_height = std::max(0, m_window_context->processed_height() - padding.y - padding.w);
+    const auto padding = window_context.computed_style.layout.padding;
+    const int available_width = std::max(0, window_context.processed_width() - padding.x - padding.z);
+    const int available_height = std::max(0, window_context.processed_height() - padding.y - padding.w);
     if (source_size.x <= 0 || source_size.y <= 0 || available_width <= 0 || available_height <= 0)
         return;
 
@@ -274,5 +279,5 @@ void editor::editor_system::update_scene_view_panel(
         uv_min[1] = vertical_crop;
         uv_max[1] = 1.f - vertical_crop;
     }
-    m_framebuffer_image->set_uv_region(uv_min, uv_max);
+    framebuffer_image.set_uv_region(uv_min, uv_max);
 }

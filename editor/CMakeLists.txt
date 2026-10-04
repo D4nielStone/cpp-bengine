@@ -17,3 +17,7 @@ target_include_directories(editor
 
 target_compile_features(editor PUBLIC cxx_std_20)
 target_link_libraries(editor PUBLIC commons)
+
+if(WIN32)
+    target_link_libraries(editor PRIVATE ole32 shell32)
+endif()

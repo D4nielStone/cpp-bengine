@@ -40,10 +40,15 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         std::vector<point_light> point_lights;
 
         reg->cada<directional_light>([&](const uint32_t light_entity) {
+            if (light_entity != camera_component->my_object &&
+                reg->get<camera>(light_entity))
+                return;
             if (auto light = reg->get<directional_light>(light_entity)) {
                 direction_light = *light;
             }
         });
+        if (auto camera_light = reg->get<directional_light>(camera_component->my_object))
+            direction_light = *camera_light;
         reg->cada<point_light>([&](const uint32_t light_entity) {
             if (auto light = reg->get<point_light>(light_entity)) {
                 point_lights.push_back(*light);

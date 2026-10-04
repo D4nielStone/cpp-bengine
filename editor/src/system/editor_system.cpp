@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -12,16 +14,170 @@
 #include <vector>
 
 #include "components/camera.hpp"
+#include "components/directional_light.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
+#include "debugging/debug.hpp"
 #include "elem/menu_bar.hpp"
+#include "system/editor_ui_elements.hpp"
 
 #include <bgui.hpp>
 #include <elem/input_area.hpp>
+#include <lay/dock.hpp>
 #include <rapidjson/prettywriter.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shobjidl.h>
+#endif
+
 namespace {
+#ifdef _WIN32
+    std::string utf8_path(const wchar_t* path) {
+        if (!path || !*path)
+            return {};
+        const int length = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+        if (length <= 1)
+            return {};
+        std::string result(static_cast<std::size_t>(length), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, path, -1, result.data(), length, nullptr, nullptr);
+        result.pop_back();
+        return result;
+    }
+
+    std::string choose_windows_dialog(
+        const bool save,
+        const bool directory,
+        const bool model,
+        const bool project)
+    {
+        const HRESULT initialize_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        const bool uninitialize = SUCCEEDED(initialize_result);
+        if (FAILED(initialize_result) && initialize_result != RPC_E_CHANGED_MODE)
+            return {};
+
+        IFileDialog* dialog = nullptr;
+        const auto dialog_class = save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog;
+        HRESULT result = CoCreateInstance(
+            dialog_class,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&dialog)
+        );
+        if (FAILED(result)) {
+            if (uninitialize)
+                CoUninitialize();
+            return {};
+        }
+
+        const wchar_t* title = directory
+            ? L"Criar projeto Bubble"
+            : model
+                ? L"Importar modelo 3D"
+                : project
+                    ? L"Abrir projeto"
+                    : save
+                        ? L"Salvar cena"
+                        : L"Importar cena";
+        dialog->SetTitle(title);
+
+        DWORD options = 0;
+        if (SUCCEEDED(dialog->GetOptions(&options))) {
+            options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+            if (directory) {
+                options |= FOS_PICKFOLDERS;
+            } else if (save) {
+                options |= FOS_OVERWRITEPROMPT;
+            } else {
+                options |= FOS_FILEMUSTEXIST;
+            }
+            dialog->SetOptions(options);
+        }
+
+        if (!directory) {
+            const COMDLG_FILTERSPEC model_filter[] = {
+                {L"Modelos 3D", L"*.obj;*.dae;*.fbx;*.gltf;*.glb;*.stl;*.ply"},
+                {L"Todos os arquivos", L"*.*"}
+            };
+            const COMDLG_FILTERSPEC project_filter[] = {
+                {L"Projeto Bubble", L"*.bproject"},
+                {L"Todos os arquivos", L"*.*"}
+            };
+            const COMDLG_FILTERSPEC scene_filter[] = {
+                {L"Cenas Bubble", L"*.bscene"},
+                {L"Todos os arquivos", L"*.*"}
+            };
+            const COMDLG_FILTERSPEC* filters = model ? model_filter : project ? project_filter : scene_filter;
+            dialog->SetFileTypes(2, filters);
+            if (save && !project && !model)
+                dialog->SetDefaultExtension(L"bscene");
+        }
+
+        std::string selected_path;
+        if (SUCCEEDED(dialog->Show(nullptr))) {
+            IShellItem* item = nullptr;
+            if (SUCCEEDED(dialog->GetResult(&item))) {
+                PWSTR path = nullptr;
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                    selected_path = utf8_path(path);
+                    CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+
+        dialog->Release();
+        if (uninitialize)
+            CoUninitialize();
+        return selected_path;
+    }
+#endif
+
+    std::filesystem::path recent_project_file() {
+#ifdef _WIN32
+        if (const char* app_data = std::getenv("APPDATA"))
+            return std::filesystem::path(app_data) / "BubbleEngine" / "recent_project.txt";
+#else
+        if (const char* config_home = std::getenv("XDG_CONFIG_HOME"))
+            return std::filesystem::path(config_home) / "BubbleEngine" / "recent_project.txt";
+        if (const char* home = std::getenv("HOME"))
+            return std::filesystem::path(home) / ".config" / "BubbleEngine" / "recent_project.txt";
+#endif
+        return std::filesystem::current_path() / "recent_project.txt";
+    }
+
+    bool remember_recent_project(const std::filesystem::path& project_path) {
+        const auto recent_path = recent_project_file();
+        std::error_code error;
+        std::filesystem::create_directories(recent_path.parent_path(), error);
+        if (error)
+            return false;
+
+        std::ofstream output(recent_path, std::ios::binary | std::ios::trunc);
+        if (!output)
+            return false;
+        output << std::filesystem::absolute(project_path).lexically_normal().string();
+        return output.good();
+    }
+
+    std::string load_recent_project() {
+        std::ifstream input(recent_project_file(), std::ios::binary);
+        if (!input)
+            return {};
+
+        std::string path((std::istreambuf_iterator<char>(input)), {});
+        while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
+            path.pop_back();
+        return path;
+    }
+
     std::string choose_file(const bool save, const bool model, const bool project = false) {
+#ifdef _WIN32
+        return choose_windows_dialog(save, false, model, project);
+#else
         const char* command = model
             ? "zenity --file-selection --title='Importar modelo 3D' --file-filter='Modelos 3D | *.obj *.dae *.fbx *.gltf *.glb *.stl *.ply' 2>/dev/null"
             : project
@@ -43,9 +199,13 @@ namespace {
         while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
             path.pop_back();
         return path;
+#endif
     }
 
     std::string choose_project_directory() {
+#ifdef _WIN32
+        return choose_windows_dialog(false, true, false, false);
+#else
         std::FILE* dialog = popen("zenity --file-selection --directory --title='Criar projeto Bubble' 2>/dev/null", "r");
         if (!dialog)
             return {};
@@ -59,6 +219,7 @@ namespace {
         while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
             path.pop_back();
         return path;
+#endif
     }
 
     std::string normalized_key(const std::string& key) {
@@ -102,6 +263,33 @@ namespace {
             }
         }
         return false;
+    }
+
+    bool read_float(const rapidjson::Value& object, const char* key, float& result) {
+        const auto* value = member_value(object, key);
+        if (!value || !value->IsNumber())
+            return false;
+        result = value->GetFloat();
+        return std::isfinite(result);
+    }
+
+    bool read_float_array(
+        const rapidjson::Value& object,
+        const char* key,
+        float* result,
+        const rapidjson::SizeType count)
+    {
+        const auto* value = member_value(object, key);
+        if (!value || !value->IsArray() || value->Size() != count)
+            return false;
+        for (rapidjson::SizeType index = 0; index < count; ++index) {
+            if (!(*value)[index].IsNumber())
+                return false;
+            result[index] = (*value)[index].GetFloat();
+            if (!std::isfinite(result[index]))
+                return false;
+        }
+        return true;
     }
 
     const rapidjson::Value* scene_transform(
@@ -315,6 +503,9 @@ namespace {
                 const auto relative_to_assets = std::filesystem::path(COMMONS_ASSET_DIR) / resolved_model;
                 if (std::filesystem::is_regular_file(relative_to_assets, error)) {
                     resolved_model = relative_to_assets;
+                } else if (!project_assets.empty() &&
+                    std::filesystem::is_regular_file(project_assets.parent_path() / resolved_model, error)) {
+                    resolved_model = project_assets.parent_path() / resolved_model;
                 } else if (!project_assets.empty() && std::filesystem::is_regular_file(project_assets / resolved_model, error)) {
                     resolved_model = project_assets / resolved_model;
                 } else if (!std::filesystem::is_regular_file(resolved_model, error)) {
@@ -348,6 +539,10 @@ namespace {
 
         for (auto member = value.MemberBegin(); member != value.MemberEnd(); ++member) {
             const auto key = normalized_key(member->name.GetString());
+            const bool is_model_reference = key == "renderer" || key == "model" ||
+                key == "modelpath" || key == "mesh" || key == "meshpath" || key == "modelfile";
+            if (!path.empty() && is_model_reference)
+                continue;
             const bool child_model_context = model_context || key == "models" || key == "model" ||
                 key == "meshes" || key == "mesh" || key == "renderer";
             import_models(member->value, transform, child_model_context, scene_directory, project_assets, registry, imported);
@@ -356,40 +551,46 @@ namespace {
 }
 
 editor::editor_system::~editor_system() {
+    if (auto registry = m_registry.lock(); registry && !m_project_config_path.empty())
+        save_editor_cache(registry);
     m_config.save_interface();
 }
 
 void editor::editor_system::setup(
     const std::shared_ptr<COMMONS_NS::ecs>& registry)
 {
+    m_registry = registry;
     m_config.initialize_interface();
 
     auto& root = bgui::set_layout<bgui::linear>(bgui::orientation::vertical);
     auto& menu_bar = root.add_persistent<bgui::menu_bar>(root);
-    auto& config = menu_bar.add_button("[ Config ]");
-    config.add_button("Editor Camera", [this]() {
-        m_ui.open_editor_camera_settings(m_config);
-    });
-    auto& files = menu_bar.add_button("[ Files ]");
-    const std::weak_ptr<COMMONS_NS::ecs> weak_registry = registry;
-    files.add_button("[ Salvar cena ]", [this, weak_registry]() {
-        open_scene_file_dialog(true, weak_registry.lock());
-    });
-    files.add_button("[ Novo Projeto ]", [this]() {
+    auto& project_menu = menu_bar.add_button("Projeto");
+    project_menu.add_button("Novo projeto...", [this]() {
         const auto directory = choose_project_directory();
         if (!directory.empty())
             create_project(directory);
     });
-    files.add_button("[ Abrir Projeto ]", [this]() {
+    project_menu.add_button("Abrir projeto...", [this]() {
         const auto path = choose_file(false, false, true);
         if (!path.empty())
             open_project(path);
     });
-    files.add_button("[ Importar cena ]", [this, weak_registry]() {
+    const std::weak_ptr<COMMONS_NS::ecs> weak_registry = registry;
+    project_menu.add_button("Salvar projeto", [this, weak_registry]() {
+        save_project(weak_registry.lock());
+    });
+
+    auto& scene_menu = menu_bar.add_button("Cena");
+    scene_menu.add_button("Salvar cena...", [this, weak_registry]() {
+        open_scene_file_dialog(true, weak_registry.lock());
+    });
+    scene_menu.add_button("Importar cena...", [this, weak_registry]() {
         open_scene_file_dialog(false, weak_registry.lock());
     });
-    files.add_button("[ Salvar projeto ]", [this, weak_registry]() {
-        save_project(weak_registry.lock());
+
+    auto& config = menu_bar.add_button("Configurações");
+    config.add_button("Câmera do editor", [this]() {
+        m_ui.open_editor_camera_settings(m_config);
     });
 
     auto& dock = root.add_persistent<bgui::dock>();
@@ -400,10 +601,29 @@ void editor::editor_system::setup(
     auto& assets_window = dock.add_window("Assets Window", bgui::dock_area::right);
     m_config.load_interface();
 
+    config.add_button("Restaurar interface padrão", [this, dock_ptr = &dock]() {
+        bgui::dock::configuration default_configuration;
+        default_configuration.windows = {
+            {"Editor View Window", bgui::dock_area::center, 1.f},
+            {"Entities", bgui::dock_area::left, 1.f},
+            {"Components", bgui::dock_area::right, 0.5f},
+            {"Assets Window", bgui::dock_area::right, 0.5f}
+        };
+        dock_ptr->apply_configuration(default_configuration);
+        m_config.save_interface();
+    });
+
     if (registry) {
         auto editor_camera_entity = registry->create();
         m_editor_camera_entity = editor_camera_entity.id;
         registry->add<COMMONS_NS::camera>(editor_camera_entity);
+        registry->add<COMMONS_NS::directional_light>(
+            editor_camera_entity,
+            COMMONS_NS::fvec3{-0.2f, -1.f, -0.3f},
+            COMMONS_NS::fvec3(0.15f),
+            COMMONS_NS::fvec3(1.f),
+            1.f
+        );
         if (auto camera_transform = registry->get<COMMONS_NS::transform>(m_editor_camera_entity))
             camera_transform->set_rotation(COMMONS_NS::fvec3{0.f, 90.f, 0.f});
         m_camera = registry->get<COMMONS_NS::camera>(m_editor_camera_entity);
@@ -415,71 +635,121 @@ void editor::editor_system::setup(
     setup_entities_panel(entities_window);
     setup_components_panel(components_window);
     setup_assets_panel(assets_window, registry);
-
     refresh_scene(registry);
+    const auto recent_project = load_recent_project();
+    if (!recent_project.empty()) {
+        debugging::emit(info, "editor", "Carregando o projeto recente: " + recent_project);
+        open_project(recent_project);
+    } else {
+        debugging::emit(info, "editor", "Nenhum projeto recente foi encontrado.");
+    }
     bgui::cascade_style();
     bgui::load_font_queue();
 }
 
 void editor::editor_system::save_project(const std::shared_ptr<COMMONS_NS::ecs>& registry) {
     if (!registry || m_project_config_path.empty()) {
-        if (m_project_status)
-            m_project_status->set_buffer("Crie ou abra um projeto antes de salvar.");
+        ui_elements::set_text(ui_elements::project_status, "Crie ou abra um projeto antes de salvar.");
         return;
     }
 
     const auto project_root = std::filesystem::path(m_project_config_path).parent_path();
-    std::filesystem::path scene_path = project_root / "Scenes" / "scene.bscene";
+    const auto scenes_root = project_root / "Scenes";
+    std::filesystem::path scene_path = scenes_root / "scene.bscene";
     if (!m_current_scene.empty()) {
         const auto current = std::filesystem::absolute(m_current_scene).lexically_normal();
-        const auto root = std::filesystem::absolute(project_root).lexically_normal();
-        const auto relative = current.lexically_relative(root);
+        const auto absolute_scenes = std::filesystem::absolute(scenes_root).lexically_normal();
+        const auto relative = current.lexically_relative(absolute_scenes);
         if (!relative.empty() && *relative.begin() != "..")
-            scene_path = current;
+            scene_path = scenes_root / relative;
+        else
+            scene_path = scenes_root / current.filename();
     }
 
     std::error_code error;
     std::filesystem::create_directories(scene_path.parent_path(), error);
-    if (error || !save_scene_file(scene_path.string(), registry)) {
-        if (m_project_status)
-            m_project_status->set_buffer("Não foi possível salvar as cenas e os assets do projeto.");
+    if (error) {
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível criar a pasta de cenas do projeto.");
         return;
     }
 
-    m_current_scene = scene_path.lexically_normal().string();
-    const auto relative_scene = scene_path.lexically_relative(project_root).generic_string();
-    if (std::find(m_project_scenes.begin(), m_project_scenes.end(), relative_scene) == m_project_scenes.end())
-        m_project_scenes.push_back(relative_scene);
+    std::vector<std::string> scenes_in_project;
+    scenes_in_project.reserve(m_project_scenes.size() + 1);
     for (const auto& scene : m_project_scenes) {
-        auto registered_scene_path = std::filesystem::path(scene);
-        if (registered_scene_path.is_relative())
-            registered_scene_path = project_root / registered_scene_path;
-        if (!package_scene_assets(registered_scene_path, project_root)) {
-            if (m_project_status)
-                m_project_status->set_buffer("Não foi possível empacotar todos os assets do projeto.");
+        auto source_path = std::filesystem::path(scene);
+        if (source_path.is_relative())
+            source_path = project_root / source_path;
+        source_path = std::filesystem::absolute(source_path).lexically_normal();
+
+        if (!package_scene_assets(source_path, project_root)) {
+            ui_elements::set_text(ui_elements::project_status, "Não foi possível empacotar os assets de uma cena do projeto.");
+            return;
+        }
+
+        const auto relative_to_scenes = source_path.lexically_relative(
+            std::filesystem::absolute(scenes_root).lexically_normal());
+        auto destination_path = scenes_root / scene;
+        if (!relative_to_scenes.empty() && *relative_to_scenes.begin() != "..") {
+            destination_path = scenes_root / relative_to_scenes;
+        } else {
+            const auto relative_to_project = source_path.lexically_relative(
+                std::filesystem::absolute(project_root).lexically_normal());
+            destination_path = relative_to_project.empty() || *relative_to_project.begin() == ".."
+                ? scenes_root / source_path.filename()
+                : scenes_root / relative_to_project;
+        }
+
+        if (source_path != std::filesystem::absolute(destination_path).lexically_normal()) {
+            std::filesystem::create_directories(destination_path.parent_path(), error);
+            if (error) {
+                ui_elements::set_text(ui_elements::project_status, "Não foi possível criar a pasta de uma cena do projeto.");
+                return;
+            }
+            std::filesystem::copy_file(
+                source_path, destination_path, std::filesystem::copy_options::overwrite_existing, error);
+            if (error) {
+                ui_elements::set_text(ui_elements::project_status, "Não foi possível copiar uma cena para a pasta Scenes.");
+                return;
+            }
+        }
+        scenes_in_project.push_back(destination_path.lexically_relative(project_root).generic_string());
+    }
+
+    if (!save_scene_file(scene_path.string(), registry)) {
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível salvar a cena atual do projeto.");
+        return;
+    }
+    m_current_scene = std::filesystem::absolute(scene_path).lexically_normal().string();
+    const auto relative_scene = scene_path.lexically_relative(project_root).generic_string();
+    if (std::find(scenes_in_project.begin(), scenes_in_project.end(), relative_scene) == scenes_in_project.end())
+        scenes_in_project.push_back(relative_scene);
+    m_project_scenes = std::move(scenes_in_project);
+
+    if (!save_editor_cache(registry)) {
+        ui_elements::set_text(ui_elements::project_status, "Cenas salvas, mas não foi possível salvar o cache do editor.");
+        return;
+    }
+    for (const auto& scene : m_project_scenes) {
+        if (!package_scene_assets(project_root / scene, project_root)) {
+            ui_elements::set_text(ui_elements::project_status, "Não foi possível empacotar todos os assets do projeto.");
             return;
         }
     }
     if (!save_project_config()) {
-        if (m_project_status)
-            m_project_status->set_buffer("Cenas e assets salvos, mas não foi possível atualizar o projeto.");
+        ui_elements::set_text(ui_elements::project_status, "Cenas e assets salvos, mas não foi possível atualizar o projeto.");
         return;
     }
 
     refresh_project_scenes();
-    if (m_project_status)
-        m_project_status->set_buffer("Projeto salvo: " + m_project_name);
+    ui_elements::set_text(ui_elements::project_status, "Projeto salvo: " + m_project_name);
 }
 
 void editor::editor_system::update(const std::shared_ptr<COMMONS_NS::ecs>& registry) {
     if (!registry)
         return;
-
     refresh_scene(registry);
-    if (!m_framebuffer_image)
+    if (!ui_elements::contains(ui_elements::framebuffer_image))
         return;
-
-    m_ui.update();
 
     if (m_camera.expired()) {
         registry->cada<COMMONS_NS::camera>([&](const uint32_t entity) {
@@ -491,10 +761,17 @@ void editor::editor_system::update(const std::shared_ptr<COMMONS_NS::ecs>& regis
     }
 
     update_scene_view_panel(registry);
+
+    const float current_time = bgui::get_time();
+    if (!m_project_config_path.empty() &&
+        current_time - m_last_editor_cache_save_time >= 1.f &&
+        !save_editor_cache(registry))
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível salvar o cache do editor.");
 }
 
 void editor::editor_system::refresh_scene(const std::shared_ptr<COMMONS_NS::ecs>& registry) {
-    if (!registry || !m_entities_list || !m_components_list)
+    if (!registry || !ui_elements::contains(ui_elements::entities_list) ||
+        !ui_elements::contains(ui_elements::components_list))
         return;
 
     std::vector<std::pair<uint32_t, uint32_t>> signature;
@@ -527,12 +804,14 @@ void editor::editor_system::open_scene_file_dialog(
 {
     if (!registry)
         return;
-    if (!m_scene_file_dialog)
+    if (!ui_elements::contains(ui_elements::scene_file_dialog))
         create_scene_file_dialog();
 
+    auto& scene_file_dialog = ui_elements::require<bgui::window>(ui_elements::scene_file_dialog);
+    auto& scene_file_input = ui_elements::require<bgui::input_area>(ui_elements::scene_file_input);
     m_scene_file_save = save;
     m_scene_file_registry = registry;
-    m_scene_file_dialog->set_title(save ? "Salvar .bscene" : "Importar .bscene");
+    scene_file_dialog.set_title(save ? "Salvar .bscene" : "Importar .bscene");
     std::string initial_path;
     if (save) {
         if (!m_current_scene.empty()) {
@@ -543,49 +822,48 @@ void editor::editor_system::open_scene_file_dialog(
             initial_path = "scene.bscene";
         }
     }
-    m_scene_file_input->set_buffer(initial_path);
-    m_scene_file_status->set_buffer("Informe o caminho do arquivo .bscene.");
+    scene_file_input.set_buffer(initial_path);
+    ui_elements::set_text(ui_elements::scene_file_status, "Informe o caminho do arquivo .bscene.");
     const auto size = bgui::get_context_size();
-    m_scene_file_dialog->set_position(
-        std::max(0, (size.x - m_scene_file_dialog->processed_width()) / 2),
-        std::max(0, (size.y - m_scene_file_dialog->processed_height()) / 2)
+    scene_file_dialog.set_position(
+        std::max(0, (size.x - scene_file_dialog.processed_width()) / 2),
+        std::max(0, (size.y - scene_file_dialog.processed_height()) / 2)
     );
-    m_scene_file_dialog->set_enable(true);
-    m_scene_file_dialog->set_flex(false);
+    scene_file_dialog.set_enable(true);
+    scene_file_dialog.set_flex(false);
 }
 
 void editor::editor_system::create_scene_file_dialog() {
     auto& dialog = bgui::get_layout().add_persistent<bgui::window, bgui::layer::overlay>("Arquivo de cena");
-    m_scene_file_dialog = &dialog;
+    dialog.add_class(ui_elements::scene_file_dialog);
     dialog.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
     dialog.style.layout.require_size(460.f, 190.f);
 
     auto& input = dialog.add_persistent<bgui::input_area>("", 0.35f, [this](const std::string) {
-        apply_scene_file_path(m_scene_file_input->get_buffer());
+        apply_scene_file_path(ui_elements::require<bgui::input_area>(ui_elements::scene_file_input).get_buffer());
     }, "Caminho do arquivo .bscene");
+    input.add_class(ui_elements::scene_file_input);
     input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    m_scene_file_input = &input;
 
     auto& browse = dialog.add_persistent<bgui::button>("Procurar...", 0.35f, [this]() {
         const auto path = choose_file(m_scene_file_save, false);
-        if (!path.empty() && m_scene_file_input)
-            m_scene_file_input->set_buffer(path);
+        if (!path.empty())
+            ui_elements::require<bgui::input_area>(ui_elements::scene_file_input).set_buffer(path);
     });
     browse.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
 
-    m_scene_file_status = &dialog.add_persistent<bgui::text>("", 0.32f);
-    m_scene_file_status->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& status = dialog.add_persistent<bgui::text>("", 0.32f);
+    status.add_class(ui_elements::scene_file_status);
+    status.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
 
     auto& actions = dialog.add_persistent<bgui::linear>(bgui::orientation::horizontal);
     actions.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     auto& confirm = actions.add_persistent<bgui::button>("Confirmar", 0.35f, [this]() {
-        if (m_scene_file_input)
-            apply_scene_file_path(m_scene_file_input->get_buffer());
+        apply_scene_file_path(ui_elements::require<bgui::input_area>(ui_elements::scene_file_input).get_buffer());
     });
     confirm.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
     auto& cancel = actions.add_persistent<bgui::button>("Cancelar", 0.35f, [this]() {
-        if (m_scene_file_dialog)
-            m_scene_file_dialog->set_enable(false);
+        ui_elements::require<bgui::window>(ui_elements::scene_file_dialog).set_enable(false);
     });
     cancel.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
 
@@ -595,18 +873,18 @@ void editor::editor_system::create_scene_file_dialog() {
 void editor::editor_system::apply_scene_file_path(const std::string& path) {
     const auto registry = m_scene_file_registry.lock();
     if (!registry) {
-        m_scene_file_status->set_buffer("A cena não está mais disponível.");
+        ui_elements::set_text(ui_elements::scene_file_status, "A cena não está mais disponível.");
         return;
     }
     if (path.empty()) {
-        m_scene_file_status->set_buffer("Informe um caminho válido.");
+        ui_elements::set_text(ui_elements::scene_file_status, "Informe um caminho válido.");
         return;
     }
 
     std::filesystem::path scene_path(path);
     if (scene_path.extension() != ".bscene") {
         if (!m_scene_file_save) {
-            m_scene_file_status->set_buffer("Selecione um arquivo com extensão .bscene.");
+            ui_elements::set_text(ui_elements::scene_file_status, "Selecione um arquivo com extensão .bscene.");
             return;
         }
         scene_path += ".bscene";
@@ -620,16 +898,16 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
             if (!scene_path.parent_path().empty())
                 std::filesystem::create_directories(scene_path.parent_path(), error);
             if (error) {
-                m_scene_file_status->set_buffer("Não foi possível criar a pasta da cena.");
+                ui_elements::set_text(ui_elements::scene_file_status, "Não foi possível criar a pasta da cena.");
                 return;
             }
             if (!save_scene_file(scene_path.string(), registry)) {
-                m_scene_file_status->set_buffer("Não foi possível salvar o arquivo.");
+                ui_elements::set_text(ui_elements::scene_file_status, "Não foi possível salvar o arquivo.");
                 return;
             }
             if (!m_project_config_path.empty() &&
                 !package_scene_assets(scene_path, std::filesystem::path(m_project_config_path).parent_path())) {
-                m_scene_file_status->set_buffer("Cena salva, mas não foi possível empacotar seus assets.");
+                ui_elements::set_text(ui_elements::scene_file_status, "Cena salva, mas não foi possível empacotar seus assets.");
                 return;
             }
             m_current_scene = scene_path.lexically_normal().string();
@@ -643,16 +921,16 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
                     if (std::find(m_project_scenes.begin(), m_project_scenes.end(), relative) == m_project_scenes.end())
                         m_project_scenes.push_back(relative);
                     if (!save_project_config()) {
-                        m_scene_file_status->set_buffer("Cena salva, mas não foi possível atualizar o projeto.");
+                        ui_elements::set_text(ui_elements::scene_file_status, "Cena salva, mas não foi possível atualizar o projeto.");
                         return;
                     }
                     refresh_project_scenes();
                 }
             }
-            m_scene_file_status->set_buffer("Cena salva: " + scene_path.string());
+            ui_elements::set_text(ui_elements::scene_file_status, "Cena salva: " + scene_path.string());
         } else {
                 if (m_project_config_path.empty()) {
-                    m_scene_file_status->set_buffer("Crie ou abra um projeto antes de importar cenas.");
+                    ui_elements::set_text(ui_elements::scene_file_status, "Crie ou abra um projeto antes de importar cenas.");
                     return;
                 }
                 const auto project_root = std::filesystem::path(m_project_config_path).parent_path();
@@ -660,12 +938,12 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
                 std::error_code error;
                 std::filesystem::create_directories(destination.parent_path(), error);
                 if (error || !std::filesystem::is_regular_file(scene_path, error)) {
-                    m_scene_file_status->set_buffer("Não foi possível acessar a cena de origem.");
+                    ui_elements::set_text(ui_elements::scene_file_status, "Não foi possível acessar a cena de origem.");
                     return;
                 }
                 std::filesystem::copy_file(scene_path, destination, std::filesystem::copy_options::overwrite_existing, error);
                 if (error) {
-                    m_scene_file_status->set_buffer("Não foi possível copiar a cena para o projeto.");
+                    ui_elements::set_text(ui_elements::scene_file_status, "Não foi possível copiar a cena para o projeto.");
                     return;
                 }
                 const auto relative_scene = destination.lexically_relative(project_root).generic_string();
@@ -673,13 +951,13 @@ void editor::editor_system::apply_scene_file_path(const std::string& path) {
                     m_project_scenes.push_back(relative_scene);
                 refresh_project_scenes();
                 if (!save_project_config()) {
-                    m_scene_file_status->set_buffer("Cena importada, mas não foi possível atualizar o projeto.");
+                    ui_elements::set_text(ui_elements::scene_file_status, "Cena importada, mas não foi possível atualizar o projeto.");
                     return;
                 }
-                m_scene_file_status->set_buffer("Cena adicionada ao projeto: " + scene_path.filename().string());
+                ui_elements::set_text(ui_elements::scene_file_status, "Cena adicionada ao projeto: " + scene_path.filename().string());
             }
     } catch (const std::exception& error) {
-        m_scene_file_status->set_buffer(std::string("Erro: ") + error.what());
+        ui_elements::set_text(ui_elements::scene_file_status, std::string("Erro: ") + error.what());
     }
 }
 
@@ -691,25 +969,29 @@ void editor::editor_system::create_project(const std::string& directory) {
     std::error_code error;
     std::filesystem::create_directories(project_root / "Assets", error);
     if (error) {
-        if (m_project_status)
-            m_project_status->set_buffer("Não foi possível criar a pasta do projeto.");
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível criar a pasta do projeto.");
         return;
     }
     std::filesystem::create_directories(project_root / "Scenes", error);
     if (error) {
-        if (m_project_status)
-            m_project_status->set_buffer("Não foi possível criar as pastas do projeto.");
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível criar as pastas do projeto.");
         return;
     }
     m_project_name = project_root.filename().string();
     m_project_config_path = (project_root / "project.bproject").string();
     m_project_scenes.clear();
 
-    if (m_project_status)
-        m_project_status->set_buffer("Projeto aberto: " + m_project_name);
+    if (!save_editor_cache(m_registry.lock())) {
+        ui_elements::set_text(ui_elements::project_status, "Projeto criado, mas não foi possível criar o cache do editor.");
+        return;
+    }
 
-    if (!save_project_config() && m_project_status)
-        m_project_status->set_buffer("Não foi possível salvar a configuração do projeto.");
+    ui_elements::set_text(ui_elements::project_status, "Projeto aberto: " + m_project_name);
+
+    if (!save_project_config())
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível salvar a configuração do projeto.");
+    else if (!remember_recent_project(m_project_config_path))
+        debugging::emit(alerta, "editor", "Não foi possível registrar o projeto recente.");
     refresh_project_scenes();
 }
 
@@ -717,19 +999,20 @@ void editor::editor_system::open_project(const std::string& path) {
     if (path.empty())
         return;
 
+    debugging::emit(info, "editor", "Abrindo projeto: " + path);
     const auto project_path = std::filesystem::path(path);
     std::ifstream input(project_path, std::ios::binary);
     if (!input) {
-        if (m_project_status)
-            m_project_status->set_buffer("Não foi possível abrir o arquivo do projeto.");
+        debugging::emit(erro, "editor", "Não foi possível abrir o arquivo do projeto: " + path);
+        ui_elements::set_text(ui_elements::project_status, "Não foi possível abrir o arquivo do projeto.");
         return;
     }
     const std::string contents((std::istreambuf_iterator<char>(input)), {});
     rapidjson::Document document;
     document.Parse(contents.c_str());
     if (document.HasParseError() || !document.IsObject()) {
-        if (m_project_status)
-            m_project_status->set_buffer("Arquivo de projeto inválido.");
+        debugging::emit(erro, "editor", "Arquivo de projeto inválido: " + path);
+        ui_elements::set_text(ui_elements::project_status, "Arquivo de projeto inválido.");
         return;
     }
 
@@ -738,8 +1021,8 @@ void editor::editor_system::open_project(const std::string& path) {
     const auto name = document.FindMember("name");
     if (name != document.MemberEnd()) {
         if (!name->value.IsString()) {
-            if (m_project_status)
-                m_project_status->set_buffer("Nome inválido na configuração do projeto.");
+            debugging::emit(erro, "editor", "Nome inválido na configuração do projeto: " + path);
+            ui_elements::set_text(ui_elements::project_status, "Nome inválido na configuração do projeto.");
             return;
         }
         project_name = name->value.GetString();
@@ -747,8 +1030,8 @@ void editor::editor_system::open_project(const std::string& path) {
     const auto scenes = document.FindMember("scenes");
     if (scenes != document.MemberEnd()) {
         if (!scenes->value.IsArray()) {
-            if (m_project_status)
-                m_project_status->set_buffer("Lista de cenas inválida no projeto.");
+            debugging::emit(erro, "editor", "Lista de cenas inválida no projeto: " + path);
+            ui_elements::set_text(ui_elements::project_status, "Lista de cenas inválida no projeto.");
             return;
         }
         for (const auto& scene : scenes->value.GetArray()) {
@@ -775,10 +1058,18 @@ void editor::editor_system::open_project(const std::string& path) {
         }
     }
 
-    if (m_project_status)
-        m_project_status->set_buffer("Projeto aberto: " + m_project_name);
+    const auto registry = m_registry.lock();
+    const bool cache_loaded = load_editor_cache(registry);
+    if (!cache_loaded)
+        debugging::emit(alerta, "editor", "Projeto aberto sem carregar o cache do editor.");
+    if (!remember_recent_project(project_path))
+        debugging::emit(alerta, "editor", "Não foi possível registrar o projeto recente.");
+    debugging::emit(info, "editor", "Projeto carregado: " + m_project_name);
+    ui_elements::set_text(ui_elements::project_status, "Projeto aberto: " + m_project_name);
 
     refresh_project_scenes();
+    if (!cache_loaded)
+        ui_elements::set_text(ui_elements::project_status, "Projeto aberto, mas não foi possível carregar o cache do editor.");
 }
 
 bool editor::editor_system::save_project_config() {
@@ -812,18 +1103,255 @@ bool editor::editor_system::save_project_config() {
     return output.good();
 }
 
-void editor::editor_system::refresh_project_scenes() {
-    if (m_project_status) {
-        if (m_project_config_path.empty())
-            m_project_status->set_buffer("Nenhum projeto aberto");
-        else
-            m_project_status->set_buffer("Projeto: " + m_project_name);
+bool editor::editor_system::save_editor_cache(
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    if (!registry || m_project_config_path.empty() || m_editor_camera_entity == 0)
+        return false;
+
+    const auto camera = registry->get<COMMONS_NS::camera>(m_editor_camera_entity);
+    const auto camera_transform = registry->get<COMMONS_NS::transform>(m_editor_camera_entity);
+    const auto ambient_light = registry->get<COMMONS_NS::directional_light>(m_editor_camera_entity);
+    if (!camera || !camera_transform || !ambient_light)
+        return false;
+
+    const auto project_root = std::filesystem::path(m_project_config_path).parent_path();
+    const auto cache_path = project_root / "Cache" / "editor_scene.json";
+    std::error_code error;
+    std::filesystem::create_directories(cache_path.parent_path(), error);
+    if (error)
+        return false;
+
+    rapidjson::Document document;
+    document.SetObject();
+    auto& allocator = document.GetAllocator();
+    document.AddMember("format", rapidjson::Value("cpp-bengine-editor-cache", allocator), allocator);
+    document.AddMember("version", 2, allocator);
+
+    rapidjson::Value editor_camera(rapidjson::kObjectType);
+    rapidjson::Value transform(rapidjson::kObjectType);
+    camera_transform->serialize(transform, allocator);
+    editor_camera.AddMember("transform", transform, allocator);
+
+    rapidjson::Value camera_settings(rapidjson::kObjectType);
+    camera_settings.AddMember("fov", camera->fov, allocator);
+    camera_settings.AddMember("near_clip", camera->corte_curto, allocator);
+    camera_settings.AddMember("far_clip", camera->corte_longo, allocator);
+    camera_settings.AddMember("scale", camera->scale, allocator);
+    camera_settings.AddMember("orthographic", camera->flag_orth, allocator);
+    rapidjson::Value background(rapidjson::kArrayType);
+    background.PushBack(camera->ceu.r, allocator);
+    background.PushBack(camera->ceu.g, allocator);
+    background.PushBack(camera->ceu.b, allocator);
+    background.PushBack(camera->ceu.a, allocator);
+    camera_settings.AddMember("background", background, allocator);
+    editor_camera.AddMember("camera", camera_settings, allocator);
+
+    rapidjson::Value serialized_light(rapidjson::kObjectType);
+    if (!ambient_light->serialize(serialized_light, allocator))
+        return false;
+    editor_camera.AddMember("ambient_light", serialized_light, allocator);
+    document.AddMember("editor_camera", editor_camera, allocator);
+
+    rapidjson::Value grid(rapidjson::kObjectType);
+    grid.AddMember("enabled", m_grid_gizmo.enabled, allocator);
+    grid.AddMember("spacing", m_grid_gizmo.spacing, allocator);
+    grid.AddMember("extent", m_grid_gizmo.extent, allocator);
+    document.AddMember("grid", grid, allocator);
+
+    rapidjson::Value camera_controls(rapidjson::kObjectType);
+    camera_controls.AddMember("move_speed", m_config.camera_move_speed(), allocator);
+    camera_controls.AddMember("look_sensitivity", m_config.camera_look_sensitivity(), allocator);
+    camera_controls.AddMember("zoom_sensitivity", m_config.camera_zoom_sensitivity(), allocator);
+    document.AddMember("camera_controls", camera_controls, allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+    document.Accept(writer);
+
+    std::ofstream output(cache_path, std::ios::binary | std::ios::trunc);
+    if (!output)
+        return false;
+    output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
+    if (!output.good())
+        return false;
+    m_last_editor_cache_save_time = bgui::get_time();
+    return true;
+}
+
+bool editor::editor_system::load_editor_cache(
+    const std::shared_ptr<COMMONS_NS::ecs>& registry)
+{
+    if (!registry || m_project_config_path.empty() || m_editor_camera_entity == 0)
+        return false;
+
+    const auto camera = registry->get<COMMONS_NS::camera>(m_editor_camera_entity);
+    const auto camera_transform = registry->get<COMMONS_NS::transform>(m_editor_camera_entity);
+    const auto ambient_light = registry->get<COMMONS_NS::directional_light>(m_editor_camera_entity);
+    if (!camera || !camera_transform || !ambient_light)
+        return false;
+
+    camera_transform->set_position(COMMONS_NS::fvec3{0.f});
+    camera_transform->set_rotation(COMMONS_NS::fvec3{0.f, 90.f, 0.f});
+    camera_transform->set_scale(COMMONS_NS::fvec3(1.f));
+    camera->fov = 75.f;
+    camera->corte_curto = 0.1f;
+    camera->corte_longo = 300.f;
+    camera->scale = 5.f;
+    camera->flag_orth = false;
+    camera->ceu = {0.43f, 0.78f, 0.86f, 1.f};
+    ambient_light->direction = {-0.2f, -1.f, -0.3f};
+    ambient_light->ambient = COMMONS_NS::fvec3(0.15f);
+    ambient_light->color = COMMONS_NS::fvec3(1.f);
+    ambient_light->intensity = 1.f;
+    m_grid_gizmo.enabled = true;
+    m_grid_gizmo.spacing = 1.f;
+    m_grid_gizmo.extent = 50.f;
+    m_config.set_camera_move_speed(4.f);
+    m_config.set_camera_look_sensitivity(0.12f);
+    m_config.set_camera_zoom_sensitivity(3.f);
+
+    const auto project_root = std::filesystem::path(m_project_config_path).parent_path();
+    const auto cache_path = project_root / "Cache" / "editor_scene.json";
+    std::error_code error;
+    if (!std::filesystem::exists(cache_path, error)) {
+        if (error)
+            return false;
+        return save_editor_cache(registry);
     }
 
-    if (!m_project_scenes_list)
+    std::ifstream input(cache_path, std::ios::binary);
+    if (!input)
+        return false;
+    const std::string contents((std::istreambuf_iterator<char>(input)), {});
+    rapidjson::Document document;
+    document.Parse(contents.c_str());
+    if (document.HasParseError() || !document.IsObject())
+        return false;
+
+    const auto format = document.FindMember("format");
+    const auto version = document.FindMember("version");
+    if (format == document.MemberEnd() || !format->value.IsString() ||
+        std::string(format->value.GetString()) != "cpp-bengine-editor-cache" ||
+        version == document.MemberEnd() || !version->value.IsInt() ||
+        (version->value.GetInt() != 1 && version->value.GetInt() != 2))
+        return false;
+    const int cache_version = version->value.GetInt();
+
+    const auto* editor_camera = member_value(document, "editor_camera");
+    const auto* transform = editor_camera ? member_value(*editor_camera, "transform") : nullptr;
+    const auto* camera_settings = editor_camera ? member_value(*editor_camera, "camera") : nullptr;
+    const auto* light = editor_camera ? member_value(*editor_camera, "ambient_light") : nullptr;
+    const auto* grid = member_value(document, "grid");
+    const auto* controls = member_value(document, "camera_controls");
+    if (!transform || !camera_settings || !light || !grid || !controls)
+        return false;
+
+    float position_values[3]{};
+    float rotation_values[3]{};
+    float scale_values[3]{};
+    if (!read_float_array(*transform, "position", position_values, 3) ||
+        !read_float_array(*transform, "rotation", rotation_values, 3) ||
+        !read_float_array(*transform, "scale", scale_values, 3))
+        return false;
+
+    float fov = 0.f;
+    float near_clip = 0.f;
+    float far_clip = 0.f;
+    float camera_scale = 0.f;
+    float background_values[4]{};
+    const auto* orthographic = member_value(*camera_settings, "orthographic");
+    if (!read_float(*camera_settings, "fov", fov) ||
+        !read_float(*camera_settings, "near_clip", near_clip) ||
+        !read_float(*camera_settings, "far_clip", far_clip) ||
+        !read_float(*camera_settings, "scale", camera_scale) ||
+        !read_float_array(*camera_settings, "background", background_values, 4) ||
+        !orthographic || !orthographic->IsBool() ||
+        fov <= 0.f || fov >= 180.f || near_clip <= 0.f ||
+        far_clip <= near_clip || camera_scale <= 0.f)
+        return false;
+
+    float light_direction[3]{};
+    float light_ambient[3]{};
+    float light_color[3]{};
+    float light_intensity = 0.f;
+    if (!read_float_array(*light, "direction", light_direction, 3) ||
+        !read_float_array(*light, "ambient", light_ambient, 3) ||
+        !read_float_array(*light, "color", light_color, 3) ||
+        !read_float(*light, "intensity", light_intensity))
+        return false;
+    if (cache_version == 1 &&
+        std::abs(light_ambient[0] - 0.15f) < 0.0001f &&
+        std::abs(light_ambient[1]) < 0.0001f &&
+        std::abs(light_ambient[2]) < 0.0001f &&
+        std::abs(light_color[0] - 1.f) < 0.0001f &&
+        std::abs(light_color[1]) < 0.0001f &&
+        std::abs(light_color[2]) < 0.0001f) {
+        light_ambient[1] = light_ambient[2] = light_ambient[0];
+        light_color[1] = light_color[2] = light_color[0];
+    }
+    if (cache_version == 1 &&
+        std::abs(scale_values[0] - 1.f) < 0.0001f &&
+        std::abs(scale_values[1]) < 0.0001f &&
+        std::abs(scale_values[2]) < 0.0001f) {
+        scale_values[1] = scale_values[2] = scale_values[0];
+    }
+
+    const auto* grid_enabled = member_value(*grid, "enabled");
+    float grid_spacing = 0.f;
+    float grid_extent = 0.f;
+    if (!grid_enabled || !grid_enabled->IsBool() ||
+        !read_float(*grid, "spacing", grid_spacing) ||
+        !read_float(*grid, "extent", grid_extent) ||
+        grid_spacing <= 0.f || grid_extent <= 0.f)
+        return false;
+
+    float move_speed = 0.f;
+    float look_sensitivity = 0.f;
+    float zoom_sensitivity = 0.f;
+    if (!read_float(*controls, "move_speed", move_speed) ||
+        !read_float(*controls, "look_sensitivity", look_sensitivity) ||
+        !read_float(*controls, "zoom_sensitivity", zoom_sensitivity) ||
+        move_speed <= 0.f || look_sensitivity <= 0.f || zoom_sensitivity <= 0.f)
+        return false;
+
+    camera_transform->set_position(COMMONS_NS::fvec3{position_values[0], position_values[1], position_values[2]});
+    camera_transform->set_rotation(COMMONS_NS::fvec3{rotation_values[0], rotation_values[1], rotation_values[2]});
+    camera_transform->set_scale(COMMONS_NS::fvec3{scale_values[0], scale_values[1], scale_values[2]});
+    camera->fov = fov;
+    camera->corte_curto = near_clip;
+    camera->corte_longo = far_clip;
+    camera->scale = camera_scale;
+    camera->flag_orth = orthographic->GetBool();
+    camera->ceu = {background_values[0], background_values[1], background_values[2], background_values[3]};
+    ambient_light->direction = {light_direction[0], light_direction[1], light_direction[2]};
+    ambient_light->ambient = {light_ambient[0], light_ambient[1], light_ambient[2]};
+    ambient_light->color = {light_color[0], light_color[1], light_color[2]};
+    ambient_light->intensity = light_intensity;
+    m_grid_gizmo.enabled = grid_enabled->GetBool();
+    m_grid_gizmo.spacing = grid_spacing;
+    m_grid_gizmo.extent = grid_extent;
+    m_config.set_camera_move_speed(move_speed);
+    m_config.set_camera_look_sensitivity(look_sensitivity);
+    m_config.set_camera_zoom_sensitivity(zoom_sensitivity);
+    m_scene_initialized = false;
+    m_last_editor_cache_save_time = bgui::get_time();
+    if (cache_version == 1 && !save_editor_cache(registry))
+        debugging::emit(alerta, "editor", "Cache antigo carregado, mas não foi possível atualizá-lo.");
+    return true;
+}
+
+void editor::editor_system::refresh_project_scenes() {
+    if (m_project_config_path.empty())
+        ui_elements::set_text(ui_elements::project_status, "Nenhum projeto aberto");
+    else
+        ui_elements::set_text(ui_elements::project_status, "Projeto: " + m_project_name);
+
+    if (!ui_elements::contains(ui_elements::project_scenes_list))
         return;
 
-    for (auto& layer_elements : m_project_scenes_list->get_elements())
+    auto& project_scenes_list = ui_elements::require<bgui::linear>(ui_elements::project_scenes_list);
+    for (auto& layer_elements : project_scenes_list.get_elements())
         layer_elements.second.clear();
 
     std::vector<std::string> scenes = m_project_scenes;
@@ -831,7 +1359,7 @@ void editor::editor_system::refresh_project_scenes() {
     const std::weak_ptr<COMMONS_NS::ecs> weak_registry = m_registry;
 
     for (const auto& scene : scenes) {
-        auto& item = m_project_scenes_list->add_persistent<bgui::button>(scene, 0.35f, [this, scene, weak_registry]() {
+        auto& item = project_scenes_list.add_persistent<bgui::button>(scene, 0.35f, [this, scene, weak_registry]() {
             load_project_scene(scene, weak_registry.lock());
         });
         item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
@@ -850,8 +1378,7 @@ void editor::editor_system::load_project_scene(
         scene_path = std::filesystem::path(m_project_config_path).parent_path() / scene_path;
     std::error_code error;
     if (!std::filesystem::is_regular_file(scene_path, error)) {
-        if (m_project_status)
-            m_project_status->set_buffer("Cena não encontrada: " + scene);
+        ui_elements::set_text(ui_elements::project_status, "Cena não encontrada: " + scene);
         return;
     }
 
@@ -874,8 +1401,7 @@ void editor::editor_system::load_project_scene(
         imported = import_scene_file(scene_path.string(), registry);
     } catch (const std::exception& exception) {
         rollback_new_entities();
-        if (m_project_status)
-            m_project_status->set_buffer(std::string("Falha ao carregar cena: ") + exception.what());
+        ui_elements::set_text(ui_elements::project_status, std::string("Falha ao carregar cena: ") + exception.what());
         return;
     }
 
@@ -886,15 +1412,13 @@ void editor::editor_system::load_project_scene(
         document.Parse(contents.c_str());
         if (document.HasParseError()) {
             rollback_new_entities();
-            if (m_project_status)
-                m_project_status->set_buffer("Arquivo de cena inválido; a cena atual foi mantida.");
+            ui_elements::set_text(ui_elements::project_status, "Arquivo de cena inválido; a cena atual foi mantida.");
             return;
         }
         const auto entities = document.IsObject() ? document.FindMember("entities") : document.MemberEnd();
         if (!document.IsObject() || (entities != document.MemberEnd() && entities->value.IsArray() && !entities->value.Empty())) {
             rollback_new_entities();
-            if (m_project_status)
-                m_project_status->set_buffer("Nenhum modelo válido foi carregado; a cena atual foi mantida.");
+            ui_elements::set_text(ui_elements::project_status, "Nenhum modelo válido foi carregado; a cena atual foi mantida.");
             return;
         }
     }
@@ -915,8 +1439,7 @@ void editor::editor_system::load_project_scene(
     m_selected_entity = first_loaded_entity;
     m_scene_initialized = false;
     refresh_scene(registry);
-    if (m_project_status)
-        m_project_status->set_buffer("Cena carregada: " + scene);
+    ui_elements::set_text(ui_elements::project_status, "Cena carregada: " + scene);
 }
 
 void editor::editor_system::import_model_file(
@@ -932,19 +1455,18 @@ void editor::editor_system::import_model_file(
         const auto renderer = registry->get<COMMONS_NS::renderer>(entity.id);
         if (!renderer || !renderer->m_modelo || renderer->m_modelo->meshes.empty()) {
             registry->remove(entity.id);
-            if (m_model_import_status)
-                m_model_import_status->set_buffer("Não foi possível carregar esse modelo.");
+            ui_elements::set_text(ui_elements::model_import_status, "Não foi possível carregar esse modelo.");
             return;
         }
 
         m_selected_entity = entity.id;
         m_scene_initialized = false;
         refresh_scene(registry);
-        if (m_model_import_status)
-            m_model_import_status->set_buffer("Modelo importado: " + std::filesystem::path(path).filename().string());
+        ui_elements::set_text(
+            ui_elements::model_import_status,
+            "Modelo importado: " + std::filesystem::path(path).filename().string());
     } catch (const std::exception& error) {
-        if (m_model_import_status)
-            m_model_import_status->set_buffer(std::string("Erro: ") + error.what());
+        ui_elements::set_text(ui_elements::model_import_status, std::string("Erro: ") + error.what());
     }
 }
 

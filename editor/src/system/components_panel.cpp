@@ -1,4 +1,5 @@
 #include "system/editor_system.hpp"
+#include "system/editor_ui_elements.hpp"
 
 #include <array>
 
@@ -16,14 +17,16 @@ namespace {
 void editor::editor_system::setup_components_panel(bgui::window& window) {
     auto& context = window.add_persistent<bgui::linear>(bgui::orientation::vertical);
     context.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
-    m_components_list = &context.add_persistent<bgui::linear>(bgui::orientation::vertical);
-    m_components_list->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+    auto& components_list = context.add_persistent<bgui::linear>(bgui::orientation::vertical);
+    components_list.add_class(editor::ui_elements::components_list);
+    components_list.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
 }
 
 void editor::editor_system::rebuild_components(const std::shared_ptr<COMMONS_NS::ecs>& registry) {
-    clear_layout(*m_components_list);
+    auto& components_list = editor::ui_elements::require<bgui::linear>(editor::ui_elements::components_list);
+    clear_layout(components_list);
     if (m_selected_entity == 0) {
-        auto& empty = m_components_list->add_persistent<bgui::text>("No entity selected", 0.35f);
+        auto& empty = components_list.add_persistent<bgui::text>("No entity selected", 0.35f);
         empty.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         return;
     }
@@ -46,7 +49,7 @@ void editor::editor_system::rebuild_components(const std::shared_ptr<COMMONS_NS:
     for (const auto& [component_mask, name] : component_names) {
         if ((mask & static_cast<uint32_t>(component_mask)) == 0)
             continue;
-        auto& row = m_components_list->add_persistent<bgui::text>(name, 0.35f);
+        auto& row = components_list.add_persistent<bgui::text>(name, 0.35f);
         row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     }
 }
