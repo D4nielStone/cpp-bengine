@@ -64,8 +64,9 @@ TEST(EditorAssetsTest, PackagesOnlyModelAndReferencedDependencies) {
     ASSERT_TRUE(model.IsString());
     const auto packaged_model = project_root / std::filesystem::path(model.GetString());
     const auto packaged_directory = packaged_model.parent_path();
-    EXPECT_TRUE(std::filesystem::is_regular_file(packaged_model));
-    EXPECT_TRUE(std::filesystem::is_regular_file(packaged_directory / "material.mtl"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(packaged_model)) << packaged_model.string();
+    EXPECT_TRUE(std::filesystem::is_regular_file(packaged_directory / "material.mtl"))
+        << model.GetString() << " resolved to " << packaged_directory.string();
     EXPECT_TRUE(std::filesystem::is_regular_file(packaged_directory / "texture.png"));
     EXPECT_FALSE(std::filesystem::exists(packaged_directory / "unrelated.txt"));
 }

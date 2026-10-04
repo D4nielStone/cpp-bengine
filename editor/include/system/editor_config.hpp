@@ -21,6 +21,6 @@ namespace editor {
         float m_camera_move_speed{4.f};
         float m_camera_look_sensitivity{0.12f};
         float m_camera_zoom_sensitivity{3.f};
-        float m_ui_scale{1.f};
+        float m_ui_scale{0.78f};
     };
 }
