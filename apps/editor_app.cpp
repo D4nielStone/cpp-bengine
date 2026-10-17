@@ -10,6 +10,7 @@
 #include <lay/dock.hpp>
 #include <lay/linear.hpp>
 #include <elem/image.hpp>
+#include "systems/viewport_sync.hpp"
 
 int main() {
     commons::window window("Bubble Engine - Editor");
@@ -70,6 +71,11 @@ int main() {
             static_cast<float>(camera->viewportFBO.x),
             static_cast<float>(camera->viewportFBO.y)
         }
+    );
+
+    window.add<commons::viewport_sync_system>(
+        camera,
+        framebuffer_image
     );
 
     window.loop();

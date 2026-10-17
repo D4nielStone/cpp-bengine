@@ -5,4 +5,4 @@ add_executable(runtime_app runtime_app.cpp)
 target_link_libraries(runtime_app PRIVATE commons)
 
 add_executable(editor_app editor_app.cpp)
-target_link_libraries(editor_app PRIVATE commons editor)
+target_link_libraries(editor_app PRIVATE commons)

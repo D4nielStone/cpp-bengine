@@ -9,30 +9,140 @@ using namespace COMMONS_NS;
 /**
  * @brief Ativa a escrita do framebuffer da câmera
  */
+
+
 void camera::drawFB() {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
     glDepthFunc(GL_LESS);
     glDepthMask(GL_TRUE);
+
     if (flag_fb) {
         if (viewport_ptr) {
-            viewportFBO = *viewport_ptr;
+            viewport(*viewport_ptr);
         }
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, viewportFBO.x, viewportFBO.y, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, viewportFBO.x, viewportFBO.y);
-        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+        if (viewportFBO.x <= 0 || viewportFBO.y <= 0) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            return;
+        }
+
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glViewport(0, 0, viewportFBO.x, viewportFBO.y);
-    } else {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        return;
     }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glViewport(0, 0, viewportFBO.x, viewportFBO.y);
 }
+
+void camera::createFB() {
+    if (flag_fb)
+        return;
+
+    if (viewportFBO.x <= 0 || viewportFBO.y <= 0)
+        return;
+
+    glGenFramebuffers(1, &fbo);
+    glGenTextures(1, &texture);
+    glGenRenderbuffers(1, &rbo);
+
+    flag_fb = true;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGB,
+        viewportFBO.x,
+        viewportFBO.y,
+        0,
+        GL_RGB,
+        GL_UNSIGNED_BYTE,
+        nullptr
+    );
+
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D,
+        texture,
+        0
+    );
+
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(
+        GL_RENDERBUFFER,
+        GL_DEPTH24_STENCIL8,
+        viewportFBO.x,
+        viewportFBO.y
+    );
+
+    glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER,
+        GL_DEPTH_STENCIL_ATTACHMENT,
+        GL_RENDERBUFFER,
+        rbo
+    );
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        deleteFB();
+        return;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void camera::viewport(const ivec2& viewp) {
+    if (viewp.x <= 0 || viewp.y <= 0)
+        return;
+
+    if (viewportFBO.x == viewp.x && viewportFBO.y == viewp.y)
+        return;
+
+    viewportFBO = viewp;
+
+    if (!flag_fb)
+        return;
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGB,
+        viewportFBO.x,
+        viewportFBO.y,
+        0,
+        GL_RGB,
+        GL_UNSIGNED_BYTE,
+        nullptr
+    );
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(
+        GL_RENDERBUFFER,
+        GL_DEPTH24_STENCIL8,
+        viewportFBO.x,
+        viewportFBO.y
+    );
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+}
+
 
 camera::~camera()
 {
@@ -102,41 +212,6 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
 
     return true;
 }
-void camera::createFB()
-{
-    if (flag_fb)
-        return;
-
-    flag_fb = true;
-
-    glGenFramebuffers(1, &fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-
-    // Criando uma texture para armazenar a image renderizada
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 800, 600, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    // Anexando a texture ao framebuffer
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-
-    // Criando um renderbuffer para armazenar depth e stencil
-    glGenRenderbuffers(1, &rbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 800, 600);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-
-    // Verificando se o framebuffer est� completo
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        std::cerr << "Erro: Framebuffer n�o est� completo!" << std::endl;
-    }
-
-    // Voltando ao framebuffer padr�o
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-}
 
 void camera::deleteFB()
 {
@@ -188,10 +263,6 @@ glm::mat4 camera::getViewMatrix() {
     viewMatrix = glm::lookAt(to_glm(position), to_glm(target), to_glm(up));
     return viewMatrix;
 }
-void camera::viewport(const ivec2& viewp) {
-    viewportFBO = viewp;
-}
-
 glm::mat4 camera::obtProjectionMatrix() {
     ivec2 viewp = viewportFBO;
     if (viewport_ptr) {
