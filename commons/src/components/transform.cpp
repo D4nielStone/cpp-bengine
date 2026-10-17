@@ -117,12 +117,6 @@ void  transform::set_rotation(const fvec3& v) {
     rotation = v;
 }
 
-void  transform::set_rotation(const fvector_type4& v) {
-    m_usar_target = false;
-    glm::vec3 euler = glm::eulerAngles(glm::quat(to_glm(v)));
-    rotation = {euler.x, euler.y, euler.z};
-}
-
 void  transform::move(const fvec3& v) {
     position = position + v;
 }

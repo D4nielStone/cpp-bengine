@@ -39,7 +39,6 @@ namespace COMMONS_NS {
         void set_position(const fvec3&);
         void set_scale(const fvec3&);
         void set_rotation(const fvec3&);
-        void set_rotation(const fvector_type4&);
         void move(const fvec3&);
         void rotate(const fvec3&);
         void apply_scale(const fvec3&);

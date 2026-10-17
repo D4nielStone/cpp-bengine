@@ -23,6 +23,7 @@ namespace {
 window::window(const std::string& title, const int width, const int height)
     : m_ecs(std::make_shared<ecs>()) {
     m_window = bgui::set_up_glfw(width, height, title.c_str());
+    bgui::style_manager::get_instance().apply_theme(bgui::dark_theme());
 
     try {
         initialize_opengl_state();
