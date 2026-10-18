@@ -35,17 +35,17 @@ namespace COMMONS_NS {
         return start + alpha * (end - start);
     }
     static inline bgui::vec2 lerp(const bgui::vec2& start, const bgui::vec2& end, const float& alpha) {
-        return bgui::vec2(
-                start.x + alpha * (end.x - start.x),
-                start.y + alpha * (end.y - start.y)
-                );
+        return bgui::vec2{
+            start.x + alpha * (end.x - start.x),
+            start.y + alpha * (end.y - start.y)
+        };
     }
     static inline bgui::vec3 lerp(const bgui::vec3& start, const bgui::vec3& end, const float& alpha) {
-        return bgui::vec3(
-                start.x + alpha * (end.x - start.x),
-                start.y + alpha * (end.y - start.y),
-                start.z + alpha * (end.z - start.z)
-                );
+        return bgui::vec3{
+            start.x + alpha * (end.x - start.x),
+            start.y + alpha * (end.y - start.y),
+            start.z + alpha * (end.z - start.z)
+        };
     }
 	static inline float dist(const float& a, const float& b) {
 		return std::abs(a - b);
