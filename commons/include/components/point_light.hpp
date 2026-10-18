@@ -31,13 +31,13 @@ SOFTWARE.
 namespace COMMONS_NS {
     struct point_light : public component
     {
-        fvec3 position;
-        fvec3 color;
+        bgui::vec3 position;
+        bgui::vec3 color;
         float intensity;
         float constant;
         float linear;
         float quadratic;
-        explicit  point_light(fvec3 position = {0, 2, -2}, fvec3 color = {1, 1, 1}, float intensity = 5.f , float constant = 1.f, float linear = 0.09f, float quadratic = 0.032f) :
+        explicit  point_light(bgui::vec3 position = {0, 2, -2}, bgui::vec3 color = {1, 1, 1}, float intensity = 5.f , float constant = 1.f, float linear = 0.09f, float quadratic = 0.032f) :
             position(position), color(color), intensity(intensity), constant(constant), linear(linear), quadratic(quadratic)
         {}
         static constexpr mask mask = {COMPONENTE_LUZ_PONTUAL};

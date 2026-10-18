@@ -47,9 +47,9 @@ struct uniform {
         float f;
         int i;
         bool b;
-        fvec2 vec2;
-        fvec3 vec3;
-        fvector_type4 vec4;
+        bgui::vec2 vec2;
+        bgui::vec3 vec3;
+        bgui::vec4 vec4;
         color color_value;
         glm::mat4 mat4;
 
@@ -61,9 +61,9 @@ struct uniform {
         float* f_ptr;
         int* i_ptr;
         bool* b_ptr;
-        fvec2* vec2_ptr;
-        fvec3* vec3_ptr;
-        fvector_type4* vec4_ptr;
+        bgui::vec2* vec2_ptr;
+        bgui::vec3* vec3_ptr;
+        bgui::vec4* vec4_ptr;
         color* color_ptr;
         glm::mat4* mat4_ptr;
 
@@ -76,18 +76,18 @@ struct uniform {
     uniform(float val) : m_type(type::Float) { valor.f = val; }
     uniform(int val) : m_type(type::Int) { valor.i = val; }
     uniform(bool val) : m_type(type::Bool) { valor.b = val; }
-    uniform(const fvec2& val) : m_type(type::Vet2) { valor.vec2 = val; }
-    uniform(const fvec3& val) : m_type(type::Vet3) { valor.vec3 = val; }
-    uniform(const fvector_type4& val) : m_type(type::Vet4) { valor.vec4 = val; }
+    uniform(const bgui::vec2& val) : m_type(type::Vet2) { valor.vec2 = val; }
+    uniform(const bgui::vec3& val) : m_type(type::Vet3) { valor.vec3 = val; }
+    uniform(const bgui::vec4& val) : m_type(type::Vet4) { valor.vec4 = val; }
     uniform(const color& val) : m_type(type::Cor) { valor.color_value = val; }
     uniform(const glm::mat4& val) : m_type(type::Mat4) { valor.mat4 = val; }
 
     uniform(float* val) : m_type(type::Float_ptr) { ponteiro.f_ptr = val; }
     uniform(int* val) : m_type(type::Int_ptr) { ponteiro.i_ptr = val; }
     uniform(bool* val) : m_type(type::Bool_ptr) { ponteiro.b_ptr = val; }
-    uniform(fvec2* val) : m_type(type::Vet2_ptr) { ponteiro.vec2_ptr = val; }
-    uniform(fvec3* val) : m_type(type::Vet3_ptr) { ponteiro.vec3_ptr = val; }
-    uniform(fvector_type4* val) : m_type(type::Vet4_ptr) { ponteiro.vec4_ptr = val; }
+    uniform(bgui::vec2* val) : m_type(type::Vet2_ptr) { ponteiro.vec2_ptr = val; }
+    uniform(bgui::vec3* val) : m_type(type::Vet3_ptr) { ponteiro.vec3_ptr = val; }
+    uniform(bgui::vec4* val) : m_type(type::Vet4_ptr) { ponteiro.vec4_ptr = val; }
     uniform(color* val) : m_type(type::Cor_ptr) { ponteiro.color_ptr = val; }
     uniform(glm::mat4* val) : m_type(type::Mat4_ptr) { ponteiro.mat4_ptr = val; }
 

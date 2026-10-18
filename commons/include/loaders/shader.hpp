@@ -1,41 +1,9 @@
-/** @copyright
-MIT License
-Copyright (c) 2025 Daniel Oliveira
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
-/**
- * @file shader.hpp
- * @brief Gerencia os shaders GLSL.
- *
- * @see shader.cpp
- */
-
 #pragma once
 #include <string>
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <vector>
-#include <utility>
 #include <unordered_map>
-#include <glm/gtc/type_ptr.hpp>
 #include "commons_namespace.hpp"
 #include "utils/vec.hpp"
 #include "util/color.hpp"
@@ -70,9 +38,9 @@ namespace COMMONS_NS {
         void setInt  (const std::string& name, const int& value) const;
         void setFloat(const std::string& name, const float& value) const;
         void set_color  (const std::string& name, const color& m_color) const;
-        void setVec4 (const std::string& name, const fvector_type4& vec4) const;
+        void setVec4 (const std::string& name, const bgui::vec4& vec4) const;
         void setVec3 (const std::string& name, const float& r, const float& g, const float& b) const;
-        void setVec3 (const std::string &name, const fvec3 &vector_type) const;
+        void setVec3 (const std::string &name, const bgui::vec3 &vector_type) const;
         void setVec2 (const std::string &name, const float &r, const float &g) const;
         void setMat4 (const std::string& name, const float* value) const;
         void setMat3 (const std::string& name, const float* value) const;

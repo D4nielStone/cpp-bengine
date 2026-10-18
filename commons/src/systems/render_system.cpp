@@ -33,8 +33,8 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
 
         directional_light direction_light{
             {-0.2f, -1.0f, -0.3f},
-            fvec3(0.15f),
-            fvec3(1.0f),
+            bgui::vec3(0.15f),
+            bgui::vec3(1.0f),
             1.0f
         };
         std::vector<point_light> point_lights;

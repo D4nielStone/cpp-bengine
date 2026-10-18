@@ -14,6 +14,9 @@ namespace COMMONS_NS {
 namespace editor {
     class transform_gizmo {
     public:
+        [[nodiscard]] bool is_dragging() const noexcept {
+            return m_dragging;
+        }   
         bool update(
             const COMMONS_NS::camera& camera,
             COMMONS_NS::transform* target,

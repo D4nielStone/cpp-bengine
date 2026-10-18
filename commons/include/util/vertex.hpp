@@ -10,8 +10,8 @@
 namespace COMMONS_NS {
 	struct vertex {
 	    vertex() = default;
-	    vertex(const fvec3& p, const fvec3& n, const fvec2& uv) : position(p), normal(n), uvcoords(uv) {}
-		fvec3 position, normal;
-		fvec2 uvcoords;
+	    vertex(const bgui::vec3& p, const bgui::vec3& n, const bgui::vec2& uv) : position(p), normal(n), uvcoords(uv) {}
+		bgui::vec3 position, normal;
+		bgui::vec2 uvcoords;
 	};
 }

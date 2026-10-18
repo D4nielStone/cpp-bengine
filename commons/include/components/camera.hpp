@@ -25,7 +25,7 @@ namespace COMMONS_NS {
         bool m_use_skybox { false };
 		color ceu				{0.43F, 0.78F, 0.86F, 1.0F};
 
-		fvec3 forward, right, up, position;
+		bgui::vec3 forward, right, up, position;
 		transform* m_transform{ nullptr };
 
 		glm::mat4 viewMatrix = glm::mat4(1.f), projMatriz = glm::mat4(1.f);
@@ -45,8 +45,8 @@ namespace COMMONS_NS {
 
 		static constexpr mask mask = COMPONENTE_CAM;
 
-		ivec2* viewport_ptr{ nullptr };
-		ivec2 viewportFBO{ 800, 600 };
+		bgui::vec2i* viewport_ptr{ nullptr };
+		bgui::vec2i viewportFBO{ 800, 600 };
 
 		void drawFB();
         bool analyze(const rapidjson::Value&) override;
@@ -59,14 +59,14 @@ namespace COMMONS_NS {
 		void deleteFB();
         unsigned int framebuffer_texture() const { return texture; }
 		glm::mat4 getViewMatrix();
-		void viewport(const ivec2& viewp);
+		void viewport(const bgui::vec2i& viewp);
 
 		glm::mat4 obtProjectionMatrix();
 
-		ray point_to_ray(const fvec2& screenPoint) const;
-		fvec3 telaParaMundo(const fvec2& screenPoint, float profundidade) const;
-        ivec2 worldParaTela(const fvec3& worldPos);
+		ray point_to_ray(const bgui::vec2& screenPoint) const;
+		bgui::vec3 telaParaMundo(const bgui::vec2& screenPoint, float profundidade) const;
+        bgui::vec2i worldParaTela(const bgui::vec3& worldPos);
 
-		void move(const fvec3& pos);
+		void move(const bgui::vec3& pos);
 	};
 }

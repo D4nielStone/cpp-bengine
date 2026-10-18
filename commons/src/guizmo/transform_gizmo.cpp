@@ -17,7 +17,7 @@ namespace {
         {0.34f, 0.84f, 0.36f, 1.f},
         {0.25f, 0.55f, 1.f, 1.f}
     }};
-    const std::array<COMMONS_NS::fvec3, 3> axes{{
+    const std::array<bgui::vec3, 3> axes{{
         {1.f, 0.f, 0.f},
         {0.f, 1.f, 0.f},
         {0.f, 0.f, 1.f}
@@ -36,13 +36,13 @@ namespace {
         return std::sqrt(dot(value, value));
     }
 
-    std::array<COMMONS_NS::fvec3, 3> oriented_axes(const COMMONS_NS::fvec3& rotation) {
+    std::array<bgui::vec3, 3> oriented_axes(const bgui::vec3& rotation) {
         auto matrix = glm::mat4(1.f);
         matrix = glm::rotate(matrix, glm::radians(rotation.x), glm::vec3(1.f, 0.f, 0.f));
         matrix = glm::rotate(matrix, glm::radians(rotation.y), glm::vec3(0.f, 1.f, 0.f));
         matrix = glm::rotate(matrix, glm::radians(rotation.z), glm::vec3(0.f, 0.f, 1.f));
 
-        std::array<COMMONS_NS::fvec3, 3> result{};
+        std::array<bgui::vec3, 3> result{};
         for (std::size_t index = 0; index < axes.size(); ++index) {
             const auto transformed = glm::mat3(matrix) * glm::vec3(
                 axes[index].x, axes[index].y, axes[index].z);
@@ -193,35 +193,31 @@ namespace {
         const float amount = std::clamp(dot(point - start, segment) / segment_length_squared, 0.f, 1.f);
         return length(point - (start + segment * amount));
     }
+bool project(
+    const commons::camera& camera,
+    const bgui::vec4i& viewport,
+    const bgui::vec3& world,
+    bgui::vec2& screen)
+{
+    if (viewport.z <= 0 || viewport.w <= 0)
+        return false;
 
-    bool project(
-        const COMMONS_NS::camera& camera,
-        const bgui::vec4i& viewport,
-        const COMMONS_NS::fvec3& world,
-        bgui::vec2& screen)
-    {
-        const auto clip = camera.projMatriz * camera.viewMatrix *
-            glm::vec4(world.x, world.y, world.z, 1.f);
-        if (clip.w <= 0.0001f || viewport.z <= 0 || viewport.w <= 0)
-            return false;
+    const auto clip = camera.projMatriz * camera.viewMatrix *
+        glm::vec4(world.x, world.y, world.z, 1.f);
 
-        float ndc_x = clip.x/ clip.w;
-        float ndc_y = clip.y/ clip.w;
-        const float source_aspect = camera.viewportFBO.y > 0
-            ? static_cast<float>(camera.viewportFBO.x) / camera.viewportFBO.y
-            : static_cast<float>(viewport.z) / viewport.w;
-        const float target_aspect = static_cast<float>(viewport.z) / viewport.w;
-        if (source_aspect > target_aspect)
-            ndc_x *= source_aspect / target_aspect;
-        else if (source_aspect < target_aspect)
-            ndc_y *= target_aspect / source_aspect;
+    if (clip.w <= 0.0001f)
+        return false;
 
-        screen = {
-            viewport.x + (ndc_x * 0.5f + 0.5f) * viewport.z,
-            viewport.y + (0.5f - ndc_y * 0.5f) * viewport.w
-        };
-        return true;
-    }
+    const float ndc_x = clip.x / clip.w;
+    const float ndc_y = clip.y / clip.w;
+
+    screen = {
+        viewport.x + (ndc_x * 0.5f + 0.5f) * viewport.z,
+        viewport.y + (0.5f - ndc_y * 0.5f) * viewport.w
+    };
+
+    return true;
+}
 
     bool key_pressed(const bgui::input_key key) {
         const auto& inputs = bgui::get_context().m_input_map;
@@ -375,7 +371,7 @@ bool editor::transform_gizmo::update(
             float delta = angle - m_last_mouse_angle;
             if (delta > pi) delta -= 2.f * pi;
             if (delta < -pi) delta += 2.f * pi;
-            COMMONS_NS::fvec3 rotation_delta{};
+            bgui::vec3 rotation_delta{};
             rotation_delta[m_active_axis] = delta * 180.f / pi;
             target->rotate(rotation_delta);
             m_last_mouse_angle = angle;

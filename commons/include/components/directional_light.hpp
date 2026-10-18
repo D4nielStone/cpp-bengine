@@ -33,9 +33,9 @@ SOFTWARE.
 namespace COMMONS_NS {
     struct directional_light : public component
     {
-        fvec3 direction, ambient, color; float intensity = 1.f;
+        bgui::vec3 direction, ambient, color; float intensity = 1.f;
         directional_light() = default;
-        explicit  directional_light(fvec3 direction, fvec3 ambient, fvec3 color, float intensity) :
+        explicit  directional_light(bgui::vec3 direction, bgui::vec3 ambient, bgui::vec3 color, float intensity) :
         direction(direction), ambient(ambient), color(color), intensity(intensity){}
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override;
         bool analyze(const rapidjson::Value& value) override;

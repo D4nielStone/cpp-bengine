@@ -33,13 +33,13 @@ namespace COMMONS_NS {
     // Estrutura para armazenar os resultados do Raycast
     struct ray
     {
-        fvec3 origem;
-        fvec3 direction;
+        bgui::vec3 origem;
+        bgui::vec3 direction;
     };
     struct ray_result {
         bool atingiu;                      // Se o ray atingiu algo
-        fvec3 pontoDeColisao;            // Ponto de colis�o
-        fvec3 normalAtingida;           // Normal da superf�cie atingida
+        bgui::vec3 pontoDeColisao;            // Ponto de colis�o
+        bgui::vec3 normalAtingida;           // Normal da superf�cie atingida
         const btCollisionObject* objetoAtingido; // Objeto atingido
     };
 }

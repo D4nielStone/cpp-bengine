@@ -148,7 +148,7 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
     for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
         vertex vertex;
         // processa coordenadas de vertex
-        vector3<float> vector;
+        bgui::vec3 vector;
         vector.x = mesh->mVertices[i].x;
         vector.y = mesh->mVertices[i].y;
         vector.z = mesh->mVertices[i].z;
@@ -166,7 +166,7 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
         // uvs
         if (mesh->mTextureCoords[0])
         {
-            vector2<float> vec;
+            bgui::vec2 vec;
 
             vec.x = mesh->mTextureCoords[0][i].x;
             vec.y = mesh->mTextureCoords[0][i].y;

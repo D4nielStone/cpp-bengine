@@ -34,14 +34,14 @@ namespace COMMONS_NS {
     static inline float lerp(const float& start, const float& end, const float& alpha) {
         return start + alpha * (end - start);
     }
-    static inline fvec2 lerp(const fvec2& start, const fvec2& end, const float& alpha) {
-        return fvec2(
+    static inline bgui::vec2 lerp(const bgui::vec2& start, const bgui::vec2& end, const float& alpha) {
+        return bgui::vec2(
                 start.x + alpha * (end.x - start.x),
                 start.y + alpha * (end.y - start.y)
                 );
     }
-    static inline fvec3 lerp(const fvec3& start, const fvec3& end, const float& alpha) {
-        return fvec3(
+    static inline bgui::vec3 lerp(const bgui::vec3& start, const bgui::vec3& end, const float& alpha) {
+        return bgui::vec3(
                 start.x + alpha * (end.x - start.x),
                 start.y + alpha * (end.y - start.y),
                 start.z + alpha * (end.z - start.z)

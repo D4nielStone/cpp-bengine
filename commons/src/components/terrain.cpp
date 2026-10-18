@@ -85,7 +85,7 @@ void terrain::gerarHeightMap(unsigned char* data, int width, int height)
     glm::vec3 v3 = {vertices[i3].position.x,vertices[i3].position.y,vertices[i3].position.z};
 
     glm::vec3 _normal = glm::normalize(glm::cross(v2 - v1, v3 - v1));
-    fvec3 normal = {_normal.x, _normal.y, _normal.z};
+    bgui::vec3 normal = {_normal.x, _normal.y, _normal.z};
 
     // Adicionar a normal ao vértice (antes de normalize no final)
     vertices[i1].normal = vertices[i1].normal + normal;
@@ -96,7 +96,7 @@ void terrain::gerarHeightMap(unsigned char* data, int width, int height)
     // Normalizar todas as normais dos vértices
     for (auto &v : vertices)
     {
-        v.normal = normalized(v.normal);
+        v.normal = v.normal / glm::length(glm::vec3(v.normal.x, v.normal.y, v.normal.z));
     }
     // Criar a mesh
     m_mesh.set_vertices(vertices);

@@ -74,8 +74,8 @@ void physics_system::update(const std::shared_ptr<ecs>& reg) {
         auto t = reg->get<transform>(entity);
         btTransform bt;
         f->m_estado_de_movimento->getWorldTransform(bt);
-        t->position = fvec3(bt.getOrigin());
-        t->set_rotation(fvector_type4(bt.getRotation()));
+        t->position = bgui::vec3(bt.getOrigin());
+        t->set_rotation(bgui::vec4(bt.getRotation()));
     });
 }
 
@@ -123,7 +123,7 @@ ray_result physics_system::cast_ray(const ray& ray)
 
     dynamic_world->rayTest(origem, destino, callback);
 
-    ray_result resultado = { false, fvec3(0.0f), fvec3(0.0f), nullptr };
+    ray_result resultado = { false, bgui::vec3(0.0f), bgui::vec3(0.0f), nullptr };
 
     if (callback.hasHit()) {
         btVector3 ponto = callback.m_hitPointWorld;

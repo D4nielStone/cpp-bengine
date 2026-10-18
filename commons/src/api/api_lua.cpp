@@ -76,12 +76,12 @@ void commons::api::setClasses(sol::state& lua) {
     // \brief definindo classes:
     // \{
     // - vector_typeores
-    registrar_vector3<float>(lua, "fvec3");
+    registrar_bgui::vec3(lua, "bgui::vec3");
     registrar_vector3<double>(lua, "dvector_type3");
-    registrar_vector3<int>(lua, "ivector_type3");
+    registrar_vector3<int>(lua, "bgui::ivector_type3");
     // - components
     lua.new_usertype<transform>("transform",
-            sol::constructors<transform(const fvec3&, const fvec3&, const fvec3&)>(),
+            sol::constructors<transform(const bgui::vec3&, const bgui::vec3&, const bgui::vec3&)>(),
             "position", &transform::position,
             "scale", &transform::scale,
             "rotation", &transform::rotation,

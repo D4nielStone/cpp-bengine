@@ -10,17 +10,22 @@ using namespace COMMONS_NS;
  * @brief Ativa a escrita do framebuffer da câmera
  */
 
+bgui::vec3 normalized(const bgui::vec3& v) {
+    float length = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (length == 0) return {0.f, 0.f, 0.f};
+    return {v.x / length, v.y / length, v.z / length};
+}
 
 void camera::drawFB() {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
+
     glDepthFunc(GL_LESS);
     glDepthMask(GL_TRUE);
 
     if (flag_fb) {
-        if (viewport_ptr) {
+        if (viewport_ptr)
             viewport(*viewport_ptr);
-        }
 
         if (viewportFBO.x <= 0 || viewportFBO.y <= 0) {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -32,12 +37,56 @@ void camera::drawFB() {
 
         glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
         return;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+
+camera::~camera()
+{
+    debugging::emit(debug, "camera", "descarregando");
+
+    if(m_skybox)delete m_skybox;
+    deleteFB();
+}
+
+camera::camera(const bool orth)
+    : flag_orth(orth) {
+}
+
+bool camera::analyze(const rapidjson::Value& value)
+{
+    m_skybox = new skybox();
+
+    if(value.HasMember("fov"))
+        fov = value["fov"].GetFloat();
+    if(value.HasMember("zfar"))
+        corte_longo = value["zfar"].GetFloat();
+	if (value.HasMember("scale"))
+		scale = value["scale"].GetFloat();
+	if (value.HasMember("ortho"))
+		flag_orth = value["ortho"].GetBool();
+	if (value.HasMember("ceu"))
+	{
+		auto _ceu = value["ceu"].GetArray();
+		ceu =
+		{
+			_ceu[0].GetFloat() / 255,
+			_ceu[1].GetFloat() / 255,
+			_ceu[2].GetFloat() / 255,
+			_ceu[3].GetFloat() / 255,
+		};
+	}
+	if (value.HasMember("skybox") && !value["skybox"].GetBool()) return true;
+
+    m_use_skybox = true;
+
+	return true;
 }
 
 void camera::createFB() {
@@ -107,25 +156,25 @@ void camera::createFB() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void camera::viewport(const ivec2& viewp) {
+void camera::viewport(const bgui::vec2i& viewp) {
     if (viewp.x <= 0 || viewp.y <= 0)
         return;
 
     if (viewportFBO.x == viewp.x && viewportFBO.y == viewp.y)
         return;
 
-    viewportFBO = viewp;
-
-    if (!flag_fb)
+    if (!flag_fb) {
+        viewportFBO = viewp;
         return;
+    }
 
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(
         GL_TEXTURE_2D,
         0,
         GL_RGB,
-        viewportFBO.x,
-        viewportFBO.y,
+        viewp.x,
+        viewp.y,
         0,
         GL_RGB,
         GL_UNSIGNED_BYTE,
@@ -137,53 +186,29 @@ void camera::viewport(const ivec2& viewp) {
     glRenderbufferStorage(
         GL_RENDERBUFFER,
         GL_DEPTH24_STENCIL8,
-        viewportFBO.x,
-        viewportFBO.y
+        viewp.x,
+        viewp.y
     );
     glBindRenderbuffer(GL_RENDERBUFFER, 0);
-}
 
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-camera::~camera()
-{
-    debugging::emit(debug, "camera", "descarregando");
+    const bool complete =
+        glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
+        GL_FRAMEBUFFER_COMPLETE;
 
-    if(m_skybox)delete m_skybox;
-    deleteFB();
-}
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-camera::camera(const bool orth)
-    : flag_orth(orth) {
-}
+    if (!complete) {
+        debugging::emit(
+            debug,
+            "camera",
+            "Framebuffer incompleto apos redimensionamento"
+        );
+        return;
+    }
 
-bool camera::analyze(const rapidjson::Value& value)
-{
-    m_skybox = new skybox();
-
-    if(value.HasMember("fov"))
-        fov = value["fov"].GetFloat();
-    if(value.HasMember("zfar"))
-        corte_longo = value["zfar"].GetFloat();
-	if (value.HasMember("scale"))
-		scale = value["scale"].GetFloat();
-	if (value.HasMember("ortho"))
-		flag_orth = value["ortho"].GetBool();
-	if (value.HasMember("ceu"))
-	{
-		auto _ceu = value["ceu"].GetArray();
-		ceu =
-		{
-			_ceu[0].GetFloat() / 255,
-			_ceu[1].GetFloat() / 255,
-			_ceu[2].GetFloat() / 255,
-			_ceu[3].GetFloat() / 255,
-		};
-	}
-	if (value.HasMember("skybox") && !value["skybox"].GetBool()) return true;
-
-    m_use_skybox = true;
-
-	return true;
+    viewportFBO = viewp;
 }
 bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const
 {
@@ -232,7 +257,7 @@ glm::mat4 camera::getViewMatrix() {
     position = m_transform->get_position();
 
     // Recalculate reference vectors
-    fvec3 frente = {
+    bgui::vec3 frente = {
         cos(glm::radians(m_transform->get_rotation().y)) * cos(glm::radians(m_transform->get_rotation().x)),    // x
         sin(glm::radians(m_transform->get_rotation().x)),                                                     // y
         sin(glm::radians(m_transform->get_rotation().y)) * cos(glm::radians(m_transform->get_rotation().x))     // z
@@ -241,8 +266,8 @@ glm::mat4 camera::getViewMatrix() {
 
     up = {0.f, 1.f, 0.f};
 
-    const glm::vec3 glm_forward = to_glm(forward);
-    const glm::vec3 glm_up = to_glm(up);
+    const glm::vec3 glm_forward = glm::vec3(forward.x, forward.y, forward.z);
+    const glm::vec3 glm_up = glm::vec3(up.x, up.y, up.z);
     const glm::vec3 glm_right = glm::normalize(glm::cross(glm_forward, glm_up));
     right = {glm_right.x, glm_right.y, glm_right.z};
     const glm::vec3 corrected_up = glm::normalize(glm::cross(glm_right, glm_forward));
@@ -251,7 +276,7 @@ glm::mat4 camera::getViewMatrix() {
     // Atualiza a transformação
     m_transform->set_up(up);
 
-    fvec3 target;
+    bgui::vec3 target;
     if (m_transform->is_using_target()) {
         target = m_transform->get_target();
     }
@@ -260,43 +285,49 @@ glm::mat4 camera::getViewMatrix() {
     }
 
     // Agora, passa o vector 'up' atualizado para a viewMatrix
-    viewMatrix = glm::lookAt(to_glm(position), to_glm(target), to_glm(up));
+    viewMatrix = glm::lookAt(glm::vec3(position.x, position.y, position.z), glm::vec3(target.x, target.y, target.z), glm::vec3(up.x, up.y, up.z));
     return viewMatrix;
 }
 glm::mat4 camera::obtProjectionMatrix() {
-    ivec2 viewp = viewportFBO;
-    if (viewport_ptr) {
-        viewp = *viewport_ptr;
-        viewportFBO = *viewport_ptr;
-    }
+    const bgui::vec2i viewp = viewport_ptr ? *viewport_ptr : viewportFBO;
 
     if (viewp.x <= 0 || viewp.y <= 0)
         return glm::mat4(1.f);
 
-    if (flag_orth)
-    {
-        float width = viewp.x;
-        float height = viewp.y != 0.0f ? viewp.y : 1.0f;
-        aspecto = width / height;
+    const float width = static_cast<float>(viewp.x);
+    const float height = static_cast<float>(viewp.y);
+
+    aspecto = width / height;
+
+    if (flag_orth) {
         left = -scale * aspecto;
         right_limit = scale * aspecto;
         bottom = -scale;
         top = scale;
-        projMatriz = glm::ortho(left, right_limit, bottom, top, corte_curto, corte_longo);
+
+        projMatriz = glm::ortho(
+            left,
+            right_limit,
+            bottom,
+            top,
+            corte_curto,
+            corte_longo
+        );
+    } else {
+        projMatriz = glm::perspective(
+            glm::radians(fov),
+            aspecto,
+            corte_curto,
+            corte_longo
+        );
     }
-    else
-    {
-        float width = viewp.x;
-        float height = viewp.y;
-        aspecto = width / height;
-        projMatriz = glm::perspective(glm::radians(fov), aspecto, corte_curto, corte_longo);
-    }
+
     return projMatriz;
 }
 
-ray camera::point_to_ray(const fvec2& screenPoint) const
+ray camera::point_to_ray(const bgui::vec2& screenPoint) const
 {
-    fvec3 directionMundo = telaParaMundo(screenPoint, 0.0f);
+    bgui::vec3 directionMundo = telaParaMundo(screenPoint, 0.0f);
 
     ray ray {};
     ray.origem = position;
@@ -305,21 +336,21 @@ ray camera::point_to_ray(const fvec2& screenPoint) const
     return ray;
 }
 
-fvec3 camera::telaParaMundo(const fvec2 &screenPoint, float profundidade) const
+bgui::vec3 camera::telaParaMundo(const bgui::vec2 &screenPoint, float profundidade) const
 {
     float ndcX = (2.0f * screenPoint.x) / viewportFBO.x - 1.0f;
     float ndcY = 1.0f - (2.0f * screenPoint.y) / viewportFBO.y;
-    fvector_type4 clipCoords = {ndcX, ndcY, profundidade, 1.0f};
+    bgui::vec4 clipCoords = {ndcX, ndcY, profundidade, 1.0f};
 
-    const glm::vec4 eye = glm::inverse(projMatriz) * to_glm(clipCoords);
-    fvector_type4 eyeCoords = {eye.x, eye.y, eye.z, eye.w};
+    const glm::vec4 eye = glm::inverse(projMatriz) * glm::vec4(clipCoords.x, clipCoords.y, clipCoords.z, clipCoords.w);
+    bgui::vec4 eyeCoords = {eye.x, eye.y, eye.z, eye.w};
     eyeCoords = {eyeCoords.x, eyeCoords.y, -1.0f, 0.0f};
 
-    const glm::vec4 world = glm::inverse(viewMatrix) * to_glm(eyeCoords);
+    const glm::vec4 world = glm::inverse(viewMatrix) * glm::vec4(eyeCoords.x, eyeCoords.y, eyeCoords.z, eyeCoords.w);
     return normalized({world.x, world.y, world.z});
 }
 
-ivec2 camera::worldParaTela(const fvec3 &worldPos)
+bgui::vec2i camera::worldParaTela(const bgui::vec3 &worldPos)
 {
     glm::vec4 clipSpacePos = projMatriz * viewMatrix * glm::vec4(worldPos.x, worldPos.y, worldPos.z, 1.0f);
 
@@ -333,13 +364,13 @@ ivec2 camera::worldParaTela(const fvec3 &worldPos)
     int screenWidth = viewport_ptr->x;
     int screenHeight = viewport_ptr->y;
 
-    ivec2 screenPos;
+    bgui::vec2i screenPos;
     screenPos.x = static_cast<int>(std::round((ndcPos.x * 0.5f + 0.5f) * screenWidth));
     screenPos.y = static_cast<int>(std::round((1.0f - (ndcPos.y * 0.5f + 0.5f)) * screenHeight)); // Inverter Y
     return screenPos;
 }
 
-void camera::move(const fvec3& pos)
+void camera::move(const bgui::vec3& pos)
 {
     if (!m_transform && reg)
         m_transform = reg->get<transform>(my_object).get();

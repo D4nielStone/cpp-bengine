@@ -2,9 +2,13 @@
 
 using namespace COMMONS_NS;
 
-transform::transform(const fvec3& p, const fvec3& r, const fvec3& e) :
+glm::vec3 to_glm(const bgui::vec3& v) {
+    return glm::vec3(v.x, v.y, v.z);
+}
+
+transform::transform(const bgui::vec3& p, const bgui::vec3& r, const bgui::vec3& e) :
 			position(p), up({0.f, 1.f, 0.f}),
-			rotation(r), target(new fvec3(1.f)), m_target_novo(true),
+			rotation(r), target(new bgui::vec3(1.f)), m_target_novo(true),
 			scale(e), m_usar_target(false) {}
 
 transform::~transform() {
@@ -72,23 +76,23 @@ glm::mat4 transform::get_model_matrix() {
     return matrizmodelo;
 }
 
-fvec3 transform::get_position() const {
+bgui::vec3 transform::get_position() const {
     return position;
 }
 
-fvec3 transform::get_scale() const {
+bgui::vec3 transform::get_scale() const {
     return scale;
 }
 
-fvec3 transform::get_rotation() const {
+bgui::vec3 transform::get_rotation() const {
     return rotation;
 }
 
-fvec3 transform::get_target() const {
+bgui::vec3 transform::get_target() const {
     return *target;
 }
 
-fvec3 transform::get_up() const {
+bgui::vec3 transform::get_up() const {
     return up;
 }
 
@@ -100,40 +104,40 @@ void transform::set_model_matrix(const glm::mat4& m) {
     matrizmodelo = m;
 }
 
-void transform::set_up(const fvec3& c) {
+void transform::set_up(const bgui::vec3& c) {
     up = c;
 }
 
-void  transform::set_position(const fvec3& v) {
+void  transform::set_position(const bgui::vec3& v) {
     position = v;
 }
 
-void  transform::set_scale(const fvec3& v) {
+void  transform::set_scale(const bgui::vec3& v) {
     scale = v;
 }
 
-void  transform::set_rotation(const fvec3& v) {
+void  transform::set_rotation(const bgui::vec3& v) {
     m_usar_target = false;
     rotation = v;
 }
 
-void  transform::move(const fvec3& v) {
+void  transform::move(const bgui::vec3& v) {
     position = position + v;
 }
 
-void  transform::apply_scale(const fvec3& v) {
+void  transform::apply_scale(const bgui::vec3& v) {
     scale = scale + v;
 }
 
-void  transform::rotate(const fvec3& v) {
+void  transform::rotate(const bgui::vec3& v) {
     m_usar_target = false;
     rotation = rotation + v;
 }
 
-void  transform::look_at_vector(const fvec3& pos) {
+void  transform::look_at_vector(const bgui::vec3& pos) {
     m_usar_target = true;
     if(!m_target_novo)
-        target = new fvec3(1.f);
+        target = new bgui::vec3(1.f);
     m_target_novo = true;
     *target = pos;
 }

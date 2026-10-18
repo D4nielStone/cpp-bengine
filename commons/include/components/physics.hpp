@@ -46,14 +46,14 @@ namespace COMMONS_NS {
         virtual ~physics();
 
         void setModelo(model*);
-        void setForca(const fvec3& vector);
-        void setVelocidade(const fvec3& vector);
-        void setFatorLinear(const fvec3& fator);
-        void setFatorAngular(const fvec3& fator);
+        void setForca(const bgui::vec3& vector);
+        void setVelocidade(const bgui::vec3& vector);
+        void setFatorLinear(const bgui::vec3& fator);
+        void setFatorAngular(const bgui::vec3& fator);
         void setFriccao(const float fator);
         void setRestituicao(const float fator);
         void setRaioCCD(const float fator);
-        fvec3 getVelocidade() const;
+        bgui::vec3 getVelocidade() const;
         unsigned int m_massa;
         model* m_modelo{ nullptr };
         btCollisionShape* m_forma{ nullptr };
