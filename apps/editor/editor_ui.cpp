@@ -1,5 +1,6 @@
 #include "editor_ui.hpp"
 
+#include <elem/button.hpp>
 #include <elem/menu_bar.hpp>
 
 #include <iostream>
@@ -32,6 +33,20 @@ editor_ui::editor_ui(
 )
     : m_dock(dock),
       m_project_persistence(project_persistence) {
+    m_play_button = &menu_bar.add<bgui::button>(
+        "Play",
+        0.3f,
+        [this]() {
+            m_is_playing = !m_is_playing;
+            m_play_button->get_label().set_buffer(
+                m_is_playing ? "Stop" : "Play"
+            );
+            if (m_play_state_callback)
+                m_play_state_callback(m_is_playing);
+        }
+    );
+    m_play_button->add_class("runtime-play-button");
+
     menu_bar.add_menu(
         "Files",
         0.3f,
@@ -65,6 +80,10 @@ editor_ui::editor_ui(
 
 void editor_ui::set_project_loaded_callback(std::function<void()> callback) {
     m_project_loaded_callback = std::move(callback);
+}
+
+void editor_ui::set_play_state_callback(std::function<void(bool)> callback) {
+    m_play_state_callback = std::move(callback);
 }
 
 void editor_ui::update() {

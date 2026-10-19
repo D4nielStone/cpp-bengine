@@ -1,5 +1,6 @@
 #include "systems/render_system.hpp"
 
+#include <chrono>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "components/camera.hpp"
@@ -16,7 +17,12 @@ void render_system::setup(const std::shared_ptr<ecs>&) {
 }
 
 void render_system::update(const std::shared_ptr<ecs>& reg) {
+    const auto start_time = std::chrono::steady_clock::now();
+    m_last_camera_count = 0;
+    m_last_rendered_entity_count = 0;
+
     if (!reg) {
+        m_last_render_time_ms = 0.0;
         return;
     }
 
@@ -26,6 +32,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             return;
         }
 
+        ++m_last_camera_count;
         camera_component->drawFB();
 
         const auto view = camera_component->getViewMatrix();
@@ -62,6 +69,8 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
                 debugging::emit(debug, "render", "Renderizador ou transformação inválida");
                 return;
             }
+            if (!render_component->visible)
+                return;
 
             auto& shader = render_component->m_modelo->getShader();
             shader.use();
@@ -85,7 +94,12 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             }
 
             render_component->m_modelo->draw();
+            ++m_last_rendered_entity_count;
         });
 
     });
+
+    m_last_render_time_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start_time
+    ).count();
 }

@@ -2,19 +2,40 @@
 
 #include <bgui.hpp>
 
+#include "components/renderer.hpp"
 #include "editor_context.hpp"
 #include "panel.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace editor::ui {
+namespace detail {
+
+class entities_refreshing_layout final : public bgui::linear {
+public:
+    entities_refreshing_layout()
+        : bgui::linear(bgui::orientation::vertical) {}
+
+    std::function<void()> before_update;
+
+    void on_update() override {
+        if (before_update)
+            before_update();
+        bgui::linear::on_update();
+    }
+};
+
+}
 
 class entities_view final : public panel {
 public:
@@ -25,10 +46,18 @@ private:
     struct entry {
         entity_id id{};
         std::string label;
+        std::string normalized_label;
 
         bool operator==(const entry& other) const noexcept {
             return id == other.id && label == other.label;
         }
+    };
+
+    struct row {
+        entity_id id{};
+        bgui::button* selection{nullptr};
+        bgui::icon* visibility{nullptr};
+        bgui::icon* lock{nullptr};
     };
 
     static constexpr const char* selected_class = "editor-entity-row-selected";
@@ -37,14 +66,49 @@ private:
     std::shared_ptr<editor_context> m_context;
     name_provider m_get_name;
 
-    bgui::linear* m_root{nullptr};
+    detail::entities_refreshing_layout* m_root{nullptr};
     bgui::linear* m_toolbar{nullptr};
+    bgui::inputbox* m_filter{nullptr};
     bgui::linear* m_list{nullptr};
     bgui::tree* m_scene_tree{nullptr};
 
-    std::vector<std::pair<entity_id, bgui::button*>> m_rows;
+    std::vector<row> m_rows;
     std::vector<entry> m_last_entries;
+    std::string m_last_filter;
     std::optional<entity_id> m_last_selection;
+
+    static std::string normalize(std::string value) {
+        std::transform(
+            value.begin(),
+            value.end(),
+            value.begin(),
+            [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            }
+        );
+        return value;
+    }
+
+    static std::string normalized_filter(const std::string& raw_filter) {
+        const auto is_space = [](unsigned char character) {
+            return std::isspace(character) != 0;
+        };
+        const auto begin = std::find_if_not(
+            raw_filter.begin(), raw_filter.end(), is_space
+        );
+        const auto end = std::find_if_not(
+            raw_filter.rbegin(), raw_filter.rend(), is_space
+        ).base();
+        return begin < end
+            ? normalize(std::string(begin, end))
+            : std::string{};
+    }
+
+    static bool matches_filter(const entry& item, const std::string& filter) {
+        return filter.empty() ||
+            item.normalized_label.find(filter) != std::string::npos ||
+            std::to_string(item.id).find(filter) != std::string::npos;
+    }
 
     std::string entity_label(const entity_id id) const {
         if (m_get_name) {
@@ -72,6 +136,7 @@ private:
             entry e;
             e.id = id;
             e.label = entity_label(id);
+            e.normalized_label = normalize(e.label);
             result.push_back(std::move(e));
         }
 
@@ -86,53 +151,151 @@ private:
         return std::binary_search(
             entries.begin(),
             entries.end(),
-            entry{id, {}},
+            entry{id, {}, {}},
             [](const entry& a, const entry& b) { return a.id < b.id; }
         );
+    }
+
+    static void configure_icon_button(bgui::button& button, const int size) {
+        const bgui::color transparent{0.f, 0.f, 0.f, 0.f};
+        button.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
+        button.style.layout.require_width(bgui::mode::pixel, size);
+        button.style.layout.require_height(bgui::mode::pixel, size);
+        button.style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::center,
+            bgui::alignment::center
+        };
+        button.style.layout.padding = bgui::vec4i{0};
+        button.style.visual.background.normal = transparent;
+        button.style.visual.background.hover =
+            bgui::color{0.18f, 0.18f, 0.18f, 1.f};
+        button.style.visual.background.pressed =
+            bgui::color{0.24f, 0.24f, 0.24f, 1.f};
+        button.style.visual.background.focused = transparent;
+        button.style.visual.border.normal = transparent;
+        button.style.visual.border.hover = transparent;
+        button.style.visual.border.pressed = transparent;
+        button.style.visual.border.focused = transparent;
+        button.style.visual.border_size = 0.f;
+        button.style.visual.border_radius = 0.f;
+        button.get_label().set_enable(false);
+        button.mark_style_dirty();
+    }
+
+    static bgui::icon& add_button_icon(
+        bgui::button& button,
+        const std::string_view name,
+        const float scale
+    ) {
+        auto& icon = button.add<bgui::icon>(name, scale);
+        icon.receives_input(false);
+        icon.style.layout.require_mode(
+            bgui::mode::wrap_content,
+            bgui::mode::wrap_content
+        );
+        icon.style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::center,
+            bgui::alignment::center
+        };
+        return icon;
     }
 
     void update_row_styles() {
         const bgui::color transparent{0.f, 0.f, 0.f, 0.f};
         const bgui::color selected_background{0.16f, 0.30f, 0.44f, 1.f};
 
-        for (const auto& [id, row] : m_rows) {
-            if (!row)
+        for (const auto& item : m_rows) {
+            if (!item.selection)
                 continue;
 
             const bool is_selected =
                 m_context && m_context->selected_entity &&
-                *m_context->selected_entity == id;
+                *m_context->selected_entity == item.id;
             if (is_selected) {
-                row->add_class(selected_class);
-                row->add_class(selected_class_legacy);
-                row->style.visual.background.normal = selected_background;
-                row->style.visual.background.hover = selected_background;
-                row->style.visual.background.pressed = selected_background;
-                row->style.visual.background.focused = selected_background;
+                item.selection->add_class(selected_class);
+                item.selection->add_class(selected_class_legacy);
+                item.selection->style.visual.background.normal = selected_background;
+                item.selection->style.visual.background.hover = selected_background;
+                item.selection->style.visual.background.pressed = selected_background;
+                item.selection->style.visual.background.focused = selected_background;
             } else {
-                row->remove_class(selected_class);
-                row->remove_class(selected_class_legacy);
-                row->style.visual.background.normal = transparent;
-                row->style.visual.background.hover = transparent;
-                row->style.visual.background.pressed = transparent;
-                row->style.visual.background.focused = transparent;
+                item.selection->remove_class(selected_class);
+                item.selection->remove_class(selected_class_legacy);
+                item.selection->style.visual.background.normal = transparent;
+                item.selection->style.visual.background.hover = transparent;
+                item.selection->style.visual.background.pressed = transparent;
+                item.selection->style.visual.background.focused = transparent;
             }
-            row->style.visual.border.normal = transparent;
-            row->style.visual.border.hover = transparent;
-            row->style.visual.border.pressed = transparent;
-            row->style.visual.border.focused = transparent;
-            row->style.visual.border_radius = 0.f;
-            row->style.visual.border_size = 0.f;
-            row->mark_style_dirty();
+            item.selection->style.visual.border.normal = transparent;
+            item.selection->style.visual.border.hover = transparent;
+            item.selection->style.visual.border.pressed = transparent;
+            item.selection->style.visual.border.focused = transparent;
+            item.selection->style.visual.border_radius = 0.f;
+            item.selection->style.visual.border_size = 0.f;
+            item.selection->mark_style_dirty();
+
+            const bool hidden =
+                m_context && m_context->hidden_entities.contains(item.id);
+            if (item.visibility) {
+                item.visibility->set_buffer(
+                    hidden ? "\xef\x81\xb0" : "\xef\x81\xae"
+                );
+                item.visibility->style.visual.text.normal = hidden
+                    ? bgui::color{0.42f, 0.42f, 0.42f, 1.f}
+                    : bgui::color{0.72f, 0.72f, 0.72f, 1.f};
+                item.visibility->mark_style_dirty();
+            }
+
+            const bool locked =
+                m_context && m_context->locked_entities.contains(item.id);
+            if (item.lock) {
+                item.lock->style.visual.text.normal = locked
+                    ? bgui::color{0.92f, 0.72f, 0.32f, 1.f}
+                    : bgui::color{0.42f, 0.42f, 0.42f, 1.f};
+                item.lock->mark_style_dirty();
+            }
         }
     }
 
     void select(const entity_id id) {
-        if (!m_context || m_context->selected_entity == id)
+        if (!m_context || m_context->locked_entities.contains(id) ||
+            m_context->selected_entity == id)
             return;
 
         m_context->selected_entity = id;
         m_last_selection = id;
+        update_row_styles();
+    }
+
+    void toggle_visibility(const entity_id id) {
+        if (!m_context || !m_context->registry)
+            return;
+
+        const bool now_hidden =
+            !m_context->hidden_entities.contains(id);
+        if (now_hidden)
+            m_context->hidden_entities.insert(id);
+        else
+            m_context->hidden_entities.erase(id);
+
+        if (const auto renderer = m_context->registry->get<commons::renderer>(id))
+            renderer->visible = !now_hidden;
+
+        update_row_styles();
+    }
+
+    void toggle_lock(const entity_id id) {
+        if (!m_context)
+            return;
+
+        if (m_context->locked_entities.contains(id)) {
+            m_context->locked_entities.erase(id);
+        } else {
+            m_context->locked_entities.insert(id);
+            if (m_context->selected_entity == id)
+                m_context->selected_entity.reset();
+        }
+
         update_row_styles();
     }
 
@@ -172,7 +335,27 @@ private:
         };
         row.get_label().set_wrap(false);
 
-        m_rows.emplace_back(id, &row);
+        auto& visibility_button = row_layout.add<bgui::button>(
+            "",
+            0.26f,
+            [this, id]() { toggle_visibility(id); }
+        );
+        configure_icon_button(visibility_button, 20);
+        auto& visibility_icon = add_button_icon(
+            visibility_button,
+            "eye",
+            0.24f
+        );
+
+        auto& lock_button = row_layout.add<bgui::button>(
+            "",
+            0.26f,
+            [this, id]() { toggle_lock(id); }
+        );
+        configure_icon_button(lock_button, 20);
+        auto& lock_icon = add_button_icon(lock_button, "key", 0.24f);
+
+        m_rows.push_back({id, &row, &visibility_icon, &lock_icon});
     }
 
     static void clear_tree(bgui::tree& tree) {
@@ -203,8 +386,15 @@ public:
             bgui::dock_area::left,
             0.3f
         );
-        m_root = &window.get_context();
+        auto& window_context = window.get_context();
+        window_context.set_scrollable(false);
+        m_root = &window_context.add<detail::entities_refreshing_layout>();
+        m_root->style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::match_parent
+        );
         m_root->set_scrollable(false);
+        m_root->before_update = [this]() { update(); };
 
         const auto start_align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::start,
@@ -221,11 +411,11 @@ public:
             bgui::mode::match_parent,
             bgui::mode::wrap_content
         );
-        m_toolbar->style.layout.padding = bgui::vec4i{4, 2, 4, 2};
+        m_toolbar->style.layout.padding = bgui::vec4i{4, 3, 4, 3};
         m_toolbar->style.visual.visible = false;
 
         auto& add_entity = m_toolbar->add<bgui::button>(
-            "+",
+            "",
             0.28f,
             [this]() {
                 if (!m_context || !m_context->registry)
@@ -235,16 +425,32 @@ public:
             }
         );
         add_entity.add_class("entities-add-button");
-        add_entity.style.layout.require_mode(
+        configure_icon_button(add_entity, 24);
+        add_button_icon(add_entity, "plus", 0.26f);
+
+        auto& search_icon = m_toolbar->add<bgui::icon>("search", 0.24f);
+        search_icon.receives_input(false);
+        search_icon.style.layout.require_mode(
             bgui::mode::pixel,
-            bgui::mode::pixel
+            bgui::mode::wrap_content
         );
-        add_entity.style.layout.require_width(bgui::mode::pixel, 20.f);
-        add_entity.style.layout.require_height(bgui::mode::pixel, 20.f);
-        add_entity.get_label().style.layout.align = bgui::vec<2, bgui::alignment>{
+        search_icon.style.layout.require_width(bgui::mode::pixel, 18.f);
+        search_icon.style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::center,
             bgui::alignment::center
         };
+
+        m_filter = &m_toolbar->add<bgui::inputbox>(
+            "",
+            "Search entities...",
+            0.27f
+        );
+        m_filter->add_class("editor-input");
+        m_filter->style.layout.require_mode(
+            bgui::mode::stretch,
+            bgui::mode::wrap_content
+        );
+        m_filter->style.layout.padding = bgui::vec4i{4, 2, 4, 2};
 
         m_list = &m_root->add<bgui::linear>(bgui::orientation::vertical);
         m_list->add_class("entities-list");
@@ -260,18 +466,48 @@ public:
     }
 
     void update() override {
-        if (!m_root || !m_list)
+        if (!m_root || !m_filter || !m_list)
             return;
 
         const auto entries = collect_entries();
+        const auto current_filter = m_filter->get_buffer();
+
+        if (m_context) {
+            for (auto it = m_context->hidden_entities.begin();
+                 it != m_context->hidden_entities.end();) {
+                if (!contains(entries, *it))
+                    it = m_context->hidden_entities.erase(it);
+                else
+                    ++it;
+            }
+            for (auto it = m_context->locked_entities.begin();
+                 it != m_context->locked_entities.end();) {
+                if (!contains(entries, *it))
+                    it = m_context->locked_entities.erase(it);
+                else
+                    ++it;
+            }
+
+            if (m_context->registry) {
+                for (const auto& item : entries) {
+                    if (!m_context->hidden_entities.contains(item.id))
+                        continue;
+                    if (const auto renderer =
+                            m_context->registry->get<commons::renderer>(item.id)) {
+                        renderer->visible = false;
+                    }
+                }
+            }
+        }
 
         // Limpa a seleção se a entidade selecionada não existe mais.
         if (m_context && m_context->selected_entity &&
-            !contains(entries, *m_context->selected_entity)) {
+            (!contains(entries, *m_context->selected_entity) ||
+             m_context->locked_entities.contains(*m_context->selected_entity))) {
             m_context->selected_entity = std::nullopt;
         }
 
-        if (entries != m_last_entries)
+        if (entries != m_last_entries || current_filter != m_last_filter)
             refresh(entries);
 
         const auto selection = m_context ? m_context->selected_entity : std::nullopt;
@@ -299,6 +535,18 @@ private:
             return;
 
         m_rows.clear();
+        const auto filter = normalized_filter(
+            m_filter ? m_filter->get_buffer() : std::string{}
+        );
+        std::vector<entry> visible_entries;
+        std::copy_if(
+            entries.begin(),
+            entries.end(),
+            std::back_inserter(visible_entries),
+            [&filter](const entry& item) {
+                return matches_filter(item, filter);
+            }
+        );
 
         const bool create_scene_tree = !m_scene_tree;
         if (!m_scene_tree) {
@@ -312,12 +560,12 @@ private:
             clear_tree(*m_scene_tree);
         }
 
-        for (const auto& e : entries)
-            build_row(e, m_scene_tree->children());
+        for (const auto& item : visible_entries)
+            build_row(item, m_scene_tree->children());
 
-        if (entries.empty()) {
+        if (visible_entries.empty()) {
             auto& empty = m_scene_tree->children().add<bgui::text>(
-                "No entities",
+                filter.empty() ? "No entities" : "No entities found",
                 0.26f
             );
             empty.add_class("entities-empty");
@@ -327,6 +575,7 @@ private:
             m_scene_tree->set_expanded(true);
 
         m_last_entries = entries;
+        m_last_filter = m_filter ? m_filter->get_buffer() : std::string{};
 
         update_row_styles();
     }

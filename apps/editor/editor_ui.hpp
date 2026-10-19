@@ -24,6 +24,7 @@ public:
     );
 
     void set_project_loaded_callback(std::function<void()> callback);
+    void set_play_state_callback(std::function<void(bool)> callback);
 
     template <typename T, typename... Args>
     T& add_panel(Args&&... args) {
@@ -40,6 +41,9 @@ private:
     bgui::dock& m_dock;
     project_persistence_system& m_project_persistence;
     std::function<void()> m_project_loaded_callback;
+    std::function<void(bool)> m_play_state_callback;
+    bgui::button* m_play_button{nullptr};
+    bool m_is_playing{false};
     std::vector<std::unique_ptr<panel>> m_panels;
 };
 

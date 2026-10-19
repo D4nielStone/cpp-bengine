@@ -22,6 +22,13 @@ right and lets you edit transform, camera, and directional-light properties,
 as well as add or remove supported components. Selecting an entity in either
 the scene or the entity list updates the Inspector.
 
+Use the editor's **Play** button to run the current scene in the scene viewport.
+While the runtime is active, editor camera movement, selection, and gizmos are
+disabled, and entities hidden only for editor organization are shown. The
+**Runtime Debug / Profiler** panel reports frame time, FPS, render time, camera
+and draw counts, and scene entity/renderer statistics. The render duration is
+CPU-side time spent submitting the scene. Press **Stop** to return to editing.
+
 # Dependencies
 
 The following dependencies must be installed:

@@ -42,6 +42,12 @@ public:
             return;
 
         const bool left_down = bgui::get_pressed(bgui::input_key::mouse_left);
+        if (m_context->is_playing) {
+            m_left_was_down = left_down;
+            m_pending_pick.reset();
+            return;
+        }
+
         const bool just_pressed = left_down && !m_left_was_down;
         m_left_was_down = left_down;
 
@@ -93,9 +99,14 @@ public:
 
         registry->cada<commons::renderer, commons::transform>(
             [&](const std::uint32_t entity) {
+                if (m_context->hidden_entities.contains(entity) ||
+                    m_context->locked_entities.contains(entity)) {
+                    return;
+                }
+
                 const auto renderer = registry->get<commons::renderer>(entity);
                 const auto transform = registry->get<commons::transform>(entity);
-                if (!renderer || !renderer->m_modelo || !transform)
+                if (!renderer || !renderer->visible || !renderer->m_modelo || !transform)
                     return;
 
                 const auto model_matrix = transform->get_model_matrix();

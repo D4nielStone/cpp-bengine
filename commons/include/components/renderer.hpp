@@ -9,6 +9,7 @@ namespace COMMONS_NS {
 	class renderer : public component {
     public:
         model* m_modelo{nullptr};
+	    bool visible{true};
 		static constexpr mask mask = COMPONENTE_RENDER;
 		renderer(model* mesh) : m_modelo(mesh) {
 		}

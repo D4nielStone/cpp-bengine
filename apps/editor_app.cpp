@@ -11,6 +11,7 @@
 #include "editor/editor_context.hpp"
 #include "editor/project_persistence_system.hpp"
 #include "editor/scene_view.hpp"
+#include "editor/runtime_tools_view.hpp"
 #include "editor/entities_view.hpp"
 #include "editor/components_view.hpp"
 #include "editor/ui_persistence_system.hpp"
@@ -75,8 +76,33 @@ int main() {
     auto& components_panel = editor.add_panel<editor::ui::components_view>(
         editor_context
     );
+    auto render_system = window.add<commons::render_system>();
+    auto& runtime_tools_panel =
+        editor.add_panel<editor::ui::runtime_tools_view>(
+            window,
+            editor_context,
+            render_system
+        );
+    editor.set_play_state_callback(
+        [editor_context, input_state = scene.input_state()](const bool playing) {
+            editor_context->is_playing = playing;
+            input_state->runtime_active = playing;
+            for (const auto id : editor_context->hidden_entities) {
+                if (auto renderer =
+                        editor_context->registry->get<commons::renderer>(id)) {
+                    renderer->visible = !playing;
+                }
+            }
+        }
+    );
     editor.set_project_loaded_callback(
         [&entities_panel, &components_panel, editor_context]() {
+        for (const auto id : editor_context->hidden_entities) {
+            if (auto renderer = editor_context->registry->get<commons::renderer>(id))
+                renderer->visible = true;
+        }
+        editor_context->hidden_entities.clear();
+        editor_context->locked_entities.clear();
         editor_context->selected_entity.reset();
         entities_panel.refresh();
         components_panel.refresh();
@@ -85,8 +111,8 @@ int main() {
     (void)scene;
     (void)entities_panel;
     (void)components_panel;
+    (void)runtime_tools_panel;
 
-    window.add<commons::render_system>();
     window.add<commons::ui_system>();
 
     window.loop();

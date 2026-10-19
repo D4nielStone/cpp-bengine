@@ -183,6 +183,12 @@ public:
         if (!m_camera || !m_image || !registry)
             return;
 
+        if (m_input_state && m_input_state->runtime_active) {
+            m_last_mouse_position = bgui::get_mouse_position();
+            m_previous_time = bgui::get_time();
+            return;
+        }
+
         auto camera_transform = registry->get<commons::transform>(
             m_camera->my_object
         );

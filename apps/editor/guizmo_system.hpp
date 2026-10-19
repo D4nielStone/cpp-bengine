@@ -60,6 +60,17 @@ public:
             return;
         }
 
+        if (m_context->is_playing) {
+            if (m_input_state)
+                m_input_state->gizmo_active = false;
+            m_last_mouse_position = bgui::get_mouse_position();
+            m_left_was_down = bgui::get_pressed(
+                bgui::input_key::mouse_left
+            );
+            bgui::element::get_requires(data);
+            return;
+        }
+
         const bool left_down = bgui::get_pressed(
             bgui::input_key::mouse_left
         );
