@@ -1,10 +1,77 @@
 #include "os/window.hpp"
 
+#include <filesystem>
+#include <optional>
 #include <stdexcept>
 
 #include <glad.h>
 #include <bgui.hpp>
 #include <bgui_backend_glfw.hpp>
+#include <os/style_manager.hpp>
+
+namespace {
+    template<typename T>
+    void override_value(std::optional<T>& target, const std::optional<T>& value) {
+        if (value)
+            target = value;
+    }
+
+    void override_color(bgui::state_color& target, const bgui::state_color& value) {
+        override_value(target.normal, value.normal);
+        override_value(target.hover, value.hover);
+        override_value(target.pressed, value.pressed);
+        override_value(target.focused, value.focused);
+        override_value(target.disabled, value.disabled);
+    }
+
+    void override_style(bgui::style& target, const bgui::style& value) {
+        override_value(target.layout.size_mode, value.layout.size_mode);
+        override_value(target.layout.align, value.layout.align);
+        override_value(target.layout.margin, value.layout.margin);
+        override_value(target.layout.padding, value.layout.padding);
+        override_value(target.layout.limit_min, value.layout.limit_min);
+        override_value(target.layout.limit_max, value.layout.limit_max);
+        override_value(target.layout.size, value.layout.size);
+        override_value(target.layout.ori, value.layout.ori);
+
+        override_color(target.visual.background, value.visual.background);
+        override_color(target.visual.border, value.visual.border);
+        override_color(target.visual.text, value.visual.text);
+        override_value(target.visual.border_radius, value.visual.border_radius);
+        override_value(target.visual.border_size, value.visual.border_size);
+        override_value(target.visual.font, value.visual.font);
+        override_value(target.visual.visible, value.visual.visible);
+    }
+
+    void apply_editor_theme_overrides(bgui::theme& theme) {
+        const auto override_path =
+            std::filesystem::path(COMMONS_ASSET_DIR) /
+            "themes/editor-dark.theme";
+        if (!std::filesystem::is_regular_file(override_path))
+            throw std::runtime_error(
+                "[ui] Could not find editor theme overrides: " +
+                override_path.string()
+            );
+
+        const auto overrides = bgui::load_theme(override_path.string());
+        override_style(theme.base, overrides.base);
+
+        const auto apply_styles = [](auto& target, const auto& source) {
+            for (const auto& [name, value] : source)
+                override_style(target[name], value);
+        };
+        apply_styles(theme.types, overrides.types);
+        apply_styles(theme.classes, overrides.classes);
+        apply_styles(theme.ids, overrides.ids);
+    }
+
+    bgui::theme editor_theme() {
+        auto theme = bgui::dark_theme();
+        apply_editor_theme_overrides(theme);
+        return theme;
+    }
+
+}
 
 using namespace COMMONS_NS;
 
@@ -23,7 +90,7 @@ namespace {
 window::window(const std::string& title, const int width, const int height)
     : m_ecs(std::make_shared<ecs>()) {
     m_window = bgui::set_up_glfw(width, height, title.c_str());
-    bgui::style_manager::get_instance().apply_theme(bgui::dark_theme());
+    bgui::style_manager::get_instance().apply_theme(editor_theme());
 
     try {
         initialize_opengl_state();

@@ -17,6 +17,7 @@ struct editor_context {
 
     std::shared_ptr<commons::ecs> registry;
     std::optional<entity_id> selected_entity;
+    std::optional<entity_id> editor_camera_entity;
 };
 
 }

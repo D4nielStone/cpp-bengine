@@ -44,6 +44,8 @@ build
 !commons/assets/shaders/*.frag
 !commons/assets/models/
 !commons/assets/models/*.obj
+!commons/assets/themes/
+!commons/assets/themes/*.theme
 .vscode
 editor.cfg
 Cache/

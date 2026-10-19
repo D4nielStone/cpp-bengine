@@ -208,6 +208,11 @@ bool project_persistence_system::save(
         error = "Cannot save a project without an ECS registry.";
         return false;
     }
+    if (!m_registry->get<commons::camera>(m_editor_camera_id) ||
+        !m_registry->get<commons::transform>(m_editor_camera_id)) {
+        error = "The editor camera entity is not available.";
+        return false;
+    }
 
     rapidjson::Document document;
     document.SetObject();
@@ -220,6 +225,9 @@ bool project_persistence_system::save(
     rapidjson::Value entities(rapidjson::kArrayType);
 
     for (const auto& [id, components] : m_registry->entities) {
+        if (id == m_editor_camera_id)
+            continue;
+
         rapidjson::Value entity(rapidjson::kObjectType);
         entity.AddMember("id", id, allocator);
         rapidjson::Value serialized_components(rapidjson::kObjectType);
@@ -299,23 +307,30 @@ bool project_persistence_system::load(
     if (!validate_project(document, error))
         return false;
 
-    bool has_editor_camera = false;
-    for (const auto& entity : document["entities"].GetArray()) {
-        if (entity["id"].GetUint() == m_editor_camera_id &&
-            entity["components"].HasMember("camera")) {
-            has_editor_camera = true;
-            break;
-        }
-    }
-    if (!has_editor_camera) {
-        error = "The project does not contain the editor camera entity (ID " +
-            std::to_string(m_editor_camera_id) + ").";
+    auto active_camera = m_registry->get<commons::camera>(m_editor_camera_id);
+    auto active_transform = m_registry->get<commons::transform>(m_editor_camera_id);
+    if (!active_camera || !active_transform) {
+        error = "The editor camera entity is not available.";
         return false;
+    }
+
+    for (const auto& entity : document["entities"].GetArray()) {
+        if (entity["id"].GetUint() != m_editor_camera_id)
+            continue;
+
+        if (!entity["components"].HasMember("camera")) {
+            error = "The project contains an entity that conflicts with the editor camera ID.";
+            return false;
+        }
+        break;
     }
 
     auto staged_registry = std::make_shared<commons::ecs>();
     for (const auto& entity_data : document["entities"].GetArray()) {
         const auto id = entity_data["id"].GetUint();
+        if (id == m_editor_camera_id)
+            continue;
+
         auto entity = staged_registry->create(id);
         const auto& components = entity_data["components"];
         for (auto component = components.MemberBegin(); component != components.MemberEnd(); ++component) {
@@ -328,22 +343,12 @@ bool project_persistence_system::load(
         }
     }
 
-    auto active_camera = m_registry->get<commons::camera>(m_editor_camera_id);
-    auto staged_camera = staged_registry->get<commons::camera>(m_editor_camera_id);
-    if (active_camera && staged_camera) {
-        const auto& camera_data = document["entities"].GetArray();
-        for (const auto& entity : camera_data) {
-            if (entity["id"].GetUint() == m_editor_camera_id) {
-                if (!active_camera->analyze(entity["components"]["camera"])) {
-                    error = "Could not apply the project settings to the editor camera.";
-                    return false;
-                }
-                break;
-            }
-        }
-        active_camera->m_transform = nullptr;
-        staged_registry->entities[m_editor_camera_id][commons::camera::mask] = active_camera;
-    }
+    auto editor_camera_entity = staged_registry->create(m_editor_camera_id);
+    staged_registry->add<commons::camera>(editor_camera_entity);
+    auto& editor_components = staged_registry->entities[m_editor_camera_id];
+    editor_components[commons::transform::mask] = active_transform;
+    editor_components[commons::camera::mask] = active_camera;
+    active_camera->m_transform = nullptr;
 
     m_registry->entities = std::move(staged_registry->entities);
     m_registry->mascaras = std::move(staged_registry->mascaras);

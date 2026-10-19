@@ -59,6 +59,7 @@ int main() {
         project_persistence
     );
     auto editor_context = std::make_shared<editor::ui::editor_context>(registry);
+    editor_context->editor_camera_entity = camera_entity.id;
 
     auto& scene = editor.add_panel<editor::ui::scene_view>(
         window,
