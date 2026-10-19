@@ -8,12 +8,17 @@
 #include "systems/ui_system.hpp"
 
 #include "editor/editor_ui.hpp"
+#include "editor/editor_context.hpp"
+#include "editor/project_persistence_system.hpp"
 #include "editor/scene_view.hpp"
 #include "editor/entities_view.hpp"
+#include "editor/components_view.hpp"
+#include "editor/ui_persistence_system.hpp"
+
+#include <lay/linear.hpp>
 
 int main() {
     commons::window window("Bubble Engine - Editor");
-
     auto registry = window.get_ecs();
 
     auto camera_entity = registry->create();
@@ -28,28 +33,57 @@ int main() {
     registry->get<commons::transform>(camera_entity.id)->set_position({0.f, 0.f, 5.f});
     registry->get<commons::transform>(camera_entity.id)->set_rotation({0.f, -90.f, 0.f});
 
-    auto& dock = bgui::get_layout().add<bgui::dock>();
-    editor::ui::editor_ui editor(dock);
+    auto& editor_root = bgui::get_layout().add<bgui::linear>(
+        bgui::orientation::vertical
+    );
+    editor_root.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::match_parent
+    );
+    auto& menu_bar = editor_root.add<bgui::menu_bar>(editor_root);
+    auto& dock = editor_root.add<bgui::dock>();
+    dock.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::match_parent
+    );
 
-    auto& scene = editor.add_panel<editor::ui::scene_view>(window, camera);
-    auto& entities_panel = editor.add_panel<editor::ui::entities_view>(
+    editor::ui::ui_persistence_system ui_persistence;
+    editor::ui::project_persistence_system project_persistence(
         registry,
-        [&registry](std::uint32_t id) {
-            auto transform = registry->get<commons::transform>(id);
-            if (transform) {
-                return "Entity " + std::to_string(id) +
-                    " (Position: " +
-                    std::to_string(transform->get_position().x) + ", " +
-                    std::to_string(transform->get_position().y) + ", " +
-                    std::to_string(transform->get_position().z) + ")";
-            }
+        camera_entity.id
+    );
+    editor::ui::editor_ui editor(
+        dock,
+        menu_bar,
+        ui_persistence,
+        project_persistence
+    );
+    auto editor_context = std::make_shared<editor::ui::editor_context>(registry);
 
+    auto& scene = editor.add_panel<editor::ui::scene_view>(
+        window,
+        camera,
+        editor_context
+    );
+    auto& entities_panel = editor.add_panel<editor::ui::entities_view>(
+        editor_context,
+        [](std::uint32_t id) {
             return "Entity " + std::to_string(id);
         }
     );
+    auto& components_panel = editor.add_panel<editor::ui::components_view>(
+        editor_context
+    );
+    editor.set_project_loaded_callback(
+        [&entities_panel, &components_panel, editor_context]() {
+        editor_context->selected_entity.reset();
+        entities_panel.refresh();
+        components_panel.refresh();
+    });
 
     (void)scene;
     (void)entities_panel;
+    (void)components_panel;
 
     window.add<commons::render_system>();
     window.add<commons::ui_system>();

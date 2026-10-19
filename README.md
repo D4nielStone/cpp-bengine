@@ -13,6 +13,15 @@ The engine uses Bubble GUI to provide a simple and easy-to-use interface for the
 
 The engine also uses the BGUI API to build its own transform gizmos.
 
+The editor's **Files** menu saves and loads the dock layout through BGUI in
+`editor-ui.cfg`, and saves and loads project entities in `project.bengine`.
+Project files currently support transforms, renderers, cameras, and directional
+lights; saving fails with an error if an entity contains a component without
+project serialization support. The editor's Inspector panel is docked on the
+right and lets you edit transform, camera, and directional-light properties,
+as well as add or remove supported components. Selecting an entity in either
+the scene or the entity list updates the Inspector.
+
 # Dependencies
 
 The following dependencies must be installed:

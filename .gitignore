@@ -8,6 +8,8 @@
 
 # Ignorar pastas de dependências e binários
 */editor
+!apps/editor/
+!apps/editor/**
 */bin
 */lib
 */lib64

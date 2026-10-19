@@ -16,3 +16,23 @@ target_include_directories(commons_tests
 
 include(GoogleTest)
 gtest_discover_tests(commons_tests)
+
+add_executable(
+    editor_persistence_tests
+    editor_persistence_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/project_persistence_system.cpp
+)
+
+target_link_libraries(editor_persistence_tests
+    PRIVATE
+        GTest::gtest_main
+        commons
+)
+
+target_include_directories(editor_persistence_tests
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/apps/editor
+)
+
+include(GoogleTest)
+gtest_discover_tests(editor_persistence_tests)

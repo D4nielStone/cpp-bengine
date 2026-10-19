@@ -10,6 +10,8 @@ add_executable(
     editor_app
     editor_app.cpp
     editor/editor_ui.cpp
+    editor/project_persistence_system.cpp
     editor/scene_view.cpp
+    editor/ui_persistence_system.cpp
 )
 target_link_libraries(editor_app PRIVATE commons)

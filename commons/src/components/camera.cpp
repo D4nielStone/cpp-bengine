@@ -61,8 +61,6 @@ camera::camera(const bool orth)
 
 bool camera::analyze(const rapidjson::Value& value)
 {
-    m_skybox = new skybox();
-
     if(value.HasMember("fov"))
         fov = value["fov"].GetFloat();
     if(value.HasMember("zfar"))
@@ -82,9 +80,13 @@ bool camera::analyze(const rapidjson::Value& value)
 			_ceu[3].GetFloat() / 255,
 		};
 	}
-	if (value.HasMember("skybox") && !value["skybox"].GetBool()) return true;
-
-    m_use_skybox = true;
+    m_use_skybox = !value.HasMember("skybox") || value["skybox"].GetBool();
+    if (m_use_skybox && !m_skybox)
+        m_skybox = new skybox();
+    else if (!m_use_skybox && m_skybox) {
+        delete m_skybox;
+        m_skybox = nullptr;
+    }
 
 	return true;
 }
