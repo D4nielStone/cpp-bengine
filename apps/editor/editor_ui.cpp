@@ -706,8 +706,8 @@ bool editor_ui::load_project_selection() {
         }
 
         const std::vector<std::filesystem::path> candidates{
-            main_scene,
             root / "project.bengine",
+            main_scene,
             root / "game.world",
             root / "main.scene"
         };

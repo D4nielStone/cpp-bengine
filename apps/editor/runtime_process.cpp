@@ -359,6 +359,14 @@ void runtime_process::cleanup_project_file() {
         return;
 
     std::error_code error;
+    const auto scene_file = m_project_file.parent_path() /
+        (m_project_file.stem().string() + ".scene");
+    std::filesystem::remove(scene_file, error);
+    if (error)
+        std::cerr << "[editor] Could not remove runtime scene file '"
+                  << scene_file.string() << "': " << error.message() << '\n';
+
+    error.clear();
     std::filesystem::remove(m_project_file, error);
     if (error)
         std::cerr << "[editor] Could not remove runtime project file '"

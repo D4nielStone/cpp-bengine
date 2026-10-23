@@ -18,11 +18,12 @@ it remains dedicated to icon glyphs.
 The engine also uses the BGUI API to build its own transform gizmos.
 
 The editor's **Files** menu saves and loads the dock layout through BGUI in
-`editor-ui.cfg`, and saves and loads project entities in `project.bengine`.
+`editor-ui.cfg`. Project settings and the main-scene reference live in
+`project.bengine`; entity/component data lives in the referenced `.scene` file.
 The **Edit** menu and `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo
 scene edits, including Inspector changes, entity and component creation or
 removal, and transform-gizmo drags. Loading another project clears this history.
-Project files support transforms, renderers, cameras, directional lights,
+Scene files support transforms, renderers, cameras, directional lights,
 physics bodies/colliders, and Lua code components; saving fails with an error if
 an entity contains a component without project serialization support. The
 editor's Inspector panel is docked on the right and lets you edit transform,
@@ -100,7 +101,7 @@ path supplied at startup. Without `--project`, they continue to use
 `project.bengine`. The **Load Project** action now opens a modal that accepts
 a project directory or a project file path, and it resolves common folders such
 as `project.bengine`, `game.world`, or a project directory containing one of
-those files.
+those files. Older `.bengine` files that still embed entities remain loadable.
 
 A ready-to-use FPP sample project is available in `projects/fpp_demo/` and uses
 entities, physics, collision, and Lua scripts for gameplay logic.

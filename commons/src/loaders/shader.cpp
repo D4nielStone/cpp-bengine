@@ -77,11 +77,17 @@ const char* shader_exception::what() const noexcept {
     return msg_.c_str();
 }
 
-shader::shader(const char* vertexPath, const char* fragmentPath) {
-    compilar(vertexPath, fragmentPath);
+shader::shader(const char* vertexPath, const char* fragmentPath) : ID(0) {
+    if (glad_glCreateProgram != nullptr)
+        compilar(vertexPath, fragmentPath);
 }
 
 void shader::compilar(const char* vertexPath, const char* fragmentPath) {
+    if (glad_glCreateProgram == nullptr) {
+        ID = 0;
+        return;
+    }
+
     vert = vertexPath; frag = fragmentPath;
     // Verifica se o shader já foi compilado
     if(shaders.find(fragmentPath) != shaders.end())
@@ -131,6 +137,9 @@ void shader::compilar(const char* vertexPath, const char* fragmentPath) {
 
 void shader::use()
 {
+    if (glad_glUseProgram == nullptr || ID == 0)
+        return;
+
     if(shaders.find(frag) != shaders.end())
     {
         glUseProgram(ID);

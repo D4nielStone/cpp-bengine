@@ -4,6 +4,7 @@
 #include "components/code.hpp"
 #include "components/physics.hpp"
 #include "components/point_light.hpp"
+#include "components/renderer.hpp"
 #include "components/transform.hpp"
 
 #include <gtest/gtest.h>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -25,6 +27,37 @@ std::filesystem::path temporary_project_path() {
         .count();
     return std::filesystem::temp_directory_path() /
         ("cpp-bengine-project-" + std::to_string(timestamp) + ".bengine");
+}
+
+std::string read_file(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    return {
+        std::istreambuf_iterator<char>(file),
+        std::istreambuf_iterator<char>()
+    };
+}
+
+std::filesystem::path scene_file_for_project(
+    const std::filesystem::path& project_path
+) {
+    rapidjson::Document project;
+    const auto contents = read_file(project_path);
+    project.Parse(contents.data(), contents.size());
+    if (project.IsObject() && project.HasMember("scene") &&
+        project["scene"].IsString()) {
+        const std::filesystem::path scene_path(project["scene"].GetString());
+        return scene_path.is_absolute()
+            ? scene_path
+            : project_path.parent_path() / scene_path;
+    }
+    return project_path.parent_path() /
+        (project_path.stem().string() + ".scene");
+}
+
+void remove_project_files(const std::filesystem::path& project_path) {
+    std::error_code ignored;
+    std::filesystem::remove(scene_file_for_project(project_path), ignored);
+    std::filesystem::remove(project_path, ignored);
 }
 
 TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCameras) {
@@ -52,17 +85,21 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     std::string error;
 
     ASSERT_TRUE(persistence.save(path_string, error)) << error;
-    std::ifstream saved_file(path, std::ios::binary);
-    const std::string saved_contents{
-        std::istreambuf_iterator<char>(saved_file),
-        std::istreambuf_iterator<char>()
-    };
+    const auto saved_project_contents = read_file(path);
     rapidjson::Document saved_project;
-    saved_project.Parse(saved_contents.data(), saved_contents.size());
+    saved_project.Parse(saved_project_contents.data(), saved_project_contents.size());
     ASSERT_FALSE(saved_project.HasParseError());
-    ASSERT_EQ(saved_project["entities"].Size(), 1U);
+    EXPECT_FALSE(saved_project.HasMember("entities"));
+    EXPECT_TRUE(saved_project.HasMember("scene"));
+    const auto scene_path = scene_file_for_project(path);
+    const auto saved_scene_contents = read_file(scene_path);
+    rapidjson::Document saved_scene;
+    saved_scene.Parse(saved_scene_contents.data(), saved_scene_contents.size());
+    ASSERT_FALSE(saved_scene.HasParseError());
+    EXPECT_STREQ(saved_scene["format"].GetString(), "bubble-engine-scene");
+    ASSERT_EQ(saved_scene["entities"].Size(), 1U);
     EXPECT_EQ(
-        saved_project["entities"][0]["id"].GetUint(),
+        saved_scene["entities"][0]["id"].GetUint(),
         scene_camera_entity.id
     );
 
@@ -88,7 +125,112 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     EXPECT_FLOAT_EQ(scene_position.y, 6.f);
     EXPECT_FLOAT_EQ(scene_position.z, 7.f);
 
-    std::filesystem::remove(path);
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, KeepsLoadedEntityIdsInTheLiveRegistry) {
+    auto source_registry = std::make_shared<commons::ecs>();
+    auto source_camera = source_registry->create(17);
+    source_registry->add<commons::camera>(source_camera);
+    const auto scene_entity = source_registry->create(23);
+
+    editor::ui::project_persistence_system source_persistence(
+        source_registry,
+        source_camera.id
+    );
+    const auto path = temporary_project_path();
+    std::string error;
+    ASSERT_TRUE(source_persistence.save(path.string(), error)) << error;
+
+    auto destination_registry = std::make_shared<commons::ecs>();
+    auto destination_camera = destination_registry->create(17);
+    destination_registry->add<commons::camera>(destination_camera);
+    destination_registry->create(99);
+    editor::ui::project_persistence_system destination_persistence(
+        destination_registry,
+        destination_camera.id
+    );
+
+    ASSERT_TRUE(destination_persistence.load(path.string(), error)) << error;
+    EXPECT_TRUE(destination_registry->is_alive(scene_entity.id));
+    EXPECT_NE(
+        destination_registry->get<commons::transform>(scene_entity.id),
+        nullptr
+    );
+    EXPECT_TRUE(destination_registry->validate_invariants());
+
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, LoadsStandaloneSceneFiles) {
+    auto source_registry = std::make_shared<commons::ecs>();
+    auto source_camera = source_registry->create(17);
+    source_registry->add<commons::camera>(source_camera);
+    const auto scene_entity = source_registry->create(23);
+    source_registry->get<commons::transform>(scene_entity.id)->set_position(
+        {3.f, 4.f, 5.f}
+    );
+
+    const auto scene_path = temporary_project_path().replace_extension(".scene");
+    editor::ui::project_persistence_system source_persistence(
+        source_registry,
+        source_camera.id
+    );
+    std::string error;
+    ASSERT_TRUE(source_persistence.save(scene_path.string(), error)) << error;
+
+    auto destination_registry = std::make_shared<commons::ecs>();
+    auto destination_camera = destination_registry->create(17);
+    destination_registry->add<commons::camera>(destination_camera);
+    editor::ui::project_persistence_system destination_persistence(
+        destination_registry,
+        destination_camera.id
+    );
+    ASSERT_TRUE(destination_persistence.load(scene_path.string(), error)) << error;
+    const auto transform =
+        destination_registry->get<commons::transform>(scene_entity.id);
+    ASSERT_NE(transform, nullptr);
+    EXPECT_FLOAT_EQ(transform->get_position().x, 3.f);
+    EXPECT_FLOAT_EQ(transform->get_position().y, 4.f);
+    EXPECT_FLOAT_EQ(transform->get_position().z, 5.f);
+
+    std::filesystem::remove(scene_path);
+}
+
+TEST(ProjectPersistenceTest, LoadsLegacyCombinedProjectFiles) {
+    const auto path = temporary_project_path();
+    {
+        std::ofstream legacy_project(path, std::ios::binary);
+        legacy_project << R"({
+            "format": "bubble-engine-project",
+            "version": 1,
+            "settings": {"gravity": [1.0, -4.0, 2.0]},
+            "entities": [{
+                "id": 23,
+                "components": {
+                    "transform": {
+                        "position": [3.0, 4.0, 5.0],
+                        "rotation": [0.0, 0.0, 0.0],
+                        "scale": [1.0, 1.0, 1.0]
+                    }
+                }
+            }]
+        })";
+    }
+
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    std::string error;
+
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    const auto transform = registry->get<commons::transform>(23);
+    ASSERT_NE(transform, nullptr);
+    EXPECT_FLOAT_EQ(transform->get_position().x, 3.f);
+    EXPECT_FLOAT_EQ(persistence.global_gravity()[1], -4.f);
+
+    remove_project_files(path);
 }
 
 TEST(ProjectPersistenceTest, SavesAndLoadsEntityNames) {
@@ -107,11 +249,7 @@ TEST(ProjectPersistenceTest, SavesAndLoadsEntityNames) {
 
     ASSERT_TRUE(persistence.save(path.string(), error)) << error;
 
-    std::ifstream saved_file(path, std::ios::binary);
-    const std::string saved_contents{
-        std::istreambuf_iterator<char>(saved_file),
-        std::istreambuf_iterator<char>()
-    };
+    const auto saved_contents = read_file(scene_file_for_project(path));
     rapidjson::Document saved_project;
     saved_project.Parse(saved_contents.data(), saved_contents.size());
     ASSERT_FALSE(saved_project.HasParseError());
@@ -121,7 +259,113 @@ TEST(ProjectPersistenceTest, SavesAndLoadsEntityNames) {
     ASSERT_TRUE(persistence.load(path.string(), error)) << error;
     EXPECT_EQ(entity_names.at(entity.id), std::string("Coin"));
 
-    std::filesystem::remove(path);
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, SavesRendererMaterialVisibilityAndLockState) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto entity = registry->create(23);
+    registry->add<commons::renderer>(entity);
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    ASSERT_NE(renderer, nullptr);
+    renderer->m_modelo = new commons::model();
+    renderer->visible = false;
+    renderer->m_modelo->meshes.emplace_back(
+        std::vector<commons::vertex>{},
+        std::vector<unsigned int>{},
+        commons::material{}
+    );
+    auto material = renderer->m_modelo->meshes.front().getMaterial();
+    material.set_uniform(
+        "material.albedo",
+        commons::color{0.2f, 0.4f, 0.6f, 0.8f}
+    );
+    renderer->m_modelo->meshes.front().setMaterial(material);
+
+    editor::ui::project_persistence_system::entity_state_set locked_entities{
+        entity.id
+    };
+    editor::ui::project_persistence_system persistence(
+        registry,
+        editor_camera.id,
+        nullptr,
+        nullptr,
+        &locked_entities
+    );
+    const auto path = temporary_project_path();
+    std::string error;
+
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+
+    const auto contents = read_file(scene_file_for_project(path));
+    rapidjson::Document saved_scene;
+    saved_scene.Parse(contents.data(), contents.size());
+    ASSERT_FALSE(saved_scene.HasParseError());
+    const auto& saved_entity = saved_scene["entities"][0];
+    EXPECT_TRUE(saved_entity["locked"].GetBool());
+    const auto& saved_renderer =
+        saved_entity["components"]["renderer"];
+    EXPECT_FALSE(saved_renderer["visible"].GetBool());
+    ASSERT_GE(saved_renderer["materials"].Size(), 1U);
+    const auto& albedo = saved_renderer["materials"][0]["albedo"];
+    ASSERT_EQ(albedo.Size(), 4U);
+    EXPECT_GE(albedo[0].GetFloat(), 0.f);
+    EXPECT_GE(albedo[1].GetFloat(), 0.f);
+    EXPECT_GE(albedo[2].GetFloat(), 0.f);
+    EXPECT_GE(albedo[3].GetFloat(), 0.f);
+
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, LoadsRendererVisibilityAndLockState) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto entity = registry->create(23);
+    registry->add<commons::renderer>(entity);
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    ASSERT_NE(renderer, nullptr);
+    renderer->m_modelo = new commons::model();
+    renderer->visible = false;
+    renderer->m_modelo->meshes.emplace_back(
+        std::vector<commons::vertex>{},
+        std::vector<unsigned int>{},
+        commons::material{}
+    );
+
+    editor::ui::project_persistence_system::entity_state_set hidden_entities{
+        entity.id
+    };
+    editor::ui::project_persistence_system::entity_state_set locked_entities{
+        entity.id
+    };
+    editor::ui::project_persistence_system persistence(
+        registry,
+        editor_camera.id,
+        nullptr,
+        &hidden_entities,
+        &locked_entities
+    );
+    const auto path = temporary_project_path();
+    std::string error;
+
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    renderer->visible = true;
+    hidden_entities.clear();
+    locked_entities.clear();
+
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+
+    const auto loaded_renderer =
+        registry->get<commons::renderer>(entity.id);
+    ASSERT_NE(loaded_renderer, nullptr);
+    EXPECT_FALSE(loaded_renderer->visible);
+    EXPECT_TRUE(hidden_entities.contains(entity.id));
+    EXPECT_TRUE(locked_entities.contains(entity.id));
+
+    remove_project_files(path);
 }
 
 TEST(ProjectPersistenceTest, SavesAndLoadsPhysicsBodies) {
@@ -152,7 +396,7 @@ TEST(ProjectPersistenceTest, SavesAndLoadsPhysicsBodies) {
     );
     EXPECT_FLOAT_EQ(loaded_physics->m_massa, 2.5f);
 
-    std::filesystem::remove(path);
+    remove_project_files(path);
 }
 
 TEST(ProjectPersistenceTest, SavesAndLoadsGlobalGravitySettings) {
@@ -172,7 +416,7 @@ TEST(ProjectPersistenceTest, SavesAndLoadsGlobalGravitySettings) {
     EXPECT_FLOAT_EQ(gravity[1], -4.f);
     EXPECT_FLOAT_EQ(gravity[2], 2.25f);
 
-    std::filesystem::remove(path);
+    remove_project_files(path);
 }
 
 TEST(ProjectPersistenceTest, ResolvesLuaScriptsFromProjectDirectory) {
@@ -210,11 +454,7 @@ TEST(ProjectPersistenceTest, ResolvesLuaScriptsFromProjectDirectory) {
 
     const auto runtime_file = temporary_project_path();
     ASSERT_TRUE(persistence.save(runtime_file.string(), error)) << error;
-    std::ifstream saved_runtime_file(runtime_file, std::ios::binary);
-    const std::string saved_contents{
-        std::istreambuf_iterator<char>(saved_runtime_file),
-        std::istreambuf_iterator<char>()
-    };
+    const auto saved_contents = read_file(scene_file_for_project(runtime_file));
     rapidjson::Document saved_project;
     saved_project.Parse(saved_contents.data(), saved_contents.size());
     ASSERT_FALSE(saved_project.HasParseError());
@@ -224,7 +464,7 @@ TEST(ProjectPersistenceTest, ResolvesLuaScriptsFromProjectDirectory) {
         loaded_code->arquivoCompleto
     );
 
-    std::filesystem::remove(runtime_file);
+    remove_project_files(runtime_file);
     std::filesystem::remove_all(directory);
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "glad.h"
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -27,8 +28,11 @@ namespace COMMONS_NS {
         // the program ID
         unsigned int ID;
 
-        // constructor reads and builds the shader
-        shader() { compilar("phong.vert", "phong.frag"); };
+        // constructor reads and builds the shader when an OpenGL context is available
+        shader() : ID(0) {
+            if (glad_glCreateProgram != nullptr)
+                compilar("phong.vert", "phong.frag");
+        }
         shader(const char* vertexPath, const char* fragmentPath);
         // use/activate the shader
         void use();

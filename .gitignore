@@ -39,6 +39,8 @@ out/.ninja_deps
 build/*
 build-check/*
 build
+build-scene-validation/*
+/build-scene-validation
 */assets/*
 !commons/assets/
 !commons/assets/shaders/

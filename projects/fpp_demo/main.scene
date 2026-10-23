@@ -1,0 +1,338 @@
+{
+    "format": "bubble-engine-scene",
+    "version": 1,
+    "entities": [
+        {
+            "id": 2,
+            "locked": false,
+            "components": {
+                "directional_light": {
+                    "direction": [
+                        -0.20000000298023224,
+                        -0.5,
+                        -0.30000001192092896
+                    ],
+                    "ambient": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "intensity": 1.0
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 3,
+            "locked": false,
+            "components": {
+                "transform": {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 100,
+            "locked": false,
+            "name": "PlayerCamera",
+            "components": {
+                "camera": {
+                    "fov": 75.0,
+                    "zfar": 200.0,
+                    "scale": 1.0,
+                    "ortho": false,
+                    "ceu": [
+                        109,
+                        198,
+                        219,
+                        255
+                    ],
+                    "skybox": false
+                },
+                "code": {
+                    "directory": "scripts/fpp_player.lua"
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        1.7000000476837158,
+                        5.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        -90.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 101,
+            "locked": false,
+            "name": "ArenaFloor",
+            "components": {
+                "renderer": {
+                    "model": "assets/models/floor.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ]
+                        }
+                    ],
+                    "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        -1.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        20.0,
+                        1.0,
+                        20.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 102,
+            "locked": false,
+            "name": "NorthWall",
+            "components": {
+                "renderer": {
+                    "model": "assets/models/wall.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.8015798330307007,
+                                0.4185848534107208,
+                                0.7780252695083618,
+                                1.0
+                            ]
+                        }
+                    ],
+                    "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        2.0,
+                        -8.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        20.0,
+                        6.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 103,
+            "locked": false,
+            "name": "PickupOrb",
+            "components": {
+                "renderer": {
+                    "model": "assets/models/pickup.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ]
+                        }
+                    ],
+                    "visible": true
+                },
+                "physics": {
+                    "shape": "sphere",
+                    "static": false,
+                    "mass": 1.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "code": {
+                    "directory": "scripts/fpp_game.lua"
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        0.5,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 104,
+            "locked": false,
+            "name": "WestWall",
+            "components": {
+                "renderer": {
+                    "model": "assets/models/wall.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ]
+                        }
+                    ],
+                    "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "transform": {
+                    "position": [
+                        -10.0,
+                        2.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        90.0,
+                        0.0
+                    ],
+                    "scale": [
+                        16.0,
+                        6.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 105,
+            "locked": false,
+            "name": "EastWall",
+            "components": {
+                "renderer": {
+                    "model": "assets/models/wall.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ]
+                        }
+                    ],
+                    "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "transform": {
+                    "position": [
+                        10.0,
+                        2.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        -90.0,
+                        0.0
+                    ],
+                    "scale": [
+                        16.0,
+                        6.0,
+                        1.0
+                    ]
+                }
+            }
+        }
+    ]
+}

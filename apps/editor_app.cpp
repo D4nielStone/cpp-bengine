@@ -71,7 +71,9 @@ int main(int argc, char** argv) {
     editor::ui::project_persistence_system project_persistence(
         registry,
         camera_entity.id,
-        &editor_context->entity_names
+        &editor_context->entity_names,
+        &editor_context->hidden_entities,
+        &editor_context->locked_entities
     );
     if (argc == 3) {
         std::string error;
@@ -217,12 +219,6 @@ int main(int argc, char** argv) {
         [&entities_panel, &components_panel, &files_panel, editor_context](
             const std::string& loaded_project_path
         ) {
-        for (const auto id : editor_context->hidden_entities) {
-            if (auto renderer = editor_context->registry->get<commons::renderer>(id))
-                renderer->visible = true;
-        }
-        editor_context->hidden_entities.clear();
-        editor_context->locked_entities.clear();
         editor_context->clear_history();
         editor_context->selected_entity.reset();
         entities_panel.refresh();
