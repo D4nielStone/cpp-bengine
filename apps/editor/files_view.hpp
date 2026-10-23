@@ -18,6 +18,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 #include <utility>
@@ -67,11 +68,12 @@ public:
         );
         m_folder_sidebar->style.layout.require_width(
             bgui::mode::percent,
-            0.29f
+            29.f
         );
+        m_folder_sidebar->add_class("entities-list");
         m_folder_sidebar->style.layout.padding = bgui::vec4i{6, 5, 6, 5};
         m_folder_sidebar->style.visual.background.normal =
-            bgui::color{0.075f, 0.08f, 0.09f, 1.f};
+            bgui::color{0.075f, 0.075f, 0.075f, 1.f};
         m_folder_sidebar->set_scrollable(true);
 
         m_file_area = &m_root->add<bgui::linear>(
@@ -188,8 +190,43 @@ private:
                 return static_cast<char>(std::tolower(character));
             }
         );
-        return extension == ".world" || extension == ".bengine" ||
-            extension == ".scene";
+        return extension == ".world" || extension == ".scene";
+    }
+
+    static bool is_project_file(const std::filesystem::path& path) {
+        auto extension = path.extension().string();
+        std::transform(
+            extension.begin(),
+            extension.end(),
+            extension.begin(),
+            [](const unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            }
+        );
+        return extension == ".bengine";
+    }
+
+    static bool is_lua_file(const std::filesystem::path& path) {
+        auto extension = path.extension().string();
+        std::transform(
+            extension.begin(),
+            extension.end(),
+            extension.begin(),
+            [](const unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            }
+        );
+        return extension == ".lua";
+    }
+
+    static std::string_view file_icon(const std::filesystem::path& path) {
+        if (is_project_file(path))
+            return "home";
+        if (is_scene_file(path))
+            return "cube";
+        if (is_lua_file(path))
+            return "code";
+        return "file";
     }
 
     static bool is_model_file(const std::filesystem::path& path) {
@@ -250,6 +287,7 @@ private:
 
     void request_refresh() {
         m_refresh_requested = true;
+        refresh_if_needed();
     }
 
     std::string directory_label(const std::filesystem::path& directory) const {
@@ -262,9 +300,9 @@ private:
         const std::filesystem::path& directory,
         const std::size_t depth
     ) {
+        const bool expanded = m_expanded_directories.contains(directory);
         auto& row = m_folder_sidebar->add<bgui::button>(
-            (m_expanded_directories.contains(directory) ? "v  " : ">  ") +
-                directory_label(directory),
+            "",
             0.27f,
             [this, directory]() {
                 if (m_expanded_directories.contains(directory))
@@ -276,6 +314,32 @@ private:
                 request_refresh();
             }
         );
+        row.get_label().set_enable(false);
+        auto& icon = row.add<bgui::icon>(
+            directory == m_project_root
+                ? "home"
+                : (expanded ? "folder_open" : "folder"),
+            0.25f
+        );
+        icon.receives_input(false);
+        icon.style.layout.require_mode(
+            bgui::mode::wrap_content,
+            bgui::mode::wrap_content
+        );
+        icon.style.layout.padding = bgui::vec4i{3, 0, 5, 0};
+        auto& label = row.add<bgui::text>(
+            (expanded ? "v  " : ">  ") + directory_label(directory),
+            0.27f
+        );
+        label.receives_input(false);
+        label.style.layout.require_mode(
+            bgui::mode::stretch,
+            bgui::mode::wrap_content
+        );
+        label.style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::start,
+            bgui::alignment::center
+        };
         row.style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::wrap_content
@@ -364,12 +428,10 @@ private:
             add_message("Esta pasta não contém arquivos.");
             return;
         }
-
         for (const auto& file : files) {
             const bool selected = file == m_selected_file;
             auto& item = m_file_area->add<file_button>(
-                std::string(is_scene_file(file) ? "[Cena]  " : "[Arquivo]  ") +
-                    file.filename().string(),
+                "",
                 [this, file]() {
                     m_selected_file = file;
                     request_refresh();
@@ -381,16 +443,33 @@ private:
                       }
                     : std::function<void(const bgui::vec2i&)>{}
             );
+            item.get_label().set_enable(false);
+            auto& icon = item.add<bgui::icon>(file_icon(file), 0.27f);
+            icon.receives_input(false);
+            icon.style.layout.require_mode(
+                bgui::mode::wrap_content,
+                bgui::mode::wrap_content
+            );
+            icon.style.layout.padding = bgui::vec4i{2, 0, 6, 0};
+            auto& label = item.add<bgui::text>(
+                file.filename().string(),
+                0.28f
+            );
+            label.receives_input(false);
+            label.set_wrap(false);
+            label.style.layout.require_mode(
+                bgui::mode::stretch,
+                bgui::mode::wrap_content
+            );
+            label.style.layout.align = bgui::vec<2, bgui::alignment>{
+                bgui::alignment::start,
+                bgui::alignment::center
+            };
             item.style.layout.require_mode(
                 bgui::mode::match_parent,
                 bgui::mode::wrap_content
             );
             item.style.layout.padding = bgui::vec4i{5, 3, 5, 3};
-            item.get_label().set_wrap(false);
-            item.get_label().style.layout.align = bgui::vec<2, bgui::alignment>{
-                bgui::alignment::start,
-                bgui::alignment::center
-            };
             item.style.visual.background.normal = selected
                 ? bgui::color{0.20f, 0.31f, 0.43f, 1.f}
                 : bgui::color{0.15f, 0.16f, 0.18f, 1.f};
