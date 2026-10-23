@@ -5,12 +5,21 @@
 Validated with:
 
 ```
-cmake -S . -B build-check -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
-cmake --build build-check --parallel 2
-ctest --test-dir build-check --output-on-failure
+cmake -S . -B build-menu-check -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
+cmake --build build-menu-check --parallel 2
+ctest --test-dir build-menu-check --output-on-failure
 ```
 
-Result: build succeeded and the current suite passed (`28/28` tests). The repository is therefore in a clean, passing state for the tests available in this environment.
+Result: clean configure and build succeeded; the current suite passed (`29/29` tests).
+
+## BGUI menu bar and context-menu behavior
+
+| Check | Status | Evidence | Notes |
+|---|---|---|---|
+| Text-driven button/menu sizing | Confirmed and fixed | [external/cpp-bgui/core/source/elem/text.cpp](../external/cpp-bgui/core/source/elem/text.cpp) truncated fractional text metrics both during layout measurement and again while preparing draw data. `MenuBarTest.TextContentSizeRoundsUpFractionalFontMetrics` reproduced width `9` vs required `10` and height `4` vs required `5` before the fix. | Both paths now round up, so wrap-content geometry and hit-test bounds do not undercut fractional text metrics. |
+| Menu-bar and context-option callbacks | Dispatch verified | [external/cpp-bgui/tests/menu_bar_tests.cpp](../external/cpp-bgui/tests/menu_bar_tests.cpp) synthesizes press/release events for a regular menu-bar button and a context-menu option; both callbacks run and the popup closes. | No separate callback-dispatch defect was reproduced. The editor was not manually exercised in a display-backed session. |
+
+The regression tests use a synthetic font and BGUI's headless input path; they do not require a GPU or display.
 
 ## Item-by-item status
 
@@ -33,6 +42,7 @@ Result: build succeeded and the current suite passed (`28/28` tests). The reposi
 
 - [tests/commons_tests.cpp](../tests/commons_tests.cpp): invariant checks for ECS liveness, mask consistency, invalid-ID behavior, and ID reuse.
 - [tests/editor_persistence_tests.cpp](../tests/editor_persistence_tests.cpp): persistence round-trips, invalid JSON, duplicate IDs, and project save/load stability checks.
+- [external/cpp-bgui/tests/menu_bar_tests.cpp](../external/cpp-bgui/tests/menu_bar_tests.cpp): fractional text sizing before/after draw generation and menu/button callback dispatch.
 
 ## Remaining risks / follow-up
 
