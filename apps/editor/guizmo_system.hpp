@@ -7,6 +7,7 @@
 #include "guizmo/transform_gizmo.hpp"
 #include "guizmo/grid_gizmo.hpp"
 
+#include <bgui.hpp>
 #include <elem/image.hpp>
 #include <os/os.hpp>
 
@@ -152,6 +153,43 @@ public:
             width,
             height
         };
+
+        const auto& root_elements = bgui::get_layout().get_elements();
+        const auto overlays = root_elements.find(bgui::layer::overlay);
+        bool modal_active = false;
+        if (overlays != root_elements.end()) {
+            for (const auto& overlay : overlays->second) {
+                if (overlay && overlay->is_enabled() && overlay->type == "modal") {
+                    modal_active = true;
+                    break;
+                }
+            }
+        }
+
+        if (modal_active) {
+            const bool was_dragging = m_guizmo.is_dragging();
+            m_guizmo.update(
+                *m_camera,
+                nullptr,
+                viewport,
+                {},
+                mouse_position,
+                mouse_delta,
+                false,
+                false,
+                false
+            );
+            if (was_dragging)
+                finish_transform_action();
+
+            if (m_input_state)
+                m_input_state->gizmo_active = false;
+
+            m_last_mouse_position = mouse_position;
+            m_left_was_down = left_down;
+            bgui::element::get_requires(data);
+            return;
+        }
 
         const bool mouse_over_view =
             mouse_position.x >= x &&

@@ -21,6 +21,13 @@ Result: clean configure and build succeeded; the current suite passed (`29/29` t
 
 The regression tests use a synthetic font and BGUI's headless input path; they do not require a GPU or display.
 
+## Modal sizing and editor gizmo stacking
+
+| Check | Status | Evidence | Notes |
+|---|---|---|---|
+| Modal content sizing | Confirmed and fixed | [external/cpp-bgui/core/source/lay/layout.cpp](../external/cpp-bgui/core/source/lay/layout.cpp) now measures nested layouts even when their container is non-flex. `LinearTest.MeasuresContentInsideNonFlexLayouts` reproduces the previous zero-sized content. | This allows dynamically enabled modals to calculate their full content dimensions without waiting for a hover-style invalidation. |
+| Gizmo drawn over active modals | Confirmed and fixed | [apps/editor/guizmo_system.hpp](../apps/editor/guizmo_system.hpp) suppresses grid/frustum/transform drawing while a root overlay modal is enabled. | The custom draw list is rendered after ordinary UI quads, so element-layer ordering alone cannot place a modal above it. Desktop visual verification remains pending. |
+
 ## Item-by-item status
 
 | ID | Status | Evidence | Notes |
