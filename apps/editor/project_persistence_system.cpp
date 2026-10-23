@@ -208,7 +208,8 @@ bool parse_component(
     }
 
     if (name == "renderer") {
-        if (data.HasMember("model")) {
+        if (data.HasMember("model") && data["model"].IsString() &&
+            std::string(data["model"].GetString()) != "") {
             std::filesystem::path model_path(data["model"].GetString());
             if (!model_path.is_absolute())
                 model_path = project_directory / model_path;
@@ -590,21 +591,23 @@ bool project_persistence_system::save(
                 const std::filesystem::path model_path(
                     renderer->m_modelo->get_source_path()
                 );
-                std::filesystem::path saved_model_path = model_path;
-                if (saving_in_project) {
-                    const auto relative_model_path =
-                        model_path.lexically_relative(m_asset_root);
-                    if (!relative_model_path.empty() &&
-                        *relative_model_path.begin() != "..") {
-                        saved_model_path = relative_model_path;
+                if (!model_path.empty()) {
+                    std::filesystem::path saved_model_path = model_path;
+                    if (saving_in_project) {
+                        const auto relative_model_path =
+                            model_path.lexically_relative(m_asset_root);
+                        if (!relative_model_path.empty() &&
+                            *relative_model_path.begin() != "..") {
+                            saved_model_path = relative_model_path;
+                        }
                     }
+                    const auto saved_model = saved_model_path.generic_string();
+                    component_data["model"].SetString(
+                        saved_model.c_str(),
+                        static_cast<rapidjson::SizeType>(saved_model.size()),
+                        allocator
+                    );
                 }
-                const auto saved_model = saved_model_path.generic_string();
-                component_data["model"].SetString(
-                    saved_model.c_str(),
-                    static_cast<rapidjson::SizeType>(saved_model.size()),
-                    allocator
-                );
             }
 
             if (mask == commons::component::COMPONENTE_RENDER) {
