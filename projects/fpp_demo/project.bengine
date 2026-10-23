@@ -1,0 +1,87 @@
+{
+  "format": "bubble-engine-project",
+  "version": 1,
+  "entities": [
+    {
+      "id": 1,
+      "name": "PlayerCamera",
+      "components": {
+        "transform": {
+          "position": [0.0, 1.7, 5.0],
+          "rotation": [0.0, -90.0, 0.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "camera": {
+          "fov": 75.0,
+          "zfar": 200.0,
+          "scale": 1.0,
+          "ortho": false,
+          "skybox": true
+        },
+        "code": {
+          "directory": "scripts/fpp_player.lua"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "ArenaFloor",
+      "components": {
+        "transform": {
+          "position": [0.0, -1.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0],
+          "scale": [20.0, 1.0, 20.0]
+        },
+        "renderer": {
+          "model": "assets/models/floor.obj"
+        },
+        "physics": {
+          "shape": "box",
+          "static": true,
+          "mass": 0.0
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "NorthWall",
+      "components": {
+        "transform": {
+          "position": [0.0, 2.0, -8.0],
+          "rotation": [0.0, 0.0, 0.0],
+          "scale": [20.0, 6.0, 1.0]
+        },
+        "renderer": {
+          "model": "assets/models/wall.obj"
+        },
+        "physics": {
+          "shape": "box",
+          "static": true,
+          "mass": 0.0
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "PickupOrb",
+      "components": {
+        "transform": {
+          "position": [0.0, 0.5, 0.0],
+          "rotation": [0.0, 0.0, 0.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "renderer": {
+          "model": "assets/models/pickup.obj"
+        },
+        "physics": {
+          "shape": "sphere",
+          "static": false,
+          "mass": 1.0
+        },
+        "code": {
+          "directory": "scripts/fpp_game.lua"
+        }
+      }
+    }
+  ]
+}

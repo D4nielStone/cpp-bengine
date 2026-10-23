@@ -13,6 +13,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace {
 
@@ -84,6 +85,39 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     EXPECT_FLOAT_EQ(scene_position.x, 5.f);
     EXPECT_FLOAT_EQ(scene_position.y, 6.f);
     EXPECT_FLOAT_EQ(scene_position.z, 7.f);
+
+    std::filesystem::remove(path);
+}
+
+TEST(ProjectPersistenceTest, SavesAndLoadsEntityNames) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    registry->get<commons::transform>(editor_camera.id)->set_position({0.f, 0.f, 0.f});
+
+    auto entity = registry->create(23);
+    registry->add<commons::transform>(entity);
+    std::unordered_map<std::uint32_t, std::string> entity_names{{entity.id, "Coin"}};
+
+    editor::ui::project_persistence_system persistence(registry, 17, &entity_names);
+    std::string error;
+    const auto path = temporary_project_path();
+
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+
+    std::ifstream saved_file(path, std::ios::binary);
+    const std::string saved_contents{
+        std::istreambuf_iterator<char>(saved_file),
+        std::istreambuf_iterator<char>()
+    };
+    rapidjson::Document saved_project;
+    saved_project.Parse(saved_contents.data(), saved_contents.size());
+    ASSERT_FALSE(saved_project.HasParseError());
+    EXPECT_EQ(saved_project["entities"][0]["name"].GetString(), std::string("Coin"));
+
+    entity_names.clear();
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    EXPECT_EQ(entity_names.at(entity.id), std::string("Coin"));
 
     std::filesystem::remove(path);
 }

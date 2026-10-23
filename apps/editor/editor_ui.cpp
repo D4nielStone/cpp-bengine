@@ -4,14 +4,15 @@
 #include <elem/icon.hpp>
 #include <elem/menu_bar.hpp>
 
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace editor::ui {
 namespace {
 
 constexpr const char* ui_configuration_path = "editor-ui.cfg";
-constexpr const char* project_path = "project.bengine";
 
 // Glifos do ícone (Font Awesome: play / stop / pause)
 constexpr const char* icon_play = "\xef\x81\x8b";
@@ -95,25 +96,83 @@ editor_ui::editor_ui(
     bgui::dock& dock,
     bgui::menu_bar& menu_bar,
     ui_persistence_system& ui_persistence,
-    project_persistence_system& project_persistence
+    project_persistence_system& project_persistence,
+    std::string project_path
 )
     : m_dock(dock),
-      m_project_persistence(project_persistence) {
+      m_project_persistence(project_persistence),
+      m_project_path(std::move(project_path)) {
+    m_project_modal = &bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+    m_project_modal->set_enable(false);
+    m_project_modal->content().add<bgui::text>(
+        "Select the project directory or file to load.",
+        0.34f
+    );
+    m_project_directory_input = &m_project_modal->content().add<bgui::inputbox>(
+        m_project_path,
+        "Project folder...",
+        0.32f,
+        [this](const std::string& value) {
+            m_project_path = value;
+        }
+    );
+    auto& use_current = m_project_modal->content().add<bgui::button>(
+        "Use current folder",
+        0.3f,
+        [this]() {
+            std::error_code error;
+            const auto current = std::filesystem::absolute(
+                std::filesystem::current_path(error)
+            );
+            m_project_path = current.string();
+            if (m_project_directory_input)
+                m_project_directory_input->set_buffer(m_project_path);
+        }
+    );
+    use_current.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::wrap_content
+    );
+    m_project_modal->set_confirmation_text("Open");
+    m_project_modal->set_on_confirm([this]() {
+        std::filesystem::path path(m_project_path);
+        std::error_code error;
+
+        if (!path.empty() && std::filesystem::is_directory(path, error)) {
+            const auto project_file = path / "project.bengine";
+            if (std::filesystem::exists(project_file, error))
+                path = project_file;
+            else if (std::filesystem::exists(path / "game.world", error))
+                path = path / "game.world";
+            else if (std::filesystem::exists(path / "main.scene", error))
+                path = path / "main.scene";
+            else
+                path = path / "project.bengine";
+        }
+
+        m_project_path = path.string();
+        std::string load_error;
+        const bool success = m_project_persistence.load(m_project_path, load_error);
+        report_result("Loading project", success, load_error);
+        if (success && m_project_loaded_callback)
+            m_project_loaded_callback();
+        m_project_modal->set_enable(false);
+    });
+
     menu_bar.add_menu(
         "Files",
         0.3f,
         [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
             menu.add_button("Save Project", [this]() {
                 std::string error;
-                const bool success = m_project_persistence.save(project_path, error);
+                const bool success = m_project_persistence.save(m_project_path, error);
                 report_result("Saving project", success, error);
             });
             menu.add_button("Load Project", [this]() {
-                std::string error;
-                const bool success = m_project_persistence.load(project_path, error);
-                report_result("Loading project", success, error);
-                if (success && m_project_loaded_callback)
-                    m_project_loaded_callback();
+                if (m_project_directory_input)
+                    m_project_directory_input->set_buffer(m_project_path);
+                if (m_project_modal)
+                    m_project_modal->set_enable(true);
             });
             menu.add_separator();
             menu.add_button("Save UI", [ui_persistence_ptr]() {

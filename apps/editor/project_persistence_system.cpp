@@ -1,6 +1,7 @@
 #include "project_persistence_system.hpp"
 
 #include "components/camera.hpp"
+#include "components/code.hpp"
 #include "components/directional_light.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
@@ -48,6 +49,9 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
     if (name == "renderer")
         return value.HasMember("model") && value["model"].IsString();
 
+    if (name == "code")
+        return value.HasMember("directory") && value["directory"].IsString();
+
     if (name == "camera") {
         if ((value.HasMember("fov") && !is_number(value["fov"])) ||
             (value.HasMember("zfar") && !is_number(value["zfar"])) ||
@@ -85,6 +89,8 @@ std::string component_name(const component_mask mask) {
         return "renderer";
     case commons::component::COMPONENTE_CAM:
         return "camera";
+    case commons::component::COMPONENTE_CODIGO:
+        return "code";
     case commons::component::COMPONENTE_LUZ_DIRECIONAL:
         return "directional_light";
     default:
@@ -108,6 +114,8 @@ bool serialize_component(
         return std::static_pointer_cast<commons::renderer>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_CAM:
         return std::static_pointer_cast<commons::camera>(component)->serialize(destination, allocator);
+    case commons::component::COMPONENTE_CODIGO:
+        return std::static_pointer_cast<commons::code>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_LUZ_DIRECIONAL:
         return std::static_pointer_cast<commons::directional_light>(component)->serialize(destination, allocator);
     default:
@@ -128,6 +136,12 @@ bool parse_component(
     if (name == "renderer") {
         registry.add<commons::renderer>(entity);
         return registry.get<commons::renderer>(entity.id)->analyze(data);
+    }
+
+    if (name == "code") {
+        if (!registry.get<commons::code>(entity.id))
+            registry.add<commons::code>(entity, "");
+        return registry.get<commons::code>(entity.id)->analyze(data);
     }
 
     if (name == "camera") {
@@ -163,6 +177,7 @@ bool validate_project(const rapidjson::Document& document, std::string& error) {
             !entity.HasMember("id") ||
             !entity["id"].IsUint() ||
             entity["id"].GetUint() == 0 ||
+            (entity.HasMember("name") && !entity["name"].IsString()) ||
             !entity.HasMember("components") ||
             !entity["components"].IsObject() ||
             !entity["components"].HasMember("transform")) {
@@ -194,10 +209,16 @@ bool validate_project(const rapidjson::Document& document, std::string& error) {
 
 project_persistence_system::project_persistence_system(
     std::shared_ptr<commons::ecs> registry,
-    const std::uint32_t editor_camera_id
+    const std::uint32_t editor_camera_id,
+    entity_name_map* entity_names
 )
     : m_registry(std::move(registry)),
-      m_editor_camera_id(editor_camera_id) {}
+      m_editor_camera_id(editor_camera_id),
+      m_entity_names(entity_names) {}
+
+void project_persistence_system::set_entity_names(entity_name_map* entity_names) {
+    m_entity_names = entity_names;
+}
 
 bool project_persistence_system::save(
     const std::string& path,
@@ -230,6 +251,16 @@ bool project_persistence_system::save(
 
         rapidjson::Value entity(rapidjson::kObjectType);
         entity.AddMember("id", id, allocator);
+
+        if (m_entity_names) {
+            const auto name_it = m_entity_names->find(id);
+            if (name_it != m_entity_names->end() && !name_it->second.empty()) {
+                rapidjson::Value name_value;
+                name_value.SetString(name_it->second.c_str(), static_cast<rapidjson::SizeType>(name_it->second.size()), allocator);
+                entity.AddMember("name", name_value, allocator);
+            }
+        }
+
         rapidjson::Value serialized_components(rapidjson::kObjectType);
         for (const auto& [mask, component] : components) {
             const auto name = component_name(mask);
@@ -325,6 +356,9 @@ bool project_persistence_system::load(
         break;
     }
 
+    if (m_entity_names)
+        m_entity_names->clear();
+
     auto staged_registry = std::make_shared<commons::ecs>();
     for (const auto& entity_data : document["entities"].GetArray()) {
         const auto id = entity_data["id"].GetUint();
@@ -332,6 +366,9 @@ bool project_persistence_system::load(
             continue;
 
         auto entity = staged_registry->create(id);
+        if (m_entity_names && entity_data.HasMember("name") && entity_data["name"].IsString()) {
+            m_entity_names->emplace(id, entity_data["name"].GetString());
+        }
         const auto& components = entity_data["components"];
         for (auto component = components.MemberBegin(); component != components.MemberEnd(); ++component) {
             const std::string name(component->name.GetString(), component->name.GetStringLength());

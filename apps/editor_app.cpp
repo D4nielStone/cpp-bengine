@@ -10,6 +10,7 @@
 #include "editor/editor_ui.hpp"
 #include "editor/editor_context.hpp"
 #include "editor/project_persistence_system.hpp"
+#include "editor/files_view.hpp"
 #include "editor/scene_view.hpp"
 #include "editor/runtime_tools_view.hpp"
 #include "editor/entities_view.hpp"
@@ -21,9 +22,18 @@
 
 #include <chrono>
 #include <filesystem>
+#include <iostream>
 #include <string>
 
 int main(int argc, char** argv) {
+    std::string project_path = "project.bengine";
+    if (argc == 3 && std::string(argv[1]) == "--project") {
+        project_path = argv[2];
+    } else if (argc != 1) {
+        std::cerr << "Usage: editor_app [--project <scene-file>]\n";
+        return 2;
+    }
+
     commons::window window("Bubble Engine - Editor");
     auto registry = window.get_ecs();
 
@@ -38,6 +48,9 @@ int main(int argc, char** argv) {
     registry->get<commons::transform>(cube_entity.id)->set_position({0.f, 0.f, 0.f});
     registry->get<commons::transform>(camera_entity.id)->set_position({0.f, 0.f, 5.f});
     registry->get<commons::transform>(camera_entity.id)->set_rotation({0.f, -90.f, 0.f});
+
+    auto editor_context = std::make_shared<editor::ui::editor_context>(registry);
+    editor_context->editor_camera_entity = camera_entity.id;
 
     auto& editor_root = bgui::get_layout().add<bgui::linear>(
         bgui::orientation::vertical
@@ -56,16 +69,23 @@ int main(int argc, char** argv) {
     editor::ui::ui_persistence_system ui_persistence;
     editor::ui::project_persistence_system project_persistence(
         registry,
-        camera_entity.id
+        camera_entity.id,
+        &editor_context->entity_names
     );
+    if (argc == 3) {
+        std::string error;
+        if (!project_persistence.load(project_path, error)) {
+            std::cerr << "[editor] Could not load project: " << error << '\n';
+            return 1;
+        }
+    }
     editor::ui::editor_ui editor(
         dock,
         menu_bar,
         ui_persistence,
-        project_persistence
+        project_persistence,
+        project_path
     );
-    auto editor_context = std::make_shared<editor::ui::editor_context>(registry);
-    editor_context->editor_camera_entity = camera_entity.id;
 
     auto& scene = editor.add_panel<editor::ui::scene_view>(
         window,
@@ -80,6 +100,39 @@ int main(int argc, char** argv) {
     );
     auto& components_panel = editor.add_panel<editor::ui::components_view>(
         editor_context
+    );
+    auto& files_panel = editor.add_panel<editor::ui::files_view>(
+        project_path,
+        [&scene, editor_context, &entities_panel, &components_panel](
+            const std::filesystem::path& asset,
+            const bgui::vec2i& mouse_position
+        ) {
+            const auto viewport = scene.image().processed_rect();
+            if (mouse_position.x < viewport.x ||
+                mouse_position.x > viewport.x + viewport.z ||
+                mouse_position.y < viewport.y ||
+                mouse_position.y > viewport.y + viewport.w)
+                return;
+
+            auto model_path = asset.string();
+            std::error_code error;
+            const auto current_directory = std::filesystem::current_path(error);
+            const auto relative_path = error
+                ? std::filesystem::path{}
+                : asset.lexically_relative(current_directory);
+            if (!relative_path.empty())
+                model_path = relative_path.string();
+
+            auto entity = editor_context->registry->create();
+            editor_context->registry->add<commons::renderer>(
+                entity,
+                model_path.c_str()
+            );
+            editor_context->entity_names[entity.id] = asset.stem().string();
+            editor_context->selected_entity = entity.id;
+            entities_panel.refresh();
+            components_panel.refresh();
+        }
     );
     auto render_system = window.add<commons::render_system>();
     auto& runtime_tools_panel =
@@ -165,6 +218,7 @@ int main(int argc, char** argv) {
     (void)scene;
     (void)entities_panel;
     (void)components_panel;
+    (void)files_panel;
     (void)runtime_tools_panel;
 
     window.add<commons::ui_system>();

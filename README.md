@@ -1,7 +1,7 @@
 Bubble Engine
 ===
 
-![gif](gif.gif)
+![PREVIEW](image.jpg)
 
 # About
 
@@ -25,6 +25,12 @@ project serialization support. The editor's Inspector panel is docked on the
 right and lets you edit transform, camera, and directional-light properties,
 as well as add or remove supported components. Selecting an entity in either
 the scene or the entity list updates the Inspector.
+
+The **Arquivos** panel shows the project folders on a dark sidebar and the
+selected folder's files beside it. Selecting a `.world`, `.bengine`, or `.scene`
+file reveals the option to make it the main scene; this choice is stored in
+`.bengine-main-scene` at the project root. Drag supported 3D model files from
+the panel into the Scene viewport to add them as entities.
 
 Use the editor's centered play icon to open the current scene in a separate
 runtime window. The icon sits in a dark toolbar container. The runtime window
@@ -78,6 +84,22 @@ Run either application with:
 ./out/apps/runtime_app
 ./out/apps/editor_app
 ```
+
+To open a scene directly in the editor, pass its file path with `--project`:
+
+```
+./out/apps/editor_app --project game.world
+```
+
+The editor's **Load Project** and **Save Project** menu actions use the same
+path supplied at startup. Without `--project`, they continue to use
+`project.bengine`. The **Load Project** action now opens a modal that accepts
+a project directory or a project file path, and it resolves common folders such
+as `project.bengine`, `game.world`, or a project directory containing one of
+those files.
+
+A ready-to-use FPP sample project is available in `projects/fpp_demo/` and uses
+entities, physics, collision, and Lua scripts for gameplay logic.
 
 # Structure
 

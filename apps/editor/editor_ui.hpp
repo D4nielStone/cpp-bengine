@@ -12,6 +12,11 @@
 #include <string>
 #include <vector>
 
+namespace bgui {
+class modal;
+class inputbox;
+}
+
 namespace editor::ui {
 
 class editor_ui final {
@@ -20,7 +25,8 @@ public:
         bgui::dock& dock,
         bgui::menu_bar& menu_bar,
         ui_persistence_system& ui_persistence,
-        project_persistence_system& project_persistence
+        project_persistence_system& project_persistence,
+        std::string project_path = "project.bengine"
     );
 
     void set_project_loaded_callback(std::function<void()> callback);
@@ -48,6 +54,7 @@ public:
 private:
     bgui::dock& m_dock;
     project_persistence_system& m_project_persistence;
+    std::string m_project_path;
     std::function<void()> m_project_loaded_callback;
     std::function<bool(bool, std::string&)> m_play_state_callback;
     std::function<bool(std::string&)> m_runtime_running_callback;
@@ -56,6 +63,8 @@ private:
     bgui::icon* m_play_icon{nullptr};
     bgui::button* m_pause_button{nullptr};
     bgui::icon* m_pause_icon{nullptr};
+    bgui::modal* m_project_modal{nullptr};
+    bgui::inputbox* m_project_directory_input{nullptr};
     bool m_is_playing{false};
     bool m_is_paused{false};
     std::vector<std::unique_ptr<panel>> m_panels;
