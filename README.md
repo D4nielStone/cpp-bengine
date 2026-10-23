@@ -11,6 +11,10 @@ An experimental C++ engine for windowing, rendering, physics, and component-base
 
 The engine uses Bubble GUI to provide a simple and easy-to-use interface for the editor application. The GUI supports native docking and windowing.
 
+The engine bundles Hack Nerd Font for consistent, antialiased interface text.
+BGUI's bundled 3270 Nerd Font has an intentionally pixelated terminal style, so
+it remains dedicated to icon glyphs.
+
 The engine also uses the BGUI API to build its own transform gizmos.
 
 The editor's **Files** menu saves and loads the dock layout through BGUI in
@@ -22,12 +26,12 @@ right and lets you edit transform, camera, and directional-light properties,
 as well as add or remove supported components. Selecting an entity in either
 the scene or the entity list updates the Inspector.
 
-Use the editor's **Play** button to run the current scene in the scene viewport.
-While the runtime is active, editor camera movement, selection, and gizmos are
-disabled, and entities hidden only for editor organization are shown. The
-**Runtime Debug / Profiler** panel reports frame time, FPS, render time, camera
-and draw counts, and scene entity/renderer statistics. The render duration is
-CPU-side time spent submitting the scene. Press **Stop** to return to editing.
+Use the editor's centered play icon to open the current scene in a separate
+runtime window. The icon sits in a dark toolbar container. The runtime window
+displays the game camera framebuffer, along with frame time, FPS, CPU render
+time, and draw counts. Press the stop icon in the editor to close the runtime
+window. The **Editor Diagnostics** panel continues to show metrics for the
+editor viewport.
 
 # Dependencies
 

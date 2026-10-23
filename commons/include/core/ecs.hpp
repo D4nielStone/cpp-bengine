@@ -90,8 +90,10 @@ namespace COMMONS_NS {
 	template<typename ...comps, typename Func>
 	inline void ecs::cada(Func func)
 	{
-		for (auto [entity, components] : entities) {
-			if ((has<comps>(entity) && ...)) {
+		for (const auto& [entity, components] : entities) {
+			const auto mask_it = mascaras.find(entity);
+			if (mask_it != mascaras.end() &&
+				(((mask_it->second & comps::mask) != component::COMPONENTE_NONE) && ...)) {
 				func(entity);
 			}
 		}

@@ -8,6 +8,8 @@
 using namespace COMMONS_NS;
 
 namespace {
+    std::unordered_map<unsigned int, std::unordered_map<std::string, int>> uniform_location_cache;
+
     std::filesystem::path safe_absolute(const std::filesystem::path& p)
     {
         std::error_code ec;
@@ -66,6 +68,7 @@ namespace {
 void COMMONS_NS::desload_shaders()
 {
     shaders.clear();
+    uniform_location_cache.clear();
 }
 
 shader_exception::shader_exception(const char* msg) : msg_(msg) {}
@@ -139,42 +142,53 @@ void shader::use()
     }
 }
 
+int shader::uniform_location(const std::string& name) const {
+    auto& locations = uniform_location_cache[ID];
+    const auto it = locations.find(name);
+    if (it != locations.end())
+        return it->second;
+
+    const int location = glGetUniformLocation(ID, name.c_str());
+    locations.emplace(name, location);
+    return location;
+}
+
 void shader::setBool(const std::string& name, const bool& value) const {
-    glUniform1i(glGetUniformLocation(ID, name.c_str()), value);
+    glUniform1i(uniform_location(name), value);
 }
 
 void shader::setFloat(const std::string& name, const float& value) const {
-    glUniform1f(glGetUniformLocation(ID, name.c_str()), value);
+    glUniform1f(uniform_location(name), value);
 }
 
 void shader::setInt(const std::string& name, const int& value) const {
-    glUniform1i(glGetUniformLocation(ID, name.c_str()), value);
+    glUniform1i(uniform_location(name), value);
 }
 
 void shader::setMat4(const std::string& name, const float* value) const {
-    glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, value);
+    glUniformMatrix4fv(uniform_location(name), 1, GL_FALSE, value);
 }
 
 void shader::setMat3(const std::string& name, const float* value) const {
-    glUniformMatrix3fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, value);
+    glUniformMatrix3fv(uniform_location(name), 1, GL_FALSE, value);
 }
 
 void shader::set_color(const std::string& name, const COMMONS_NS::color& color) const {
-    glUniform4f(glGetUniformLocation(ID, name.c_str()), color.r, color.g, color.b, color.a);
+    glUniform4f(uniform_location(name), color.r, color.g, color.b, color.a);
 }
 
 void shader::setVec4(const std::string& name, const bgui::vec4& vec4 ) const {
-    glUniform4f(glGetUniformLocation(ID, name.c_str()), vec4.x, vec4.y, vec4.z, vec4.w);
+    glUniform4f(uniform_location(name), vec4.x, vec4.y, vec4.z, vec4.w);
 }
 void shader::setVec3(const std::string& name, const float& r, const float& g, const float& b) const {
-    glUniform3f(glGetUniformLocation(ID, name.c_str()), r, g, b);
+    glUniform3f(uniform_location(name), r, g, b);
 }
 void shader::setVec3(const std::string& name, const bgui::vec3& vector_type) const {
-    glUniform3f(glGetUniformLocation(ID, name.c_str()), vector_type.x, vector_type.y, vector_type.z);
+    glUniform3f(uniform_location(name), vector_type.x, vector_type.y, vector_type.z);
 }
 
 void shader::setVec2(const std::string& name, const float& r, const float& g) const {
-    glUniform2f(glGetUniformLocation(ID, name.c_str()), r, g);
+    glUniform2f(uniform_location(name), r, g);
 }
 
 bool shader::checkCompileErrors(unsigned int shader, const std::string& type) {

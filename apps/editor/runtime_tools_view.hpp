@@ -7,6 +7,7 @@
 
 #include <elem/text.hpp>
 
+#include <cstddef>
 #include <memory>
 
 namespace editor::ui {
@@ -30,6 +31,9 @@ private:
     bgui::text* m_frame_profile{nullptr};
     bgui::text* m_render_profile{nullptr};
     bgui::text* m_scene_debug{nullptr};
+    double m_fps_elapsed{0.0};
+    double m_fps{0.0};
+    std::size_t m_frame_count{0};
 };
 
 }

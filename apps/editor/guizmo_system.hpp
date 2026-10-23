@@ -54,19 +54,10 @@ public:
         }
     }
 
+    bool supports_render_cache() const override { return false; }
+
     void get_requires(bgui::draw_data* data) override {
         if (!m_camera || !m_image || !m_context || !m_context->registry) {
-            bgui::element::get_requires(data);
-            return;
-        }
-
-        if (m_context->is_playing) {
-            if (m_input_state)
-                m_input_state->gizmo_active = false;
-            m_last_mouse_position = bgui::get_mouse_position();
-            m_left_was_down = bgui::get_pressed(
-                bgui::input_key::mouse_left
-            );
             bgui::element::get_requires(data);
             return;
         }
@@ -131,6 +122,18 @@ public:
             *m_camera,
             viewport
         );
+
+        if (m_context->show_camera_frustum && m_context->selected_entity) {
+            const auto frustum_camera = m_context->registry->get<commons::camera>(
+                *m_context->selected_entity
+            );
+            if (frustum_camera && frustum_camera != m_camera)
+                m_grid_gizmo.draw_camera_frustum(
+                    *m_camera,
+                    *frustum_camera,
+                    viewport
+                );
+        }
 
         std::shared_ptr<commons::transform> selected_transform;
         if (m_context && m_context->selected_entity) {

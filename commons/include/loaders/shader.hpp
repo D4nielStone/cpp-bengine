@@ -46,6 +46,8 @@ namespace COMMONS_NS {
         void setMat3 (const std::string& name, const float* value) const;
         bool checkCompileErrors(unsigned int shader, const std::string& type);
         bool checkLinkErrors(unsigned int shader);
+    private:
+        int uniform_location(const std::string& name) const;
     };
     inline std::unordered_map<std::string, unsigned int> shaders;
 }

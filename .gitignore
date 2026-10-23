@@ -46,6 +46,9 @@ build
 !commons/assets/models/*.obj
 !commons/assets/themes/
 !commons/assets/themes/*.theme
+!commons/assets/fonts/
+!commons/assets/fonts/*.ttf
+!commons/assets/fonts/LICENSE*.txt
 .vscode
 editor.cfg
 Cache/

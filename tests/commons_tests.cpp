@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
+#include <vector>
 
 #include "components/component.hpp"
+#include "components/renderer.hpp"
 #include "components/transform.hpp"
+#include "core/ecs.hpp"
 #include "core/scene.hpp"
 #include "entities/entity.hpp"
 #include "util/color.hpp"
@@ -65,4 +68,20 @@ TEST(SceneTest, OwnsAnIndependentEcs)
     EXPECT_TRUE(first.get_ecs()->has<transform>(first_entity.id));
     EXPECT_TRUE(second.get_ecs()->has<transform>(second_entity.id));
     EXPECT_NE(first.get_ecs(), second.get_ecs());
+}
+
+TEST(EcsIterationTest, FiltersEntitiesByComponentMask)
+{
+    auto registry = std::make_shared<ecs>();
+    const entity first = registry->create(1);
+    entity second = registry->create(2);
+    registry->add<renderer>(second);
+
+    std::vector<uint32_t> rendered_entities;
+    registry->cada<renderer, transform>([&](const uint32_t id) {
+        rendered_entities.push_back(id);
+    });
+
+    EXPECT_EQ(rendered_entities, (std::vector<uint32_t>{second.id}));
+    EXPECT_TRUE(registry->has<transform>(first.id));
 }

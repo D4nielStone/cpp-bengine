@@ -42,12 +42,6 @@ public:
             return;
 
         const bool left_down = bgui::get_pressed(bgui::input_key::mouse_left);
-        if (m_context->is_playing) {
-            m_left_was_down = left_down;
-            m_pending_pick.reset();
-            return;
-        }
-
         const bool just_pressed = left_down && !m_left_was_down;
         m_left_was_down = left_down;
 

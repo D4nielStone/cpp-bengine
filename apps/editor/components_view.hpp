@@ -9,10 +9,12 @@
 #include "components/transform.hpp"
 
 #include <bgui.hpp>
-#include <elem/details.hpp>
+#include <elem/checkbox.hpp>
+#include <elem/combo_box.hpp>
 #include <elem/field.hpp>
 #include <elem/icon.hpp>
 #include <elem/inputbox.hpp>
+#include <elem/tree.hpp>
 #include <elem/window.hpp>
 #include <lay/dock.hpp>
 #include <lay/linear.hpp>
@@ -74,11 +76,20 @@ public:
             bgui::alignment::start,
             bgui::alignment::start
         };
-        m_root->style.layout.padding = bgui::vec4i{8, 8, 8, 8};
         m_root->set_scrollable(true);
         m_root->add_class("editor-panel");
         m_root->add_class("components-view");
         m_root->before_update = [this]() { refresh_if_needed(); };
+
+        m_toolbar = &m_root->add<bgui::linear>(
+            bgui::orientation::horizontal
+        );
+        m_toolbar->add_class("entities-toolbar");
+        m_toolbar->style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
+        );
+        m_toolbar->style.layout.padding = bgui::vec4i{4, 3, 4, 3};
 
         m_refresh_requested = true;
     }
@@ -97,6 +108,8 @@ private:
     std::shared_ptr<editor_context> m_context;
     bgui::window* m_window{nullptr};
     detail::refreshing_layout* m_root{nullptr};
+    bgui::linear* m_toolbar{nullptr};
+    bgui::tree* m_entity_tree{nullptr};
     std::optional<entity_id> m_rendered_selection;
     bool m_refresh_requested{false};
 
@@ -120,9 +133,10 @@ private:
     }
 
     void clear_content() {
+        m_entity_tree = nullptr;
         for (auto& [layer, elements] : m_root->get_elements()) {
             (void)layer;
-            while (!elements.empty())
+            while (elements.size() > 1)
                 m_root->remove(elements.back().get());
         }
     }
@@ -148,6 +162,7 @@ private:
         m_refresh_requested = false;
         m_rendered_selection = selected;
         clear_content();
+        clear_toolbar();
 
         if (!selected) {
             auto& message = m_root->add<bgui::text>(
@@ -166,21 +181,20 @@ private:
 
     void build_entity(const entity_id id) {
         const auto registry = m_context->registry;
-        auto& identity = m_root->add<bgui::linear>(
-            bgui::orientation::horizontal
+        build_toolbar(id);
+        m_entity_tree = &m_root->add<bgui::tree>(
+            entity_name(id),
+            0.34f,
+            true
         );
-        identity.add_class("editor-header");
-        configure_row(identity);
-
-        identity.add<bgui::icon>("home", 0.34f);
-        auto& title = identity.add<bgui::text>(
-            "Entity " + std::to_string(id),
-            0.36f
+        m_entity_tree->add_class("editor-header");
+        m_entity_tree->set_icon("home", 0.34f);
+        m_entity_tree->style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
         );
-        title.add_class("editor-inspector-name");
-        title.style.layout.require_width(bgui::mode::stretch);
 
-        auto& id_label = m_root->add<bgui::text>(
+        auto& id_label = m_entity_tree->children().add<bgui::text>(
             "ID: " + std::to_string(id),
             0.27f
         );
@@ -202,29 +216,101 @@ private:
         if (auto light = registry->get<commons::directional_light>(id))
             add_directional_light(id, light);
 
-        add_available_components(id);
     }
 
-    bgui::details& add_section(
+    std::string entity_name(const entity_id id) const {
+        const auto name = m_context->entity_names.find(id);
+        if (name != m_context->entity_names.end() && !name->second.empty())
+            return name->second;
+        return "Entity " + std::to_string(id);
+    }
+
+    void clear_toolbar() {
+        if (!m_toolbar)
+            return;
+        for (auto& [layer, elements] : m_toolbar->get_elements()) {
+            (void)layer;
+            while (!elements.empty())
+                m_toolbar->remove(elements.back().get());
+        }
+    }
+
+    void build_toolbar(const entity_id id) {
+        std::vector<std::string> options{"Add Component"};
+        const auto registry = m_context->registry;
+        if (!registry->get<commons::camera>(id))
+            options.emplace_back("Camera");
+        if (!registry->get<commons::directional_light>(id))
+            options.emplace_back("Directional Light");
+
+        auto& component_combo = m_toolbar->add<bgui::combo_box>(
+            options,
+            0.28f
+        );
+        component_combo.add_class("editor-input");
+        component_combo.style.layout.require_mode(
+            bgui::mode::wrap_content,
+            bgui::mode::match_parent
+        );
+        component_combo.set_on_change(
+            [this, id](const std::size_t index, const std::string& option) {
+                (void)index;
+                if (option == "Camera")
+                    add_component<commons::camera>(id);
+                else if (option == "Directional Light")
+                    add_component<commons::directional_light>(id);
+            }
+        );
+
+        auto& name_icon = m_toolbar->add<bgui::icon>("edit", 0.24f);
+        name_icon.receives_input(false);
+        name_icon.style.layout.require_mode(
+            bgui::mode::pixel,
+            bgui::mode::wrap_content
+        );
+        name_icon.style.layout.require_width(bgui::mode::pixel, 18.f);
+        name_icon.style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::center,
+            bgui::alignment::center
+        };
+
+        auto& name_input = m_toolbar->add<bgui::inputbox>(
+            entity_name(id),
+            "Entity name...",
+            0.3f,
+            [this, id](const std::string& name) {
+                if (!name.empty())
+                    m_context->entity_names[id] = name;
+                else
+                    m_context->entity_names.erase(id);
+                refresh();
+            }
+        );
+        name_input.add_class("editor-input");
+        name_input.style.layout.require_mode(
+            bgui::mode::stretch,
+            bgui::mode::wrap_content
+        );
+    }
+
+    bgui::tree& add_section(
         const std::string& name,
         const bool removable,
         const std::function<void()>& remove_component
     ) {
-        auto& section = m_root->add<bgui::details>(name, true);
+        auto& section = m_entity_tree->add_child(name);
+        section.set_expanded(true);
         section.add_class("editor-section");
-        section.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        section.content().add_class("editor-surface");
-        section.content().style.layout.padding = bgui::vec4i{6, 6, 6, 6};
-        section.content().style.layout.align = bgui::vec<2, bgui::alignment>{
+        section.set_icon("circle", 0.27f);
+        section.children().add_class("editor-surface");
+        section.children().style.layout.padding = bgui::vec4i{6, 6, 6, 6};
+        section.children().style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::start,
             bgui::alignment::start
         };
 
         if (removable) {
-            auto& remove_row = section.content().add<bgui::linear>(
+            auto& remove_row = section.children().add<bgui::linear>(
                 bgui::orientation::horizontal
             );
             remove_row.add_class("editor-property-row");
@@ -255,7 +341,7 @@ private:
 
     void add_transform(const std::shared_ptr<commons::transform>& transform) {
         auto& section = add_section("Transform", false, {});
-        auto& content = section.content();
+        auto& content = section.children();
 
         add_vector_field(
             content,
@@ -298,7 +384,7 @@ private:
             true,
             [this, id]() { remove_component<commons::renderer>(id); }
         );
-        auto& icon_row = section.content().add<bgui::linear>(
+        auto& icon_row = section.children().add<bgui::linear>(
             bgui::orientation::horizontal
         );
         configure_row(icon_row);
@@ -319,7 +405,7 @@ private:
             true,
             [this, id]() { remove_component<commons::camera>(id); }
         );
-        auto& content = section.content();
+        auto& content = section.children();
 
         add_number_field(
             content,
@@ -348,6 +434,15 @@ private:
         orthographic.set_on_change(
             [camera](bool enabled) { camera->flag_orth = enabled; }
         );
+
+        auto& show_frustum = content.add<bgui::checkbox>(
+            "Show Frustum",
+            0.29f,
+            m_context->show_camera_frustum
+        );
+        show_frustum.set_on_change([context = m_context](bool enabled) {
+            context->show_camera_frustum = enabled;
+        });
     }
 
     void add_directional_light(
@@ -361,7 +456,7 @@ private:
                 remove_component<commons::directional_light>(id);
             }
         );
-        auto& content = section.content();
+        auto& content = section.children();
 
         add_vector_field(
             content,
@@ -479,72 +574,6 @@ private:
         );
         field.add_class("editor-input");
         field.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-    }
-
-    void add_available_components(const entity_id id) {
-        const auto registry = m_context->registry;
-        const bool has_camera = static_cast<bool>(
-            registry->get<commons::camera>(id)
-        );
-        const bool has_directional_light = static_cast<bool>(
-            registry->get<commons::directional_light>(id)
-        );
-        if (has_camera && has_directional_light)
-            return;
-
-        auto& heading = m_root->add<bgui::text>("Add Component", 0.31f);
-        heading.add_class("editor-property-label");
-        heading.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-
-        auto& available = m_root->add<bgui::linear>(
-            bgui::orientation::vertical
-        );
-        available.add_class("editor-surface");
-        available.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-
-        if (!has_camera) {
-            add_component_button(
-                available,
-                "eye",
-                "Camera",
-                [this, id]() { add_component<commons::camera>(id); }
-            );
-        }
-        if (!has_directional_light) {
-            add_component_button(
-                available,
-                "bolt",
-                "Directional Light",
-                [this, id]() {
-                    add_component<commons::directional_light>(id);
-                }
-            );
-        }
-    }
-
-    void add_component_button(
-        bgui::linear& parent,
-        const std::string& icon,
-        const std::string& label,
-        const std::function<void()>& action
-    ) {
-        auto& row = parent.add<bgui::linear>(bgui::orientation::horizontal);
-        row.add_class("editor-property-row");
-        configure_row(row);
-        row.add<bgui::icon>("plus", 0.28f);
-        row.add<bgui::icon>(icon, 0.28f);
-        auto& button = row.add<bgui::button>(label, 0.28f, action);
-        button.add_class("editor-input");
-        button.style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::wrap_content
         );

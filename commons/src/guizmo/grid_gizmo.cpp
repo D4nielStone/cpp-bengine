@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 
 #include "components/camera.hpp"
 #include "glad.h"
@@ -108,6 +109,7 @@ namespace {
         GLint depth_function;
         GLint blend_source;
         GLint blend_destination;
+        GLfloat line_width;
         GLboolean depth_test;
         GLboolean depth_write;
         GLboolean blend;
@@ -124,6 +126,7 @@ namespace {
         glGetIntegerv(GL_DEPTH_FUNC, &state.depth_function);
         glGetIntegerv(GL_BLEND_SRC, &state.blend_source);
         glGetIntegerv(GL_BLEND_DST, &state.blend_destination);
+        glGetFloatv(GL_LINE_WIDTH, &state.line_width);
         state.depth_test = glIsEnabled(GL_DEPTH_TEST);
         glGetBooleanv(GL_DEPTH_WRITEMASK, &state.depth_write);
         state.blend = glIsEnabled(GL_BLEND);
@@ -144,6 +147,7 @@ namespace {
         else
             glDisable(GL_DEPTH_TEST);
         glBlendFunc(static_cast<GLenum>(state.blend_source), static_cast<GLenum>(state.blend_destination));
+        glLineWidth(state.line_width);
         if (state.blend)
             glEnable(GL_BLEND);
         else
@@ -152,6 +156,65 @@ namespace {
             glEnable(GL_SCISSOR_TEST);
         else
             glDisable(GL_SCISSOR_TEST);
+    }
+
+    void ensure_resources(GLuint& program, GLuint& vao, GLuint& vbo) {
+        if (program != 0)
+            return;
+        program = create_grid_program();
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+    }
+
+    void render_vertices(
+        const COMMONS_NS::camera& camera,
+        const bgui::vec4i& viewport,
+        const std::vector<grid_vertex>& vertices,
+        const GLuint program,
+        const GLuint vao,
+        const GLuint vbo,
+        const bool depth_test,
+        const float line_width
+    ) {
+        if (!camera.flag_fb || camera.viewportFBO.x <= 0 ||
+            camera.viewportFBO.y <= 0 || viewport.z <= 0 || viewport.w <= 0 ||
+            vertices.empty())
+            return;
+
+        const auto state = save_gl_state();
+        glBindFramebuffer(GL_FRAMEBUFFER, camera.fbo);
+        glViewport(0, 0, camera.viewportFBO.x, camera.viewportFBO.y);
+        if (depth_test)
+            glEnable(GL_DEPTH_TEST);
+        else
+            glDisable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_SCISSOR_TEST);
+        glLineWidth(line_width);
+
+        glUseProgram(program);
+        glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, GL_FALSE,
+            glm::value_ptr(camera.viewMatrix));
+        glUniformMatrix4fv(glGetUniformLocation(program, "projection"), 1, GL_FALSE,
+            glm::value_ptr(camera.projMatriz));
+
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(vertices.size() * sizeof(grid_vertex)),
+            vertices.data(), GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(grid_vertex),
+            reinterpret_cast<void*>(offsetof(grid_vertex, x)));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(grid_vertex),
+            reinterpret_cast<void*>(offsetof(grid_vertex, r)));
+        glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
+
+        restore_gl_state(state);
     }
 }
 
@@ -197,39 +260,63 @@ void editor::grid_gizmo::draw(
             axis ? 0.8f : 0.55f);
     }
 
-    if (m_program == 0) {
-        m_program = create_grid_program();
-        glGenVertexArrays(1, &m_vao);
-        glGenBuffers(1, &m_vbo);
+    ensure_resources(m_program, m_vao, m_vbo);
+    render_vertices(
+        camera, viewport, vertices, m_program, m_vao, m_vbo, true, 1.f
+    );
+}
+
+void editor::grid_gizmo::draw_camera_frustum(
+    const COMMONS_NS::camera& viewport_camera,
+    const COMMONS_NS::camera& frustum_camera,
+    const bgui::vec4i& viewport)
+{
+    if (!viewport_camera.flag_fb || viewport_camera.viewportFBO.x <= 0 ||
+        viewport_camera.viewportFBO.y <= 0 || viewport.z <= 0 || viewport.w <= 0)
+        return;
+
+    const glm::mat4 inverse_view_projection = glm::inverse(
+        frustum_camera.projMatriz * frustum_camera.viewMatrix
+    );
+    constexpr float ndc_corners[8][3]{
+        {-1.f, -1.f, -1.f}, {1.f, -1.f, -1.f},
+        {1.f, 1.f, -1.f}, {-1.f, 1.f, -1.f},
+        {-1.f, -1.f, 1.f}, {1.f, -1.f, 1.f},
+        {1.f, 1.f, 1.f}, {-1.f, 1.f, 1.f}
+    };
+    glm::vec3 corners[8];
+    for (std::size_t i = 0; i < 8; ++i) {
+        const glm::vec4 world = inverse_view_projection * glm::vec4(
+            ndc_corners[i][0], ndc_corners[i][1], ndc_corners[i][2], 1.f
+        );
+        if (!std::isfinite(world.w) || std::abs(world.w) < 1e-6f)
+            return;
+        corners[i] = glm::vec3(world) / world.w;
+        if (!std::isfinite(corners[i].x) || !std::isfinite(corners[i].y) ||
+            !std::isfinite(corners[i].z))
+            return;
     }
 
-    const auto state = save_gl_state();
-    glBindFramebuffer(GL_FRAMEBUFFER, camera.fbo);
-    glViewport(0, 0, camera.viewportFBO.x, camera.viewportFBO.y);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_SCISSOR_TEST);
+    constexpr float color[4]{1.f, 0.72f, 0.16f, 1.f};
+    constexpr std::size_t edges[][2]{
+        {0, 1}, {1, 2}, {2, 3}, {3, 0},
+        {4, 5}, {5, 6}, {6, 7}, {7, 4},
+        {0, 4}, {1, 5}, {2, 6}, {3, 7}
+    };
+    std::vector<grid_vertex> vertices;
+    vertices.reserve(std::size(edges) * 2);
+    for (const auto& edge : edges) {
+        for (const auto index : edge) {
+            const auto& point = corners[index];
+            vertices.push_back({
+                point.x, point.y, point.z,
+                color[0], color[1], color[2], color[3]
+            });
+        }
+    }
 
-    glUseProgram(m_program);
-    glUniformMatrix4fv(glGetUniformLocation(m_program, "view"), 1, GL_FALSE,
-        glm::value_ptr(camera.viewMatrix));
-    glUniformMatrix4fv(glGetUniformLocation(m_program, "projection"), 1, GL_FALSE,
-        glm::value_ptr(camera.projMatriz));
-
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(grid_vertex)),
-        vertices.data(), GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(grid_vertex),
-        reinterpret_cast<void*>(offsetof(grid_vertex, x)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(grid_vertex),
-        reinterpret_cast<void*>(offsetof(grid_vertex, r)));
-    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
-
-    restore_gl_state(state);
+    ensure_resources(m_program, m_vao, m_vbo);
+    render_vertices(
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 1.5f
+    );
 }

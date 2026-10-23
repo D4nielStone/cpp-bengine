@@ -2,6 +2,8 @@
 
 #include <bgui.hpp>
 
+#include "components/camera.hpp"
+#include "components/directional_light.hpp"
 #include "components/renderer.hpp"
 #include "editor_context.hpp"
 #include "panel.hpp"
@@ -111,12 +113,31 @@ private:
     }
 
     std::string entity_label(const entity_id id) const {
+        if (m_context) {
+            const auto name = m_context->entity_names.find(id);
+            if (name != m_context->entity_names.end() && !name->second.empty())
+                return name->second;
+        }
         if (m_get_name) {
             auto name = m_get_name(id);
             if (!name.empty())
                 return name;
         }
         return "Entity " + std::to_string(id);
+    }
+
+    std::string_view entity_icon(const entity_id id) const {
+        if (!m_context || !m_context->registry)
+            return "circle";
+
+        if (m_context->registry->get<commons::camera>(id))
+            return "camera";
+        if (m_context->registry->get<commons::directional_light>(id))
+            return "lightbulb";
+        if (m_context->registry->get<commons::renderer>(id))
+            return "cube";
+
+        return "circle";
     }
 
     // Snapshot ordenado por id (ordem estável independente do container).
@@ -177,7 +198,7 @@ private:
         button.style.visual.border.pressed = transparent;
         button.style.visual.border.focused = transparent;
         button.style.visual.border_size = 0.f;
-        button.style.visual.border_radius = 0.f;
+        button.style.visual.border_radius = 5.f;
         button.get_label().set_enable(false);
         button.mark_style_dirty();
     }
@@ -312,7 +333,7 @@ private:
             bgui::alignment::start,
         };
 
-        auto& icon = row_layout.add<bgui::icon>("circle", 0.2f);
+        auto& icon = row_layout.add<bgui::icon>(entity_icon(e.id), 0.2f);
         icon.add_class("entity-row-icon");
         icon.style.layout.require_mode(
             bgui::mode::pixel,
@@ -425,7 +446,7 @@ public:
             }
         );
         add_entity.add_class("entities-add-button");
-        configure_icon_button(add_entity, 24);
+        configure_icon_button(add_entity, 18);
         add_button_icon(add_entity, "plus", 0.26f);
 
         auto& search_icon = m_toolbar->add<bgui::icon>("search", 0.24f);
@@ -443,14 +464,13 @@ public:
         m_filter = &m_toolbar->add<bgui::inputbox>(
             "",
             "Search entities...",
-            0.27f
+            0.3f
         );
         m_filter->add_class("editor-input");
         m_filter->style.layout.require_mode(
             bgui::mode::stretch,
             bgui::mode::wrap_content
         );
-        m_filter->style.layout.padding = bgui::vec4i{4, 2, 4, 2};
 
         m_list = &m_root->add<bgui::linear>(bgui::orientation::vertical);
         m_list->add_class("entities-list");
@@ -473,6 +493,13 @@ public:
         const auto current_filter = m_filter->get_buffer();
 
         if (m_context) {
+            for (auto it = m_context->entity_names.begin();
+                 it != m_context->entity_names.end();) {
+                if (!contains(entries, it->first))
+                    it = m_context->entity_names.erase(it);
+                else
+                    ++it;
+            }
             for (auto it = m_context->hidden_entities.begin();
                  it != m_context->hidden_entities.end();) {
                 if (!contains(entries, *it))
@@ -551,7 +578,7 @@ private:
         const bool create_scene_tree = !m_scene_tree;
         if (!m_scene_tree) {
             m_scene_tree = &m_list->add<bgui::tree>(
-                "SampleScene 1",
+                "Scene",
                 0.28f,
                 false
             );

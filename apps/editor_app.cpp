@@ -15,10 +15,15 @@
 #include "editor/entities_view.hpp"
 #include "editor/components_view.hpp"
 #include "editor/ui_persistence_system.hpp"
+#include "editor/runtime_process.hpp"
 
 #include <lay/linear.hpp>
 
-int main() {
+#include <chrono>
+#include <filesystem>
+#include <string>
+
+int main(int argc, char** argv) {
     commons::window window("Bubble Engine - Editor");
     auto registry = window.get_ecs();
 
@@ -83,16 +88,65 @@ int main() {
             editor_context,
             render_system
         );
+    auto runtime_process = std::make_shared<editor::ui::runtime_process>();
+    auto runtime_executable = std::filesystem::absolute(argv[0]).parent_path() /
+#ifdef _WIN32
+        "runtime_app.exe";
+#else
+        "runtime_app";
+#endif
     editor.set_play_state_callback(
-        [editor_context, input_state = scene.input_state()](const bool playing) {
-            editor_context->is_playing = playing;
-            input_state->runtime_active = playing;
-            for (const auto id : editor_context->hidden_entities) {
-                if (auto renderer =
-                        editor_context->registry->get<commons::renderer>(id)) {
-                    renderer->visible = !playing;
-                }
+        [runtime_process, runtime_executable, &project_persistence, editor_context](
+            const bool playing,
+            std::string& error
+        ) {
+            if (!playing) {
+                if (!runtime_process->stop(error))
+                    return false;
+                editor_context->is_playing = false;
+                return true;
             }
+
+            std::error_code filesystem_error;
+            const auto temp_directory =
+                std::filesystem::temp_directory_path(filesystem_error);
+            if (filesystem_error) {
+                error = "Could not locate the temporary directory: " +
+                    filesystem_error.message();
+                return false;
+            }
+
+            const auto project_file = temp_directory /
+                ("cpp-bengine-runtime-" +
+                 std::to_string(
+                     std::chrono::steady_clock::now()
+                         .time_since_epoch()
+                         .count()
+                 ) +
+                 ".bengine");
+            if (!project_persistence.save(project_file.string(), error)) {
+                std::filesystem::remove(project_file, filesystem_error);
+                return false;
+            }
+
+            const bool started = runtime_process->start(
+                runtime_executable,
+                project_file,
+                error
+            );
+            if (started)
+                editor_context->is_playing = true;
+            return started;
+        }
+    );
+    editor.set_runtime_running_callback(
+        [runtime_process](std::string& error) {
+            return runtime_process->running(error);
+        }
+    );
+    editor.set_runtime_pause_callback(
+        [runtime_process](const bool paused, std::string& error) {
+            return runtime_process->set_paused(paused, error);
         }
     );
     editor.set_project_loaded_callback(

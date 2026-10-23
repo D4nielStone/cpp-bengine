@@ -22,6 +22,11 @@ namespace editor {
         float extent{50.f};
 
         void draw(const COMMONS_NS::camera& camera, const bgui::vec4i& viewport);
+        void draw_camera_frustum(
+            const COMMONS_NS::camera& viewport_camera,
+            const COMMONS_NS::camera& frustum_camera,
+            const bgui::vec4i& viewport
+        );
 
     private:
         unsigned int m_program{0};

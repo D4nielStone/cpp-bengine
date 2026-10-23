@@ -8,8 +8,7 @@
 
 #include "debugging/debug.hpp"
 
-#include <array>
-#include <iostream>
+#include <filesystem>
 
 using namespace COMMONS_NS;
 
@@ -21,35 +20,16 @@ void ui_system::setup(const std::shared_ptr<ecs>&)
     bgui::set_up_gl3();
     bgui::set_font_antialiasing(true);
     bgui::set_up_freetype();
-#ifdef _WIN32
-    bgui::ft_search_system_fonts(
-        "segoe,Segoe,SEGOE,arial,Arial,ARIAL,calibri,Calibri,CALIBRI,"
-        "tahoma,Tahoma,TAHOMA");
-    constexpr std::array<const char*, 4> interface_fonts = {
-        "Segoe UI Regular",
-        "Segoe UI Variable Regular",
-        "Arial Regular",
-        "Calibri Regular"
-    };
-#else
-    constexpr std::array<const char*, 4> interface_fonts = {
-        "DejaVu Sans Book",
-        "Liberation Sans Regular",
-        "Noto Sans Regular",
-        "Ubuntu Regular"
-    };
-#endif
-    bool interface_font_loaded = false;
-    for (const char* font_name : interface_fonts) {
-        bgui::ft_load_system_font(font_name);
-        if (bgui::font_manager::get_instance().has_font(font_name)) {
-            bgui::font_manager::get_instance().set_default_font(font_name);
-            interface_font_loaded = true;
-            break;
-        }
-    }
-    if (!interface_font_loaded)
-        std::cerr << "[ui] No supported sans-serif interface font found; keeping the FreeType default font.\n";
+    constexpr const char* interface_font = "Hack Nerd Font";
+    const auto interface_font_path =
+        std::filesystem::path(COMMONS_ASSET_DIR) /
+        "fonts/HackNerdFont-Regular.ttf";
+    bgui::ft_load_font(
+        interface_font,
+        interface_font_path.string(),
+        bgui::font_manager::m_default_resolution
+    );
+    bgui::font_manager::get_instance().set_default_font(interface_font);
     bgui::load_font_queue();
     m_initialized = true;
     debugging::emit(debug, "ui", "cpp-bgui inicializado");

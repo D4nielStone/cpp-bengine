@@ -11,6 +11,10 @@
 #include "debugging/debug.hpp"
 #include "glad.h"
 
+#include <memory>
+#include <utility>
+#include <vector>
+
 using namespace COMMONS_NS;
 
 void render_system::setup(const std::shared_ptr<ecs>&) {
@@ -26,6 +30,33 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         return;
     }
 
+    directional_light global_direction_light{
+        {-0.2f, -1.0f, -0.3f},
+        bgui::vec3(0.15f),
+        bgui::vec3(1.0f),
+        1.0f
+    };
+    reg->cada<directional_light>([&](const uint32_t light_entity) {
+        if (reg->has<camera>(light_entity))
+            return;
+        if (auto light = reg->get<directional_light>(light_entity))
+            global_direction_light = *light;
+    });
+
+    std::vector<point_light> point_lights;
+    reg->cada<point_light>([&](const uint32_t light_entity) {
+        if (auto light = reg->get<point_light>(light_entity))
+            point_lights.push_back(*light);
+    });
+
+    std::vector<std::pair<std::shared_ptr<renderer>, std::shared_ptr<transform>>> renderables;
+    reg->cada<renderer, transform>([&](const uint32_t render_entity) {
+        renderables.emplace_back(
+            reg->get<renderer>(render_entity),
+            reg->get<transform>(render_entity)
+        );
+    });
+
     reg->cada<camera>([&](const uint32_t entity) {
         auto camera_component = reg->get<camera>(entity);
         if (!camera_component) {
@@ -38,39 +69,17 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         const auto view = camera_component->getViewMatrix();
         const auto projection = camera_component->obtProjectionMatrix();
 
-        directional_light direction_light{
-            {-0.2f, -1.0f, -0.3f},
-            bgui::vec3(0.15f),
-            bgui::vec3(1.0f),
-            1.0f
-        };
-        std::vector<point_light> point_lights;
-
-        reg->cada<directional_light>([&](const uint32_t light_entity) {
-            if (light_entity != camera_component->my_object &&
-                reg->get<camera>(light_entity))
-                return;
-            if (auto light = reg->get<directional_light>(light_entity)) {
-                direction_light = *light;
-            }
-        });
+        auto direction_light = global_direction_light;
         if (auto camera_light = reg->get<directional_light>(camera_component->my_object))
             direction_light = *camera_light;
-        reg->cada<point_light>([&](const uint32_t light_entity) {
-            if (auto light = reg->get<point_light>(light_entity)) {
-                point_lights.push_back(*light);
-            }
-        });
 
-        reg->cada<renderer, transform>([&](const uint32_t render_entity) {
-            auto render_component = reg->get<renderer>(render_entity);
-            auto transform_component = reg->get<transform>(render_entity);
+        for (const auto& [render_component, transform_component] : renderables) {
             if (!render_component || !transform_component || !render_component->m_modelo) {
                 debugging::emit(debug, "render", "Renderizador ou transformação inválida");
-                return;
+                continue;
             }
             if (!render_component->visible)
-                return;
+                continue;
 
             auto& shader = render_component->m_modelo->getShader();
             shader.use();
@@ -95,7 +104,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
 
             render_component->m_modelo->draw();
             ++m_last_rendered_entity_count;
-        });
+        }
 
     });
 

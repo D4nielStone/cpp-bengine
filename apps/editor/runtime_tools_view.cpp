@@ -45,7 +45,7 @@ runtime_tools_view::runtime_tools_view(
 
 void runtime_tools_view::build(bgui::dock& dock) {
     auto& runtime_window = dock.add_window(
-        "Runtime Debug / Profiler",
+        "Editor Diagnostics",
         bgui::dock_area::right,
         0.24f
     );
@@ -59,7 +59,7 @@ void runtime_tools_view::build(bgui::dock& dock) {
         bgui::mode::match_parent
     );
 
-    m_runtime_status = &content.add<bgui::text>("Runtime: stopped", 0.31f);
+    m_runtime_status = &content.add<bgui::text>("Game window: stopped", 0.31f);
     m_frame_profile = &content.add<bgui::text>("Frame: 0.00 ms | FPS: 0", 0.29f);
     m_render_profile = &content.add<bgui::text>("Render: 0.00 ms", 0.29f);
     m_scene_debug = &content.add<bgui::text>(
@@ -75,11 +75,17 @@ void runtime_tools_view::update() {
     }
 
     const double frame_time = m_window.delta_time();
-    const double frame_rate = frame_time > 0.0 ? 1.0 / frame_time : 0.0;
+    m_fps_elapsed += frame_time;
+    ++m_frame_count;
+    if (m_fps_elapsed >= 1.0) {
+        m_fps = static_cast<double>(m_frame_count) / m_fps_elapsed;
+        m_fps_elapsed = 0.0;
+        m_frame_count = 0;
+    }
     std::ostringstream frame;
     frame << std::fixed << std::setprecision(2)
           << "Frame: " << frame_time * 1000.0 << " ms | FPS: "
-          << std::setprecision(0) << frame_rate;
+          << std::setprecision(0) << m_fps;
     m_frame_profile->set_buffer(frame.str());
 
     std::ostringstream render;
@@ -90,7 +96,7 @@ void runtime_tools_view::update() {
            << m_render_system->last_rendered_entity_count();
     m_render_profile->set_buffer(render.str());
     m_runtime_status->set_buffer(
-        m_context->is_playing ? "Runtime: running" : "Runtime: stopped"
+        m_context->is_playing ? "Game window: running" : "Game window: stopped"
     );
 
     std::size_t entity_count = 0;
