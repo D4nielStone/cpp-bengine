@@ -3,6 +3,7 @@
 #include "components/camera.hpp"
 #include "components/code.hpp"
 #include "components/directional_light.hpp"
+#include "components/physics.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 #include "entities/entity.hpp"
@@ -12,6 +13,7 @@
 #include <rapidjson/stringbuffer.h>
 
 #include <fstream>
+#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -36,6 +38,25 @@ bool is_vector3(const rapidjson::Value& value) {
     return true;
 }
 
+bool is_color4(const rapidjson::Value& value) {
+    if (!value.IsArray() || value.Size() != 4)
+        return false;
+    for (const auto& channel : value.GetArray())
+        if (!is_number(channel))
+            return false;
+    return true;
+}
+
+commons::color material_albedo(const commons::material& material) {
+    const auto albedo = material.getUniforme("material.albedo");
+    if (albedo.m_type == commons::uniform::type::Cor)
+        return albedo.valor.color_value;
+    if (albedo.m_type == commons::uniform::type::Cor_ptr &&
+        albedo.ponteiro.color_ptr)
+        return *albedo.ponteiro.color_ptr;
+    return {};
+}
+
 bool validate_component(const std::string& name, const rapidjson::Value& value) {
     if (!value.IsObject())
         return false;
@@ -46,11 +67,40 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
                value.HasMember("scale") && is_vector3(value["scale"]);
     }
 
-    if (name == "renderer")
-        return value.HasMember("model") && value["model"].IsString();
+    if (name == "renderer") {
+        if (!value.HasMember("model") || !value["model"].IsString())
+            return false;
+        if (!value.HasMember("materials"))
+            return true;
+        if (!value["materials"].IsArray())
+            return false;
+        for (const auto& material : value["materials"].GetArray()) {
+            if (!material.IsObject() || !material.HasMember("albedo") ||
+                !is_color4(material["albedo"]))
+                return false;
+        }
+        return true;
+    }
 
     if (name == "code")
         return value.HasMember("directory") && value["directory"].IsString();
+
+    if (name == "physics") {
+        if (!value.HasMember("shape") || !value["shape"].IsString())
+            return false;
+        const std::string shape(value["shape"].GetString());
+        if (shape != "box" && shape != "capsule" && shape != "sphere" &&
+            shape != "cylinder" && shape != "cone" && shape != "plane")
+            return false;
+        if ((value.HasMember("static") && !value["static"].IsBool()) ||
+            (value.HasMember("mass") &&
+                (!is_number(value["mass"]) || value["mass"].GetFloat() < 0.f)) ||
+            (value.HasMember("friction") && !is_number(value["friction"])) ||
+            (value.HasMember("restitution") &&
+                !is_number(value["restitution"])))
+            return false;
+        return true;
+    }
 
     if (name == "camera") {
         if ((value.HasMember("fov") && !is_number(value["fov"])) ||
@@ -91,6 +141,8 @@ std::string component_name(const component_mask mask) {
         return "camera";
     case commons::component::COMPONENTE_CODIGO:
         return "code";
+    case commons::component::COMPONENTE_FISICA:
+        return "physics";
     case commons::component::COMPONENTE_LUZ_DIRECIONAL:
         return "directional_light";
     default:
@@ -116,6 +168,8 @@ bool serialize_component(
         return std::static_pointer_cast<commons::camera>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_CODIGO:
         return std::static_pointer_cast<commons::code>(component)->serialize(destination, allocator);
+    case commons::component::COMPONENTE_FISICA:
+        return std::static_pointer_cast<commons::physics>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_LUZ_DIRECIONAL:
         return std::static_pointer_cast<commons::directional_light>(component)->serialize(destination, allocator);
     default:
@@ -127,21 +181,86 @@ bool parse_component(
     const std::string& name,
     const rapidjson::Value& data,
     commons::ecs& registry,
-    commons::entity& entity
+    commons::entity& entity,
+    const std::filesystem::path& project_directory
 ) {
     if (name == "transform") {
         return registry.get<commons::transform>(entity.id)->analyze(data);
     }
 
     if (name == "renderer") {
-        registry.add<commons::renderer>(entity);
-        return registry.get<commons::renderer>(entity.id)->analyze(data);
+        std::filesystem::path model_path(data["model"].GetString());
+        if (!model_path.is_absolute())
+            model_path = project_directory / model_path;
+        model_path = model_path.lexically_normal();
+        const auto model_path_string = model_path.string();
+        registry.add<commons::renderer>(entity, model_path_string.c_str());
+        auto renderer = registry.get<commons::renderer>(entity.id);
+        if (!renderer || !renderer->m_modelo)
+            return false;
+
+        if (data.HasMember("materials")) {
+            const auto& materials = data["materials"];
+            if (materials.Size() != renderer->m_modelo->meshes.size())
+                return false;
+            for (rapidjson::SizeType index = 0;
+                 index < materials.Size();
+                 ++index) {
+                const auto& albedo = materials[index]["albedo"];
+                auto material =
+                    renderer->m_modelo->meshes[index].getMaterial();
+                material.set_uniform(
+                    "material.albedo",
+                    commons::color{
+                        albedo[0].GetFloat(),
+                        albedo[1].GetFloat(),
+                        albedo[2].GetFloat(),
+                        albedo[3].GetFloat()
+                    }
+                );
+                renderer->m_modelo->meshes[index].setMaterial(material);
+            }
+        }
+        return true;
     }
 
     if (name == "code") {
         if (!registry.get<commons::code>(entity.id))
             registry.add<commons::code>(entity, "");
-        return registry.get<commons::code>(entity.id)->analyze(data);
+        auto script = registry.get<commons::code>(entity.id);
+        if (!script->analyze(data))
+            return false;
+        const std::filesystem::path script_path(script->file);
+        script->arquivoCompleto = (
+            script_path.is_absolute()
+                ? script_path
+                : project_directory / script_path
+        ).lexically_normal().string();
+        return true;
+    }
+
+    if (name == "physics") {
+        const std::string shape_name(data["shape"].GetString());
+        auto shape = commons::physics::shapes::box_shape;
+        if (shape_name == "capsule")
+            shape = commons::physics::shapes::forma_capsula;
+        else if (shape_name == "sphere")
+            shape = commons::physics::shapes::forma_esfera;
+        else if (shape_name == "cylinder")
+            shape = commons::physics::shapes::forma_cilindro;
+        else if (shape_name == "cone")
+            shape = commons::physics::shapes::forma_cone;
+        else if (shape_name == "plane")
+            shape = commons::physics::shapes::forma_plano;
+        const bool static_body =
+            data.HasMember("static") && data["static"].GetBool();
+        registry.add<commons::physics>(entity, static_body, shape);
+        auto physics = registry.get<commons::physics>(entity.id);
+        if (!physics->analyze(data))
+            return false;
+        if (static_body)
+            physics->setMass(0.f);
+        return true;
     }
 
     if (name == "camera") {
@@ -168,6 +287,14 @@ bool validate_project(const rapidjson::Document& document, std::string& error) {
         !document.HasMember("entities") ||
         !document["entities"].IsArray()) {
         error = "The file is not a supported Bubble Engine project.";
+        return false;
+    }
+
+    if (document.HasMember("settings") &&
+        (!document["settings"].IsObject() ||
+         (document["settings"].HasMember("gravity") &&
+          !is_vector3(document["settings"]["gravity"])))) {
+        error = "The project contains invalid global settings.";
         return false;
     }
 
@@ -220,6 +347,16 @@ void project_persistence_system::set_entity_names(entity_name_map* entity_names)
     m_entity_names = entity_names;
 }
 
+const std::array<float, 3>& project_persistence_system::global_gravity() const noexcept {
+    return m_global_gravity;
+}
+
+void project_persistence_system::set_global_gravity(
+    const std::array<float, 3>& gravity
+) noexcept {
+    m_global_gravity = gravity;
+}
+
 bool project_persistence_system::save(
     const std::string& path,
     std::string& error
@@ -235,6 +372,16 @@ bool project_persistence_system::save(
         return false;
     }
 
+    std::error_code path_error;
+    const auto absolute_target = std::filesystem::absolute(
+        std::filesystem::path(path),
+        path_error
+    ).lexically_normal();
+    if (path_error) {
+        error = "Could not resolve project path: " + path_error.message();
+        return false;
+    }
+
     rapidjson::Document document;
     document.SetObject();
     auto& allocator = document.GetAllocator();
@@ -243,6 +390,12 @@ bool project_persistence_system::save(
     format.SetString("bubble-engine-project", allocator);
     document.AddMember("format", format, allocator);
     document.AddMember("version", 1, allocator);
+    rapidjson::Value settings(rapidjson::kObjectType);
+    rapidjson::Value gravity(rapidjson::kArrayType);
+    for (const auto axis : m_global_gravity)
+        gravity.PushBack(axis, allocator);
+    settings.AddMember("gravity", gravity, allocator);
+    document.AddMember("settings", settings, allocator);
     rapidjson::Value entities(rapidjson::kArrayType);
 
     for (const auto& [id, components] : m_registry->entities) {
@@ -278,6 +431,75 @@ bool project_persistence_system::save(
                 return false;
             }
 
+            const bool saving_in_project =
+                absolute_target.parent_path() == m_asset_root;
+            if (mask == commons::component::COMPONENTE_CODIGO &&
+                !m_asset_root.empty() && !saving_in_project) {
+                const auto script =
+                    std::static_pointer_cast<commons::code>(component);
+                const std::filesystem::path script_path(script->file);
+                const auto resolved_script_path = (
+                    script_path.is_absolute()
+                        ? script_path
+                        : m_asset_root / script_path
+                ).lexically_normal().string();
+                component_data["directory"].SetString(
+                    resolved_script_path.c_str(),
+                    static_cast<rapidjson::SizeType>(resolved_script_path.size()),
+                    allocator
+                );
+            } else if (mask == commons::component::COMPONENTE_RENDER &&
+                       !m_asset_root.empty()) {
+                const auto renderer =
+                    std::static_pointer_cast<commons::renderer>(component);
+                if (!renderer->m_modelo) {
+                    error = "Could not serialize the model on entity " +
+                        std::to_string(id) + ".";
+                    return false;
+                }
+                const std::filesystem::path model_path(
+                    renderer->m_modelo->get_source_path()
+                );
+                std::filesystem::path saved_model_path = model_path;
+                if (saving_in_project) {
+                    const auto relative_model_path =
+                        model_path.lexically_relative(m_asset_root);
+                    if (!relative_model_path.empty() &&
+                        *relative_model_path.begin() != "..") {
+                        saved_model_path = relative_model_path;
+                    }
+                }
+                const auto saved_model = saved_model_path.generic_string();
+                component_data["model"].SetString(
+                    saved_model.c_str(),
+                    static_cast<rapidjson::SizeType>(saved_model.size()),
+                    allocator
+                );
+            }
+
+            if (mask == commons::component::COMPONENTE_RENDER) {
+                const auto renderer =
+                    std::static_pointer_cast<commons::renderer>(component);
+                if (!renderer->m_modelo) {
+                    error = "Could not serialize the model on entity " +
+                        std::to_string(id) + ".";
+                    return false;
+                }
+                rapidjson::Value materials(rapidjson::kArrayType);
+                for (const auto& mesh : renderer->m_modelo->meshes) {
+                    const auto albedo = material_albedo(mesh.getMaterial());
+                    rapidjson::Value material(rapidjson::kObjectType);
+                    rapidjson::Value color(rapidjson::kArrayType);
+                    color.PushBack(albedo.r, allocator);
+                    color.PushBack(albedo.g, allocator);
+                    color.PushBack(albedo.b, allocator);
+                    color.PushBack(albedo.a, allocator);
+                    material.AddMember("albedo", color, allocator);
+                    materials.PushBack(material, allocator);
+                }
+                component_data.AddMember("materials", materials, allocator);
+            }
+
             rapidjson::Value component_key;
             component_key.SetString(name.c_str(), static_cast<rapidjson::SizeType>(name.size()), allocator);
             serialized_components.AddMember(component_key, component_data, allocator);
@@ -291,14 +513,42 @@ bool project_persistence_system::save(
     rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
     document.Accept(writer);
 
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    const auto directory = absolute_target.parent_path();
+    const auto temp_path = directory.empty()
+        ? std::filesystem::path(absolute_target.string() + ".tmp")
+        : directory / (absolute_target.filename().string() + ".tmp");
+
+    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
     if (!output) {
-        error = "Could not open project file '" + path + "' for writing.";
+        error = "Could not open project file '" + temp_path.string() + "' for writing.";
         return false;
     }
     output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
+    output.flush();
     if (!output) {
+        output.close();
+        std::error_code ignore;
+        std::filesystem::remove(temp_path, ignore);
         error = "Could not finish writing project file '" + path + "'.";
+        return false;
+    }
+    output.close();
+    if (output.fail()) {
+        std::error_code ignore;
+        std::filesystem::remove(temp_path, ignore);
+        error = "Could not finalize project file '" + path + "' after write.";
+        return false;
+    }
+
+    // This is an atomic-ish replace within the same directory and is not a
+    // protection against power loss or crashes mid-write; the temporary file is
+    // fully validated before the original path is replaced.
+    std::error_code rename_error;
+    std::filesystem::rename(temp_path, absolute_target, rename_error);
+    if (rename_error) {
+        std::error_code remove_error;
+        std::filesystem::remove(temp_path, remove_error);
+        error = "Could not replace project file '" + path + "': " + rename_error.message();
         return false;
     }
     return true;
@@ -338,6 +588,14 @@ bool project_persistence_system::load(
     if (!validate_project(document, error))
         return false;
 
+    std::array<float, 3> staged_gravity{0.f, -9.8f, 0.f};
+    if (document.HasMember("settings") &&
+        document["settings"].HasMember("gravity")) {
+        const auto& gravity = document["settings"]["gravity"];
+        for (rapidjson::SizeType axis = 0; axis < gravity.Size(); ++axis)
+            staged_gravity[axis] = gravity[axis].GetFloat();
+    }
+
     auto active_camera = m_registry->get<commons::camera>(m_editor_camera_id);
     auto active_transform = m_registry->get<commons::transform>(m_editor_camera_id);
     if (!active_camera || !active_transform) {
@@ -356,23 +614,36 @@ bool project_persistence_system::load(
         break;
     }
 
-    if (m_entity_names)
-        m_entity_names->clear();
-
     auto staged_registry = std::make_shared<commons::ecs>();
+    entity_name_map staged_entity_names;
+    std::error_code path_error;
+    auto absolute_project_path = std::filesystem::absolute(
+        std::filesystem::path(path),
+        path_error
+    );
+    if (path_error) {
+        error = "Could not resolve project path: " + path_error.message();
+        return false;
+    }
+    const auto project_directory = absolute_project_path.parent_path();
     for (const auto& entity_data : document["entities"].GetArray()) {
         const auto id = entity_data["id"].GetUint();
         if (id == m_editor_camera_id)
             continue;
 
         auto entity = staged_registry->create(id);
-        if (m_entity_names && entity_data.HasMember("name") && entity_data["name"].IsString()) {
-            m_entity_names->emplace(id, entity_data["name"].GetString());
-        }
+        if (entity_data.HasMember("name") && entity_data["name"].IsString())
+            staged_entity_names.emplace(id, entity_data["name"].GetString());
         const auto& components = entity_data["components"];
         for (auto component = components.MemberBegin(); component != components.MemberEnd(); ++component) {
             const std::string name(component->name.GetString(), component->name.GetStringLength());
-            if (!parse_component(name, component->value, *staged_registry, entity)) {
+            if (!parse_component(
+                    name,
+                    component->value,
+                    *staged_registry,
+                    entity,
+                    project_directory
+                )) {
                 error = "Could not load component '" + name +
                     "' on entity " + std::to_string(id) + ".";
                 return false;
@@ -385,10 +656,24 @@ bool project_persistence_system::load(
     auto& editor_components = staged_registry->entities[m_editor_camera_id];
     editor_components[commons::transform::mask] = active_transform;
     editor_components[commons::camera::mask] = active_camera;
-    active_camera->m_transform = nullptr;
 
-    m_registry->entities = std::move(staged_registry->entities);
-    m_registry->mascaras = std::move(staged_registry->mascaras);
+    auto staged_registry_copy = std::make_shared<commons::ecs>();
+    staged_registry_copy->entities = staged_registry->entities;
+    staged_registry_copy->mascaras = staged_registry->mascaras;
+    for (auto& [id, components] : staged_registry_copy->entities) {
+        for (auto& [mask, component] : components) {
+            (void)mask;
+            component->reg = staged_registry_copy;
+            component->my_object = id;
+        }
+    }
+
+    auto staged_scene_entity_names = staged_entity_names;
+    const auto staged_asset_root = project_directory.lexically_normal();
+    const auto staged_global_gravity = staged_gravity;
+
+    m_registry->entities = std::move(staged_registry_copy->entities);
+    m_registry->mascaras = std::move(staged_registry_copy->mascaras);
     for (auto& [id, components] : m_registry->entities) {
         for (auto& [mask, component] : components) {
             (void)mask;
@@ -396,6 +681,11 @@ bool project_persistence_system::load(
             component->my_object = id;
         }
     }
+
+    if (m_entity_names)
+        *m_entity_names = std::move(staged_scene_entity_names);
+    m_asset_root = staged_asset_root;
+    m_global_gravity = staged_global_gravity;
 
     return true;
 }

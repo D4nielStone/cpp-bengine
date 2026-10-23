@@ -442,6 +442,7 @@ public:
                 if (!m_context || !m_context->registry)
                     return;
                 const auto created = m_context->registry->create();
+                m_context->record_entity_creation(created.id);
                 select(created.id);
             }
         );

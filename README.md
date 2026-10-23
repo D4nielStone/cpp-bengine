@@ -19,12 +19,16 @@ The engine also uses the BGUI API to build its own transform gizmos.
 
 The editor's **Files** menu saves and loads the dock layout through BGUI in
 `editor-ui.cfg`, and saves and loads project entities in `project.bengine`.
-Project files currently support transforms, renderers, cameras, and directional
-lights; saving fails with an error if an entity contains a component without
-project serialization support. The editor's Inspector panel is docked on the
-right and lets you edit transform, camera, and directional-light properties,
-as well as add or remove supported components. Selecting an entity in either
-the scene or the entity list updates the Inspector.
+The **Edit** menu and `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo
+scene edits, including Inspector changes, entity and component creation or
+removal, and transform-gizmo drags. Loading another project clears this history.
+Project files support transforms, renderers, cameras, directional lights,
+physics bodies/colliders, and Lua code components; saving fails with an error if
+an entity contains a component without project serialization support. The
+editor's Inspector panel is docked on the right and lets you edit transform,
+camera, and directional-light properties, as well as add or remove supported
+components. Selecting an entity in either the scene or the entity list updates
+the Inspector.
 
 The **Arquivos** panel shows the project folders on a dark sidebar and the
 selected folder's files beside it. Selecting a `.world`, `.bengine`, or `.scene`
@@ -100,6 +104,9 @@ those files.
 
 A ready-to-use FPP sample project is available in `projects/fpp_demo/` and uses
 entities, physics, collision, and Lua scripts for gameplay logic.
+Open it with `./build/apps/editor_app --project projects/fpp_demo/project.bengine`
+or select its directory through the editor's **Load Project** folder browser.
+In runtime, the player controller supports WASD movement and mouse look.
 
 # Structure
 

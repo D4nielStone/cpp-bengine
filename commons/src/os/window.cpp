@@ -147,6 +147,38 @@ void window::refresh() {
 
 }
 
+void window::set_close_request_callback(std::function<void()> callback) {
+    m_close_request_callback = std::move(callback);
+    if (m_window) {
+        glfwSetWindowUserPointer(m_window, this);
+        glfwSetWindowCloseCallback(
+            m_window,
+            m_close_request_callback ? close_callback : nullptr
+        );
+    }
+}
+
+void window::close() {
+    if (m_window)
+        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+}
+
+void window::close_callback(GLFWwindow* native_window) {
+    auto* instance = static_cast<window*>(
+        glfwGetWindowUserPointer(native_window)
+    );
+    if (instance)
+        instance->handle_close_request();
+}
+
+void window::handle_close_request() {
+    if (!m_close_request_callback)
+        return;
+
+    glfwSetWindowShouldClose(m_window, GLFW_FALSE);
+    m_close_request_callback();
+}
+
 void window::loop() {
     if (!m_window) {
         throw std::logic_error("The window is not initialized.");

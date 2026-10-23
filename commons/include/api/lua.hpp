@@ -1,5 +1,5 @@
 /**
- *  @file api_lua.hpp
+ *  @file lua.hpp
  *  Gerencia a configuração e ecs da API do motor com Lua via LuaBridge.
  *
  *  Este file é responsável por expor components internos do motor gráfico ao ambient

@@ -85,3 +85,42 @@ TEST(EcsIterationTest, FiltersEntitiesByComponentMask)
     EXPECT_EQ(rendered_entities, (std::vector<uint32_t>{second.id}));
     EXPECT_TRUE(registry->has<transform>(first.id));
 }
+
+namespace {
+    struct test_component : commons::component {
+        static constexpr commons::component::mask mask = commons::component::COMPONENTE_PROPRIEDADES;
+        int value = 0;
+        explicit test_component(int v = 0) : value(v) {}
+    };
+}
+
+TEST(EcsInvariantTest, KeepsLiveEntitySetAndMasksConsistent)
+{
+    auto registry = std::make_shared<ecs>();
+    auto entity = registry->create(7);
+    EXPECT_TRUE(registry->is_alive(entity.id));
+    EXPECT_TRUE(registry->validate_invariants());
+
+    registry->add<test_component>(entity, 42);
+    EXPECT_TRUE(registry->has<test_component>(entity.id));
+    EXPECT_EQ(registry->get<test_component>(entity.id)->value, 42);
+    EXPECT_TRUE(registry->validate_invariants());
+
+    registry->remove<test_component>(entity.id);
+    EXPECT_FALSE(registry->has<test_component>(entity.id));
+    EXPECT_TRUE(registry->validate_invariants());
+
+    registry->remove(entity.id);
+    EXPECT_FALSE(registry->is_alive(entity.id));
+    EXPECT_TRUE(registry->validate_invariants());
+
+    const auto reused = registry->create(entity.id);
+    EXPECT_EQ(reused.id, entity.id);
+    EXPECT_TRUE(registry->has<transform>(reused.id));
+    EXPECT_TRUE(registry->validate_invariants());
+
+    EXPECT_FALSE(registry->has<test_component>(999));
+    EXPECT_EQ(registry->get<test_component>(999), nullptr);
+    EXPECT_EQ(registry->get<test_component>(entity.id), nullptr);
+    EXPECT_FALSE(registry->is_alive(999));
+}

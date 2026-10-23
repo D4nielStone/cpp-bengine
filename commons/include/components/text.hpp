@@ -38,7 +38,7 @@ namespace COMMONS_NS {
 		constexpr static component::mask mask = component::COMPONENTE_TEXTO;
 		std::string phrase, font = "noto_sans.regular.ttf";
 		const float scale;
-		vector2<int> padding{0,0};
+		bgui::vec2i padding{0,0};
 		color m_color;
         glm::vec3 position_referencial; bool pf_ativa = false;// position de 3d para 2d
 		text(const std::string& text, float scale = 1.f) : phrase(text), scale(scale), m_color({ 1.f, 1.f, 1.f, 1.f }), padding({0, 0}) {}

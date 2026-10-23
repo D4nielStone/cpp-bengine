@@ -1,6 +1,8 @@
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
 #include "os/window.hpp"
+#include "systems/code_system.hpp"
+#include "systems/physics_system.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
 #include "editor/project_persistence_system.hpp"
@@ -12,6 +14,7 @@
 #include <lay/linear.hpp>
 
 #include <cstddef>
+#include <array>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -143,6 +146,7 @@ int main(const int argc, char** argv) {
 
     std::shared_ptr<commons::camera> game_camera =
         registry->get<commons::camera>(camera_entity.id);
+    std::array<float, 3> gravity{0.f, -9.8f, 0.f};
 
     if (project_path.empty()) {
         auto cube_entity = registry->create();
@@ -160,6 +164,7 @@ int main(const int argc, char** argv) {
             std::cerr << "[runtime] Could not load project: " << error << '\n';
             return 1;
         }
+        gravity = project.global_gravity();
 
         for (const auto& [id, components] : registry->entities) {
             (void)components;
@@ -204,6 +209,10 @@ int main(const int argc, char** argv) {
         }
     );
     window.add<runtime_viewport_sync_system>(game_camera, game_view);
+    window.add<commons::code_system>();
+    auto physics_system = std::make_shared<commons::physics_system>();
+    physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
+    window.add(physics_system);
     window.add(render_system);
     if (!game_camera->flag_fb) {
         std::cerr << "[runtime] Could not create the game camera framebuffer.\n";

@@ -11,12 +11,20 @@
 #include <os/os.hpp>
 
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 namespace editor::ui {
 
 class guizmo_system final : public bgui::element {
+    struct transform_snapshot {
+        std::shared_ptr<commons::transform> transform;
+        bgui::vec3 position;
+        bgui::vec3 rotation;
+        bgui::vec3 scale;
+    };
+
 private:
     std::shared_ptr<commons::camera> m_camera;
     std::shared_ptr<editor_context> m_context;
@@ -30,6 +38,43 @@ private:
 
     bool m_mouse_position_initialized{false};
     bool m_left_was_down{false};
+    std::optional<transform_snapshot> m_drag_snapshot;
+
+    static bool same_vector(const bgui::vec3& left, const bgui::vec3& right) {
+        return left.x == right.x && left.y == right.y && left.z == right.z;
+    }
+
+    void finish_transform_action() {
+        if (!m_drag_snapshot)
+            return;
+
+        auto snapshot = std::move(*m_drag_snapshot);
+        m_drag_snapshot.reset();
+        const auto position = snapshot.transform->get_position();
+        const auto rotation = snapshot.transform->get_rotation();
+        const auto scale = snapshot.transform->get_scale();
+        if (same_vector(snapshot.position, position) &&
+            same_vector(snapshot.rotation, rotation) &&
+            same_vector(snapshot.scale, scale))
+            return;
+
+        const auto transform = snapshot.transform;
+        const auto old_position = snapshot.position;
+        const auto old_rotation = snapshot.rotation;
+        const auto old_scale = snapshot.scale;
+        m_context->record_action(
+            [transform, old_position, old_rotation, old_scale]() {
+                transform->set_position(old_position);
+                transform->set_rotation(old_rotation);
+                transform->set_scale(old_scale);
+            },
+            [transform, position, rotation, scale]() {
+                transform->set_position(position);
+                transform->set_rotation(rotation);
+                transform->set_scale(scale);
+            }
+        );
+    }
 
 public:
     guizmo_system(
@@ -143,6 +188,7 @@ public:
         }
 
         if (selected_transform) {
+            const bool was_dragging = m_guizmo.is_dragging();
             m_guizmo.update(
                 *m_camera,
                 selected_transform.get(),
@@ -154,6 +200,17 @@ public:
                 left_just_pressed,
                 left_down
             );
+            const bool is_dragging = m_guizmo.is_dragging();
+            if (!was_dragging && is_dragging && m_context->selected_entity) {
+                m_drag_snapshot = transform_snapshot{
+                    selected_transform,
+                    selected_transform->get_position(),
+                    selected_transform->get_rotation(),
+                    selected_transform->get_scale()
+                };
+            } else if (was_dragging && !is_dragging) {
+                finish_transform_action();
+            }
         }
 
         if (m_input_state) {

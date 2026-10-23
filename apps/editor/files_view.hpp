@@ -94,6 +94,17 @@ public:
         refresh_if_needed();
     }
 
+    void set_project_file(const std::filesystem::path& project_file) {
+        m_project_root = resolve_project_root(project_file);
+        m_current_directory = m_project_root;
+        m_selected_file.clear();
+        m_main_scene.clear();
+        m_expanded_directories.clear();
+        m_expanded_directories.insert(m_project_root);
+        load_main_scene();
+        request_refresh();
+    }
+
 private:
     class file_button final : public bgui::button {
     public:
@@ -214,6 +225,7 @@ private:
     }
 
     void load_main_scene() {
+        m_main_scene.clear();
         std::ifstream marker(m_project_root / ".bengine-main-scene");
         if (!marker)
             return;

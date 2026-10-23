@@ -1,6 +1,8 @@
 #include "project_persistence_system.hpp"
 
 #include "components/camera.hpp"
+#include "components/code.hpp"
+#include "components/physics.hpp"
 #include "components/point_light.hpp"
 #include "components/transform.hpp"
 
@@ -120,6 +122,110 @@ TEST(ProjectPersistenceTest, SavesAndLoadsEntityNames) {
     EXPECT_EQ(entity_names.at(entity.id), std::string("Coin"));
 
     std::filesystem::remove(path);
+}
+
+TEST(ProjectPersistenceTest, SavesAndLoadsPhysicsBodies) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto body_entity = registry->create(23);
+    registry->add<commons::physics>(
+        body_entity,
+        false,
+        commons::physics::shapes::forma_esfera
+    );
+    registry->get<commons::physics>(body_entity.id)->setMass(2.5f);
+
+    editor::ui::project_persistence_system persistence(registry, 17);
+    const auto path = temporary_project_path();
+    std::string error;
+
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+
+    const auto loaded_physics =
+        registry->get<commons::physics>(body_entity.id);
+    ASSERT_NE(loaded_physics, nullptr);
+    EXPECT_EQ(
+        loaded_physics->e_forma,
+        commons::physics::shapes::forma_esfera
+    );
+    EXPECT_FLOAT_EQ(loaded_physics->m_massa, 2.5f);
+
+    std::filesystem::remove(path);
+}
+
+TEST(ProjectPersistenceTest, SavesAndLoadsGlobalGravitySettings) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    editor::ui::project_persistence_system persistence(registry, 17);
+    persistence.set_global_gravity({1.5f, -4.f, 2.25f});
+    const auto path = temporary_project_path();
+    std::string error;
+
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    persistence.set_global_gravity({0.f, -9.8f, 0.f});
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    const auto& gravity = persistence.global_gravity();
+    EXPECT_FLOAT_EQ(gravity[0], 1.5f);
+    EXPECT_FLOAT_EQ(gravity[1], -4.f);
+    EXPECT_FLOAT_EQ(gravity[2], 2.25f);
+
+    std::filesystem::remove(path);
+}
+
+TEST(ProjectPersistenceTest, ResolvesLuaScriptsFromProjectDirectory) {
+    const auto directory = temporary_project_path().parent_path() /
+        temporary_project_path().stem();
+    std::filesystem::create_directories(directory / "scripts");
+    {
+        std::ofstream script(directory / "scripts" / "logic.lua");
+        script << "function setup() end\nfunction update() end\n";
+    }
+
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto scripted_entity = registry->create(23);
+    registry->add<commons::code>(
+        scripted_entity,
+        "scripts/logic.lua"
+    );
+
+    editor::ui::project_persistence_system persistence(registry, 17);
+    const auto project_file = directory / "project.bengine";
+    std::string error;
+
+    ASSERT_TRUE(persistence.save(project_file.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(project_file.string(), error)) << error;
+
+    const auto loaded_code = registry->get<commons::code>(scripted_entity.id);
+    ASSERT_NE(loaded_code, nullptr);
+    EXPECT_EQ(loaded_code->file, "scripts/logic.lua");
+    EXPECT_EQ(
+        loaded_code->arquivoCompleto,
+        std::filesystem::absolute(directory / "scripts" / "logic.lua").string()
+    );
+
+    const auto runtime_file = temporary_project_path();
+    ASSERT_TRUE(persistence.save(runtime_file.string(), error)) << error;
+    std::ifstream saved_runtime_file(runtime_file, std::ios::binary);
+    const std::string saved_contents{
+        std::istreambuf_iterator<char>(saved_runtime_file),
+        std::istreambuf_iterator<char>()
+    };
+    rapidjson::Document saved_project;
+    saved_project.Parse(saved_contents.data(), saved_contents.size());
+    ASSERT_FALSE(saved_project.HasParseError());
+    EXPECT_EQ(
+        saved_project["entities"][0]["components"]["code"]["directory"]
+            .GetString(),
+        loaded_code->arquivoCompleto
+    );
+
+    std::filesystem::remove(runtime_file);
+    std::filesystem::remove_all(directory);
 }
 
 TEST(ProjectPersistenceTest, RejectsComponentsWithoutSerializationSupport) {

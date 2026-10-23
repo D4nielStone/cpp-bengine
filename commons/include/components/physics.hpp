@@ -26,6 +26,8 @@
 #include "commons_namespace.hpp"
 #include "loaders/model.hpp"
 #include "component.hpp"
+#include <bullet/btBulletDynamicsCommon.h>
+#include <rapidjson/document.h>
 
 namespace COMMONS_NS {
     struct physics : component {
@@ -42,7 +44,7 @@ namespace COMMONS_NS {
         };
 
         shapes e_forma;
-        physics(bool static = false, const shapes m_forma = shapes::box_shape);
+        physics(bool is_static = false, const shapes m_forma = shapes::box_shape);
         virtual ~physics();
 
         void setModelo(model*);
@@ -53,8 +55,17 @@ namespace COMMONS_NS {
         void setFriccao(const float fator);
         void setRestituicao(const float fator);
         void setRaioCCD(const float fator);
+        void setMass(float mass);
         bgui::vec3 getVelocidade() const;
-        unsigned int m_massa;
+        bool analyze(const rapidjson::Value&) override;
+        bool serialize(
+            rapidjson::Value& value,
+            rapidjson::Document::AllocatorType& allocator
+        ) const override;
+
+        float m_massa{1.f};
+        float friction{0.5f};
+        float restitution{0.f};
         model* m_modelo{ nullptr };
         btCollisionShape* m_forma{ nullptr };
         btDefaultMotionState* m_estado_de_movimento{ nullptr };

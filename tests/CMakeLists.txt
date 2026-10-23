@@ -1,3 +1,12 @@
+include(FetchContent)
+
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
 add_executable(commons_tests
     commons_tests.cpp
 )
@@ -13,6 +22,8 @@ target_include_directories(commons_tests
         ${CMAKE_SOURCE_DIR}/commons/include
         ${CMAKE_SOURCE_DIR}/external/rapidjson/include
 )
+
+target_compile_features(commons_tests PRIVATE cxx_std_20)
 
 include(GoogleTest)
 gtest_discover_tests(commons_tests)
@@ -34,5 +45,6 @@ target_include_directories(editor_persistence_tests
         ${CMAKE_SOURCE_DIR}/apps/editor
 )
 
-include(GoogleTest)
+target_compile_features(editor_persistence_tests PRIVATE cxx_std_20)
+
 gtest_discover_tests(editor_persistence_tests)

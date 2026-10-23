@@ -3,7 +3,7 @@
   "version": 1,
   "entities": [
     {
-      "id": 1,
+      "id": 100,
       "name": "PlayerCamera",
       "components": {
         "transform": {
@@ -16,7 +16,7 @@
           "zfar": 200.0,
           "scale": 1.0,
           "ortho": false,
-          "skybox": true
+          "skybox": false
         },
         "code": {
           "directory": "scripts/fpp_player.lua"
@@ -24,7 +24,7 @@
       }
     },
     {
-      "id": 2,
+      "id": 101,
       "name": "ArenaFloor",
       "components": {
         "transform": {
@@ -43,7 +43,7 @@
       }
     },
     {
-      "id": 3,
+      "id": 102,
       "name": "NorthWall",
       "components": {
         "transform": {
@@ -62,7 +62,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 103,
       "name": "PickupOrb",
       "components": {
         "transform": {
@@ -82,6 +82,44 @@
           "directory": "scripts/fpp_game.lua"
         }
       }
-    }
+    },
+      {
+        "id": 104,
+        "name": "WestWall",
+        "components": {
+          "transform": {
+            "position": [-10.0, 2.0, 0.0],
+            "rotation": [0.0, 90.0, 0.0],
+            "scale": [16.0, 6.0, 1.0]
+          },
+          "renderer": {
+            "model": "assets/models/wall.obj"
+          },
+          "physics": {
+            "shape": "box",
+            "static": true,
+            "mass": 0.0
+          }
+        }
+      },
+      {
+        "id": 105,
+        "name": "EastWall",
+        "components": {
+          "transform": {
+            "position": [10.0, 2.0, 0.0],
+            "rotation": [0.0, -90.0, 0.0],
+            "scale": [16.0, 6.0, 1.0]
+          },
+          "renderer": {
+            "model": "assets/models/wall.obj"
+          },
+          "physics": {
+            "shape": "box",
+            "static": true,
+            "mass": 0.0
+          }
+        }
+      }
   ]
 }

@@ -17,6 +17,7 @@
 #include "editor/components_view.hpp"
 #include "editor/ui_persistence_system.hpp"
 #include "editor/runtime_process.hpp"
+#include "editor/undo_redo_shortcuts_system.hpp"
 
 #include <lay/linear.hpp>
 
@@ -84,7 +85,16 @@ int main(int argc, char** argv) {
         menu_bar,
         ui_persistence,
         project_persistence,
+        registry,
         project_path
+    );
+    editor.set_history_callbacks(
+        [editor_context]() { editor_context->undo(); },
+        [editor_context]() { editor_context->redo(); }
+    );
+    editor.set_exit_callback([&window]() { window.close(); });
+    window.set_close_request_callback(
+        [&editor]() { editor.confirm_exit(); }
     );
 
     auto& scene = editor.add_panel<editor::ui::scene_view>(
@@ -129,6 +139,7 @@ int main(int argc, char** argv) {
                 model_path.c_str()
             );
             editor_context->entity_names[entity.id] = asset.stem().string();
+            editor_context->record_entity_creation(entity.id);
             editor_context->selected_entity = entity.id;
             entities_panel.refresh();
             components_panel.refresh();
@@ -203,16 +214,20 @@ int main(int argc, char** argv) {
         }
     );
     editor.set_project_loaded_callback(
-        [&entities_panel, &components_panel, editor_context]() {
+        [&entities_panel, &components_panel, &files_panel, editor_context](
+            const std::string& loaded_project_path
+        ) {
         for (const auto id : editor_context->hidden_entities) {
             if (auto renderer = editor_context->registry->get<commons::renderer>(id))
                 renderer->visible = true;
         }
         editor_context->hidden_entities.clear();
         editor_context->locked_entities.clear();
+        editor_context->clear_history();
         editor_context->selected_entity.reset();
         entities_panel.refresh();
         components_panel.refresh();
+        files_panel.set_project_file(loaded_project_path);
     });
 
     (void)scene;
@@ -222,6 +237,7 @@ int main(int argc, char** argv) {
     (void)runtime_tools_panel;
 
     window.add<commons::ui_system>();
+    bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(editor_context);
 
     window.loop();
 

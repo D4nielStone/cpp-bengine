@@ -24,6 +24,10 @@
 
 #pragma once
 #include "system.hpp"
+#include "components/code.hpp"
+
+#include <chrono>
+#include <unordered_set>
 
 namespace COMMONS_NS {
 	struct code_system : system {
@@ -31,6 +35,11 @@ namespace COMMONS_NS {
     	~code_system();
         void update(const std::shared_ptr<ecs>&) override;
         void setup(const std::shared_ptr<ecs>&) override;
-	};
+
+    private:
+        std::unordered_set<const code*> m_initialized;
+        std::unordered_set<const code*> m_failed;
+        std::chrono::steady_clock::time_point m_last_update{};
+    };
 }
 /** @see code_system.cpp */

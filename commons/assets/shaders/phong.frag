@@ -93,7 +93,7 @@ vec3 calculateLightLo(vec3 L, vec3 radiance, vec3 N, vec3 V, vec3 albedo, float 
 void main() {
     vec2 novoUv = uvMundo ? Position.xz * 0.1 : Uv;
 
-    vec4 albedo = use_tex_albedo ? texture(tex_albedo, novoUv) : material.albedo;
+    vec4 albedo = (use_tex_albedo ? texture(tex_albedo, novoUv) : vec4(1.0)) * material.albedo;
     float metallic = use_tex_metallic ? texture(tex_metallic, novoUv).r *2: material.metallic;
     float roughness = use_tex_roughness ? texture(tex_roughness, novoUv).r*0.1: material.roughness;
     float ao = use_tex_ao ? texture(tex_ao, novoUv).r : material.ao;

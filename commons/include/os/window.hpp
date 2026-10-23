@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
 
 #include "core/ecs.hpp"
 #include "os/time.hpp"
@@ -39,12 +40,18 @@ namespace COMMONS_NS {
         double delta_time() const noexcept;
         void refresh();
         void loop();
+        void set_close_request_callback(std::function<void()> callback);
+        void close();
 
     private:
+        static void close_callback(GLFWwindow* window);
+        void handle_close_request();
+
         GLFWwindow* m_window{nullptr};
         std::unique_ptr<bgui::scoped_interface> m_interface;
         std::shared_ptr<ecs> m_ecs;
         std::vector<std::shared_ptr<system>> m_systems;
+        std::function<void()> m_close_request_callback;
         time m_time;
         bool m_looping{false};
     };

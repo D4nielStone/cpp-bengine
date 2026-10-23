@@ -1,141 +1,195 @@
-/** @copyright
- * MIT License
- * Copyright (c) 2025 Daniel Oliveira
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- * @file physics.cpp
-
 #include "components/physics.hpp"
-#include "debugging/assert.hpp"
-#include "core/project.hpp"
+
+#include <rapidjson/document.h>
+
+#include <stdexcept>
+#include <string>
 
 using namespace COMMONS_NS;
 
-physics::physics(bool static, const shapes e_forma) : e_forma(e_forma) {
-    m_massa = static ? 0 : 1;
+namespace {
 
-    switch (e_forma) {
-        case shapes::box_shape:
-            m_forma = new btBoxShape(btVector3(0.5f, 0.5f, 0.5f));
-            break;
-        case shapes::forma_esfera:
-            m_forma = new btSphereShape(0.5f);
-            break;
-        case shapes::forma_capsula:
-            m_forma = new btCapsuleShape(0.5f, 1.8f);
-            break;
-        case shapes::forma_cilindro:
-            m_forma = new btCylinderShape(btVector3(0.5f, 0.5f, 0.5f));
-            break;
-        case shapes::forma_cone:
-            m_forma = new btConeShape(0.5f, 1.f);
-            break;
-        case shapes::forma_plano:
-            m_forma = new btStaticPlaneShape(btVector3(0.f, 1.f, 0.f), 1.f);
-            break;
-        case shapes::mesh_shape:
-            m_forma = nullptr;
-            break;
+const char* shape_name(const physics::shapes shape) {
+    switch (shape) {
+    case physics::shapes::box_shape:
+        return "box";
+    case physics::shapes::forma_capsula:
+        return "capsule";
+    case physics::shapes::forma_esfera:
+        return "sphere";
+    case physics::shapes::forma_cilindro:
+        return "cylinder";
+    case physics::shapes::forma_cone:
+        return "cone";
+    case physics::shapes::forma_plano:
+        return "plane";
+    case physics::shapes::mesh_shape:
+        return "mesh";
     }
-
-
-    btVector3 inertia(0, 0, 0);
-    if(m_massa > 0) m_forma->calculateLocalInertia(m_massa, inertia);
-    m_estado_de_movimento = new btDefaultMotionState(btTransform(btQuaternion(0, 0, 0, 1), btVector3(0, 0, 0)));
-    btRigidBody::btRigidBodyConstructionInfo rigidBodyCI(m_massa, m_estado_de_movimento, m_forma, inertia);
-    m_rigid_body = new btRigidBody(rigidBodyCI);
+    return "box";
 }
 
-// Destrutor
+}
+
+physics::physics(const bool is_static, const shapes shape)
+    : e_forma(shape),
+      m_massa(is_static ? 0.f : 1.f) {
+    switch (shape) {
+    case shapes::box_shape:
+        m_forma = new btBoxShape(btVector3(0.5f, 0.5f, 0.5f));
+        break;
+    case shapes::forma_capsula:
+        m_forma = new btCapsuleShape(0.5f, 1.8f);
+        break;
+    case shapes::forma_esfera:
+        m_forma = new btSphereShape(0.5f);
+        break;
+    case shapes::forma_cilindro:
+        m_forma = new btCylinderShape(btVector3(0.5f, 0.5f, 0.5f));
+        break;
+    case shapes::forma_cone:
+        m_forma = new btConeShape(0.5f, 1.f);
+        break;
+    case shapes::forma_plano:
+        m_forma = new btStaticPlaneShape(btVector3(0.f, 1.f, 0.f), 0.f);
+        break;
+    case shapes::mesh_shape:
+        throw std::invalid_argument(
+            "Mesh physics shapes are not supported by project files."
+        );
+    }
+
+    btVector3 inertia(0.f, 0.f, 0.f);
+    if (m_massa > 0.f)
+        m_forma->calculateLocalInertia(m_massa, inertia);
+
+    m_estado_de_movimento = new btDefaultMotionState(
+        btTransform(btQuaternion::getIdentity(), btVector3(0.f, 0.f, 0.f))
+    );
+    btRigidBody::btRigidBodyConstructionInfo construction(
+        m_massa,
+        m_estado_de_movimento,
+        m_forma,
+        inertia
+    );
+    m_rigid_body = new btRigidBody(construction);
+    setFriccao(friction);
+    setRestituicao(restitution);
+}
+
 physics::~physics() {
-    if(m_rigid_body && current_project)current_project->physics_system()->remove(m_rigid_body);
-    if(m_rigid_body)delete m_rigid_body;
-    if(m_estado_de_movimento)delete m_estado_de_movimento;
-    if(m_forma)delete m_forma;
+    delete m_rigid_body;
+    delete m_estado_de_movimento;
+    delete m_forma;
 }
 
-// Criar forma para múltiplas meshes
-void physics::setModelo(model* p_modelo) {
-    if(!p_modelo) throw std::runtime_error("Física: model inválido.");
-    m_modelo = p_modelo;
-    if(e_forma != shapes::mesh_shape) return;
-
-    btTriangleIndexVertexArray* indexVertexArray = new btTriangleIndexVertexArray();
-
-    for (const auto& mesh : m_modelo->meshes) {
-        const auto& vertices = mesh.getVertices();
-        const auto& indices = mesh.getIndices();
-
-        btIndexedMesh mesh;
-        mesh.m_numTriangles = indices.size() / 3;
-        mesh.m_triangleIndexBase = (const unsigned char*)indices.data();
-        mesh.m_triangleIndexStride = 3 * sizeof(unsigned int);
-        mesh.m_numVertices = vertices.size();
-        mesh.m_vertexBase = (const unsigned char*)vertices.data();
-        mesh.m_vertexStride = sizeof(vertex);
-        mesh.m_indexType = PHY_INTEGER;
-        mesh.m_vertexType = PHY_FLOAT;
-
-        indexVertexArray->addIndexedMesh(mesh, PHY_INTEGER);
-    }
-
-    m_forma = new btBvhTriangleMeshShape(indexVertexArray, true);
+void physics::setModelo(model* model_value) {
+    if (!model_value)
+        throw std::invalid_argument("Physics model cannot be null.");
+    if (e_forma == shapes::mesh_shape)
+        throw std::invalid_argument(
+            "Mesh physics shapes are not supported."
+        );
+    m_modelo = model_value;
 }
 
-// Aplicar força
 void physics::setForca(const bgui::vec3& vector) {
     m_rigid_body->activate();
-    m_rigid_body->applyCentralForce(to_btvec(vector));
+    m_rigid_body->applyCentralForce(
+        btVector3(vector.x, vector.y, vector.z)
+    );
 }
 
-// Aplicar speed
 void physics::setVelocidade(const bgui::vec3& speed) {
     m_rigid_body->activate();
-    m_rigid_body->setLinearVelocity(to_btvec(speed));
+    m_rigid_body->setLinearVelocity(
+        btVector3(speed.x, speed.y, speed.z)
+    );
 }
 
-// Obter speed
-bgui::vec3 physics::getVelocidade() const {
-    return { m_rigid_body->getLinearVelocity().getX(),
-            m_rigid_body->getLinearVelocity().getY(),
-            m_rigid_body->getLinearVelocity().getZ() };
-}
-void physics::setFatorLinear(const bgui::vec3& fator) {
-        m_rigid_body->activate();
-        m_rigid_body->setLinearFactor(to_btvec(fator));
-}
-
-void physics::setFatorAngular(const bgui::vec3& fator){
-        m_rigid_body->activate();
-        m_rigid_body->setAngularFactor(to_btvec(fator));
-}
-
-void physics::setRestituicao(const float fator) {
-        m_rigid_body->activate();
-        m_rigid_body->setRestitution(fator);
-}
-void physics::setFriccao(const float fator) {
-        m_rigid_body->activate();
-        m_rigid_body->setFriction(fator);
-}
-void physics::setRaioCCD(const float fator) {
+void physics::setFatorLinear(const bgui::vec3& factor) {
     m_rigid_body->activate();
-    m_rigid_body->setCcdSweptSphereRadius(fator);
+    m_rigid_body->setLinearFactor(
+        btVector3(factor.x, factor.y, factor.z)
+    );
 }
- */
+
+void physics::setFatorAngular(const bgui::vec3& factor) {
+    m_rigid_body->activate();
+    m_rigid_body->setAngularFactor(
+        btVector3(factor.x, factor.y, factor.z)
+    );
+}
+
+void physics::setFriccao(const float factor) {
+    friction = factor;
+    if (m_rigid_body)
+        m_rigid_body->setFriction(factor);
+}
+
+void physics::setRestituicao(const float factor) {
+    restitution = factor;
+    if (m_rigid_body)
+        m_rigid_body->setRestitution(factor);
+}
+
+void physics::setRaioCCD(const float factor) {
+    m_rigid_body->activate();
+    m_rigid_body->setCcdSweptSphereRadius(factor);
+}
+
+void physics::setMass(const float mass) {
+    m_massa = mass > 0.f ? mass : 0.f;
+    btVector3 inertia(0.f, 0.f, 0.f);
+    if (m_massa > 0.f)
+        m_forma->calculateLocalInertia(m_massa, inertia);
+    m_rigid_body->setMassProps(m_massa, inertia);
+    m_rigid_body->updateInertiaTensor();
+}
+
+bgui::vec3 physics::getVelocidade() const {
+    const auto velocity = m_rigid_body->getLinearVelocity();
+    return {velocity.getX(), velocity.getY(), velocity.getZ()};
+}
+
+bool physics::analyze(const rapidjson::Value& value) {
+    if (!value.IsObject())
+        return false;
+
+    if (value.HasMember("mass")) {
+        if (!value["mass"].IsNumber())
+            return false;
+        setMass(value["mass"].GetFloat());
+    }
+    if (value.HasMember("friction")) {
+        if (!value["friction"].IsNumber())
+            return false;
+        setFriccao(value["friction"].GetFloat());
+    }
+    if (value.HasMember("restitution")) {
+        if (!value["restitution"].IsNumber())
+            return false;
+        setRestituicao(value["restitution"].GetFloat());
+    }
+    return true;
+}
+
+bool physics::serialize(
+    rapidjson::Value& value,
+    rapidjson::Document::AllocatorType& allocator
+) const {
+    value.SetObject();
+    rapidjson::Value shape;
+    const auto* name = shape_name(e_forma);
+    shape.SetString(
+        name,
+        static_cast<rapidjson::SizeType>(std::char_traits<char>::length(name)),
+        allocator
+    );
+    value.AddMember("shape", shape, allocator);
+    value.AddMember("static", m_massa <= 0.f, allocator);
+    value.AddMember("mass", m_massa, allocator);
+    value.AddMember("friction", friction, allocator);
+    value.AddMember("restitution", restitution, allocator);
+    return true;
+}
