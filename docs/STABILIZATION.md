@@ -4,7 +4,7 @@
 
 | Check | Status | Evidence | Notes |
 |---|---|---|---|
-| Project manager opens before the editor, supports recent projects, a folder browser, opening by path, and creating a new project file | Implemented and compiled; desktop interaction pending | [apps/editor_app.cpp](../apps/editor_app.cpp) switches from the manager to the editor in one GLFW window, avoiding a second GLFW initialization. | Compact layout with a darker action panel. Headless CTest passed; visual interaction could not be checked without a display session. The `text_color` notice comes from the BGUI image shader not using a generic text style property and is separate from the GLFW cursor failure. |
+| Project manager opens before the editor, supports recent projects, a folder browser, opening by path, and creating a new project file | Implemented and compiled; desktop interaction pending | [apps/editor_app.cpp](../apps/editor_app.cpp) switches from the manager to the editor in one GLFW window, avoiding a second GLFW initialization. | Reduced typography and spacing, shorter recent-project labels, and contrasting column backgrounds address overlap and overflow in the supplied screenshot. Headless CTest passed; visual interaction still requires a display session. |
 
 ## Current build status
 

@@ -75,17 +75,23 @@ project_choice show_project_manager(
     root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
     auto& header = root.add<bgui::linear>(bgui::orientation::vertical);
     header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    header.style.layout.padding = bgui::vec4i{24, 16, 24, 8};
-    header.add<bgui::text>("Bubble Engine", 1.2f);
-    header.add<bgui::text>("Project Manager", 0.65f);
+    header.style.layout.padding = bgui::vec4i{20, 12, 20, 8};
+    auto& title = header.add<bgui::text>("Bubble Engine", 0.62f);
+    title.style.layout.set_margin(0, 2);
+    header.add<bgui::text>("Project Manager", 0.34f);
 
     auto& content = root.add<bgui::linear>(bgui::orientation::horizontal);
     content.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
     auto& recent = content.add<bgui::linear>(bgui::orientation::vertical);
-    recent.style.layout.require_width(bgui::mode::pixel, 360.f);
+    recent.style.layout.require_width(bgui::mode::pixel, 320.f);
     recent.style.layout.require_height(bgui::mode::match_parent);
-    recent.style.layout.padding = bgui::vec4i{20, 12, 14, 16};
-    recent.add<bgui::text>("Recent Projects", 0.8f);
+    recent.style.layout.padding = bgui::vec4i{16, 10, 12, 14};
+    recent.style.visual.background.normal = bgui::color{0.105f, 0.115f, 0.13f, 1.f};
+    recent.style.visual.border.normal = bgui::color{0.19f, 0.21f, 0.24f, 1.f};
+    recent.style.visual.border_size = 1.f;
+    recent.style.visual.border_radius = 5.f;
+    auto& recent_title = recent.add<bgui::text>("Recent Projects", 0.42f);
+    recent_title.style.layout.set_margin(0, 8);
 
     std::vector<std::string> recent_projects;
     std::ifstream recent_file("editor-recent-projects.cfg");
@@ -94,30 +100,37 @@ project_choice show_project_manager(
             recent_projects.push_back(line);
     }
     if (recent_projects.empty())
-        recent.add<bgui::text>("No recent projects", 0.55f);
+        recent.add<bgui::text>("No recent projects", 0.32f);
     for (const auto& path : recent_projects) {
+        const std::filesystem::path project_path(path);
+        auto project_label = project_path.filename().string();
+        const auto folder_name = project_path.parent_path().filename().string();
+        if (!folder_name.empty())
+            project_label += "  ·  " + folder_name;
         auto& button = recent.add<bgui::button>(
-            std::filesystem::path(path).stem().string() + "  —  " + path,
-            0.55f,
+            project_label,
+            0.34f,
             [&, path]() { choice = {path, false}; window.close(); }
         );
         button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        button.style.layout.set_padding(8, 5);
+        button.style.layout.set_padding(6, 4);
     }
 
     auto& actions = content.add<bgui::linear>(bgui::orientation::vertical);
     actions.style.layout.require_width(bgui::mode::stretch);
     actions.style.layout.require_height(bgui::mode::match_parent);
-    actions.style.layout.padding = bgui::vec4i{20, 14, 20, 16};
-    actions.style.visual.background.normal = bgui::color{0.075f, 0.082f, 0.095f, 1.f};
-    actions.style.visual.border.normal = bgui::color{0.19f, 0.21f, 0.24f, 1.f};
+    actions.style.layout.padding = bgui::vec4i{16, 12, 16, 14};
+    actions.style.visual.background.normal = bgui::color{0.055f, 0.062f, 0.075f, 1.f};
+    actions.style.visual.border.normal = bgui::color{0.22f, 0.24f, 0.28f, 1.f};
     actions.style.visual.border_size = 1.f;
     actions.style.visual.border_radius = 5.f;
-    actions.add<bgui::text>("Open or Create", 0.8f);
-    actions.add<bgui::text>("Project file path", 0.55f);
+    auto& actions_title = actions.add<bgui::text>("Open or Create", 0.44f);
+    actions_title.style.layout.set_margin(0, 8);
+    auto& path_label = actions.add<bgui::text>("Project file path", 0.30f);
+    path_label.style.layout.set_margin(0, 8);
     auto& path_row = actions.add<bgui::linear>(bgui::orientation::horizontal);
     path_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    auto& path_input = path_row.add<bgui::inputbox>("project.bengine", "Path to project file", 0.58f);
+    auto& path_input = path_row.add<bgui::inputbox>("project.bengine", "Path to project file", 0.36f);
     path_input.style.layout.require_width(bgui::mode::stretch);
     path_input.style.layout.require_height(bgui::mode::wrap_content);
 
@@ -183,27 +196,27 @@ project_choice show_project_manager(
             item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         }
     };
-    auto& browse_button = path_row.add<bgui::button>("Browse...", 0.58f, [&]() {
+    auto& browse_button = path_row.add<bgui::button>("Browse...", 0.36f, [&]() {
         const auto current = path_input.get_buffer().empty()
             ? std::filesystem::current_path()
             : std::filesystem::path(path_input.get_buffer()).parent_path();
         refresh_browser(current.empty() ? std::filesystem::current_path() : current);
         browser.set_enable(true);
     });
-    browse_button.style.layout.require_width(bgui::mode::pixel, 104.f);
+    browse_button.style.layout.require_width(bgui::mode::pixel, 84.f);
     browse_button.style.layout.require_height(bgui::mode::wrap_content);
-    auto& open_button = actions.add<bgui::button>("Open Project", 0.58f, [&]() {
+    auto& open_button = actions.add<bgui::button>("Open Project", 0.36f, [&]() {
         choice = {path_input.get_buffer(), false};
         window.close();
     });
     open_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    open_button.style.layout.set_padding(8, 5);
-    auto& create_button = actions.add<bgui::button>("Create Project", 0.58f, [&]() {
+    open_button.style.layout.set_padding(6, 4);
+    auto& create_button = actions.add<bgui::button>("Create Project", 0.36f, [&]() {
         choice = {path_input.get_buffer(), true};
         window.close();
     });
     create_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    create_button.style.layout.set_padding(8, 5);
+    create_button.style.layout.set_padding(6, 4);
 
     window.loop();
     window.reopen();
