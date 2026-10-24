@@ -217,3 +217,22 @@ TEST(EcsInvariantTest, KeepsLiveEntitySetAndMasksConsistent)
     EXPECT_EQ(registry->get<test_component>(entity.id), nullptr);
     EXPECT_FALSE(registry->is_alive(999));
 }
+
+TEST(EcsInvariantTest, RemovingLastComponentKeepsEntityAlive)
+{
+    auto registry = std::make_shared<ecs>();
+    const auto entity = registry->create(11);
+
+    registry->remove<transform>(entity.id);
+
+    EXPECT_TRUE(registry->is_alive(entity.id));
+    EXPECT_FALSE(registry->has<transform>(entity.id));
+    EXPECT_EQ(registry->get<transform>(entity.id), nullptr);
+    EXPECT_TRUE(registry->validate_invariants());
+
+    registry->remove(entity.id);
+    EXPECT_FALSE(registry->is_alive(entity.id));
+    EXPECT_TRUE(registry->entities.find(entity.id) == registry->entities.end());
+    EXPECT_TRUE(registry->mascaras.find(entity.id) == registry->mascaras.end());
+    EXPECT_TRUE(registry->validate_invariants());
+}

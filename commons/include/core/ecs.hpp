@@ -90,11 +90,6 @@ namespace COMMONS_NS {
 		return;
 
 		mask->second &= ~T::mask; // Remove o bit correspondente ao component.
-		if(!it->second.empty())
-		return;
-		entities.erase(it); // Remove a entity se não houver mais components.
-		mascaras.erase(ent);
-		live_entities.erase(ent);
 	}
 
 	template<typename T>
