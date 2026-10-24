@@ -20,11 +20,16 @@
 #include "editor/systems/undo_redo_shortcuts_system.hpp"
 
 #include <lay/linear.hpp>
+#include <elem/button.hpp>
+#include <elem/inputbox.hpp>
+#include <elem/text.hpp>
 
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -53,15 +58,103 @@ std::filesystem::path locate_build_directory(
     return {};
 }
 
+struct project_choice {
+    std::string path;
+    bool create{false};
+};
+
+project_choice show_project_manager() {
+    commons::window manager_window("Bubble Engine - Project Manager", 1100, 680);
+    project_choice choice;
+    auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
+    root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    auto& header = root.add<bgui::linear>(bgui::orientation::vertical);
+    header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    header.style.layout.padding = bgui::vec4i{32, 24, 32, 12};
+    header.add<bgui::text>("Bubble Engine", 1.6f);
+    header.add<bgui::text>("Project Manager", 0.8f);
+
+    auto& content = root.add<bgui::linear>(bgui::orientation::horizontal);
+    content.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+    auto& recent = content.add<bgui::linear>(bgui::orientation::vertical);
+    recent.style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
+    recent.style.layout.padding = bgui::vec4i{32, 18, 24, 24};
+    recent.add<bgui::text>("Recent Projects", 1.0f);
+
+    std::vector<std::string> recent_projects;
+    std::ifstream recent_file("editor-recent-projects.cfg");
+    for (std::string line; std::getline(recent_file, line);) {
+        if (!line.empty() && std::filesystem::is_regular_file(line))
+            recent_projects.push_back(line);
+    }
+    if (recent_projects.empty())
+        recent.add<bgui::text>("No recent projects", 0.65f);
+    for (const auto& path : recent_projects) {
+        auto& button = recent.add<bgui::button>(
+            std::filesystem::path(path).stem().string() + "  —  " + path,
+            0.7f,
+            [&, path]() { choice = {path, false}; manager_window.close(); }
+        );
+        button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    }
+
+    auto& actions = content.add<bgui::linear>(bgui::orientation::vertical);
+    actions.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    actions.style.layout.padding = bgui::vec4i{24, 18, 32, 24};
+    actions.add<bgui::text>("Open or Create", 1.0f);
+    actions.add<bgui::text>("Project file path", 0.65f);
+    auto& path_input = actions.add<bgui::inputbox>("project.bengine", "Path to .bengine project", 0.75f);
+    path_input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& open_button = actions.add<bgui::button>("Open Project", 0.75f, [&]() {
+        choice = {path_input.get_buffer(), false};
+        manager_window.close();
+    });
+    open_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& create_button = actions.add<bgui::button>("Create Project", 0.75f, [&]() {
+        choice = {path_input.get_buffer(), true};
+        manager_window.close();
+    });
+    create_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& status = actions.add<bgui::text>("", 0.65f);
+    (void)status;
+
+    manager_window.add<commons::ui_system>();
+    manager_window.loop();
+    return choice;
+}
+
 }
 
 int main(int argc, char** argv) {
     std::string project_path = "project.bengine";
+    bool create_project = false;
     if (argc == 3 && std::string(argv[1]) == "--project") {
         project_path = argv[2];
     } else if (argc != 1) {
         std::cerr << "Usage: editor_app [--project <scene-file>]\n";
         return 2;
+    }
+
+    if (argc == 1) {
+        const auto choice = show_project_manager();
+        if (choice.path.empty())
+            return 0;
+        project_path = choice.path;
+        create_project = choice.create;
+        if (create_project) {
+            std::error_code error;
+            const auto parent = std::filesystem::path(project_path).parent_path();
+            if (!parent.empty())
+                std::filesystem::create_directories(parent, error);
+            if (error) {
+                std::cerr << "[editor] Could not create project folder: " << error.message() << '\n';
+                return 1;
+            }
+            if (std::filesystem::exists(project_path)) {
+                std::cerr << "[editor] Project file already exists: " << project_path << '\n';
+                return 1;
+            }
+        }
     }
 
     commons::window window("Bubble Engine - Editor");
@@ -104,12 +197,30 @@ int main(int argc, char** argv) {
         &editor_context->hidden_entities,
         &editor_context->locked_entities
     );
-    if (argc == 3) {
+    if (argc == 3 || (argc == 1 && !create_project)) {
         std::string error;
         if (!project_persistence.load(project_path, error)) {
             std::cerr << "[editor] Could not load project: " << error << '\n';
             return 1;
         }
+    }
+    if (create_project) {
+        std::string error;
+        if (!project_persistence.save(project_path, error)) {
+            std::cerr << "[editor] Could not create project: " << error << '\n';
+            return 1;
+        }
+    }
+    {
+        std::vector<std::string> recent_projects{project_path};
+        std::ifstream previous_recent_file("editor-recent-projects.cfg");
+        for (std::string path; std::getline(previous_recent_file, path);) {
+            if (!path.empty() && path != project_path && recent_projects.size() < 12)
+                recent_projects.push_back(path);
+        }
+        std::ofstream recent_file("editor-recent-projects.cfg", std::ios::trunc);
+        for (const auto& path : recent_projects)
+            recent_file << path << '\n';
     }
     editor::ui::editor_ui editor(
         dock,

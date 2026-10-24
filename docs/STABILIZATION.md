@@ -1,5 +1,11 @@
 # Bubble Engine stabilization report
 
+## Project manager startup
+
+| Check | Status | Evidence | Notes |
+|---|---|---|---|
+| Project manager opens before the editor, supports recent projects, opening by path, and creating a new project file | Implemented and compiled; desktop interaction pending | [apps/editor_app.cpp](../apps/editor_app.cpp) starts the manager for normal launches, loads the selected project before editor setup, and saves new project files. | Uses the existing BGUI dark theme. Clean build and headless CTest passed (35/35); visual interaction could not be checked without a display session. |
+
 ## Current build status
 
 Validated with:
