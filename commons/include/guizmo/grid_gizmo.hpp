@@ -27,6 +27,12 @@ namespace editor {
             const COMMONS_NS::camera& frustum_camera,
             const bgui::vec4i& viewport
         );
+        void draw_directional_light(
+            const COMMONS_NS::camera& viewport_camera,
+            const bgui::vec4i& viewport,
+            const bgui::vec3& position,
+            const bgui::vec3& ray_direction
+        );
 
     private:
         unsigned int m_program{0};

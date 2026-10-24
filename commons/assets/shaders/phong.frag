@@ -110,7 +110,9 @@ void main() {
     float roughness = use_tex_roughness ? texture(tex_roughness, novoUv).r * 0.1 : material.roughness;
     float ao = use_tex_ao ? texture(tex_ao, novoUv).r : material.ao;
 
-    vec3 N = normalize(Normal);
+    vec3 N = dot(Normal, Normal) > 1e-8
+        ? normalize(Normal)
+        : vec3(0.0, 1.0, 0.0);
     if (use_tex_normal) {
         N = texture(tex_normal, novoUv).rgb * 2.0 - 1.0;
         N = normalize(N);

@@ -10,6 +10,7 @@
 #include "editor/panels/editor_ui.hpp"
 #include "editor/core/editor_context.hpp"
 #include "editor/systems/project_persistence_system.hpp"
+#include "editor/systems/project_creation_system.hpp"
 #include "editor/systems/project_preview.hpp"
 #include "editor/panels/files_view.hpp"
 #include "editor/panels/scene_view.hpp"
@@ -72,6 +73,19 @@ project_choice show_project_manager(
     bgui::linear*& manager_root
 ) {
     project_choice choice;
+    const auto resolve_project_path = [](std::filesystem::path selected) {
+        std::error_code error;
+        if (std::filesystem::is_directory(selected, error) && !error) {
+            for (const auto* filename : {"project.bengine", "game.world", "main.scene"}) {
+                auto candidate = selected / filename;
+                error.clear();
+                if (std::filesystem::is_regular_file(candidate, error) && !error)
+                    return candidate;
+            }
+            return std::filesystem::path{};
+        }
+        return selected;
+    };
     auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
     manager_root = &root;
     root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
@@ -152,19 +166,56 @@ project_choice show_project_manager(
     actions.style.visual.border.normal = bgui::color{0.22f, 0.24f, 0.28f, 1.f};
     actions.style.visual.border_size = 1.f;
     actions.style.visual.border_radius = 5.f;
-    auto& actions_title = actions.add<bgui::text>("Open or Create", 0.44f);
+    auto& actions_title = actions.add<bgui::text>("Projects", 0.44f);
     actions_title.style.layout.set_margin(0, 8);
-    auto& path_label = actions.add<bgui::text>("Project file path", 0.30f);
-    path_label.style.layout.set_margin(0, 8);
+    auto& open_label = actions.add<bgui::text>("Open a project", 0.32f);
+    open_label.style.layout.set_margin(0, 5);
     auto& path_row = actions.add<bgui::linear>(bgui::orientation::horizontal);
     path_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    auto& path_input = path_row.add<bgui::inputbox>("project.bengine", "Path to project file", 0.36f);
+    auto& path_input = path_row.add<bgui::inputbox>("", "Project file or project folder", 0.36f);
     path_input.style.layout.require_width(bgui::mode::stretch);
     path_input.style.layout.require_height(bgui::mode::wrap_content);
+    bgui::text* status = nullptr;
+
+    auto& open_button = actions.add<bgui::button>("Open Project", 0.36f, [&]() {
+        if (path_input.get_buffer().empty()) {
+            status->set_buffer("Select a recent project or enter a project path.");
+            return;
+        }
+        const auto selected = resolve_project_path(path_input.get_buffer());
+        if (selected.empty()) {
+            status->set_buffer("No project file found in the selected folder.");
+            return;
+        }
+        choice = {selected.string(), false};
+        window.close();
+    });
+    open_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    open_button.style.layout.set_padding(6, 4);
+
+    auto& create_label = actions.add<bgui::text>("Create a new project", 0.32f);
+    create_label.style.layout.set_margin(0, 8);
+    auto& name_input = actions.add<bgui::inputbox>("New Project", "Project name", 0.36f);
+    name_input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    std::error_code current_path_error;
+    auto default_location = std::filesystem::current_path(current_path_error);
+    if (current_path_error)
+        default_location = std::filesystem::path(".");
+    auto& location_label = actions.add<bgui::text>("Location", 0.28f);
+    location_label.style.layout.set_margin(0, 4);
+    auto& location_row = actions.add<bgui::linear>(bgui::orientation::horizontal);
+    location_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& location_input = location_row.add<bgui::inputbox>(
+        default_location.string(),
+        "Parent folder for new projects",
+        0.34f
+    );
+    location_input.style.layout.require_width(bgui::mode::stretch);
+    location_input.style.layout.require_height(bgui::mode::wrap_content);
 
     auto& browser = actions.add<bgui::linear>(bgui::orientation::vertical);
     browser.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
-    browser.style.layout.require_height(bgui::mode::pixel, 230.f);
+    browser.style.layout.require_height(bgui::mode::pixel, 150.f);
     browser.style.layout.set_padding(6, 5);
     browser.style.visual.background.normal = bgui::color{0.045f, 0.05f, 0.06f, 1.f};
     browser.style.visual.border.normal = bgui::color{0.16f, 0.18f, 0.21f, 1.f};
@@ -173,6 +224,8 @@ project_choice show_project_manager(
     browser.set_scrollable(true);
     browser.set_enable(false);
     std::filesystem::path browser_directory;
+    bgui::inputbox* browser_target = nullptr;
+    bool browser_selects_directory = false;
     std::function<void(const std::filesystem::path&)> refresh_browser;
     refresh_browser = [&](const std::filesystem::path& requested) {
         std::error_code error;
@@ -187,6 +240,12 @@ project_choice show_project_manager(
         }
         auto& location = browser.add<bgui::text>(directory.string(), 0.48f);
         location.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        auto& use_folder = browser.add<bgui::button>("Use this folder", 0.48f, [&]() {
+            if (browser_target)
+                browser_target->set_buffer(browser_directory.string());
+            browser.set_enable(false);
+        });
+        use_folder.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         if (directory.has_parent_path() && directory.parent_path() != directory) {
             auto& parent = browser.add<bgui::button>("..  Parent folder", 0.48f, [&]() {
                 refresh_browser(browser_directory.parent_path());
@@ -219,7 +278,9 @@ project_choice show_project_manager(
         }
         for (const auto& entry : project_files) {
             auto& item = browser.add<bgui::button>("[Project] " + entry.filename().string(), 0.48f, [&, entry]() {
-                path_input.set_buffer(entry.string());
+                if (browser_target && !browser_selects_directory)
+                    browser_target->set_buffer(entry.string());
+                browser.set_enable(false);
             });
             item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         }
@@ -228,23 +289,50 @@ project_choice show_project_manager(
         const auto current = path_input.get_buffer().empty()
             ? std::filesystem::current_path()
             : std::filesystem::path(path_input.get_buffer()).parent_path();
+        browser_target = &path_input;
+        browser_selects_directory = false;
         refresh_browser(current.empty() ? std::filesystem::current_path() : current);
         browser.set_enable(true);
     });
     browse_button.style.layout.require_width(bgui::mode::pixel, 84.f);
     browse_button.style.layout.require_height(bgui::mode::wrap_content);
-    auto& open_button = actions.add<bgui::button>("Open Project", 0.36f, [&]() {
-        choice = {path_input.get_buffer(), false};
-        window.close();
+    auto& location_browse_button = location_row.add<bgui::button>("Browse...", 0.34f, [&]() {
+        browser_target = &location_input;
+        browser_selects_directory = true;
+        const auto location = location_input.get_buffer();
+        refresh_browser(location.empty()
+            ? std::filesystem::current_path()
+            : std::filesystem::path(location));
+        browser.set_enable(true);
     });
-    open_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    open_button.style.layout.set_padding(6, 4);
+    location_browse_button.style.layout.require_width(bgui::mode::pixel, 84.f);
+    location_browse_button.style.layout.require_height(bgui::mode::wrap_content);
     auto& create_button = actions.add<bgui::button>("Create Project", 0.36f, [&]() {
-        choice = {path_input.get_buffer(), true};
+        const auto project_name = name_input.get_buffer();
+        const auto first_non_space = project_name.find_first_not_of(" \t\r\n");
+        if (first_non_space == std::string::npos ||
+            std::filesystem::path(project_name).has_parent_path() ||
+            project_name == "." || project_name == "..") {
+            status->set_buffer("Enter a project name without folder separators.");
+            return;
+        }
+        if (location_input.get_buffer().empty()) {
+            status->set_buffer("Choose a parent folder for the new project.");
+            return;
+        }
+        const auto project_folder =
+            std::filesystem::path(location_input.get_buffer()) / project_name;
+        std::string error;
+        if (!editor::ui::create_project_files(project_folder, error)) {
+            status->set_buffer(error);
+            return;
+        }
+        choice = {project_folder.string(), true};
         window.close();
     });
     create_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     create_button.style.layout.set_padding(6, 4);
+    status = &actions.add<bgui::text>("", 0.28f);
 
     window.loop();
     window.reopen();
@@ -276,20 +364,8 @@ int main(int argc, char** argv) {
             return 0;
         project_path = choice.path;
         create_project = choice.create;
-        if (create_project) {
-            std::error_code error;
-            const auto parent = std::filesystem::path(project_path).parent_path();
-            if (!parent.empty())
-                std::filesystem::create_directories(parent, error);
-            if (error) {
-                std::cerr << "[editor] Could not create project folder: " << error.message() << '\n';
-                return 1;
-            }
-            if (std::filesystem::exists(project_path)) {
-                std::cerr << "[editor] Project file already exists: " << project_path << '\n';
-                return 1;
-            }
-        }
+        if (create_project)
+            project_path = editor::ui::project_file_path(project_path).string();
     }
 
     auto registry = window.get_ecs();
@@ -331,17 +407,10 @@ int main(int argc, char** argv) {
         &editor_context->hidden_entities,
         &editor_context->locked_entities
     );
-    if (argc == 3 || (argc == 1 && !create_project)) {
+    if (argc == 3 || argc == 1) {
         std::string error;
         if (!project_persistence.load(project_path, error)) {
             std::cerr << "[editor] Could not load project: " << error << '\n';
-            return 1;
-        }
-    }
-    if (create_project) {
-        std::string error;
-        if (!project_persistence.save(project_path, error)) {
-            std::cerr << "[editor] Could not create project: " << error << '\n';
             return 1;
         }
     }

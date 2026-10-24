@@ -45,6 +45,11 @@ public:
         const bool just_pressed = left_down && !m_left_was_down;
         m_left_was_down = left_down;
 
+        if (viewport_input_blocked_by_modal()) {
+            m_pending_pick.reset();
+            return;
+        }
+
         std::optional<bgui::vec2i> pick_position;
         if (m_pending_pick) {
             if (m_input_state && m_input_state->gizmo_active) {
@@ -55,7 +60,7 @@ public:
             }
         }
 
-        if (just_pressed &&
+        if (just_pressed && mouse_over_viewport(m_image) &&
             !(m_input_state && m_input_state->gizmo_active)) {
             m_pending_pick = bgui::get_mouse_position();
         }

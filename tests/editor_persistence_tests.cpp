@@ -1,4 +1,5 @@
 #include "project_persistence_system.hpp"
+#include "project_creation_system.hpp"
 #include "project_preview.hpp"
 
 #include "components/camera.hpp"
@@ -73,6 +74,9 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     registry->get<commons::transform>(editor_camera_entity.id)->set_position(
         {2.f, 3.f, 4.f}
     );
+    registry->get<commons::transform>(editor_camera_entity.id)->set_rotation(
+        {11.f, 22.f, 33.f}
+    );
     registry->get<commons::transform>(scene_camera_entity.id)->set_position(
         {5.f, 6.f, 7.f}
     );
@@ -117,9 +121,14 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
 
     const auto editor_position =
         registry->get<commons::transform>(editor_camera_entity.id)->get_position();
-    EXPECT_FLOAT_EQ(editor_position.x, -1.f);
-    EXPECT_FLOAT_EQ(editor_position.y, -1.f);
-    EXPECT_FLOAT_EQ(editor_position.z, -1.f);
+    EXPECT_FLOAT_EQ(editor_position.x, 2.f);
+    EXPECT_FLOAT_EQ(editor_position.y, 3.f);
+    EXPECT_FLOAT_EQ(editor_position.z, 4.f);
+    const auto editor_rotation =
+        registry->get<commons::transform>(editor_camera_entity.id)->get_rotation();
+    EXPECT_FLOAT_EQ(editor_rotation.x, 11.f);
+    EXPECT_FLOAT_EQ(editor_rotation.y, 22.f);
+    EXPECT_FLOAT_EQ(editor_rotation.z, 33.f);
     const auto scene_position =
         registry->get<commons::transform>(scene_camera_entity.id)->get_position();
     EXPECT_FLOAT_EQ(scene_position.x, 5.f);
@@ -135,6 +144,34 @@ TEST(ProjectPreviewTest, UsesAProjectSpecificPreviewFilePath) {
         editor::ui::project_preview_path(project.string()),
         std::filesystem::path("projects/sample.bengine.preview.png")
     );
+}
+
+TEST(ProjectCreationTest, CreatesAnEmptyProjectWithStandardFolders) {
+    const auto unique_path = temporary_project_path();
+    const auto project_folder = unique_path.parent_path() / unique_path.stem();
+    std::string error;
+
+    ASSERT_TRUE(editor::ui::create_project_files(project_folder, error)) << error;
+    const auto project_file = editor::ui::project_file_path(project_folder);
+    EXPECT_TRUE(std::filesystem::is_regular_file(project_file));
+    EXPECT_TRUE(std::filesystem::is_regular_file(project_folder / "project.scene"));
+    EXPECT_TRUE(std::filesystem::is_directory(project_folder / "assets" / "models"));
+    EXPECT_TRUE(std::filesystem::is_directory(project_folder / "assets" / "textures"));
+    EXPECT_TRUE(std::filesystem::is_directory(project_folder / "scripts"));
+
+    auto loaded_registry = std::make_shared<commons::ecs>();
+    auto editor_camera = loaded_registry->create();
+    loaded_registry->add<commons::camera>(editor_camera);
+    editor::ui::project_persistence_system persistence(
+        loaded_registry,
+        editor_camera.id
+    );
+    ASSERT_TRUE(persistence.load(project_file.string(), error)) << error;
+    EXPECT_TRUE(loaded_registry->entities.empty() == false);
+    EXPECT_EQ(loaded_registry->entities.size(), 1U);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(project_folder, ignored);
 }
 
 TEST(ProjectPersistenceTest, KeepsLoadedEntityIdsInTheLiveRegistry) {

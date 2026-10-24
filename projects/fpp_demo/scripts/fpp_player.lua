@@ -1,14 +1,12 @@
--- FPP player controller for the Bubble Engine demo project.
--- This script is intentionally lightweight and designed to be executed by the Lua code component.
-
+-- First-person body movement and yaw control for the FPP demo.
 local yaw = -90.0
-local pitch = 0.0
 local move_speed = 2.5
 
 function setup()
-    pitch, yaw = bubble.transform.get_rotation()
+    local _, initial_yaw = bubble.transform.get_rotation()
+    yaw = initial_yaw or yaw
     bubble.input.set_mouse_captured(true)
-    bubble.log("FPP player ready.")
+    bubble.log("FPP player body ready.")
 end
 
 function update()
@@ -27,8 +25,7 @@ function update()
         bubble.transform.move_right(move_speed * delta_time)
     end
 
-    local mouse_x, mouse_y = bubble.input.mouse_delta()
+    local mouse_x, _ = bubble.input.mouse_delta()
     yaw = yaw + mouse_x * 0.12
-    pitch = math.max(-89.0, math.min(89.0, pitch - mouse_y * 0.12))
-    bubble.transform.set_rotation(pitch, yaw, 0.0)
+    bubble.transform.set_rotation(0.0, yaw, 0.0)
 end

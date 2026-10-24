@@ -1,4 +1,5 @@
 #include "editor_ui.hpp"
+#include "project_creation_system.hpp"
 
 #include <components/directional_light.hpp>
 
@@ -26,6 +27,19 @@ namespace editor::ui {
 namespace {
 
 constexpr const char* ui_configuration_path = "editor-ui.cfg";
+constexpr const char* recent_projects_path = "editor-recent-projects.cfg";
+
+void remember_project(const std::string& path) {
+    std::vector<std::string> projects{path};
+    std::ifstream input(recent_projects_path);
+    for (std::string previous; std::getline(input, previous);) {
+        if (!previous.empty() && previous != path && projects.size() < 12)
+            projects.push_back(previous);
+    }
+    std::ofstream output(recent_projects_path, std::ios::trunc);
+    for (const auto& project : projects)
+        output << project << '\n';
+}
 
 // Glifos do ícone (Font Awesome: play / stop / pause)
 constexpr const char* icon_play = "\xef\x81\x8b";
@@ -175,7 +189,7 @@ editor_ui::editor_ui(
                 const bool success = m_project_persistence.save(m_project_path, error);
                 report_result("Saving project", success, error);
             });
-            menu.add_button("Load Project", [this]() {
+            menu.add_button("Project Manager", [this]() {
                 if (!m_project_modal)
                     create_project_modal(m_project_path, "");
 
@@ -400,6 +414,10 @@ void editor_ui::create_build_modal() {
         "Choose a build directory...",
         0.28f
     );
+    m_build_directory_input->m_enter_func = [this](const std::string& buffer) {
+        m_build_directory = buffer;
+        m_repository_root = m_build_directory.parent_path();
+    };
     auto& directory_actions = m_build_modal->content().add<bgui::linear>(
         bgui::orientation::horizontal
     );
@@ -410,7 +428,10 @@ void editor_ui::create_build_modal() {
     m_build_directory_browse_button = &directory_actions.add<bgui::button>(
         "Browse",
         0.28f,
-        [this]() { create_build_directory_modal(); }
+        [this]() {
+            create_build_directory_modal();
+            m_repository_root = m_build_directory.parent_path();
+        }
     );
     m_build_modal->content().add<bgui::text>(
         "Artifacts are written under <directory>/platform-builds/<target>/apps.",
@@ -880,7 +901,7 @@ void editor_ui::create_global_lighting_modal() {
             inputs[axis]->add_class("editor-input");
         }
     };
-    add_vector("Direction", m_light_direction_inputs);
+    add_vector("Ray direction", m_light_direction_inputs);
     add_vector("Ambient", m_light_ambient_inputs);
     add_vector("Color", m_light_color_inputs);
 
@@ -1170,6 +1191,27 @@ bool editor_ui::load_project_selection() {
     }
 
     std::error_code error;
+    if (m_choose_new_project_location) {
+        if (!std::filesystem::is_directory(selected_path, error) || error) {
+            m_project_picker_status->set_buffer(
+                error ? "Could not inspect selected folder: " + error.message()
+                      : "Choose an existing folder for the new project."
+            );
+            return false;
+        }
+        selected_path = std::filesystem::absolute(selected_path, error).lexically_normal();
+        if (error) {
+            m_project_picker_status->set_buffer("Could not resolve folder: " + error.message());
+            return false;
+        }
+        if (m_new_project_location_input)
+            m_new_project_location_input->set_buffer(selected_path.string());
+        m_choose_new_project_location = false;
+        m_project_modal->set_enable(false);
+        if (m_new_project_modal)
+            m_new_project_modal->set_enable(true);
+        return true;
+    }
     if (!std::filesystem::is_directory(selected_path, error)) {
         if (error) {
             m_project_picker_status->set_buffer(
@@ -1234,6 +1276,7 @@ bool editor_ui::load_project_selection() {
     }
 
     m_project_path = selected_path.string();
+    remember_project(m_project_path);
     report_result("Loading project", true, {});
     if (m_project_loaded_callback)
         m_project_loaded_callback(m_project_path);
@@ -1250,8 +1293,37 @@ void editor_ui::create_project_modal(
         bgui::layer::overlay
     >();
     m_project_modal->set_enable(false);
+    m_project_modal->content().add<bgui::text>("Project Manager", 0.46f);
+    m_project_modal->content().add<bgui::text>("Recent projects", 0.32f);
+    std::ifstream recent_input(recent_projects_path);
+    std::size_t recent_count = 0;
+    for (std::string recent; std::getline(recent_input, recent);) {
+        std::error_code recent_error;
+        if (recent.empty() ||
+            !std::filesystem::is_regular_file(recent, recent_error) || recent_error)
+            continue;
+        const auto recent_path = std::filesystem::path(recent);
+        auto& recent_button = m_project_modal->content().add<bgui::button>(
+            recent_path.parent_path().filename().string() + "  —  " + recent,
+            0.28f,
+            [this, recent]() {
+                if (m_project_directory_input)
+                    m_project_directory_input->set_buffer(recent);
+                load_project_selection();
+            }
+        );
+        recent_button.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
+        );
+        ++recent_count;
+        if (recent_count == 6)
+            break;
+    }
+    if (recent_count == 0)
+        m_project_modal->content().add<bgui::text>("No recent projects", 0.26f);
     m_project_modal->content().add<bgui::text>(
-        "Choose a project folder or a project file.",
+        "Open an existing project",
         0.34f
     );
     m_project_directory_input = &m_project_modal->content().add<bgui::inputbox>(
@@ -1274,6 +1346,11 @@ void editor_ui::create_project_modal(
                 refresh_project_picker(m_project_directory_input->get_buffer());
         }
     );
+    path_actions.add<bgui::button>("New Project...", 0.3f, [this]() {
+        create_new_project_modal();
+        if (m_new_project_modal)
+            m_new_project_modal->set_enable(true);
+    });
     path_actions.add<bgui::button>(
         "Parent folder",
         0.3f,
@@ -1308,8 +1385,13 @@ void editor_ui::create_project_modal(
         const auto selected_path = m_project_directory_input
             ? m_project_directory_input->get_buffer()
             : std::string{};
+        const bool choosing_location = m_choose_new_project_location;
         const bool loaded = load_project_selection();
         if (loaded) {
+            if (choosing_location) {
+                m_project_modal->set_confirmation_text("Open");
+                return;
+            }
             m_project_modal = nullptr;
             m_project_directory_input = nullptr;
             m_project_directory_list = nullptr;
@@ -1329,6 +1411,85 @@ void editor_ui::create_project_modal(
         if (m_project_picker_status)
             m_project_picker_status->set_buffer(status);
         m_project_modal->set_enable(true);
+    });
+}
+
+void editor_ui::create_new_project_modal() {
+    if (m_new_project_modal)
+        return;
+    m_new_project_modal = &bgui::get_layout().add<
+        bgui::modal,
+        bgui::layer::overlay
+    >();
+    m_new_project_modal->set_enable(false);
+    auto& content = m_new_project_modal->content();
+    content.add<bgui::text>("Create a project", 0.4f);
+    content.add<bgui::text>(
+        "A project folder with the starter scene and asset folders will be created.",
+        0.28f
+    );
+    content.add<bgui::text>("Project name", 0.28f);
+    m_new_project_name_input = &content.add<bgui::inputbox>(
+        "New Project", "Project name", 0.32f
+    );
+    content.add<bgui::text>("Location", 0.28f);
+    const auto default_location = std::filesystem::path(m_project_path).parent_path();
+    m_new_project_location_input = &content.add<bgui::inputbox>(
+        default_location.empty()
+            ? std::filesystem::current_path().string()
+            : default_location.string(),
+        "Parent folder", 0.32f
+    );
+    auto& actions = content.add<bgui::linear>(bgui::orientation::horizontal);
+    actions.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::wrap_content
+    );
+    actions.add<bgui::button>("Browse...", 0.3f, [this]() {
+        if (!m_project_modal)
+            create_project_modal(m_project_path, "");
+        m_choose_new_project_location = true;
+        m_project_modal->set_confirmation_text("Select Folder");
+        refresh_project_picker(m_new_project_location_input->get_buffer());
+        m_new_project_modal->set_enable(false);
+        m_project_modal->set_enable(true);
+    });
+    auto& status = content.add<bgui::text>("", 0.28f);
+    m_new_project_modal->set_confirmation_text("Create Project");
+    m_new_project_modal->set_on_confirm([this, &status]() {
+        const auto name = m_new_project_name_input->get_buffer();
+        const auto first = name.find_first_not_of(" \t\r\n");
+        const std::filesystem::path name_path(name);
+        if (first == std::string::npos || name_path.has_parent_path() ||
+            name == "." || name == "..") {
+            status.set_buffer("Enter a project name without folder separators.");
+            return;
+        }
+        if (m_new_project_location_input->get_buffer().empty()) {
+            status.set_buffer("Choose a parent folder for the new project.");
+            return;
+        }
+        const auto folder = std::filesystem::path(
+            m_new_project_location_input->get_buffer()
+        ) / name;
+        std::string error;
+        if (!create_project_files(folder, error)) {
+            status.set_buffer(error);
+            return;
+        }
+        const auto project_file = project_file_path(folder).string();
+        if (!m_project_persistence.load(project_file, error)) {
+            status.set_buffer(error);
+            return;
+        }
+        m_project_path = project_file;
+        remember_project(m_project_path);
+        if (m_project_loaded_callback)
+            m_project_loaded_callback(m_project_path);
+        m_new_project_modal->set_enable(false);
+        if (m_project_modal)
+            m_project_modal->set_enable(false);
+        report_result("Creating project", true, {});
     });
 }
 

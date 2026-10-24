@@ -256,13 +256,14 @@ glm::mat4 camera::getViewMatrix() {
     if (!m_transform)
         return viewMatrix;
 
-    position = m_transform->get_position();
+    position = m_transform->get_world_position();
+    const auto world_rotation = m_transform->get_world_rotation();
 
     // Recalculate reference vectors
     bgui::vec3 frente = {
-        cos(glm::radians(m_transform->get_rotation().y)) * cos(glm::radians(m_transform->get_rotation().x)),    // x
-        sin(glm::radians(m_transform->get_rotation().x)),                                                     // y
-        sin(glm::radians(m_transform->get_rotation().y)) * cos(glm::radians(m_transform->get_rotation().x))     // z
+        cos(glm::radians(world_rotation.y)) * cos(glm::radians(world_rotation.x)),    // x
+        sin(glm::radians(world_rotation.x)),                                          // y
+        sin(glm::radians(world_rotation.y)) * cos(glm::radians(world_rotation.x))     // z
     };
     forward = normalized(frente);
 

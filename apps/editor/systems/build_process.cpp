@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <string>
+#include <iostream>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -60,8 +61,47 @@ bool build_process::start(
     const std::filesystem::path& repository_root,
     const std::filesystem::path& build_directory,
     const build_target target,
-    std::string& error
-) {
+    std::string& error)
+{
+    std::cout << "[Build] Starting platform build" << std::endl;
+    std::cout << "[Build] Repository root: '" << repository_root.string() << "'" << std::endl;
+    std::cout << "[Build] Output directory: '" << build_directory.string() << "'" << std::endl;
+    std::cout << "[Build] Target: '" << target_name(target) << "'" << std::endl;
+
+    if (build_directory.empty()) {
+        error = "Choose a build output directory.";
+        std::cout << "[Build] Rejected: output directory is empty" << std::endl;
+        return false;
+    }
+
+    if (running(error)) {
+        std::cout << "[Build] Rejected: another build is running: " << error << std::endl;
+        return false;
+    }
+
+    const auto script = repository_root / "scripts" / "platform_build.sh";
+
+    std::cout << "[Build] Build script: '" << script.string() << "'" << std::endl;
+
+    if (!std::filesystem::exists(script)) {
+        error = "Platform build script not found: " + script.string();
+        std::cout << "[Build] " << error << std::endl   ;
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(build_directory, ec);
+
+    if (ec) {
+        error = "Failed to create build directory: " + ec.message();
+        std::cout << "[Build] Cannot create output directory '{}': {}",
+            build_directory.string(),
+            ec.message();
+        return false;
+    }
+
+    std::cout << "[Build] Output directory validated" << std::endl;
+
     error.clear();
     if (running(error)) {
         error = "A build is already running.";

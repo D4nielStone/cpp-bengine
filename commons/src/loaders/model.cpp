@@ -84,7 +84,8 @@ void model::load_model(const std::string& path) {
     source_path = resolved_path.string();
     const auto resolved_string = resolved_path.string();
     Assimp::Importer importer;
-    auto flags = aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_JoinIdenticalVertices;
+    auto flags = aiProcess_Triangulate | aiProcess_FlipUVs |
+        aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals;
 
     // Carrega a cena sem colapsar ainda
     const aiScene* scene = importer.ReadFile(resolved_string, flags);

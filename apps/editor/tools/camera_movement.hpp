@@ -45,6 +45,8 @@ private:
     float m_previous_time{0.0f};
 
     bool m_mouse_initialized{false};
+    bool m_camera_button_was_down{false};
+    bool m_camera_drag_active{false};
     bool m_orbit_initialized{false};
 
     static constexpr float radians_to_degrees =
@@ -156,6 +158,7 @@ public:
     void setup(const std::shared_ptr<commons::ecs>&) override {
         m_last_mouse_position = bgui::get_mouse_position();
         m_mouse_initialized = true;
+        m_camera_button_was_down = bgui::get_pressed(bgui::input_key::mouse_left);
         m_previous_time = bgui::get_time();
         m_orbit_initialized = false;
     }
@@ -191,6 +194,9 @@ public:
             return;
 
         const bgui::vec2i mouse = bgui::get_mouse_position();
+        const bool camera_button_down = bgui::get_pressed(bgui::input_key::mouse_left);
+        const bool camera_button_just_pressed = camera_button_down && !m_camera_button_was_down;
+        m_camera_button_was_down = camera_button_down;
 
         if (!m_mouse_initialized) {
             m_last_mouse_position = mouse;
@@ -201,6 +207,11 @@ public:
             mouse - m_last_mouse_position;
 
         m_last_mouse_position = mouse;
+
+        if (viewport_input_blocked_by_modal()) {
+            m_camera_drag_active = false;
+            return;
+        }
 
         const float current_time = bgui::get_time();
 
@@ -220,13 +231,21 @@ public:
         if (width <= 0 || height <= 0)
             return;
 
-        const bool mouse_over_viewport =
+        const bool cursor_in_viewport =
             mouse.x >= x &&
             mouse.y >= y &&
             mouse.x < x + width &&
             mouse.y < y + height;
 
-        if (!mouse_over_viewport)
+        const bool viewport_owns_mouse =
+            editor::ui::viewport_owns_mouse(m_image);
+        const bool mouse_over_viewport = cursor_in_viewport && viewport_owns_mouse;
+        if (camera_button_just_pressed)
+            m_camera_drag_active = mouse_over_viewport &&
+                !(m_input_state && m_input_state->gizmo_active);
+        if (!camera_button_down || (m_input_state && m_input_state->gizmo_active))
+            m_camera_drag_active = false;
+        if (!mouse_over_viewport && !m_camera_drag_active)
             return;
 
         if (!m_orbit_initialized)
@@ -239,8 +258,7 @@ public:
             m_orbit_center = m_orbit_target->get_position();
 
         if (!gizmo_active) {
-            const bool rotate_camera =
-                bgui::get_pressed(bgui::input_key::mouse_left);
+            const bool rotate_camera = camera_button_down && m_camera_drag_active;
 
             if (rotate_camera) {
                 m_yaw += static_cast<float>(mouse_delta.x)
@@ -256,8 +274,9 @@ public:
                 );
             }
 
-            const float scroll_delta =
-                bgui::get_context().m_scroll_delta_y;
+            const float scroll_delta = mouse_over_viewport
+                ? bgui::get_context().m_scroll_delta_y
+                : 0.0f;
 
             if (scroll_delta != 0.0f) {
                 m_orbit_distance = std::clamp(

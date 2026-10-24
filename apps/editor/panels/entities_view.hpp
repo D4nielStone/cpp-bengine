@@ -5,18 +5,22 @@
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
 #include "components/renderer.hpp"
+#include "components/transform.hpp"
 #include "editor_context.hpp"
 #include "panel.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -45,6 +49,44 @@ public:
     using name_provider = std::function<std::string(entity_id)>;
 
 private:
+    class entity_button final : public bgui::button {
+    public:
+        entity_button(
+            const std::string& label,
+            std::function<void()> on_click,
+            std::function<void(const bgui::vec2i&)> on_drop
+        ) : bgui::button(label, 0.28f, on_click),
+            m_on_drop(std::move(on_drop)) {}
+
+        void on_pressed() override {
+            m_dragged = false;
+            m_drag_distance = 0;
+            bgui::button::on_pressed();
+        }
+
+        void set_drag(const bgui::vec2i& delta) override {
+            bgui::button::set_drag(delta);
+            m_drag_distance += std::abs(delta.x) + std::abs(delta.y);
+            if (m_drag_distance >= 5)
+                m_dragged = true;
+        }
+
+        void on_released() override {
+            if (!m_dragged) {
+                bgui::button::on_released();
+                return;
+            }
+            bgui::element::on_released();
+            if (m_on_drop)
+                m_on_drop(bgui::get_mouse_position());
+        }
+
+    private:
+        std::function<void(const bgui::vec2i&)> m_on_drop;
+        int m_drag_distance{0};
+        bool m_dragged{false};
+    };
+
     struct entry {
         entity_id id{};
         std::string label;
@@ -58,6 +100,8 @@ private:
     struct row {
         entity_id id{};
         bgui::button* selection{nullptr};
+        bgui::button* expand{nullptr};
+        bgui::linear* children{nullptr};
         bgui::icon* visibility{nullptr};
         bgui::icon* lock{nullptr};
     };
@@ -78,6 +122,7 @@ private:
     std::vector<entry> m_last_entries;
     std::string m_last_filter;
     std::optional<entity_id> m_last_selection;
+    std::vector<std::pair<entity_id, entity_id>> m_last_parentage;
 
     static std::string normalize(std::string value) {
         std::transform(
@@ -174,6 +219,177 @@ private:
             entries.end(),
             entry{id, {}, {}},
             [](const entry& a, const entry& b) { return a.id < b.id; }
+        );
+    }
+
+    struct local_transform_state {
+        entity_id parent{};
+        bgui::vec3 position;
+        bgui::vec3 rotation;
+        bgui::vec3 scale;
+    };
+
+    static local_transform_state capture_transform(
+        const std::shared_ptr<commons::transform>& transform
+    ) {
+        return {
+            transform->parent_id,
+            transform->position,
+            transform->rotation,
+            transform->scale
+        };
+    }
+
+    static void restore_transform(
+        const std::shared_ptr<commons::transform>& transform,
+        const local_transform_state& state
+    ) {
+        transform->parent_id = state.parent;
+        transform->position = state.position;
+        transform->rotation = state.rotation;
+        transform->scale = state.scale;
+    }
+
+    entity_id parent_of(const entity_id id) const {
+        if (!m_context || !m_context->registry)
+            return 0;
+        const auto transform = m_context->registry->get<commons::transform>(id);
+        return transform ? transform->parent_id : 0;
+    }
+
+    std::vector<std::pair<entity_id, entity_id>> parentage_signature(
+        const std::vector<entry>& entries
+    ) const {
+        std::vector<std::pair<entity_id, entity_id>> result;
+        result.reserve(entries.size());
+        for (const auto& item : entries)
+            result.emplace_back(item.id, parent_of(item.id));
+        return result;
+    }
+
+    void reparent_entity(const entity_id child_id, const entity_id parent_id) {
+        if (!m_context || !m_context->registry || child_id == parent_id)
+            return;
+        const auto child = m_context->registry->get<commons::transform>(child_id);
+        if (!child)
+            return;
+        const auto before = capture_transform(child);
+        if (!child->set_parent(parent_id, true))
+            return;
+        const auto after = capture_transform(child);
+        if (before.parent == after.parent && before.position == after.position &&
+            before.rotation == after.rotation && before.scale == after.scale)
+            return;
+        m_context->record_action(
+            [child, before]() { restore_transform(child, before); },
+            [child, after]() { restore_transform(child, after); }
+        );
+    }
+
+    void drop_entity(const entity_id dragged_id, const bgui::vec2i& position) {
+        for (const auto& item : m_rows) {
+            if (!item.selection || item.id == dragged_id)
+                continue;
+            const auto rect = item.selection->processed_rect();
+            if (position.x >= rect.x && position.x < rect.x + rect.z &&
+                position.y >= rect.y && position.y < rect.y + rect.w) {
+                reparent_entity(dragged_id, item.id);
+                return;
+            }
+        }
+        if (m_scene_tree) {
+            const auto rect = m_scene_tree->processed_rect();
+            if (position.x >= rect.x && position.x < rect.x + rect.z &&
+                position.y >= rect.y && position.y < rect.y + rect.w)
+                reparent_entity(dragged_id, 0);
+        }
+    }
+
+    void create_entity() {
+        if (!m_context || !m_context->registry)
+            return;
+        auto entity = m_context->registry->create();
+        m_context->registry->add<commons::transform>(entity);
+        m_context->record_entity_creation(entity.id);
+        select(entity.id);
+    }
+
+    void delete_selected_entity() {
+        if (!m_context || !m_context->registry || !m_context->selected_entity)
+            return;
+        const auto id = *m_context->selected_entity;
+        if (m_context->editor_camera_entity == id ||
+            m_context->locked_entities.contains(id))
+            return;
+        const auto found = m_context->registry->entities.find(id);
+        const auto mask = m_context->registry->mascaras.find(id);
+        if (found == m_context->registry->entities.end() ||
+            mask == m_context->registry->mascaras.end())
+            return;
+
+        auto registry = m_context->registry;
+        auto context = m_context;
+        const auto removed_components = found->second;
+        const auto removed_mask = mask->second;
+        const auto transform = registry->get<commons::transform>(id);
+        const auto removed_name = context->entity_names.find(id);
+        const std::optional<std::string> name = removed_name == context->entity_names.end()
+            ? std::nullopt
+            : std::optional<std::string>{removed_name->second};
+        const bool was_hidden = context->hidden_entities.contains(id);
+        const bool was_locked = context->locked_entities.contains(id);
+
+        struct child_state {
+            std::shared_ptr<commons::transform> transform;
+            local_transform_state before;
+            local_transform_state after;
+        };
+        std::vector<child_state> children;
+        const auto new_parent = transform ? transform->parent_id : 0;
+        for (const auto& [child_id, components] : registry->entities) {
+            (void)components;
+            const auto child = registry->get<commons::transform>(child_id);
+            if (!child || child->parent_id != id)
+                continue;
+            const auto before = capture_transform(child);
+            if (!child->set_parent(new_parent, true)) {
+                for (const auto& state : children)
+                    restore_transform(state.transform, state.before);
+                return;
+            }
+            children.push_back({child, before, capture_transform(child)});
+        }
+
+        registry->remove(id);
+        context->entity_names.erase(id);
+        context->hidden_entities.erase(id);
+        context->locked_entities.erase(id);
+        context->selected_entity.reset();
+        context->record_action(
+            [registry, context, id, removed_components, removed_mask,
+             name, was_hidden, was_locked, children]() {
+                registry->entities[id] = removed_components;
+                registry->mascaras[id] = removed_mask;
+                registry->live_entities.insert(id);
+                if (name)
+                    context->entity_names[id] = *name;
+                if (was_hidden)
+                    context->hidden_entities.insert(id);
+                if (was_locked)
+                    context->locked_entities.insert(id);
+                for (const auto& child : children)
+                    restore_transform(child.transform, child.before);
+                context->selected_entity = id;
+            },
+            [registry, context, id, children]() {
+                for (const auto& child : children)
+                    restore_transform(child.transform, child.after);
+                registry->remove(id);
+                context->entity_names.erase(id);
+                context->hidden_entities.erase(id);
+                context->locked_entities.erase(id);
+                context->selected_entity.reset();
+            }
         );
     }
 
@@ -320,41 +536,62 @@ private:
         update_row_styles();
     }
 
-    void build_row(const entry& e, bgui::linear& parent) {
-        auto& row_layout = parent.add<bgui::linear>(
-            bgui::orientation::horizontal
+    void build_entity_node(
+        const entry& item,
+        bgui::linear& parent,
+        const std::unordered_map<entity_id, std::vector<entity_id>>& children_by_parent,
+        const std::unordered_map<entity_id, entry>& entries_by_id,
+        std::unordered_set<entity_id>& recursion_path
+    ) {
+        if (!recursion_path.insert(item.id).second)
+            return;
+        const auto child_it = children_by_parent.find(item.id);
+        const bool has_children = child_it != children_by_parent.end() &&
+            !child_it->second.empty();
+
+        auto& container = parent.add<bgui::linear>(bgui::orientation::vertical);
+        container.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
         );
+        auto& row_layout = container.add<bgui::linear>(bgui::orientation::horizontal);
         row_layout.style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::wrap_content
         );
         row_layout.style.layout.padding = bgui::vec4i{0, 2, 0, 2};
-        row_layout.style.layout.align = bgui::vec<2, bgui::alignment>{
-            bgui::alignment::start,
-        };
 
-        auto& icon = row_layout.add<bgui::icon>(entity_icon(e.id), 0.2f);
+        auto& disclosure = row_layout.add<bgui::button>(
+            has_children ? "v" : "",
+            0.22f,
+            []() {}
+        );
+        disclosure.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
+        disclosure.style.layout.require_width(bgui::mode::pixel, 14.f);
+        disclosure.style.layout.require_height(bgui::mode::pixel, 20.f);
+        disclosure.style.layout.padding = bgui::vec4i{0};
+        disclosure.get_label().set_wrap(false);
+
+        auto& icon = row_layout.add<bgui::icon>(entity_icon(item.id), 0.2f);
         icon.add_class("entity-row-icon");
-        icon.style.layout.require_mode(
-            bgui::mode::pixel,
-            bgui::mode::wrap_content
+        icon.style.layout.require_mode(bgui::mode::pixel, bgui::mode::wrap_content);
+        icon.style.layout.require_width(bgui::mode::pixel, 14.f);
+        const auto id = item.id;
+        auto& selection = row_layout.add<entity_button>(
+            item.label,
+            [this, id]() { select(id); },
+            [this, id](const bgui::vec2i& position) {
+                drop_entity(id, position);
+            }
         );
-        icon.style.layout.require_width(bgui::mode::pixel, 10.f);
-
-        const auto id = e.id;
-        auto& row = row_layout.add<bgui::button>(
-            e.label,
-            0.28f,
-            [this, id]() { select(id); }
-        );
-        row.style.layout.require_mode(
+        selection.style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::wrap_content
         );
-        row.get_label().style.layout.align = bgui::vec<2, bgui::alignment>{
+        selection.get_label().style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::start,
         };
-        row.get_label().set_wrap(false);
+        selection.get_label().set_wrap(false);
 
         auto& visibility_button = row_layout.add<bgui::button>(
             "",
@@ -362,11 +599,7 @@ private:
             [this, id]() { toggle_visibility(id); }
         );
         configure_icon_button(visibility_button, 20);
-        auto& visibility_icon = add_button_icon(
-            visibility_button,
-            "eye",
-            0.24f
-        );
+        auto& visibility_icon = add_button_icon(visibility_button, "eye", 0.24f);
 
         auto& lock_button = row_layout.add<bgui::button>(
             "",
@@ -376,7 +609,34 @@ private:
         configure_icon_button(lock_button, 20);
         auto& lock_icon = add_button_icon(lock_button, "key", 0.24f);
 
-        m_rows.push_back({id, &row, &visibility_icon, &lock_icon});
+        auto& nested = container.add<bgui::linear>(bgui::orientation::vertical);
+        nested.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
+        );
+        nested.style.layout.padding = bgui::vec4i{16, 0, 0, 0};
+        nested.set_enable(has_children);
+        if (has_children) {
+            auto* nested_ptr = &nested;
+            auto* disclosure_ptr = &disclosure;
+            disclosure.set_function([nested_ptr, disclosure_ptr]() {
+                const bool expanded = !nested_ptr->is_enabled();
+                nested_ptr->set_enable(expanded);
+                disclosure_ptr->get_label().set_buffer(expanded ? "v" : ">");
+            });
+        }
+
+        m_rows.push_back({id, &selection, &disclosure, &nested,
+            &visibility_icon, &lock_icon});
+        if (has_children) {
+            for (const auto child_id : child_it->second) {
+                const auto child = entries_by_id.find(child_id);
+                if (child != entries_by_id.end())
+                    build_entity_node(child->second, nested, children_by_parent,
+                        entries_by_id, recursion_path);
+            }
+        }
+        recursion_path.erase(item.id);
     }
 
     static void clear_tree(bgui::tree& tree) {
@@ -438,17 +698,19 @@ public:
         auto& add_entity = m_toolbar->add<bgui::button>(
             "",
             0.28f,
-            [this]() {
-                if (!m_context || !m_context->registry)
-                    return;
-                const auto created = m_context->registry->create();
-                m_context->record_entity_creation(created.id);
-                select(created.id);
-            }
+            [this]() { create_entity(); }
         );
         add_entity.add_class("entities-add-button");
         configure_icon_button(add_entity, 18);
         add_button_icon(add_entity, "plus", 0.26f);
+
+        auto& remove_entity = m_toolbar->add<bgui::button>(
+            "−",
+            0.28f,
+            [this]() { delete_selected_entity(); }
+        );
+        remove_entity.add_class("entities-remove-button");
+        configure_icon_button(remove_entity, 18);
 
         auto& search_icon = m_toolbar->add<bgui::icon>("search", 0.24f);
         search_icon.receives_input(false);
@@ -535,7 +797,9 @@ public:
             m_context->selected_entity = std::nullopt;
         }
 
-        if (entries != m_last_entries || current_filter != m_last_filter)
+        const auto parentage = parentage_signature(entries);
+        if (entries != m_last_entries || current_filter != m_last_filter ||
+            parentage != m_last_parentage)
             refresh(entries);
 
         const auto selection = m_context ? m_context->selected_entity : std::nullopt;
@@ -566,15 +830,34 @@ private:
         const auto filter = normalized_filter(
             m_filter ? m_filter->get_buffer() : std::string{}
         );
-        std::vector<entry> visible_entries;
-        std::copy_if(
-            entries.begin(),
-            entries.end(),
-            std::back_inserter(visible_entries),
-            [&filter](const entry& item) {
-                return matches_filter(item, filter);
+        std::unordered_map<entity_id, entry> entries_by_id;
+        for (const auto& item : entries)
+            entries_by_id.emplace(item.id, item);
+
+        std::unordered_set<entity_id> included;
+        for (const auto& item : entries) {
+            if (!matches_filter(item, filter))
+                continue;
+            auto current = item.id;
+            while (current && included.insert(current).second) {
+                const auto parent = parent_of(current);
+                if (!parent || !entries_by_id.contains(parent))
+                    break;
+                current = parent;
             }
-        );
+        }
+
+        std::unordered_map<entity_id, std::vector<entity_id>> children_by_parent;
+        std::vector<entity_id> roots;
+        for (const auto& item : entries) {
+            if (!included.contains(item.id))
+                continue;
+            const auto parent = parent_of(item.id);
+            if (parent && included.contains(parent))
+                children_by_parent[parent].push_back(item.id);
+            else
+                roots.push_back(item.id);
+        }
 
         const bool create_scene_tree = !m_scene_tree;
         if (!m_scene_tree) {
@@ -588,10 +871,16 @@ private:
             clear_tree(*m_scene_tree);
         }
 
-        for (const auto& item : visible_entries)
-            build_row(item, m_scene_tree->children());
+        m_rows.clear();
+        std::unordered_set<entity_id> recursion_path;
+        for (const auto id : roots) {
+            const auto item = entries_by_id.find(id);
+            if (item != entries_by_id.end())
+                build_entity_node(item->second, m_scene_tree->children(),
+                    children_by_parent, entries_by_id, recursion_path);
+        }
 
-        if (visible_entries.empty()) {
+        if (included.empty()) {
             auto& empty = m_scene_tree->children().add<bgui::text>(
                 filter.empty() ? "No entities" : "No entities found",
                 0.26f
@@ -604,6 +893,7 @@ private:
 
         m_last_entries = entries;
         m_last_filter = m_filter ? m_filter->get_buffer() : std::string{};
+        m_last_parentage = parentage_signature(entries);
 
         update_row_styles();
     }

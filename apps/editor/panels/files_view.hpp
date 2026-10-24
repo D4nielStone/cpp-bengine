@@ -4,12 +4,17 @@
 
 #include <bgui.hpp>
 #include <elem/button.hpp>
+#include <elem/image.hpp>
+#include <elem/inputbox.hpp>
 #include <elem/text.hpp>
+#include <elem/window.hpp>
+#include <os/asset_manager.hpp>
 #include <lay/dock.hpp>
 #include <lay/linear.hpp>
 #include <os/os.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -17,6 +22,10 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <map>
+#include <regex>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -58,6 +67,7 @@ public:
         );
         m_root->style.layout.padding = bgui::vec4i{0};
         m_root->add_class("editor-panel");
+        m_dock = &parent;
 
         m_folder_sidebar = &m_root->add<bgui::linear>(
             bgui::orientation::vertical
@@ -93,6 +103,7 @@ public:
     }
 
     void update() override {
+        update_document_editor();
         refresh_if_needed();
     }
 
@@ -159,7 +170,318 @@ private:
     bgui::linear* m_root{nullptr};
     bgui::linear* m_folder_sidebar{nullptr};
     bgui::linear* m_file_area{nullptr};
+    bgui::dock* m_dock{nullptr};
+    bgui::window* m_document_window{nullptr};
+    bgui::linear* m_document_tabs{nullptr};
+    bgui::linear* m_document_body{nullptr};
+    bgui::text* m_document_status{nullptr};
+    struct document {
+        std::filesystem::path path;
+        std::string original;
+        std::string buffer;
+        bgui::button* tab{nullptr};
+        bgui::inputbox* editor{nullptr};
+        bgui::element* rendered{nullptr};
+        bool image{false};
+    };
+    std::map<std::filesystem::path, document> m_documents;
+    document* m_active_document{nullptr};
+    std::vector<bgui::element*> m_active_content;
     bool m_refresh_requested{false};
+    bool m_save_shortcut_down{false};
+
+    static std::string lower_extension(const std::filesystem::path& path) {
+        auto extension = path.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return extension;
+    }
+
+    static bool is_image_file(const std::filesystem::path& path) {
+        const auto ext = lower_extension(path);
+#ifdef _WIN32
+        return ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+               ext == ".bmp" || ext == ".gif" || ext == ".tif" || ext == ".tiff";
+#else
+        return ext == ".png";
+#endif
+    }
+
+    static bool is_markdown_file(const std::filesystem::path& path) {
+        const auto ext = lower_extension(path);
+        return ext == ".md" || ext == ".markdown";
+    }
+
+    void ensure_document_window() {
+        if (m_document_window || !m_dock)
+            return;
+        m_document_window = &m_dock->add_window("Editor", bgui::dock_area::center, 0.3f);
+        m_document_window->set_tabbed(true);
+        auto& root = m_document_window->add<bgui::linear>(bgui::orientation::vertical);
+        root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+        root.style.layout.padding = bgui::vec4i{5};
+        m_document_tabs = &root.add<bgui::linear>(bgui::orientation::horizontal);
+        m_document_tabs->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        auto& save = m_document_tabs->add<bgui::button>("Salvar", 0.27f,
+            [this]() { save_active_document(); });
+        save.style.layout.padding = bgui::vec4i{7, 3, 7, 3};
+        auto& status_row = root.add<bgui::linear>(bgui::orientation::horizontal);
+        status_row.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
+        );
+        status_row.style.layout.padding = bgui::vec4i{6, 2, 6, 2};
+        m_document_status = &status_row.add<bgui::text>("", 0.25f);
+        m_document_status->style.layout.require_mode(
+            bgui::mode::stretch,
+            bgui::mode::wrap_content
+        );
+        m_document_status->style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::end,
+            bgui::alignment::center
+        };
+        m_document_body = &root.add<bgui::linear>(bgui::orientation::vertical);
+        m_document_body->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+        m_document_body->style.layout.padding = bgui::vec4i{6};
+        m_document_body->set_scrollable(true);
+    }
+
+    void open_document(const std::filesystem::path& path) {
+        if (is_model_file(path)) return;
+        ensure_document_window();
+        if (!m_document_window)
+            return;
+        auto found = m_documents.find(path);
+        if (found == m_documents.end()) {
+            document doc;
+            doc.path = path;
+            doc.image = is_image_file(path);
+            if (!doc.image) {
+                std::ifstream input(path, std::ios::binary);
+                if (!input) return;
+                doc.original.assign(std::istreambuf_iterator<char>(input), {});
+                if (doc.original.find('\0') != std::string::npos) return;
+                doc.buffer = doc.original;
+            }
+            auto [it, inserted] = m_documents.emplace(path, std::move(doc));
+            found = it;
+            auto& item = found->second;
+            item.tab = &m_document_tabs->add<bgui::button>(path.filename().string(), 0.27f,
+                [this, path]() { activate_document(path); });
+            item.tab->style.layout.padding = bgui::vec4i{7, 3, 7, 3};
+        }
+        activate_document(path);
+    }
+
+    void activate_document(const std::filesystem::path& path) {
+        const auto found = m_documents.find(path);
+        if (found == m_documents.end()) return;
+        if (m_active_document && m_active_document->editor)
+            m_active_document->buffer = m_active_document->editor->get_buffer();
+        for (auto* element : m_active_content)
+            m_document_body->remove(element);
+        m_active_content.clear();
+        m_active_document = &found->second;
+        auto& doc = *m_active_document;
+        set_document_status("", false);
+        if (doc.image) {
+            try {
+                auto& image = m_document_body->add<bgui::image>(
+                    bgui::asset_manager::get_instance().load_texture(
+                        std::filesystem::absolute(doc.path).string()));
+                image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+                image.style.layout.align = bgui::vec<2, bgui::alignment>{bgui::alignment::center, bgui::alignment::center};
+                m_active_content.push_back(&image);
+            } catch (const std::exception& error) {
+                auto& message = m_document_body->add<bgui::text>(
+                    "Não foi possível abrir a imagem: " + std::string(error.what()), 0.28f);
+                m_active_content.push_back(&message);
+            }
+        } else if (is_markdown_file(doc.path)) {
+            render_markdown(doc);
+        } else {
+            doc.editor = &m_document_body->add<bgui::inputbox>(
+                doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
+            doc.editor->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+            doc.editor->set_wrap(false);
+            doc.editor->set_editor_guides_enabled(true);
+            doc.editor->set_scrollable(true);
+            doc.editor->set_highlight_rules(highlight_rules(doc.path));
+            m_active_content.push_back(doc.editor);
+        }
+        m_document_window->set_title(doc.path.filename().string() +
+            (doc.buffer != doc.original ? "*" : ""));
+    }
+
+    static std::shared_ptr<const std::vector<bgui::syntax_highlight_rule>>
+    highlight_rules(const std::filesystem::path& path) {
+        using rule = bgui::syntax_highlight_rule;
+        const auto ext = lower_extension(path);
+        std::vector<rule> rules;
+        auto add = [&rules](const std::string& pattern, bgui::vec4 color) {
+            rules.push_back({pattern, std::regex(pattern), color});
+        };
+        add("\\\"([^\\\"\\\\]|\\\\.)*\\\"|'([^'\\\\]|\\\\.)*'", {0.82f, 0.62f, 0.40f, 1.f});
+        if (ext == ".json") {
+            add("\\b(true|false|null)\\b", {0.72f, 0.53f, 0.88f, 1.f});
+            add("-?[0-9]+(\\.[0-9]+)?", {0.55f, 0.72f, 0.91f, 1.f});
+            add("//[^\\n]*", {0.38f, 0.68f, 0.42f, 1.f});
+        } else if (ext == ".lua") {
+            add("--[^\\n]*", {0.38f, 0.68f, 0.42f, 1.f});
+            add("\\b(and|break|do|else|elseif|end|false|for|function|if|in|local|nil|not|or|repeat|return|then|true|until|while)\\b", {0.58f, 0.68f, 0.95f, 1.f});
+        } else if (ext == ".py" || ext == ".sh" || ext == ".ps1" || ext == ".yaml" || ext == ".yml") {
+            add("#[^\\n]*", {0.38f, 0.68f, 0.42f, 1.f});
+            add("\\b(and|as|assert|async|await|break|class|def|elif|else|except|False|for|from|if|import|in|is|lambda|None|not|or|pass|raise|return|True|try|while|with|yield)\\b", {0.58f, 0.68f, 0.95f, 1.f});
+        } else {
+            add("//[^\\n]*|/\\*[\\s\\S]*?\\*/", {0.38f, 0.68f, 0.42f, 1.f});
+            add("\\b(if|else|for|while|return|class|struct|namespace|const|static|void|int|float|bool|local|function|then|end|require|include)\\b", {0.58f, 0.68f, 0.95f, 1.f});
+        }
+        return std::make_shared<const std::vector<rule>>(std::move(rules));
+    }
+
+    void render_markdown(document& doc) {
+        std::istringstream lines(doc.buffer);
+        std::string line;
+        bool in_code_block = false;
+        while (std::getline(lines, line)) {
+            std::string display = line;
+            int heading = 0;
+            while (heading < static_cast<int>(line.size()) && heading < 6 && line[heading] == '#') ++heading;
+            if (line.rfind("```", 0) == 0 || line.rfind("~~~", 0) == 0) {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            if (in_code_block) {
+                display = "    " + line;
+            } else if (heading && heading < static_cast<int>(line.size()) && line[heading] == ' ') {
+                display = line.substr(static_cast<size_t>(heading + 1));
+            } else if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
+                display = "•  " + line.substr(2);
+            } else if (line.rfind("> ", 0) == 0) {
+                display = "│  " + line.substr(2);
+            } else if (line.size() > 2 && std::isdigit(static_cast<unsigned char>(line[0]))) {
+                const auto marker = line.find(". ");
+                if (marker != std::string::npos) display = "•  " + line.substr(marker + 2);
+            } else if (line == "---" || line == "***" || line == "___") {
+                display = "────────────────────────────────────────";
+            }
+            if (!in_code_block) {
+                display = std::regex_replace(display, std::regex(R"(\[([^\]]+)\]\(([^)]+)\))"), "$1 ($2)");
+                display = std::regex_replace(display, std::regex(R"(`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_)"), "$1$2$3$4$5");
+                display = std::regex_replace(display, std::regex(R"(~~([^~]+)~~)"), "$1");
+            }
+            auto& paragraph = m_document_body->add<bgui::text>(display, heading ? 0.28f + (6 - heading) * 0.035f : 0.28f);
+            paragraph.set_wrap(true);
+            paragraph.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+            if (heading) paragraph.style.visual.text.normal = bgui::color{0.78f, 0.84f, 0.96f, 1.f};
+            m_active_content.push_back(&paragraph);
+        }
+    }
+
+    void update_document_editor() {
+        const bool control_down =
+            bgui::get_pressed(bgui::input_key::left_control) ||
+            bgui::get_pressed(bgui::input_key::right_control);
+        const bool save_down = control_down && bgui::get_pressed(bgui::input_key::s);
+        if (save_down && !m_save_shortcut_down && m_active_document &&
+            m_active_document->editor && m_active_document->editor->is_focused())
+            save_active_document();
+        m_save_shortcut_down = save_down;
+
+        if (!m_active_document) return;
+        if (m_active_document->editor)
+            m_active_document->buffer = m_active_document->editor->get_buffer();
+        const bool dirty = m_active_document->buffer != m_active_document->original;
+        m_active_document->tab->get_label().set_buffer(
+            m_active_document->path.filename().string() + (dirty ? "*" : ""));
+        if (m_document_window)
+            m_document_window->set_title(m_active_document->path.filename().string() + (dirty ? "*" : ""));
+    }
+
+    void save_active_document() {
+        if (!m_active_document || m_active_document->image ||
+            is_markdown_file(m_active_document->path))
+            return;
+        if (m_active_document->editor)
+            m_active_document->buffer = m_active_document->editor->get_buffer();
+
+        const auto target = m_active_document->path;
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto temporary = target.parent_path() /
+            (target.filename().string() + ".tmp." + std::to_string(nonce));
+        const auto backup = target.parent_path() /
+            (target.filename().string() + ".bak." + std::to_string(nonce));
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            set_document_status("Falha ao criar arquivo temporário para salvar.", true);
+            return;
+        }
+        output.write(m_active_document->buffer.data(),
+            static_cast<std::streamsize>(m_active_document->buffer.size()));
+        output.flush();
+        if (!output) {
+            output.close();
+            remove_file(temporary);
+            set_document_status("Falha ao gravar o arquivo; alterações mantidas no editor.", true);
+            return;
+        }
+        output.close();
+        if (output.fail()) {
+            remove_file(temporary);
+            set_document_status("Falha ao finalizar o arquivo; alterações mantidas no editor.", true);
+            return;
+        }
+
+        std::error_code error;
+        std::filesystem::rename(temporary, target, error);
+        std::error_code exists_error;
+        const bool target_exists = std::filesystem::exists(target, exists_error);
+        if (error && target_exists && !exists_error) {
+            // On platforms where rename cannot replace an existing file, keep a
+            // recoverable copy while installing the new version.
+            error.clear();
+            std::filesystem::rename(target, backup, error);
+            if (!error) {
+                std::filesystem::rename(temporary, target, error);
+                if (error) {
+                    std::error_code restore_error;
+                    std::filesystem::rename(backup, target, restore_error);
+                    remove_file(temporary);
+                    set_document_status(
+                        restore_error
+                            ? "Falha ao salvar e restaurar a cópia anterior: " + restore_error.message()
+                            : "Falha ao salvar; a versão anterior foi restaurada.",
+                        true
+                    );
+                    return;
+                }
+                remove_file(backup);
+            }
+        }
+        if (error) {
+            remove_file(temporary);
+            set_document_status("Falha ao salvar: " + error.message(), true);
+            return;
+        }
+
+        m_active_document->original = m_active_document->buffer;
+        update_document_editor();
+        set_document_status("Arquivo salvo.", false);
+    }
+
+    void set_document_status(const std::string& message, bool is_error) {
+        if (!m_document_status)
+            return;
+        m_document_status->set_buffer(message);
+        m_document_status->style.visual.text.normal = is_error
+            ? bgui::color{0.95f, 0.45f, 0.40f, 1.f}
+            : bgui::color{0.55f, 0.82f, 0.60f, 1.f};
+    }
+
+    static void remove_file(const std::filesystem::path& path) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+    }
 
     static std::filesystem::path resolve_project_root(
         std::filesystem::path project_file
@@ -434,6 +756,7 @@ private:
                 "",
                 [this, file]() {
                     m_selected_file = file;
+                    open_document(file);
                     request_refresh();
                 },
                 is_model_file(file)

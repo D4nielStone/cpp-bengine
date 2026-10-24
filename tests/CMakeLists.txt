@@ -36,6 +36,7 @@ gtest_discover_tests(commons_tests)
 add_executable(
     editor_persistence_tests
     editor_persistence_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_preview.cpp
 )

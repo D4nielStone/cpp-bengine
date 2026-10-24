@@ -6,6 +6,7 @@
 #include "os/window.hpp"
 #include "panel.hpp"
 #include "viewport_input_state.hpp"
+#include "camera_preview_state.hpp"
 
 #include <elem/image.hpp>
 
@@ -33,6 +34,7 @@ private:
     std::shared_ptr<commons::camera> m_camera;
     std::shared_ptr<editor_context> m_context;
     std::shared_ptr<viewport_input_state> m_input_state;
+    std::shared_ptr<camera_preview_state> m_camera_preview;
     std::shared_ptr<scene_view_state> m_state;
 };
 

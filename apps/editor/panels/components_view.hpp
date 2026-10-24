@@ -582,14 +582,6 @@ private:
             }
         );
 
-        auto& show_frustum = content.add<bgui::checkbox>(
-            "Show Frustum",
-            0.29f,
-            m_context->show_camera_frustum
-        );
-        show_frustum.set_on_change([context = m_context](bool enabled) {
-            context->show_camera_frustum = enabled;
-        });
     }
 
     void add_directional_light(

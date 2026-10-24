@@ -253,14 +253,14 @@ bool editor::transform_gizmo::update(
         m_active_axis = -1;
     }
 
-    const auto position = target->get_position();
+    const auto position = target->get_world_position();
     if (!project(camera, viewport, position, m_center))
         return m_dragging;
     if (m_center.x < viewport.x || m_center.x > viewport.x + viewport.z ||
         m_center.y < viewport.y || m_center.y > viewport.y + viewport.w)
         return m_dragging && left_down;
 
-    const auto axis_vectors = oriented_axes(target->get_rotation());
+    const auto axis_vectors = oriented_axes(target->get_world_rotation());
     std::array<bgui::vec2, 3> axis_ends{};
     std::array<bgui::vec2, 3> axis_directions{};
     std::array<float, 3> pixels_per_unit{};
@@ -360,7 +360,10 @@ bool editor::transform_gizmo::update(
             };
             const float amount = dot(drag_delta, m_drag_axis_screen) / m_drag_pixels_per_unit;
             if (!left_just_pressed)
-                target->move(axis_vectors[m_active_axis] * amount);
+                target->set_world_position(
+                    target->get_world_position() +
+                    axis_vectors[m_active_axis] * amount
+                );
         } else if (m_mode == mode::scale && m_drag_pixels_per_unit > 0.01f) {
             const float amount = dot(mouse - m_drag_start_mouse, m_drag_axis_screen) / 82.f;
             auto scale = target->get_scale();
@@ -373,7 +376,9 @@ bool editor::transform_gizmo::update(
             if (delta < -pi) delta += 2.f * pi;
             bgui::vec3 rotation_delta{};
             rotation_delta[m_active_axis] = delta * 180.f / pi;
-            target->rotate(rotation_delta);
+            auto world_rotation = target->get_world_rotation();
+            world_rotation = world_rotation + rotation_delta;
+            target->set_world_rotation(world_rotation);
             m_last_mouse_angle = angle;
         }
     }

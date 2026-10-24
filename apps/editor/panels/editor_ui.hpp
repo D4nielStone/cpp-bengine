@@ -92,10 +92,13 @@ private:
     bgui::text* m_build_directory_picker_status{nullptr};
     bgui::button* m_build_directory_browse_button{nullptr};
     bgui::modal* m_project_modal{nullptr};
+    bgui::modal* m_new_project_modal{nullptr};
     bgui::modal* m_exit_modal{nullptr};
     bgui::modal* m_global_lighting_modal{nullptr};
     bgui::modal* m_global_physics_modal{nullptr};
     bgui::inputbox* m_project_directory_input{nullptr};
+    bgui::inputbox* m_new_project_name_input{nullptr};
+    bgui::inputbox* m_new_project_location_input{nullptr};
     std::array<bgui::inputbox*, 3> m_light_direction_inputs{};
     std::array<bgui::inputbox*, 3> m_light_ambient_inputs{};
     std::array<bgui::inputbox*, 3> m_light_color_inputs{};
@@ -106,6 +109,7 @@ private:
     bool m_is_playing{false};
     bool m_is_paused{false};
     bool m_build_running{false};
+    bool m_choose_new_project_location{false};
     std::filesystem::path m_build_directory;
     std::filesystem::path m_repository_root;
     std::unique_ptr<build_process> m_build_process;
@@ -116,6 +120,7 @@ private:
         const std::string& selected_path,
         const std::string& status
     );
+    void create_new_project_modal();
     void create_exit_modal();
     void open_global_lighting_modal();
     void open_global_physics_modal();

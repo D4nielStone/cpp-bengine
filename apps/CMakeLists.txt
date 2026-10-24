@@ -22,6 +22,7 @@ add_executable(
     editor_app.cpp
     editor/panels/editor_ui.cpp
     editor/systems/build_process.cpp
+    editor/systems/project_creation_system.cpp
     editor/systems/project_persistence_system.cpp
     editor/systems/project_preview.cpp
     editor/systems/runtime_process.cpp

@@ -4,19 +4,32 @@
 
 | Check | Status | Evidence | Notes |
 |---|---|---|---|
-| Project manager opens before the editor, supports recent projects with their latest scene preview, a folder browser, opening by path, and creating a new project file | Implemented and compiled; desktop interaction pending | [apps/editor/systems/project_preview.cpp](../apps/editor/systems/project_preview.cpp) captures the editor camera framebuffer to `<project-file>.preview.png` when the editor closes; [apps/editor_app.cpp](../apps/editor_app.cpp) displays it in each recent-project card. | Reduced typography and spacing, short recent-project labels, and contrasting column backgrounds address the supplied layout issues. Preview path test passes; visual screenshot capture and Windows WIC encoding still need desktop validation. |
+| Project manager startup, Unity-inspired project selection, editor menu access, and new-project creation | Implemented and compiled; desktop interaction pending | [apps/editor_app.cpp](../apps/editor_app.cpp) shows recent projects with their latest scene previews, supports path and folder browsing, and opens a new project created by [apps/editor/systems/project_creation_system.cpp](../apps/editor/systems/project_creation_system.cpp). The editor's Files menu now opens the Project Manager with recent projects and a new-project dialog. | The creation flow validates the project name and location, creates standard asset/script folders and a starter project/scene, then loads it into the editor. `ProjectCreationTest.CreatesAnEmptyProjectWithStandardFolders` passes. Visual interaction still needs desktop validation. |
 
 ## Current build status
 
 Validated with:
 
 ```
-cmake -S . -B build-menu-check -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
-cmake --build build-menu-check --parallel 2
-ctest --test-dir build-menu-check --output-on-failure
+scripts/build.sh /tmp/cpp-bengine-project-manager-build --test
 ```
 
-Result: clean configure and build succeeded; the current suite passed (`29/29` tests).
+Result: clean configure and build succeeded; the current suite passed (`38/38` tests).
+
+## Camera gizmos, preview, and viewport input
+
+| Check | Status | Evidence | Notes |
+|---|---|---|---|
+| Scene camera gizmos stay visible; runtime camera preview opens on hover | Implemented and compiled; desktop interaction pending | [apps/editor/tools/guizmo_system.hpp](../apps/editor/tools/guizmo_system.hpp) draws each scene camera frustum and a camera marker. [apps/editor/panels/scene_view.cpp](../apps/editor/panels/scene_view.cpp) shows the runtime camera framebuffer preview while its marker is hovered. | Runtime camera selection follows `runtime_app`: first scene camera in registry order, excluding the editor camera. The preview framebuffer is initialized at thumbnail size on demand. The old Show Frustum checkbox was removed because these gizmos are now always shown. |
+| Viewport navigation, picking, and modal input ownership | Implemented and compiled; desktop interaction pending | [apps/editor/tools/camera_movement.hpp](../apps/editor/tools/camera_movement.hpp) confines navigation to the hovered viewport and uses right mouse drag; [apps/editor/tools/entity_picking_system.hpp](../apps/editor/tools/entity_picking_system.hpp) only queues picks inside the viewport and cancels them while a modal is open. | Left click remains available for selection and transform gizmos, avoiding camera-rotation/picking conflicts. No display-backed interaction test was available. |
+
+Validated for this change with:
+
+```
+scripts/build.sh /tmp/cpp-bengine-camera-preview-build --test
+```
+
+Result: clean configure and build succeeded; all 38 tests passed. Interactive OpenGL behavior still needs desktop verification.
 
 ## BGUI menu bar and context-menu behavior
 
@@ -54,7 +67,7 @@ The regression tests use a synthetic font and BGUI's headless input path; they d
 | P1-b | Not confirmed | [CMakeLists.txt](../CMakeLists.txt) defines `BUILD_RUNTIME` and `BUILD_EDITOR`, and the workflow is now consistent with that option. | No dead option remains in the current root build contract. |
 | P1-c | Confirmed and fixed | [tests/CMakeLists.txt](../tests/CMakeLists.txt) now declares the test dependency explicitly via FetchContent for GoogleTest. | This is required for clean builds without a system install. |
 | P1-d | Confirmed | [commons/CMakeLists.txt](../commons/CMakeLists.txt) defines `COMMONS_ASSET_DIR` as a source-tree absolute path. | This is workable for development but not portable for installs or relocated runtimes. |
-| P1-e | Not confirmed | There is no current nulling of `m_transform` in the editor/runtime codebase search; the runtime camera lifecycle is not currently reproducing the issue. | No direct evidence of the risk remains in the checked sources. |
+| P1-e | Partial: lifecycle hypothesis not confirmed; editor camera persistence gap confirmed and fixed | [apps/editor/systems/project_persistence_system.cpp](../apps/editor/systems/project_persistence_system.cpp) now saves the editor camera transform in project settings and restores it only after the project load succeeds. `ProjectPersistenceTest.KeepsEditorCameraOutOfSceneAndRoundTripsSceneCameras` covers position and rotation round-trip. | The earlier `m_transform` nulling claim remains unconfirmed. Camera framebuffer resources are intentionally not serialized. |
 | P2-a | Partial | No extensible serializer registry is implemented at the component layer yet. | Design remains a follow-up proposal rather than a production change. |
 
 ## Project and scene file ownership
@@ -68,6 +81,7 @@ The regression tests use a synthetic font and BGUI's headless input path; they d
 
 - [tests/commons_tests.cpp](../tests/commons_tests.cpp): invariant checks for ECS liveness, final-component removal, mask consistency, invalid-ID behavior, and ID reuse.
 - [tests/editor_persistence_tests.cpp](../tests/editor_persistence_tests.cpp): persistence round-trips, separated project/scene files, standalone and legacy scene loading, ECS liveness after loading, renderer materials/visibility, entity lock state, and project save/load stability checks.
+- [tests/editor_persistence_tests.cpp](../tests/editor_persistence_tests.cpp): project creation generates the initial project/scene and standard asset/script folders.
 - [external/cpp-bgui/tests/menu_bar_tests.cpp](../external/cpp-bgui/tests/menu_bar_tests.cpp): fractional text sizing before/after draw generation and menu/button callback dispatch.
 
 ## Renderer materials and entity editor state

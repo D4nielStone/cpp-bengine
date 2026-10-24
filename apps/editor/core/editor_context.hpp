@@ -31,7 +31,6 @@ struct editor_context {
     std::optional<entity_id> selected_entity;
     std::optional<entity_id> editor_camera_entity;
     bool is_playing{false};
-    bool show_camera_frustum{true};
     std::unordered_map<entity_id, std::string> entity_names;
     std::unordered_set<entity_id> hidden_entities;
     std::unordered_set<entity_id> locked_entities;
@@ -95,6 +94,7 @@ struct editor_context {
              saved_mask, saved_name]() {
                 entity_registry->entities[id] = saved_components;
                 entity_registry->mascaras[id] = saved_mask;
+                entity_registry->live_entities.insert(id);
                 if (saved_name)
                     (*entity_name_map)[id] = *saved_name;
             }

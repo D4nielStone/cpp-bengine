@@ -5,12 +5,13 @@
         {
             "id": 2,
             "locked": false,
+            "name": "GlobalLight",
             "components": {
                 "directional_light": {
                     "direction": [
-                        1.0,
-                        1.0,
-                        1.0
+                        0.30000001192092896,
+                        -1.0,
+                        0.20000000298023224
                     ],
                     "ambient": [
                         0.10000000149011612,
@@ -31,9 +32,9 @@
                         0.0
                     ],
                     "rotation": [
-                        -299.7637939453125,
-                        -108.3740234375,
-                        -45.044578552246094
+                        0.0,
+                        0.0,
+                        0.0
                     ],
                     "scale": [
                         1.0,
@@ -85,17 +86,17 @@
                     "skybox": false
                 },
                 "code": {
-                    "directory": "scripts/fpp_player.lua"
+                    "directory": "scripts/fpp_camera.lua"
                 },
                 "transform": {
                     "position": [
                         0.0,
-                        1.7000000476837158,
-                        5.0
+                        1.649999976158142,
+                        0.0
                     ],
                     "rotation": [
                         0.0,
-                        -90.0,
+                        0.0,
                         0.0
                     ],
                     "scale": [
@@ -104,7 +105,8 @@
                         1.0
                     ]
                 }
-            }
+            },
+            "parent": 106
         },
         {
             "id": 101,
@@ -135,7 +137,7 @@
                 "transform": {
                     "position": [
                         0.0,
-                        -1.0,
+                        0.0,
                         0.0
                     ],
                     "rotation": [
@@ -180,8 +182,8 @@
                 "transform": {
                     "position": [
                         0.0,
-                        2.0,
-                        -8.0
+                        3.0,
+                        -20.0
                     ],
                     "rotation": [
                         0.0,
@@ -190,7 +192,7 @@
                     ],
                     "scale": [
                         20.0,
-                        6.0,
+                        3.0,
                         1.0
                     ]
                 }
@@ -272,8 +274,8 @@
                 },
                 "transform": {
                     "position": [
-                        -10.0,
-                        2.0,
+                        -20.0,
+                        3.0,
                         0.0
                     ],
                     "rotation": [
@@ -282,8 +284,8 @@
                         0.0
                     ],
                     "scale": [
-                        16.0,
-                        6.0,
+                        20.0,
+                        3.0,
                         1.0
                     ]
                 }
@@ -317,8 +319,8 @@
                 },
                 "transform": {
                     "position": [
-                        10.0,
-                        2.0,
+                        20.0,
+                        3.0,
                         0.0
                     ],
                     "rotation": [
@@ -327,8 +329,49 @@
                         0.0
                     ],
                     "scale": [
-                        16.0,
-                        6.0,
+                        20.0,
+                        3.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 106,
+            "locked": false,
+            "name": "PlayerCapsule",
+            "components": {
+                "code": {
+                    "directory": "scripts/fpp_player.lua"
+                },
+                "renderer": {
+                    "model": "assets/models/capsule.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.7200000286102295,
+                                0.7799999713897705,
+                                0.8600000143051147,
+                                1.0
+                            ]
+                        }
+                    ],
+                    "visible": true
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        0.0,
+                        5.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        -90.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
                         1.0
                     ]
                 }

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include "components/camera.hpp"
@@ -318,5 +319,71 @@ void editor::grid_gizmo::draw_camera_frustum(
     ensure_resources(m_program, m_vao, m_vbo);
     render_vertices(
         viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 1.5f
+    );
+}
+
+void editor::grid_gizmo::draw_directional_light(
+    const COMMONS_NS::camera& viewport_camera,
+    const bgui::vec4i& viewport,
+    const bgui::vec3& position,
+    const bgui::vec3& ray_direction)
+{
+    if (!viewport_camera.flag_fb || viewport_camera.viewportFBO.x <= 0 ||
+        viewport_camera.viewportFBO.y <= 0 || viewport.z <= 0 || viewport.w <= 0)
+        return;
+
+    glm::vec3 direction(ray_direction.x, ray_direction.y, ray_direction.z);
+    const float direction_length = glm::length(direction);
+    if (!std::isfinite(direction_length) || direction_length < 1e-5f)
+        return;
+    direction /= direction_length;
+
+    const glm::vec3 origin(position.x, position.y, position.z);
+    const glm::vec3 reference = std::abs(glm::dot(direction, glm::vec3(0.f, 1.f, 0.f))) > 0.92f
+        ? glm::vec3(1.f, 0.f, 0.f)
+        : glm::vec3(0.f, 1.f, 0.f);
+    const glm::vec3 right = glm::normalize(glm::cross(direction, reference));
+    const glm::vec3 up = glm::normalize(glm::cross(right, direction));
+    constexpr float color[4]{1.f, 0.78f, 0.2f, 1.f};
+    constexpr float ring_radius = 0.45f;
+    constexpr float ray_length = 0.28f;
+    constexpr float arrow_length = 0.45f;
+    constexpr float arrow_width = 0.22f;
+    constexpr int ray_count = 8;
+    std::vector<grid_vertex> vertices;
+    vertices.reserve((ray_count * 2 + 24) * 2);
+
+    const auto append_line = [&vertices, &color](
+        const glm::vec3& start, const glm::vec3& end) {
+        vertices.push_back({start.x, start.y, start.z,
+            color[0], color[1], color[2], color[3]});
+        vertices.push_back({end.x, end.y, end.z,
+            color[0], color[1], color[2], color[3]});
+    };
+
+    const glm::vec3 arrow_tip = origin + direction * 3.f;
+    const glm::vec3 arrow_base = arrow_tip - direction * arrow_length;
+    append_line(origin, arrow_tip);
+    append_line(arrow_tip, arrow_base + right * arrow_width);
+    append_line(arrow_tip, arrow_base - right * arrow_width);
+    append_line(arrow_tip, arrow_base + up * arrow_width);
+    append_line(arrow_tip, arrow_base - up * arrow_width);
+
+    for (int index = 0; index < ray_count; ++index) {
+        const float angle = 2.f * glm::pi<float>() * static_cast<float>(index) /
+            static_cast<float>(ray_count);
+        const glm::vec3 radial = right * std::cos(angle) + up * std::sin(angle);
+        const glm::vec3 ring_start = origin + radial * ring_radius;
+        const glm::vec3 ring_end = origin +
+            (right * std::cos(angle + 2.f * glm::pi<float>() / ray_count) +
+             up * std::sin(angle + 2.f * glm::pi<float>() / ray_count)) * ring_radius;
+        append_line(ring_start, ring_end);
+        append_line(origin + radial * (ring_radius + 0.08f),
+            origin + radial * (ring_radius + ray_length));
+    }
+
+    ensure_resources(m_program, m_vao, m_vbo);
+    render_vertices(
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 2.f
     );
 }

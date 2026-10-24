@@ -88,9 +88,12 @@ TEST(EditorThemeTest, VerticallyCentersWindowTrafficLights)
         "commons/assets/themes/editor-dark.theme";
     const auto editor_overrides = bgui::load_theme(theme_path.string());
     const auto controls = editor_overrides.classes.find("window-controls");
+    const auto header_style = editor_overrides.classes.find("window-header");
 
     ASSERT_NE(controls, editor_overrides.classes.end());
     ASSERT_TRUE(controls->second.layout.align.has_value());
+    ASSERT_NE(header_style, editor_overrides.classes.end());
+    ASSERT_TRUE(header_style->second.layout.padding.has_value());
 
     auto& style_manager = bgui::style_manager::get_instance();
     struct theme_restore {
@@ -104,6 +107,7 @@ TEST(EditorThemeTest, VerticallyCentersWindowTrafficLights)
 
     auto theme = bgui::dark_theme();
     theme.classes["window-controls"] = controls->second;
+    theme.classes["window-header"] = header_style->second;
     style_manager.apply_theme(theme);
 
     {
@@ -131,6 +135,7 @@ TEST(EditorThemeTest, VerticallyCentersWindowTrafficLights)
             }
         }
         ASSERT_NE(header, nullptr);
+        EXPECT_GE(header->processed_height(), 20);
 
         bgui::linear* controls_layout = nullptr;
         for (auto& [layer, elements] : header->get_elements()) {

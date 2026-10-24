@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -309,6 +310,7 @@ bool validate_entities(const rapidjson::Value& entities, std::string& error) {
         return false;
     }
     std::unordered_map<std::uint32_t, bool> entity_ids;
+    std::unordered_map<std::uint32_t, std::uint32_t> parents;
     for (const auto& entity : entities.GetArray()) {
         if (!entity.IsObject() ||
             !entity.HasMember("id") ||
@@ -316,6 +318,7 @@ bool validate_entities(const rapidjson::Value& entities, std::string& error) {
             entity["id"].GetUint() == 0 ||
             (entity.HasMember("name") && !entity["name"].IsString()) ||
             (entity.HasMember("locked") && !entity["locked"].IsBool()) ||
+            (entity.HasMember("parent") && !entity["parent"].IsUint()) ||
             !entity.HasMember("components") ||
             !entity["components"].IsObject() ||
             !entity["components"].HasMember("transform")) {
@@ -328,6 +331,14 @@ bool validate_entities(const rapidjson::Value& entities, std::string& error) {
             error = "The project contains duplicate entity IDs.";
             return false;
         }
+        const auto parent = entity.HasMember("parent")
+            ? entity["parent"].GetUint()
+            : 0u;
+        if (parent == id) {
+            error = "An entity cannot be its own parent.";
+            return false;
+        }
+        parents.emplace(id, parent);
 
         const auto& components = entity["components"];
         for (auto component = components.MemberBegin(); component != components.MemberEnd(); ++component) {
@@ -338,6 +349,24 @@ bool validate_entities(const rapidjson::Value& entities, std::string& error) {
             }
         }
 
+    }
+
+    for (const auto& [id, parent] : parents) {
+        if (parent && !entity_ids.contains(parent)) {
+            error = "Entity " + std::to_string(id) +
+                " references a parent that does not exist.";
+            return false;
+        }
+        std::unordered_set<std::uint32_t> visited;
+        auto ancestor = id;
+        while (ancestor) {
+            if (!visited.insert(ancestor).second) {
+                error = "The scene hierarchy contains a parent cycle.";
+                return false;
+            }
+            const auto found = parents.find(ancestor);
+            ancestor = found == parents.end() ? 0u : found->second;
+        }
     }
 
     return true;
@@ -359,7 +388,9 @@ bool validate_project(const rapidjson::Document& document, std::string& error) {
     if (document.HasMember("settings") &&
         (!document["settings"].IsObject() ||
          (document["settings"].HasMember("gravity") &&
-          !is_vector3(document["settings"]["gravity"])))) {
+          !is_vector3(document["settings"]["gravity"])) ||
+         (document["settings"].HasMember("editor_camera_transform") &&
+          !validate_component("transform", document["settings"]["editor_camera_transform"])))) {
         error = "The project contains invalid global settings.";
         return false;
     }
@@ -467,6 +498,10 @@ void project_persistence_system::set_global_gravity(
     m_global_gravity = gravity;
 }
 
+const std::filesystem::path& project_persistence_system::get_repository_root(const std::string& project_path) const {
+    // Implementation for getting repository root
+}
+
 bool project_persistence_system::save(
     const std::string& path,
     std::string& error
@@ -535,6 +570,9 @@ bool project_persistence_system::save(
             m_locked_entities && m_locked_entities->contains(id),
             allocator
         );
+        const auto transform = m_registry->get<commons::transform>(id);
+        if (transform && transform->parent_id)
+            entity.AddMember("parent", transform->parent_id, allocator);
 
         if (m_entity_names) {
             const auto name_it = m_entity_names->find(id);
@@ -664,6 +702,11 @@ bool project_persistence_system::save(
     for (const auto axis : m_global_gravity)
         gravity.PushBack(axis, project_allocator);
     settings.AddMember("gravity", gravity, project_allocator);
+    rapidjson::Value editor_camera_transform(rapidjson::kObjectType);
+    m_registry->get<commons::transform>(m_editor_camera_id)->serialize(
+        editor_camera_transform, project_allocator
+    );
+    settings.AddMember("editor_camera_transform", editor_camera_transform, project_allocator);
     project_document.AddMember("settings", settings, project_allocator);
 
     auto scene_reference = scene_target.lexically_relative(
@@ -788,11 +831,19 @@ bool project_persistence_system::load(
     }
 
     std::array<float, 3> staged_gravity{0.f, -9.8f, 0.f};
+    std::optional<rapidjson::Value> staged_editor_camera_transform;
     if (document.HasMember("settings") &&
         document["settings"].HasMember("gravity")) {
         const auto& gravity = document["settings"]["gravity"];
         for (rapidjson::SizeType axis = 0; axis < gravity.Size(); ++axis)
             staged_gravity[axis] = gravity[axis].GetFloat();
+    }
+    if (is_project_document && document.HasMember("settings") &&
+        document["settings"].HasMember("editor_camera_transform")) {
+        staged_editor_camera_transform.emplace(
+            document["settings"]["editor_camera_transform"],
+            document.GetAllocator()
+        );
     }
 
     auto active_camera = m_registry->get<commons::camera>(m_editor_camera_id);
@@ -822,6 +873,12 @@ bool project_persistence_system::load(
         if (id == m_editor_camera_id)
             continue;
 
+        if (entity_data.HasMember("parent") &&
+            entity_data["parent"].GetUint() == m_editor_camera_id) {
+            error = "Scene entities cannot use the editor camera as a parent.";
+            return false;
+        }
+
         auto entity = staged_registry->create(id);
         if (entity_data.HasMember("name") && entity_data["name"].IsString())
             staged_entity_names.emplace(id, entity_data["name"].GetString());
@@ -844,6 +901,9 @@ bool project_persistence_system::load(
                 return false;
             }
         }
+        if (entity_data.HasMember("parent"))
+            staged_registry->get<commons::transform>(id)->parent_id =
+                entity_data["parent"].GetUint();
         const auto renderer = staged_registry->get<commons::renderer>(id);
         if (renderer && !renderer->visible)
             staged_hidden_entities.insert(id);
@@ -877,6 +937,9 @@ bool project_persistence_system::load(
     m_registry->entities = std::move(staged_registry_copy->entities);
     m_registry->mascaras = std::move(staged_registry_copy->mascaras);
     m_registry->live_entities = std::move(staged_registry_copy->live_entities);
+    if (staged_editor_camera_transform)
+        active_transform->analyze(*staged_editor_camera_transform);
+    active_transform->parent_id = 0;
     for (auto& [id, components] : m_registry->entities) {
         for (auto& [mask, component] : components) {
             (void)mask;
