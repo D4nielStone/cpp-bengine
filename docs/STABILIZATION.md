@@ -4,7 +4,7 @@
 
 | Check | Status | Evidence | Notes |
 |---|---|---|---|
-| Project manager opens before the editor, supports recent projects, a folder browser, opening by path, and creating a new project file | Implemented and compiled; desktop interaction pending | [apps/editor_app.cpp](../apps/editor_app.cpp) switches from the manager to the editor in one GLFW window, avoiding a second GLFW initialization. | Reduced typography and spacing, shorter recent-project labels, and contrasting column backgrounds address overlap and overflow in the supplied screenshot. Headless CTest passed; visual interaction still requires a display session. |
+| Project manager opens before the editor, supports recent projects with their latest scene preview, a folder browser, opening by path, and creating a new project file | Implemented and compiled; desktop interaction pending | [apps/editor/systems/project_preview.cpp](../apps/editor/systems/project_preview.cpp) captures the editor camera framebuffer to `<project-file>.preview.png` when the editor closes; [apps/editor_app.cpp](../apps/editor_app.cpp) displays it in each recent-project card. | Reduced typography and spacing, short recent-project labels, and contrasting column backgrounds address the supplied layout issues. Preview path test passes; visual screenshot capture and Windows WIC encoding still need desktop validation. |
 
 ## Current build status
 

@@ -1,4 +1,5 @@
 #include "project_persistence_system.hpp"
+#include "project_preview.hpp"
 
 #include "components/camera.hpp"
 #include "components/code.hpp"
@@ -126,6 +127,14 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     EXPECT_FLOAT_EQ(scene_position.z, 7.f);
 
     remove_project_files(path);
+}
+
+TEST(ProjectPreviewTest, UsesAProjectSpecificPreviewFilePath) {
+    const auto project = std::filesystem::path("projects/sample.bengine");
+    EXPECT_EQ(
+        editor::ui::project_preview_path(project.string()),
+        std::filesystem::path("projects/sample.bengine.preview.png")
+    );
 }
 
 TEST(ProjectPersistenceTest, KeepsLoadedEntityIdsInTheLiveRegistry) {

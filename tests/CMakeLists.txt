@@ -37,6 +37,7 @@ add_executable(
     editor_persistence_tests
     editor_persistence_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_preview.cpp
 )
 
 target_link_libraries(editor_persistence_tests

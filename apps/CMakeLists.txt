@@ -23,6 +23,7 @@ add_executable(
     editor/panels/editor_ui.cpp
     editor/systems/build_process.cpp
     editor/systems/project_persistence_system.cpp
+    editor/systems/project_preview.cpp
     editor/systems/runtime_process.cpp
     editor/panels/runtime_tools_view.cpp
     editor/panels/scene_view.cpp
@@ -30,3 +31,9 @@ add_executable(
 )
 target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
 target_link_libraries(editor_app PRIVATE commons)
+if(WIN32)
+    target_link_libraries(editor_app PRIVATE windowscodecs ole32)
+else()
+    find_package(PNG REQUIRED)
+    target_link_libraries(editor_app PRIVATE PNG::PNG)
+endif()

@@ -10,6 +10,7 @@
 #include "editor/panels/editor_ui.hpp"
 #include "editor/core/editor_context.hpp"
 #include "editor/systems/project_persistence_system.hpp"
+#include "editor/systems/project_preview.hpp"
 #include "editor/panels/files_view.hpp"
 #include "editor/panels/scene_view.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
@@ -22,6 +23,7 @@
 #include <lay/linear.hpp>
 #include <elem/button.hpp>
 #include <elem/inputbox.hpp>
+#include <elem/image.hpp>
 #include <elem/text.hpp>
 
 #include <chrono>
@@ -107,13 +109,39 @@ project_choice show_project_manager(
         const auto folder_name = project_path.parent_path().filename().string();
         if (!folder_name.empty())
             project_label += "  ·  " + folder_name;
-        auto& button = recent.add<bgui::button>(
+        auto& card = recent.add<bgui::linear>(bgui::orientation::horizontal);
+        card.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+        card.style.layout.require_height(bgui::mode::pixel, 88.f);
+        card.style.layout.set_padding(6, 5);
+        card.style.visual.background.normal = bgui::color{0.075f, 0.082f, 0.095f, 1.f};
+        card.style.visual.border.normal = bgui::color{0.2f, 0.22f, 0.25f, 1.f};
+        card.style.visual.border_size = 1.f;
+        card.style.visual.border_radius = 4.f;
+
+        const auto preview_path = editor::ui::project_preview_path(path);
+        std::error_code preview_error;
+        if (std::filesystem::is_regular_file(preview_path, preview_error) && !preview_error) {
+            auto& preview = card.add<bgui::image>(preview_path.string());
+            preview.set_size(120.f, 68.f);
+        } else {
+            auto& placeholder = card.add<bgui::linear>(bgui::orientation::vertical);
+            placeholder.style.layout.require_size(120.f, 68.f);
+            placeholder.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
+            placeholder.style.visual.background.normal = bgui::color{0.035f, 0.04f, 0.05f, 1.f};
+            placeholder.add<bgui::text>("No preview", 0.24f);
+        }
+
+        auto& details = card.add<bgui::linear>(bgui::orientation::vertical);
+        details.style.layout.require_width(bgui::mode::stretch);
+        details.style.layout.require_height(bgui::mode::match_parent);
+        auto& button = details.add<bgui::button>(
             project_label,
             0.34f,
             [&, path]() { choice = {path, false}; window.close(); }
         );
         button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        button.style.layout.set_padding(6, 4);
+        button.style.layout.set_padding(5, 3);
+        details.add<bgui::text>(folder_name.empty() ? path : folder_name, 0.26f);
     }
 
     auto& actions = content.add<bgui::linear>(bgui::orientation::vertical);
@@ -485,6 +513,10 @@ int main(int argc, char** argv) {
     bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(editor_context);
 
     window.loop();
+
+    std::string preview_error;
+    if (!editor::ui::save_project_preview(project_path, camera, preview_error))
+        std::cerr << "[editor] Could not save project preview: " << preview_error << '\n';
 
     return 0;
 }
