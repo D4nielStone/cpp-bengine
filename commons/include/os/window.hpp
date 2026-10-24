@@ -42,6 +42,8 @@ namespace COMMONS_NS {
         void loop();
         void set_close_request_callback(std::function<void()> callback);
         void close();
+        void reopen();
+        void resize(int width, int height);
 
     private:
         static void close_callback(GLFWwindow* window);
@@ -55,4 +57,4 @@ namespace COMMONS_NS {
         time m_time;
         bool m_looping{false};
     };
-} 
+}

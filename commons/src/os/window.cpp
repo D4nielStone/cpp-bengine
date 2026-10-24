@@ -163,6 +163,16 @@ void window::close() {
         glfwSetWindowShouldClose(m_window, GLFW_TRUE);
 }
 
+void window::reopen() {
+    if (m_window)
+        glfwSetWindowShouldClose(m_window, GLFW_FALSE);
+}
+
+void window::resize(const int width, const int height) {
+    if (m_window && width > 0 && height > 0)
+        glfwSetWindowSize(m_window, width, height);
+}
+
 void window::close_callback(GLFWwindow* native_window) {
     auto* instance = static_cast<window*>(
         glfwGetWindowUserPointer(native_window)
@@ -209,4 +219,4 @@ void window::loop() {
 
     refresh_callback = previous_callback;
     m_looping = false;
-} 
+}

@@ -25,7 +25,9 @@
 #include <elem/text.hpp>
 
 #include <chrono>
+#include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -63,23 +65,27 @@ struct project_choice {
     bool create{false};
 };
 
-project_choice show_project_manager() {
-    commons::window manager_window("Bubble Engine - Project Manager", 1100, 680);
+project_choice show_project_manager(
+    commons::window& window,
+    bgui::linear*& manager_root
+) {
     project_choice choice;
     auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
+    manager_root = &root;
     root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
     auto& header = root.add<bgui::linear>(bgui::orientation::vertical);
     header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    header.style.layout.padding = bgui::vec4i{32, 24, 32, 12};
-    header.add<bgui::text>("Bubble Engine", 1.6f);
-    header.add<bgui::text>("Project Manager", 0.8f);
+    header.style.layout.padding = bgui::vec4i{24, 16, 24, 8};
+    header.add<bgui::text>("Bubble Engine", 1.2f);
+    header.add<bgui::text>("Project Manager", 0.65f);
 
     auto& content = root.add<bgui::linear>(bgui::orientation::horizontal);
     content.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
     auto& recent = content.add<bgui::linear>(bgui::orientation::vertical);
-    recent.style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
-    recent.style.layout.padding = bgui::vec4i{32, 18, 24, 24};
-    recent.add<bgui::text>("Recent Projects", 1.0f);
+    recent.style.layout.require_width(bgui::mode::pixel, 360.f);
+    recent.style.layout.require_height(bgui::mode::match_parent);
+    recent.style.layout.padding = bgui::vec4i{20, 12, 14, 16};
+    recent.add<bgui::text>("Recent Projects", 0.8f);
 
     std::vector<std::string> recent_projects;
     std::ifstream recent_file("editor-recent-projects.cfg");
@@ -88,38 +94,122 @@ project_choice show_project_manager() {
             recent_projects.push_back(line);
     }
     if (recent_projects.empty())
-        recent.add<bgui::text>("No recent projects", 0.65f);
+        recent.add<bgui::text>("No recent projects", 0.55f);
     for (const auto& path : recent_projects) {
         auto& button = recent.add<bgui::button>(
             std::filesystem::path(path).stem().string() + "  —  " + path,
-            0.7f,
-            [&, path]() { choice = {path, false}; manager_window.close(); }
+            0.55f,
+            [&, path]() { choice = {path, false}; window.close(); }
         );
         button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        button.style.layout.set_padding(8, 5);
     }
 
     auto& actions = content.add<bgui::linear>(bgui::orientation::vertical);
-    actions.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-    actions.style.layout.padding = bgui::vec4i{24, 18, 32, 24};
-    actions.add<bgui::text>("Open or Create", 1.0f);
-    actions.add<bgui::text>("Project file path", 0.65f);
-    auto& path_input = actions.add<bgui::inputbox>("project.bengine", "Path to .bengine project", 0.75f);
-    path_input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    auto& open_button = actions.add<bgui::button>("Open Project", 0.75f, [&]() {
+    actions.style.layout.require_width(bgui::mode::stretch);
+    actions.style.layout.require_height(bgui::mode::match_parent);
+    actions.style.layout.padding = bgui::vec4i{20, 14, 20, 16};
+    actions.style.visual.background.normal = bgui::color{0.075f, 0.082f, 0.095f, 1.f};
+    actions.style.visual.border.normal = bgui::color{0.19f, 0.21f, 0.24f, 1.f};
+    actions.style.visual.border_size = 1.f;
+    actions.style.visual.border_radius = 5.f;
+    actions.add<bgui::text>("Open or Create", 0.8f);
+    actions.add<bgui::text>("Project file path", 0.55f);
+    auto& path_row = actions.add<bgui::linear>(bgui::orientation::horizontal);
+    path_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    auto& path_input = path_row.add<bgui::inputbox>("project.bengine", "Path to project file", 0.58f);
+    path_input.style.layout.require_width(bgui::mode::stretch);
+    path_input.style.layout.require_height(bgui::mode::wrap_content);
+
+    auto& browser = actions.add<bgui::linear>(bgui::orientation::vertical);
+    browser.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+    browser.style.layout.require_height(bgui::mode::pixel, 230.f);
+    browser.style.layout.set_padding(6, 5);
+    browser.style.visual.background.normal = bgui::color{0.045f, 0.05f, 0.06f, 1.f};
+    browser.style.visual.border.normal = bgui::color{0.16f, 0.18f, 0.21f, 1.f};
+    browser.style.visual.border_size = 1.f;
+    browser.style.visual.border_radius = 4.f;
+    browser.set_scrollable(true);
+    browser.set_enable(false);
+    std::filesystem::path browser_directory;
+    std::function<void(const std::filesystem::path&)> refresh_browser;
+    refresh_browser = [&](const std::filesystem::path& requested) {
+        std::error_code error;
+        auto directory = std::filesystem::absolute(requested, error).lexically_normal();
+        if (error || !std::filesystem::is_directory(directory, error) || error)
+            return;
+        browser_directory = directory;
+        for (auto& [layer, elements] : browser.get_elements()) {
+            (void)layer;
+            while (!elements.empty())
+                browser.remove(elements.back().get());
+        }
+        auto& location = browser.add<bgui::text>(directory.string(), 0.48f);
+        location.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        if (directory.has_parent_path() && directory.parent_path() != directory) {
+            auto& parent = browser.add<bgui::button>("..  Parent folder", 0.48f, [&]() {
+                refresh_browser(browser_directory.parent_path());
+            });
+            parent.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        }
+        std::vector<std::filesystem::path> directories;
+        std::vector<std::filesystem::path> project_files;
+        for (std::filesystem::directory_iterator it(directory, error), end;
+             !error && it != end; it.increment(error)) {
+            std::error_code entry_error;
+            if (it->is_directory(entry_error) && !entry_error) {
+                directories.push_back(it->path());
+            } else if (!entry_error && it->is_regular_file(entry_error) && !entry_error) {
+                const auto extension = it->path().extension().string();
+                if (extension == ".bengine" || extension == ".world" || extension == ".scene")
+                    project_files.push_back(it->path());
+            }
+        }
+        const auto by_name = [](const auto& left, const auto& right) {
+            return left.filename().string() < right.filename().string();
+        };
+        std::sort(directories.begin(), directories.end(), by_name);
+        std::sort(project_files.begin(), project_files.end(), by_name);
+        for (const auto& entry : directories) {
+            auto& item = browser.add<bgui::button>("[Folder] " + entry.filename().string(), 0.48f, [&, entry]() {
+                refresh_browser(entry);
+            });
+            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        }
+        for (const auto& entry : project_files) {
+            auto& item = browser.add<bgui::button>("[Project] " + entry.filename().string(), 0.48f, [&, entry]() {
+                path_input.set_buffer(entry.string());
+            });
+            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        }
+    };
+    auto& browse_button = path_row.add<bgui::button>("Browse...", 0.58f, [&]() {
+        const auto current = path_input.get_buffer().empty()
+            ? std::filesystem::current_path()
+            : std::filesystem::path(path_input.get_buffer()).parent_path();
+        refresh_browser(current.empty() ? std::filesystem::current_path() : current);
+        browser.set_enable(true);
+    });
+    browse_button.style.layout.require_width(bgui::mode::pixel, 104.f);
+    browse_button.style.layout.require_height(bgui::mode::wrap_content);
+    auto& open_button = actions.add<bgui::button>("Open Project", 0.58f, [&]() {
         choice = {path_input.get_buffer(), false};
-        manager_window.close();
+        window.close();
     });
     open_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    auto& create_button = actions.add<bgui::button>("Create Project", 0.75f, [&]() {
+    open_button.style.layout.set_padding(8, 5);
+    auto& create_button = actions.add<bgui::button>("Create Project", 0.58f, [&]() {
         choice = {path_input.get_buffer(), true};
-        manager_window.close();
+        window.close();
     });
     create_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    auto& status = actions.add<bgui::text>("", 0.65f);
-    (void)status;
+    create_button.style.layout.set_padding(8, 5);
 
-    manager_window.add<commons::ui_system>();
-    manager_window.loop();
+    window.loop();
+    window.reopen();
+    bgui::get_layout().remove(manager_root);
+    manager_root = nullptr;
+    window.resize(1200, 600);
     return choice;
 }
 
@@ -135,8 +225,12 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    commons::window window("Bubble Engine - Editor", argc == 1 ? 980 : 1200, 600);
+    window.add<commons::ui_system>();
+
     if (argc == 1) {
-        const auto choice = show_project_manager();
+        bgui::linear* manager_root = nullptr;
+        const auto choice = show_project_manager(window, manager_root);
         if (choice.path.empty())
             return 0;
         project_path = choice.path;
@@ -157,7 +251,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    commons::window window("Bubble Engine - Editor");
     auto registry = window.get_ecs();
 
     auto camera_entity = registry->create();
@@ -376,7 +469,6 @@ int main(int argc, char** argv) {
     (void)files_panel;
     (void)runtime_tools_panel;
 
-    window.add<commons::ui_system>();
     bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(editor_context);
 
     window.loop();
