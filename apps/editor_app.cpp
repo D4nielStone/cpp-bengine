@@ -7,17 +7,17 @@
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
 
-#include "editor/editor_ui.hpp"
-#include "editor/editor_context.hpp"
-#include "editor/project_persistence_system.hpp"
-#include "editor/files_view.hpp"
-#include "editor/scene_view.hpp"
-#include "editor/runtime_tools_view.hpp"
-#include "editor/entities_view.hpp"
-#include "editor/components_view.hpp"
-#include "editor/ui_persistence_system.hpp"
-#include "editor/runtime_process.hpp"
-#include "editor/undo_redo_shortcuts_system.hpp"
+#include "editor/panels/editor_ui.hpp"
+#include "editor/core/editor_context.hpp"
+#include "editor/systems/project_persistence_system.hpp"
+#include "editor/panels/files_view.hpp"
+#include "editor/panels/scene_view.hpp"
+#include "editor/panels/runtime_tools_view.hpp"
+#include "editor/panels/entities_view.hpp"
+#include "editor/panels/components_view.hpp"
+#include "editor/systems/ui_persistence_system.hpp"
+#include "editor/systems/runtime_process.hpp"
+#include "editor/systems/undo_redo_shortcuts_system.hpp"
 
 #include <lay/linear.hpp>
 
@@ -25,6 +25,35 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+
+namespace {
+
+std::filesystem::path locate_build_directory(
+    const std::filesystem::path& executable
+) {
+    std::error_code error;
+    auto directory = std::filesystem::absolute(executable, error).parent_path();
+    if (error)
+        return {};
+
+    while (!directory.empty()) {
+        if (std::filesystem::is_regular_file(
+                directory / "CMakeCache.txt",
+                error
+            ))
+            return directory;
+        if (error)
+            return {};
+
+        const auto parent = directory.parent_path();
+        if (parent == directory)
+            break;
+        directory = parent;
+    }
+    return {};
+}
+
+}
 
 int main(int argc, char** argv) {
     std::string project_path = "project.bengine";
@@ -88,7 +117,8 @@ int main(int argc, char** argv) {
         ui_persistence,
         project_persistence,
         registry,
-        project_path
+        project_path,
+        locate_build_directory(argv[0])
     );
     editor.set_history_callbacks(
         [editor_context]() { editor_context->undo(); },
@@ -119,6 +149,9 @@ int main(int argc, char** argv) {
             const std::filesystem::path& asset,
             const bgui::vec2i& mouse_position
         ) {
+            if (!scene.is_open())
+                return;
+
             const auto viewport = scene.image().processed_rect();
             if (mouse_position.x < viewport.x ||
                 mouse_position.x > viewport.x + viewport.z ||

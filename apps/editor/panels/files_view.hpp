@@ -48,7 +48,7 @@ public:
 
         auto& window = parent.add_window(
             "Arquivos",
-            bgui::dock_area::left,
+            bgui::dock_area::bottom,
             0.3f
         );
         m_root = &window.add<bgui::linear>(bgui::orientation::horizontal);

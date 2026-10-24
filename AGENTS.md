@@ -38,7 +38,7 @@ scripts Lua, integração com a BGUI e um exemplo FPP.
 | P0-d | P0 | `entities` e `mascaras` podem dessincronizar (`remove<T>()` deixa máscara vazia em `mascaras`) |
 | P0-e | P0 | `create()` checa colisão de ID só em `entities`, sem estrutura central de entidades vivas |
 | P0-f | P0 | `add<T>()` usa `shared_from_this()`: `std::bad_weak_ptr` se o ECS não estiver em `shared_ptr` |
-| P1-a | P1 | README exige C++23, mas `commons` configura C++20 (`cxx_std_20`) |
+| P1-a | P1 | README foi atualizado para refletir a exigência real do projeto: C++20, alinhado com `commons` e com o CMake (`cxx_std_20`). |
 | P1-b | P1 | CI passa `-DBUILD_RUNTIME=ON`, que o CMake raiz não usa |
 | P1-c | P1 | `tests/CMakeLists.txt` usa `GTest::gtest_main` sem declarar a origem |
 | P1-d | P1 | `COMMONS_ASSET_DIR` é caminho absoluto do código-fonte (não portável) |

@@ -12,7 +12,16 @@ file(GLOB COMMONS_SOURCES
 
 add_library(commons STATIC ${COMMONS_SOURCES})
 
-set(COMMONS_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+option(
+    COMMONS_USE_RELATIVE_ASSET_PATHS
+    "Resolve bundled assets relative to the runtime working directory"
+    OFF
+)
+if(COMMONS_USE_RELATIVE_ASSET_PATHS)
+    set(COMMONS_ASSET_DIR "assets")
+else()
+    set(COMMONS_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+endif()
 target_compile_definitions(commons
     PUBLIC
         COMMONS_ASSET_DIR="${COMMONS_ASSET_DIR}"

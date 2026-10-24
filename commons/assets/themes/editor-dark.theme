@@ -1,2 +1,6 @@
 [base]
 visual.border.size = 1
+
+[class.window-controls]
+layout.align = start, center
+layout.padding = 0

@@ -17,6 +17,11 @@ target_link_libraries(commons_tests
         commons
 )
 
+target_compile_definitions(commons_tests
+    PRIVATE
+        BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 target_include_directories(commons_tests
     PRIVATE
         ${CMAKE_SOURCE_DIR}/commons/include
@@ -31,7 +36,7 @@ gtest_discover_tests(commons_tests)
 add_executable(
     editor_persistence_tests
     editor_persistence_tests.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/project_persistence_system.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
 
 target_link_libraries(editor_persistence_tests
@@ -43,6 +48,10 @@ target_link_libraries(editor_persistence_tests
 target_include_directories(editor_persistence_tests
     PRIVATE
         ${CMAKE_SOURCE_DIR}/apps/editor
+        ${CMAKE_SOURCE_DIR}/apps/editor/core
+        ${CMAKE_SOURCE_DIR}/apps/editor/panels
+        ${CMAKE_SOURCE_DIR}/apps/editor/systems
+        ${CMAKE_SOURCE_DIR}/apps/editor/tools
 )
 
 target_compile_features(editor_persistence_tests PRIVATE cxx_std_20)

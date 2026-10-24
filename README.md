@@ -50,7 +50,7 @@ The following dependencies must be installed:
 
 - CMake 3.20 or higher
 
-- A compiler with C++23 support
+- A compiler with C++20 support
 
 - Lua 5.3
 
@@ -75,13 +75,57 @@ git submodule update --init --recursive
 
 # Building
 
-From the project root, run:
+From the project root, build both executables on Linux:
 ```
-cmake -S . -B out
-cmake --build out
+./scripts/build.sh
 ```
 
-The runtime and editor applications will be generated in the out/apps directory.
+On Windows, run the PowerShell build helper:
+```powershell
+.\scripts\build.ps1
+```
+
+Both helpers configure and build the editor and runtime in `build/` by default.
+Pass a build directory to use another location. Add `--test` on Linux or
+`-RunTests` on Windows to also build and run the test suite.
+
+Once the editor is open, select **Build > Build Runtime** to open the platform
+build modal. Choose **Linux x64** or **Windows x64**; the first use downloads
+the Zig cross-compiler when needed and prepares target libraries through
+vcpkg. The modal displays download/build progress and the result. Detailed
+output is saved as `editor-build-linux.log` or `editor-build-windows.log` in
+the selected build directory. Enter a path directly or use **Browse** to pick
+an existing folder; artifacts are placed under
+`<directory>/platform-builds/<target>/apps`. Stop Play mode before building.
+
+Linux builds use the host's Linux toolchain and require CMake, a C++ compiler,
+pkg-config, and the OpenGL/GLFW/X11 development packages used by the engine.
+Building from Windows uses the default WSL2 distribution for both targets;
+install a WSL2 distribution first. On Ubuntu/WSL2, install Linux target
+requirements with:
+```sh
+sudo apt-get update
+sudo apt-get install -y cmake build-essential pkg-config libgl1-mesa-dev \
+  libglfw3-dev xorg-dev libxinerama-dev libxcursor-dev libxrandr-dev libxi-dev \
+  libglu1-mesa-dev libassimp-dev libbullet-dev libfreetype6-dev \
+  liblua5.3-dev libpng-dev
+```
+
+The platform build downloads pinned Zig and PowerShell host tools as needed,
+plus a pinned vcpkg release into the user cache to prepare target dependencies.
+Windows cross-builds on Linux also download the MinGW-w64 resource compiler
+with `apt-get download` (no root access); Debian/Ubuntu-based hosts need
+`apt-get` and `dpkg-deb`. On other Linux distributions, install the
+`x86_64-w64-mingw32-windres` tool from the distribution's MinGW-w64 binutils
+package and ensure it is on `PATH`. Set `VCPKG_ROOT` to an existing vcpkg
+checkout to reuse it instead.
+
+The GitHub Actions workflow builds and tests natively on Linux and Windows and
+publishes the editor and runtime executables as per-platform workflow
+artifacts. Platform builds from the editor generate the runtime under
+`build/platform-builds/<target>/apps` (or the selected build directory's
+corresponding folder). Run the executable with that `apps` folder as the
+working directory so its bundled assets resolve correctly.
 
 Run either application with:
 

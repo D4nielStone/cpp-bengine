@@ -1,12 +1,14 @@
 #pragma once
 
 #include "panel.hpp"
+#include "build_process.hpp"
 #include "project_persistence_system.hpp"
 #include "ui_persistence_system.hpp"
 
 #include <bgui.hpp>
 #include <lay/dock.hpp>
 
+#include <filesystem>
 #include <functional>
 #include <array>
 #include <memory>
@@ -18,6 +20,7 @@ class linear;
 class modal;
 class inputbox;
 class text;
+class progress_bar;
 }
 
 namespace editor::ui {
@@ -30,7 +33,8 @@ public:
         ui_persistence_system& ui_persistence,
         project_persistence_system& project_persistence,
         std::shared_ptr<commons::ecs> registry,
-        std::string project_path = "project.bengine"
+        std::string project_path,
+        std::filesystem::path build_directory
     );
 
     void set_project_loaded_callback(
@@ -78,6 +82,15 @@ private:
     bgui::icon* m_play_icon{nullptr};
     bgui::button* m_pause_button{nullptr};
     bgui::icon* m_pause_icon{nullptr};
+    bgui::text* m_build_status{nullptr};
+    bgui::progress_bar* m_build_progress{nullptr};
+    bgui::modal* m_build_modal{nullptr};
+    bgui::modal* m_build_directory_modal{nullptr};
+    bgui::inputbox* m_build_directory_input{nullptr};
+    bgui::inputbox* m_build_directory_picker_input{nullptr};
+    bgui::linear* m_build_directory_picker_list{nullptr};
+    bgui::text* m_build_directory_picker_status{nullptr};
+    bgui::button* m_build_directory_browse_button{nullptr};
     bgui::modal* m_project_modal{nullptr};
     bgui::modal* m_exit_modal{nullptr};
     bgui::modal* m_global_lighting_modal{nullptr};
@@ -92,6 +105,10 @@ private:
     bgui::text* m_project_picker_status{nullptr};
     bool m_is_playing{false};
     bool m_is_paused{false};
+    bool m_build_running{false};
+    std::filesystem::path m_build_directory;
+    std::filesystem::path m_repository_root;
+    std::unique_ptr<build_process> m_build_process;
     std::function<void()> m_exit_callback;
     std::vector<std::unique_ptr<panel>> m_panels;
 
@@ -106,6 +123,12 @@ private:
     void create_global_physics_modal();
     void refresh_project_picker(const std::string& directory);
     bool load_project_selection();
+    void open_build_modal();
+    void start_platform_build(build_target target);
+    void update_build_process();
+    void create_build_modal();
+    void create_build_directory_modal();
+    void refresh_build_directory_picker(const std::string& directory);
 };
 
 }

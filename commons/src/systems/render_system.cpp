@@ -91,6 +91,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             shader.setVec3("dirLight.ambient", direction_light.ambient);
             shader.setVec3("dirLight.color", direction_light.color);
             shader.setFloat("dirLight.intensity", direction_light.intensity);
+            shader.setInt("pointLightCount", static_cast<int>(point_lights.size()));
 
             for (size_t index = 0; index < point_lights.size(); ++index) {
                 const auto prefix = "pointLights[" + std::to_string(index) + "].";

@@ -11,6 +11,8 @@
 
 namespace editor::ui {
 
+struct scene_view_state;
+
 class scene_view final : public panel {
 public:
     scene_view(
@@ -23,6 +25,7 @@ public:
     void update() override;
 
     bgui::image& image();
+    bool is_open() const noexcept;
     std::shared_ptr<viewport_input_state> input_state() const noexcept;
 
 private:
@@ -30,7 +33,7 @@ private:
     std::shared_ptr<commons::camera> m_camera;
     std::shared_ptr<editor_context> m_context;
     std::shared_ptr<viewport_input_state> m_input_state;
-    bgui::image* m_image = nullptr;
+    std::shared_ptr<scene_view_state> m_state;
 };
 
 }

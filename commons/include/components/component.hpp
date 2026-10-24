@@ -1,6 +1,8 @@
 #pragma once
 #include <unordered_map>
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <type_traits>
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>

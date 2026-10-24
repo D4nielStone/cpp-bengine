@@ -7,7 +7,11 @@ on:
     branches: [ "main" ]
 jobs:
   build_and_test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout code
@@ -15,8 +19,9 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set up CMake
+    - name: Set up CMake (Linux)
       uses: jwlawson/actions-setup-cmake@v1
+      if: runner.os == 'Linux'
 
     - name: Install dependencies (Linux)
       run: |
@@ -26,8 +31,35 @@ jobs:
           liblua5.3-0 liblua5.3-dev libglm-dev libglfw3-dev \
           libassimp-dev libfreeimage-dev rapidjson-dev \
           libbullet-dev libfreetype6-dev
-    - name: Build All Projects ( Linux )
-      run: cmake -S . -B out -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON && cmake --build out
+      if: runner.os == 'Linux'
 
-    - name: Run Tests
-      run: ctest --test-dir out --output-on-failure
+    - name: Install dependencies (Windows)
+      shell: pwsh
+      run: |
+        & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install `
+          assimp:x64-windows bullet3:x64-windows freetype:x64-windows `
+          glfw3:x64-windows glm:x64-windows lua:x64-windows
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      if: runner.os == 'Windows'
+
+    - name: Build and test (Linux)
+      run: bash scripts/build.sh out --test
+      if: runner.os == 'Linux'
+
+    - name: Build and test (Windows)
+      shell: pwsh
+      run: |
+        $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+        ./scripts/build.ps1 -BuildDirectory out -RunTests
+      if: runner.os == 'Windows'
+
+    - name: Upload executables
+      uses: actions/upload-artifact@v4
+      with:
+        name: bubble-engine-${{ matrix.os }}
+        path: |
+          out/apps/editor_app
+          out/apps/runtime_app
+          out/apps/Release/editor_app.exe
+          out/apps/Release/runtime_app.exe
+        if-no-files-found: error

@@ -7,6 +7,7 @@
 #include <elem/inputbox.hpp>
 #include <elem/menu_bar.hpp>
 #include <elem/modal.hpp>
+#include <elem/progress_bar.hpp>
 #include <elem/text.hpp>
 #include <elem/vector_field.hpp>
 #include <lay/linear.hpp>
@@ -153,12 +154,16 @@ editor_ui::editor_ui(
     ui_persistence_system& ui_persistence,
     project_persistence_system& project_persistence,
     std::shared_ptr<commons::ecs> registry,
-    std::string project_path
+    std::string project_path,
+    std::filesystem::path build_directory
 )
     : m_dock(dock),
       m_project_persistence(project_persistence),
       m_registry(std::move(registry)),
-      m_project_path(std::move(project_path)) {
+      m_project_path(std::move(project_path)),
+      m_build_directory(std::move(build_directory)),
+      m_repository_root(m_build_directory.parent_path()),
+      m_build_process(std::make_unique<build_process>()) {
     create_project_modal(m_project_path, "");
 
     menu_bar.add_menu(
@@ -214,6 +219,16 @@ editor_ui::editor_ui(
                 const bool success = ui_persistence_ptr->load(ui_configuration_path, error);
                 report_result("Loading UI", success, error);
             });
+        }
+    );
+    menu_bar.add_menu(
+        "Build",
+        0.3f,
+        [this](bgui::context_menu& menu) {
+            menu.add_button(
+                "Build Runtime",
+                    [this]() { open_build_modal(); }
+            );
         }
     );
     menu_bar.add_menu(
@@ -337,6 +352,7 @@ editor_ui::editor_ui(
     apply_pause_visual(*m_pause_button, *m_pause_icon, false);
 
     static_cast<runtime_play_button*>(m_play_button)->on_frame = [this]() {
+        update_build_process();
         if (!m_is_playing || !m_runtime_running_callback)
             return;
 
@@ -356,7 +372,480 @@ editor_ui::editor_ui(
         apply_play_visual(*m_play_button, *m_play_icon, false);
         apply_pause_visual(*m_pause_button, *m_pause_icon, false);
     };
+
     add_flexible_spacer(menu_bar);
+}
+
+void editor_ui::create_build_modal() {
+    if (m_build_modal) {
+        m_build_modal->set_enable(true);
+        return;
+    }
+
+    m_build_modal = &bgui::get_layout().add<
+        bgui::modal,
+        bgui::layer::overlay
+    >();
+    m_build_modal->content().add<bgui::text>(
+        "Choose Linux or Windows x64. Downloads the Zig compiler on first use "
+        "and prepares target libraries with vcpkg. Windows hosts require WSL2.",
+        0.3f
+    );
+    m_build_modal->content().add<bgui::text>(
+        "Build output directory",
+        0.3f
+    );
+    m_build_directory_input = &m_build_modal->content().add<bgui::inputbox>(
+        m_build_directory.string(),
+        "Choose a build directory...",
+        0.28f
+    );
+    auto& directory_actions = m_build_modal->content().add<bgui::linear>(
+        bgui::orientation::horizontal
+    );
+    directory_actions.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::wrap_content
+    );
+    m_build_directory_browse_button = &directory_actions.add<bgui::button>(
+        "Browse",
+        0.28f,
+        [this]() { create_build_directory_modal(); }
+    );
+    m_build_modal->content().add<bgui::text>(
+        "Artifacts are written under <directory>/platform-builds/<target>/apps.",
+        0.25f
+    );
+    const auto add_target = [this](const char* icon_name,
+                                   const char* label,
+                                   const char* requirements,
+                                   const build_target target) {
+        auto& row = m_build_modal->content().add<bgui::linear>(
+            bgui::orientation::horizontal
+        );
+        row.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
+        );
+        auto& icon = row.add<bgui::icon>(icon_name, 0.3f);
+        icon.style.layout.require_mode(
+            bgui::mode::pixel,
+            bgui::mode::pixel
+        );
+        icon.style.layout.require_width(bgui::mode::pixel, 28.f);
+        icon.style.layout.require_height(bgui::mode::pixel, 28.f);
+        row.add<bgui::text>(label, 0.3f);
+        row.add<bgui::button>(
+            target == build_target::windows
+                ? "Download Windows Toolchain & Build"
+                : "Download Linux Toolchain & Build",
+            0.28f,
+            [this, target]() { start_platform_build(target); }
+        );
+        m_build_modal->content().add<bgui::text>(requirements, 0.25f);
+    };
+    add_target(
+        "linux",
+        "Linux x64",
+        "Requires Linux OpenGL/GLFW/X11 development packages; Windows hosts use WSL2.",
+        build_target::linux
+    );
+    add_target(
+        "windows",
+        "Windows x64 (Zig/MinGW)",
+        "Downloads Zig, PowerShell, and MinGW windres; vcpkg prepares libraries. Linux hosts need apt-get/dpkg-deb.",
+        build_target::windows
+    );
+    m_build_status = &m_build_modal->content().add<bgui::text>(
+        "No build started.",
+        0.28f
+    );
+    m_build_progress = &m_build_modal->content().add<bgui::progress_bar>(
+        0.f,
+        100.f,
+        0.f
+    );
+    m_build_progress->style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::pixel
+    );
+    m_build_progress->style.layout.require_height(bgui::mode::pixel, 12.f);
+    m_build_modal->set_confirmation_text("Close");
+    m_build_modal->set_on_confirm([this]() {
+        m_build_modal = nullptr;
+        m_build_status = nullptr;
+        m_build_progress = nullptr;
+        m_build_directory_input = nullptr;
+        m_build_directory_browse_button = nullptr;
+    });
+    if (m_build_running) {
+        m_build_directory_input->set_enable(false);
+        m_build_directory_browse_button->set_enable(false);
+    }
+}
+
+void editor_ui::open_build_modal() {
+    create_build_modal();
+}
+
+void editor_ui::start_platform_build(const build_target target) {
+    create_build_modal();
+    if (m_build_running) {
+        if (m_build_status)
+            m_build_status->set_buffer("A platform build is already running.");
+        return;
+    }
+    if (m_is_playing) {
+        if (m_build_status)
+            m_build_status->set_buffer("Stop Play mode before building.");
+        return;
+    }
+
+    std::string error;
+    if (!m_build_directory_input ||
+        m_build_directory_input->get_buffer().empty()) {
+        error = "Choose a build output directory.";
+    } else {
+        std::error_code path_error;
+        auto selected_directory = std::filesystem::absolute(
+            m_build_directory_input->get_buffer(),
+            path_error
+        ).lexically_normal();
+        if (path_error) {
+            error = "Could not resolve build directory: " +
+                path_error.message();
+        } else {
+            const bool path_exists = std::filesystem::exists(
+                selected_directory,
+                path_error
+            );
+            if (path_error) {
+                error = "Could not inspect build directory: " +
+                    path_error.message();
+            } else if (path_exists &&
+                       !std::filesystem::is_directory(
+                           selected_directory,
+                           path_error
+                       ) &&
+                       !path_error) {
+                error = "The selected build path is not a directory.";
+            } else if (path_error) {
+                error = "Could not inspect build directory: " +
+                    path_error.message();
+            } else {
+                m_build_directory = selected_directory;
+                m_build_directory_input->set_buffer(
+                    m_build_directory.string()
+                );
+            }
+        }
+    }
+    if (error.empty() &&
+        (m_build_directory.empty() || m_repository_root.empty())) {
+        error = "Could not locate the source or build directory.";
+    }
+    if (!error.empty() ||
+        !m_build_process->start(
+            m_repository_root,
+            m_build_directory,
+            target,
+            error
+        )) {
+        if (error.empty())
+            error = "Could not locate the source or build directory.";
+        if (m_build_status)
+            m_build_status->set_buffer("Build could not start: " + error);
+        report_result("Building platform target", false, error);
+        return;
+    }
+
+    m_build_running = true;
+    m_build_directory_input->set_enable(false);
+    m_build_directory_browse_button->set_enable(false);
+    if (m_build_status)
+        m_build_status->set_buffer(
+            std::string("Preparing ") +
+            (target == build_target::windows ? "Windows" : "Linux") +
+            " x64 toolchain..."
+        );
+    if (m_build_progress)
+        m_build_progress->set_value(0.f);
+    std::clog << "[editor] Platform build started; output: "
+              << m_build_process->log_path().string() << '\n';
+}
+
+void editor_ui::create_build_directory_modal() {
+    if (m_build_directory_modal) {
+        m_build_directory_modal->set_enable(true);
+        if (m_build_directory_picker_input && m_build_directory_input) {
+            m_build_directory_picker_input->set_buffer(
+                m_build_directory_input->get_buffer()
+            );
+            refresh_build_directory_picker(
+                m_build_directory_picker_input->get_buffer()
+            );
+        }
+        return;
+    }
+
+    const auto initial_directory = m_build_directory_input
+        ? m_build_directory_input->get_buffer()
+        : m_build_directory.string();
+    m_build_directory_modal = &bgui::get_layout().add<
+        bgui::modal,
+        bgui::layer::overlay
+    >();
+    m_build_directory_modal->content().add<bgui::text>(
+        "Choose an existing folder for platform build output.",
+        0.3f
+    );
+    m_build_directory_picker_input =
+        &m_build_directory_modal->content().add<bgui::inputbox>(
+            initial_directory,
+            "Build directory...",
+            0.28f
+        );
+    auto& path_actions = m_build_directory_modal->content().add<bgui::linear>(
+        bgui::orientation::horizontal
+    );
+    path_actions.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::wrap_content
+    );
+    path_actions.add<bgui::button>(
+        "Browse",
+        0.28f,
+        [this]() {
+            if (m_build_directory_picker_input)
+                refresh_build_directory_picker(
+                    m_build_directory_picker_input->get_buffer()
+                );
+        }
+    );
+    path_actions.add<bgui::button>(
+        "Parent folder",
+        0.28f,
+        [this]() {
+            if (!m_build_directory_picker_input)
+                return;
+            const auto parent = std::filesystem::path(
+                m_build_directory_picker_input->get_buffer()
+            ).parent_path();
+            if (!parent.empty())
+                refresh_build_directory_picker(parent.string());
+        }
+    );
+    path_actions.add<bgui::button>(
+        "Cancel",
+        0.28f,
+        [this]() {
+            if (m_build_directory_modal)
+                m_build_directory_modal->set_enable(false);
+        }
+    );
+    m_build_directory_picker_status =
+        &m_build_directory_modal->content().add<bgui::text>(
+            "Select a folder or enter its path.",
+            0.28f
+        );
+    m_build_directory_picker_list =
+        &m_build_directory_modal->content().add<bgui::linear>(
+            bgui::orientation::vertical
+        );
+    m_build_directory_picker_list->style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::pixel
+    );
+    m_build_directory_picker_list->style.layout.require_height(
+        bgui::mode::pixel,
+        220.f
+    );
+    m_build_directory_picker_list->set_scrollable(true);
+    m_build_directory_modal->set_confirmation_text("Use folder");
+    m_build_directory_modal->set_on_confirm([this]() {
+        const auto selected_path = m_build_directory_picker_input
+            ? m_build_directory_picker_input->get_buffer()
+            : std::string{};
+        std::error_code error;
+        auto path = std::filesystem::absolute(selected_path, error)
+            .lexically_normal();
+        if (error) {
+            if (m_build_status)
+                m_build_status->set_buffer(
+                    "Could not resolve build directory: " + error.message()
+                );
+        } else if (!std::filesystem::is_directory(path, error) || error) {
+            if (m_build_status) {
+                m_build_status->set_buffer(
+                    error
+                        ? "Could not inspect build directory: " +
+                            error.message()
+                        : "The selected build path is not a directory."
+                );
+            }
+        } else {
+            m_build_directory = path;
+            if (m_build_directory_input)
+                m_build_directory_input->set_buffer(path.string());
+            if (m_build_status)
+                m_build_status->set_buffer(
+                    "Build directory selected: " + path.string()
+                );
+        }
+        m_build_directory_modal = nullptr;
+        m_build_directory_picker_input = nullptr;
+        m_build_directory_picker_list = nullptr;
+        m_build_directory_picker_status = nullptr;
+    });
+    refresh_build_directory_picker(initial_directory);
+}
+
+void editor_ui::refresh_build_directory_picker(
+    const std::string& directory
+) {
+    if (!m_build_directory_picker_input ||
+        !m_build_directory_picker_list ||
+        !m_build_directory_picker_status) {
+        return;
+    }
+
+    std::error_code error;
+    auto path = std::filesystem::path(directory);
+    if (path.empty())
+        path = std::filesystem::current_path(error);
+    if (!error)
+        path = std::filesystem::absolute(path, error).lexically_normal();
+    if (error) {
+        m_build_directory_picker_status->set_buffer(
+            "Could not resolve directory: " + error.message()
+        );
+        return;
+    }
+    if (!std::filesystem::is_directory(path, error) || error) {
+        m_build_directory_picker_status->set_buffer(
+            error
+                ? "Could not inspect directory: " + error.message()
+                : "The selected path is not a directory."
+        );
+        return;
+    }
+
+    m_build_directory_picker_input->set_buffer(path.string());
+    m_build_directory_picker_status->set_buffer(
+        "Select this folder or navigate into a subfolder."
+    );
+    for (auto& [layer, elements] :
+         m_build_directory_picker_list->get_elements()) {
+        (void)layer;
+        while (!elements.empty())
+            m_build_directory_picker_list->remove(elements.back().get());
+    }
+
+    std::vector<std::filesystem::path> directories;
+    std::filesystem::directory_iterator iterator(path, error);
+    if (error) {
+        m_build_directory_picker_status->set_buffer(
+            "Could not list directory: " + error.message()
+        );
+        return;
+    }
+    const std::filesystem::directory_iterator end;
+    for (; iterator != end; iterator.increment(error)) {
+        if (error) {
+            m_build_directory_picker_status->set_buffer(
+                "Could not finish listing directory: " + error.message()
+            );
+            return;
+        }
+        std::error_code entry_error;
+        if (iterator->is_directory(entry_error) && !entry_error)
+            directories.push_back(iterator->path());
+    }
+    if (error) {
+        m_build_directory_picker_status->set_buffer(
+            "Could not finish listing directory: " + error.message()
+        );
+        return;
+    }
+
+    std::sort(
+        directories.begin(),
+        directories.end(),
+        [](const auto& left, const auto& right) {
+            return left.filename().string() < right.filename().string();
+        }
+    );
+    for (const auto& entry : directories) {
+        auto& item = m_build_directory_picker_list->add<bgui::button>(
+            "[Folder] " + entry.filename().string(),
+            0.28f,
+            [this, entry]() {
+                refresh_build_directory_picker(entry.string());
+            }
+        );
+        item.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::wrap_content
+        );
+    }
+    if (directories.empty())
+        m_build_directory_picker_status->set_buffer(
+            "This folder has no accessible subdirectories."
+        );
+}
+
+void editor_ui::update_build_process() {
+    if (!m_build_running)
+        return;
+
+    std::string error;
+    if (m_build_process->running(error)) {
+        if (!error.empty()) {
+            m_build_running = false;
+            if (m_build_directory_input)
+                m_build_directory_input->set_enable(true);
+            if (m_build_directory_browse_button)
+                m_build_directory_browse_button->set_enable(true);
+            if (m_build_status)
+                m_build_status->set_buffer("Build status unavailable: " + error);
+            report_result("Checking build", false, error);
+        }
+        std::string status;
+        const float progress = m_build_process->progress(status);
+        if (m_build_status && !status.empty())
+            m_build_status->set_buffer(status);
+        if (m_build_progress)
+            m_build_progress->set_value(progress);
+        return;
+    }
+
+    m_build_running = false;
+    if (m_build_directory_input)
+        m_build_directory_input->set_enable(true);
+    if (m_build_directory_browse_button)
+        m_build_directory_browse_button->set_enable(true);
+    const bool succeeded = m_build_process->exit_code() == 0;
+    std::string final_status;
+    const float final_progress = m_build_process->progress(final_status);
+    if (succeeded && m_build_progress)
+        m_build_progress->set_value(final_progress);
+    if (m_build_status)
+        m_build_status->set_buffer(
+            succeeded
+                ? final_status
+                : "Build failed (exit code " +
+                    std::to_string(m_build_process->exit_code()) +
+                    "). Output: " + m_build_process->log_path().string()
+        );
+    report_result(
+        "Building platform target",
+        succeeded,
+        succeeded
+            ? std::string{}
+            : "Platform build process exited with code " +
+                std::to_string(m_build_process->exit_code()) +
+                ". Build output: " + m_build_process->log_path().string()
+    );
 }
 
 void editor_ui::set_history_callbacks(

@@ -6,6 +6,7 @@ in vec3 Normal;
 in vec3 Position;
 
 #define PI 3.14159265359
+#define MAX_POINT_LIGHTS 16
 
 struct Material {
     vec4 albedo;
@@ -21,8 +22,19 @@ struct DirLight {
     vec3 ambient;
 };
 
+struct PointLight {
+    vec3 position;
+    vec3 color;
+    float intensity;
+    float constant;
+    float linear;
+    float quadratic;
+};
+
 uniform Material material;
 uniform DirLight dirLight;
+uniform PointLight pointLights[MAX_POINT_LIGHTS];
+uniform int pointLightCount;
 uniform vec3 viewPos;
 
 uniform sampler2D tex_albedo;
@@ -47,12 +59,12 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
-    float a = roughness*roughness;
-    float a2 = a*a;
+    float a = roughness * roughness;
+    float a2 = a * a;
     float NdotH = max(dot(N, H), 0.0);
-    float NdotH2 = NdotH*NdotH;
+    float NdotH2 = NdotH * NdotH;
 
-    float nom   = a2;
+    float nom = a2;
     float denom = (NdotH2 * (a2 - 1.0) + 1.0);
     denom = PI * denom * denom;
 
@@ -61,7 +73,7 @@ float DistributionGGX(vec3 N, vec3 H, float roughness) {
 
 float GeometrySchlickGGX(float NdotV, float roughness) {
     float r = (roughness + 1.0);
-    float k = (r*r) / 8.0;
+    float k = (r * r) / 8.0;
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
@@ -94,27 +106,34 @@ void main() {
     vec2 novoUv = uvMundo ? Position.xz * 0.1 : Uv;
 
     vec4 albedo = (use_tex_albedo ? texture(tex_albedo, novoUv) : vec4(1.0)) * material.albedo;
-    float metallic = use_tex_metallic ? texture(tex_metallic, novoUv).r *2: material.metallic;
-    float roughness = use_tex_roughness ? texture(tex_roughness, novoUv).r*0.1: material.roughness;
+    float metallic = use_tex_metallic ? texture(tex_metallic, novoUv).r * 2.0 : material.metallic;
+    float roughness = use_tex_roughness ? texture(tex_roughness, novoUv).r * 0.1 : material.roughness;
     float ao = use_tex_ao ? texture(tex_ao, novoUv).r : material.ao;
 
     vec3 N = normalize(Normal);
-    if(use_tex_normal) {
+    if (use_tex_normal) {
         N = texture(tex_normal, novoUv).rgb * 2.0 - 1.0;
         N = normalize(N);
     }
 
     vec3 V = normalize(viewPos - Position);
+    vec3 result = vec3(0.0);
 
-    vec3 result;
-        // Luz ambient com intensity aplicada
-        vec3 ambient = dirLight.ambient * albedo.rgb * ao * dirLight.intensity;
-        // Luz direcional
-        vec3 L_dir = normalize(-dirLight.direction);
-        vec3 radiance_dir = dirLight.color * dirLight.intensity;
-        vec3 Lo = calculateLightLo(L_dir, radiance_dir, N, V, albedo.rgb, metallic, roughness);
+    vec3 ambient = dirLight.ambient * albedo.rgb * ao * dirLight.intensity;
+    result += ambient;
 
-        result = ambient + Lo;
+    vec3 L_dir = normalize(-dirLight.direction);
+    vec3 radiance_dir = dirLight.color * dirLight.intensity;
+    result += calculateLightLo(L_dir, radiance_dir, N, V, albedo.rgb, metallic, roughness);
+
+    for (int i = 0; i < pointLightCount && i < MAX_POINT_LIGHTS; ++i) {
+        PointLight light = pointLights[i];
+        vec3 L = normalize(light.position - Position);
+        float distanceToLight = length(light.position - Position);
+        float attenuation = 1.0 / (light.constant + light.linear * distanceToLight + light.quadratic * distanceToLight * distanceToLight);
+        vec3 radiance = light.color * light.intensity * attenuation;
+        result += calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
+    }
 
     float gamma = 2.2;
     FragColor = vec4(pow(result.rgb, vec3(1.0 / gamma)), albedo.a);
