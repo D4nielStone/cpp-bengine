@@ -22,6 +22,7 @@
 #include "editor/systems/undo_redo_shortcuts_system.hpp"
 
 #include <lay/linear.hpp>
+#include <lay/dock.hpp>
 #include <elem/button.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/image.hpp>
@@ -89,24 +90,29 @@ project_choice show_project_manager(
     auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
     manager_root = &root;
     root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    root.style.visual.background.normal = bgui::color{0.035f, 0.043f, 0.058f, 1.f};
     auto& header = root.add<bgui::linear>(bgui::orientation::vertical);
     header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-    header.style.layout.padding = bgui::vec4i{20, 12, 20, 8};
-    auto& title = header.add<bgui::text>("Bubble Engine", 0.62f);
-    title.style.layout.set_margin(0, 2);
-    header.add<bgui::text>("Project Manager", 0.34f);
+    header.style.layout.padding = bgui::vec4i{24, 16, 24, 12};
+    header.style.visual.background.normal = bgui::color{0.055f, 0.068f, 0.09f, 1.f};
+    auto& title = header.add<bgui::text>("Bubble Engine", 0.68f);
+    title.style.layout.set_margin(0, 3);
+    auto& subtitle = header.add<bgui::text>("PROJECT MANAGER  /  Choose a workspace or start something new", 0.3f);
+    subtitle.style.visual.background.normal = bgui::color{0.48f, 0.58f, 0.72f, 1.f};
 
-    auto& content = root.add<bgui::linear>(bgui::orientation::horizontal);
-    content.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
-    auto& recent = content.add<bgui::linear>(bgui::orientation::vertical);
-    recent.style.layout.require_width(bgui::mode::pixel, 320.f);
-    recent.style.layout.require_height(bgui::mode::match_parent);
-    recent.style.layout.padding = bgui::vec4i{16, 10, 12, 14};
-    recent.style.visual.background.normal = bgui::color{0.105f, 0.115f, 0.13f, 1.f};
-    recent.style.visual.border.normal = bgui::color{0.19f, 0.21f, 0.24f, 1.f};
+    auto& project_dock = root.add<bgui::dock>();
+    project_dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+    bgui::dock::configuration dock_layout;
+    dock_layout.left_ratio = 0.32f;
+    project_dock.apply_configuration(dock_layout);
+    auto& recent = project_dock.add_window("Recent Projects", bgui::dock_area::left);
+    auto& actions = project_dock.add_window("Project Setup", bgui::dock_area::center);
+    recent.style.layout.padding = bgui::vec4i{16, 12, 16, 16};
+    recent.style.visual.background.normal = bgui::color{0.075f, 0.09f, 0.12f, 1.f};
+    recent.style.visual.border.normal = bgui::color{0.18f, 0.22f, 0.28f, 1.f};
     recent.style.visual.border_size = 1.f;
-    recent.style.visual.border_radius = 5.f;
-    auto& recent_title = recent.add<bgui::text>("Recent Projects", 0.42f);
+    recent.style.visual.border_radius = 7.f;
+    auto& recent_title = recent.add<bgui::text>("Your workspaces", 0.42f);
     recent_title.style.layout.set_margin(0, 8);
 
     std::vector<std::string> recent_projects;
@@ -158,15 +164,12 @@ project_choice show_project_manager(
         details.add<bgui::text>(folder_name.empty() ? path : folder_name, 0.26f);
     }
 
-    auto& actions = content.add<bgui::linear>(bgui::orientation::vertical);
-    actions.style.layout.require_width(bgui::mode::stretch);
-    actions.style.layout.require_height(bgui::mode::match_parent);
-    actions.style.layout.padding = bgui::vec4i{16, 12, 16, 14};
-    actions.style.visual.background.normal = bgui::color{0.055f, 0.062f, 0.075f, 1.f};
-    actions.style.visual.border.normal = bgui::color{0.22f, 0.24f, 0.28f, 1.f};
+    actions.style.layout.padding = bgui::vec4i{22, 16, 22, 18};
+    actions.style.visual.background.normal = bgui::color{0.055f, 0.067f, 0.087f, 1.f};
+    actions.style.visual.border.normal = bgui::color{0.18f, 0.22f, 0.28f, 1.f};
     actions.style.visual.border_size = 1.f;
-    actions.style.visual.border_radius = 5.f;
-    auto& actions_title = actions.add<bgui::text>("Projects", 0.44f);
+    actions.style.visual.border_radius = 7.f;
+    auto& actions_title = actions.add<bgui::text>("Start building", 0.48f);
     actions_title.style.layout.set_margin(0, 8);
     auto& open_label = actions.add<bgui::text>("Open a project", 0.32f);
     open_label.style.layout.set_margin(0, 5);
