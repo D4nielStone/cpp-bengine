@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <functional>
 #include <utility>
 
 namespace editor::ui {
@@ -29,6 +30,10 @@ private:
     bgui::vec2i m_last_mouse_position{0, 0};
 
     bgui::vec3 m_orbit_center{0.0f, 0.0f, 0.0f};
+    bgui::vec3 m_desired_position{};
+    bgui::vec3 m_last_applied_position{}, m_last_applied_rotation{};
+    std::function<float()> m_clock;
+    bool m_manual_orbit{false};
 
     float m_movement_speed{5.0f};
     float m_sprint_multiplier{3.0f};
@@ -90,12 +95,15 @@ private:
             89.0f
         );
 
+        m_desired_position = camera_position;
+        m_last_applied_position = camera_position;
+        m_last_applied_rotation = camera_rotation;
         if (m_orbit_target) {
             m_orbit_center = m_orbit_target->get_position();
-        } else {
+        } else if (!m_manual_orbit) {
             const auto forward = get_forward();
 
-            m_orbit_center = camera_position + forward * 10.0f;
+            m_orbit_center = camera_position + forward * m_orbit_distance;
         }
 
         const auto offset = camera_position - m_orbit_center;
@@ -120,8 +128,9 @@ private:
     ) {
         const auto forward = get_forward();
 
-        const auto camera_position =
-            m_orbit_center - forward * m_orbit_distance;
+        const auto camera_position = m_orbit_target || m_manual_orbit
+            ? m_orbit_center - forward * m_orbit_distance
+            : m_desired_position;
 
         const float interpolation = 1.0f - std::exp(
             -m_smoothing_speed * delta_time
@@ -142,24 +151,27 @@ private:
             camera_rotation,
             interpolation
         ));
+        m_last_applied_position = camera_transform->get_position();
+        m_last_applied_rotation = camera_transform->get_rotation();
     }
 
 public:
     camera_movement_system(
         std::shared_ptr<commons::camera> camera_component,
         bgui::image& image,
-        std::shared_ptr<viewport_input_state> input_state
+        std::shared_ptr<viewport_input_state> input_state,
+        std::function<float()> clock = bgui::get_time
     )
         : m_camera(std::move(camera_component)),
           m_input_state(std::move(input_state)),
-          m_image(&image) {
+          m_image(&image), m_clock(std::move(clock)) {
     }
 
     void setup(const std::shared_ptr<commons::ecs>&) override {
         m_last_mouse_position = bgui::get_mouse_position();
         m_mouse_initialized = true;
-        m_camera_button_was_down = bgui::get_pressed(bgui::input_key::mouse_left);
-        m_previous_time = bgui::get_time();
+        m_camera_button_was_down = bgui::get_pressed(bgui::input_key::mouse_right);
+        m_previous_time = m_clock();
         m_orbit_initialized = false;
     }
 
@@ -167,17 +179,20 @@ public:
         std::shared_ptr<commons::transform> target
     ) {
         m_orbit_target = std::move(target);
+        m_manual_orbit = false;
         m_orbit_initialized = false;
     }
 
     void clear_orbit_target() {
         m_orbit_target.reset();
+        m_manual_orbit = false;
         m_orbit_initialized = false;
     }
 
     void set_orbit_center(const bgui::vec3& center) {
         m_orbit_center = center;
-        m_orbit_initialized = true;
+        m_manual_orbit = true;
+        m_orbit_initialized = false;
     }
 
     void update(
@@ -194,7 +209,9 @@ public:
             return;
 
         const bgui::vec2i mouse = bgui::get_mouse_position();
-        const bool camera_button_down = bgui::get_pressed(bgui::input_key::mouse_left);
+        const bool trackpad_modifier = viewport_camera_modifier();
+        const bool camera_button_down = bgui::get_pressed(bgui::input_key::mouse_right) ||
+            (trackpad_modifier && bgui::get_pressed(bgui::input_key::mouse_left));
         const bool camera_button_just_pressed = camera_button_down && !m_camera_button_was_down;
         m_camera_button_was_down = camera_button_down;
 
@@ -203,8 +220,11 @@ public:
             m_mouse_initialized = true;
         }
 
-        const bgui::vec2i mouse_delta =
-            mouse - m_last_mouse_position;
+        // A press may arrive after the cursor crossed the viewport. Start the
+        // drag at the current cursor instead of applying that unrelated delta.
+        const bgui::vec2i mouse_delta = camera_button_just_pressed
+            ? bgui::vec2i{0, 0}
+            : mouse - m_last_mouse_position;
 
         m_last_mouse_position = mouse;
 
@@ -213,7 +233,7 @@ public:
             return;
         }
 
-        const float current_time = bgui::get_time();
+        const float current_time = m_clock();
 
         const float delta_time = std::clamp(
             current_time - m_previous_time,
@@ -240,25 +260,35 @@ public:
         const bool viewport_owns_mouse =
             editor::ui::viewport_owns_mouse(m_image);
         const bool mouse_over_viewport = cursor_in_viewport && viewport_owns_mouse;
+        const bool gizmo_active = m_input_state && m_input_state->gizmo_active && !trackpad_modifier;
         if (camera_button_just_pressed)
-            m_camera_drag_active = mouse_over_viewport &&
-                !(m_input_state && m_input_state->gizmo_active);
-        if (!camera_button_down || (m_input_state && m_input_state->gizmo_active))
+            m_camera_drag_active = mouse_over_viewport && !gizmo_active;
+        if (!camera_button_down || gizmo_active)
             m_camera_drag_active = false;
-        if (!mouse_over_viewport && !m_camera_drag_active)
+        if (m_orbit_initialized &&
+            (camera_transform->get_position() != m_last_applied_position ||
+             camera_transform->get_rotation() != m_last_applied_rotation))
+            m_orbit_initialized = false;
+
+        const float scroll_y = mouse_over_viewport ? bgui::get_context().m_scroll_delta_y : 0.f;
+        const float scroll_x = mouse_over_viewport ? bgui::get_context().m_scroll_delta_x : 0.f;
+        if (!m_orbit_initialized && !m_camera_drag_active &&
+            !(trackpad_modifier && mouse_over_viewport) && scroll_x == 0.f && scroll_y == 0.f)
             return;
 
         if (!m_orbit_initialized)
             initialize_orbit(camera_transform);
 
-        const bool gizmo_active =
-            m_input_state && m_input_state->gizmo_active;
-
         if (m_orbit_target)
             m_orbit_center = m_orbit_target->get_position();
 
         if (!gizmo_active) {
-            const bool rotate_camera = camera_button_down && m_camera_drag_active;
+            const bool dragging = camera_button_down && m_camera_drag_active;
+            const bool shift = bgui::get_pressed(bgui::input_key::left_shift) ||
+                bgui::get_pressed(bgui::input_key::right_shift);
+            const bool pan_drag = dragging && trackpad_modifier && shift;
+            const bool rotate_camera = dragging && !pan_drag;
+            const bool move_keys = dragging || (trackpad_modifier && mouse_over_viewport);
 
             if (rotate_camera) {
                 m_yaw += static_cast<float>(mouse_delta.x)
@@ -272,16 +302,13 @@ public:
                     -89.0f,
                     89.0f
                 );
+
             }
 
-            const float scroll_delta = mouse_over_viewport
-                ? bgui::get_context().m_scroll_delta_y
-                : 0.0f;
-
-            if (scroll_delta != 0.0f) {
+            if (scroll_y != 0.0f && !shift && (m_orbit_target || m_manual_orbit)) {
                 m_orbit_distance = std::clamp(
                     m_orbit_distance
-                        - scroll_delta * m_zoom_sensitivity,
+                        - scroll_y * m_zoom_sensitivity,
                     m_min_orbit_distance,
                     m_max_orbit_distance
                 );
@@ -289,25 +316,38 @@ public:
 
             const auto forward = get_forward();
             const auto right = get_right();
+            const glm::vec3 up_vector = glm::cross(
+                glm::vec3{right.x, right.y, right.z}, glm::vec3{forward.x, forward.y, forward.z});
+            const bgui::vec3 up{up_vector.x, up_vector.y, up_vector.z};
+            bgui::vec3 pan = right * (-scroll_x * m_zoom_sensitivity);
+            if (shift)
+                pan += up * (scroll_y * m_zoom_sensitivity);
+            else if (!m_orbit_target && !m_manual_orbit)
+                m_desired_position += forward * (scroll_y * m_zoom_sensitivity);
+            if (pan_drag)
+                pan += (right * -static_cast<float>(mouse_delta.x) +
+                    up * static_cast<float>(mouse_delta.y)) * (m_orbit_distance * 0.002f);
+            m_desired_position += pan;
+            m_orbit_center += pan;
 
             bgui::vec3 movement{0.0f, 0.0f, 0.0f};
 
-            if (bgui::get_pressed(bgui::input_key::w))
+            if (move_keys && bgui::get_pressed(bgui::input_key::w))
                 movement += forward;
 
-            if (bgui::get_pressed(bgui::input_key::s))
+            if (move_keys && bgui::get_pressed(bgui::input_key::s))
                 movement -= forward;
 
-            if (bgui::get_pressed(bgui::input_key::d))
+            if (move_keys && bgui::get_pressed(bgui::input_key::d))
                 movement += right;
 
-            if (bgui::get_pressed(bgui::input_key::a))
+            if (move_keys && bgui::get_pressed(bgui::input_key::a))
                 movement += right * -1.0f;
 
-            if (bgui::get_pressed(bgui::input_key::e))
+            if (move_keys && bgui::get_pressed(bgui::input_key::e))
                 movement.y += 1.0f;
 
-            if (bgui::get_pressed(bgui::input_key::q))
+            if (move_keys && bgui::get_pressed(bgui::input_key::q))
                 movement.y -= 1.0f;
 
             const float movement_length = movement.length();
@@ -324,13 +364,8 @@ public:
                     movement * speed * delta_time;
 
                 m_orbit_center += displacement;
+                m_desired_position += displacement;
 
-                if (m_orbit_target) {
-                    m_orbit_target->set_position(
-                        m_orbit_target->get_position()
-                            + displacement
-                    );
-                }
             }
         }
 

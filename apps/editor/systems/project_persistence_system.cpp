@@ -7,6 +7,7 @@
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 #include "entities/entity.hpp"
+#include "util/pbr_material.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
@@ -98,6 +99,21 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
             if (!material.IsObject() || !material.HasMember("albedo") ||
                 !is_color4(material["albedo"]))
                 return false;
+            for (const auto& factor : commons::pbr_factors) {
+                if (material.HasMember(factor.name) &&
+                    (!material[factor.name].IsNumber() ||
+                     !(material[factor.name].GetDouble() >= 0.0 &&
+                       material[factor.name].GetDouble() <= 1.0)))
+                    return false;
+            }
+            if (material.HasMember("maps")) {
+                if (!material["maps"].IsObject())
+                    return false;
+                for (const auto& map : commons::pbr_maps)
+                    if (material["maps"].HasMember(map.name) &&
+                        !material["maps"][map.name].IsString())
+                        return false;
+            }
         }
         return true;
     }
@@ -218,14 +234,15 @@ bool parse_component(
             const auto model_path_string = model_path.string();
             registry.add<commons::renderer>(entity, model_path_string.c_str());
         } else {
-            registry.add<commons::renderer>(entity);
+            registry.add<commons::renderer>(entity, new commons::model());
         }
 
         auto renderer = registry.get<commons::renderer>(entity.id);
         if (!renderer)
             return false;
 
-        if (renderer->m_modelo && data.HasMember("materials")) {
+        if (renderer->m_modelo && data.HasMember("materials") &&
+            data.HasMember("model") && data["model"].GetStringLength() != 0) {
             const auto& materials = data["materials"];
             if (materials.Size() != renderer->m_modelo->meshes.size())
                 return false;
@@ -244,6 +261,28 @@ bool parse_component(
                         albedo[3].GetFloat()
                     }
                 );
+                const auto& saved = materials[index];
+                for (const auto& factor : commons::pbr_factors)
+                    if (saved.HasMember(factor.name))
+                        material.set_uniform(std::string("material.") + factor.name,
+                            saved[factor.name].GetFloat());
+                if (saved.HasMember("maps")) {
+                    for (const auto& map : commons::pbr_maps) {
+                        if (!saved["maps"].HasMember(map.name))
+                            continue;
+                        std::filesystem::path texture_path(saved["maps"][map.name].GetString());
+                        const bool enabled = !texture_path.empty();
+                        if (enabled) {
+                            if (!texture_path.is_absolute())
+                                texture_path = project_directory / texture_path;
+                            material.set_texture(map.name,
+                                commons::texture{0, texture_path.lexically_normal().string()});
+                        } else {
+                            material.textures.erase(map.name);
+                        }
+                        material.set_uniform(std::string("use_") + map.name, enabled);
+                    }
+                }
                 renderer->m_modelo->meshes[index].setMaterial(material);
             }
         }
@@ -658,7 +697,8 @@ bool project_persistence_system::save(
                 }
                 rapidjson::Value materials(rapidjson::kArrayType);
                 for (const auto& mesh : renderer->m_modelo->meshes) {
-                    const auto albedo = material_albedo(mesh.getMaterial());
+                    const auto source_material = mesh.getMaterial();
+                    const auto albedo = material_albedo(source_material);
                     rapidjson::Value material(rapidjson::kObjectType);
                     rapidjson::Value color(rapidjson::kArrayType);
                     color.PushBack(albedo.r, allocator);
@@ -666,6 +706,23 @@ bool project_persistence_system::save(
                     color.PushBack(albedo.b, allocator);
                     color.PushBack(albedo.a, allocator);
                     material.AddMember("albedo", color, allocator);
+                    for (const auto& factor : commons::pbr_factors) {
+                        rapidjson::Value key(factor.name, allocator);
+                        material.AddMember(key, commons::pbr_value(source_material, factor), allocator);
+                    }
+                    rapidjson::Value maps(rapidjson::kObjectType);
+                    for (const auto& map : commons::pbr_maps) {
+                        std::filesystem::path texture_path(source_material.getTextura(map.name).path);
+                        if (!texture_path.empty() && saving_in_project) {
+                            const auto relative = texture_path.lexically_relative(m_asset_root);
+                            if (!relative.empty() && *relative.begin() != "..")
+                                texture_path = relative;
+                        }
+                        rapidjson::Value key(map.name, allocator);
+                        rapidjson::Value value(texture_path.generic_string().c_str(), allocator);
+                        maps.AddMember(key, value, allocator);
+                    }
+                    material.AddMember("maps", maps, allocator);
                     materials.PushBack(material, allocator);
                 }
                 component_data.AddMember("materials", materials, allocator);

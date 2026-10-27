@@ -25,6 +25,8 @@
  */
 
 #include "util/material.hpp"
+#include "util/pbr_material.hpp"
+#include <unordered_set>
 using namespace COMMONS_NS;
 
 material::material(std::map<std::string, uniform> unifs) {
@@ -102,10 +104,20 @@ void material::usar(shader& shader) {
         }
     }
 
+    for (const auto& map : pbr_maps)
+        if (!textures.contains(map.name))
+            shader.setBool(std::string("use_") + map.name, false);
+
     int slot = 0;
     for (const auto& [nome, tex] : textures) {
-        tex.bind(slot);
-        shader.setInt(nome, slot);
-        ++slot;
+        try {
+            tex.bind(slot);
+            shader.setInt(nome, slot++);
+        } catch (const std::exception& error) {
+            shader.setBool("use_" + nome, false);
+            static std::unordered_set<std::string> reported;
+            if (reported.insert(tex.path).second)
+                std::cerr << "[material] " << error.what() << '\n';
+        }
     }
 }

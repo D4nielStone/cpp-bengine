@@ -7,6 +7,8 @@
 #include "components/directional_light.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
+#include "components/physics.hpp"
+#include "util/pbr_material.hpp"
 
 #include <bgui.hpp>
 #include <elem/checkbox.hpp>
@@ -20,6 +22,8 @@
 #include <lay/linear.hpp>
 
 #include <charconv>
+#include <algorithm>
+#include <filesystem>
 #include <cmath>
 #include <functional>
 #include <iostream>
@@ -38,6 +42,12 @@ public:
         : bgui::linear(orientation) {}
 
     std::function<void()> before_update;
+    std::shared_ptr<bool> alive;
+
+    ~refreshing_layout() override {
+        if (alive)
+            *alive = false;
+    }
 
     void on_update() override {
         if (before_update)
@@ -80,6 +90,7 @@ public:
         m_root->add_class("editor-panel");
         m_root->add_class("components-view");
         m_root->before_update = [this]() { refresh_if_needed(); };
+        m_root->alive = m_surface_alive;
 
         m_toolbar = &m_root->add<bgui::linear>(
             bgui::orientation::vertical
@@ -102,6 +113,25 @@ public:
         m_refresh_requested = true;
     }
 
+    bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
+        if (!*m_surface_alive)
+            return false;
+        for (const auto& target : m_asset_targets) {
+            bool enabled = true;
+            for (auto* element = target.bounds; element; element = element->get_parent())
+                enabled = enabled && element->is_enabled();
+            if (!enabled)
+                continue;
+            const auto rect = target.bounds->processed_rect();
+            if (position.x >= rect.x && position.x < rect.x + rect.z &&
+                position.y >= rect.y && position.y < rect.y + rect.w) {
+                target.apply(path);
+                return true;
+            }
+        }
+        return false;
+    }
+
 private:
     using entity_id = editor_context::entity_id;
 
@@ -113,6 +143,15 @@ private:
     bgui::tree* m_entity_tree{nullptr};
     std::optional<entity_id> m_rendered_selection;
     bool m_refresh_requested{false};
+    commons::component::mask m_rendered_mask{commons::component::COMPONENTE_NONE};
+    std::size_t m_history_revision{0};
+    bgui::text* m_edit_status{nullptr};
+    struct asset_target {
+        bgui::element* bounds;
+        std::function<void(const std::filesystem::path&)> apply;
+    };
+    std::vector<asset_target> m_asset_targets;
+    std::shared_ptr<bool> m_surface_alive = std::make_shared<bool>(true);
 
     static std::string format_value(const float value) {
         auto result = std::to_string(value);
@@ -134,6 +173,7 @@ private:
     }
 
     void clear_content() {
+        m_asset_targets.clear();
         m_entity_tree = nullptr;
         for (auto& [layer, elements] : m_root->get_elements()) {
             (void)layer;
@@ -143,7 +183,7 @@ private:
     }
 
     void refresh_if_needed() {
-        if (!m_root)
+        if (!m_root || !*m_surface_alive)
             return;
 
         auto selected = m_context
@@ -157,11 +197,17 @@ private:
             selected.reset();
         }
 
-        if (!m_refresh_requested && selected == m_rendered_selection)
+        const auto mask = selected ? m_context->registry->get_components(*selected)
+            : commons::component::COMPONENTE_NONE;
+        const auto history_revision = m_context ? m_context->history_revision : 0;
+        if (!m_refresh_requested && selected == m_rendered_selection &&
+            mask == m_rendered_mask && history_revision == m_history_revision)
             return;
 
         m_refresh_requested = false;
         m_rendered_selection = selected;
+        m_rendered_mask = mask;
+        m_history_revision = history_revision;
         clear_content();
         clear_toolbar();
 
@@ -194,8 +240,7 @@ private:
             bgui::mode::match_parent,
             bgui::mode::wrap_content
         );
-        m_entity_tree->children().style.visual.background.normal =
-            bgui::color{0.055f, 0.060f, 0.070f, 1.f};
+        m_entity_tree->children().add_class("editor-surface");
 
         auto& id_label = m_entity_tree->children().add<bgui::text>(
             "ID: " + std::to_string(id),
@@ -219,6 +264,14 @@ private:
         if (auto light = registry->get<commons::directional_light>(id))
             add_directional_light(id, light);
 
+        if (auto physics = registry->get<commons::physics>(id)) {
+            auto& section = add_section("Physics", true,
+                [this, id]() { remove_component<commons::physics>(id); });
+            add_number_field(section.children(), "Mass", physics->m_massa,
+                [physics]() { return physics->m_massa; },
+                [physics](float mass) { physics->setMass(std::max(0.f, mass)); });
+        }
+
     }
 
     std::string entity_name(const entity_id id) const {
@@ -232,6 +285,7 @@ private:
         if (!m_toolbar)
             return;
         m_component_options = nullptr;
+        m_edit_status = nullptr;
         for (auto& [layer, elements] : m_toolbar->get_elements()) {
             (void)layer;
             while (!elements.empty())
@@ -284,8 +338,8 @@ private:
             bgui::mode::wrap_content
         );
 
-        auto& add_component_button = header.add<bgui::button>(
-            "Add Component",
+        auto& add_component_button = m_toolbar->add<bgui::button>(
+            "+ Add Component",
             0.28f,
             [this]() {
                 if (m_component_options)
@@ -296,19 +350,15 @@ private:
         );
         add_component_button.add_class("editor-input");
         add_component_button.style.layout.require_mode(
-            bgui::mode::wrap_content,
+            bgui::mode::match_parent,
             bgui::mode::wrap_content
         );
 
         const bool can_add_camera = !registry->get<commons::camera>(id);
         const bool can_add_light =
             !registry->get<commons::directional_light>(id);
-        add_component_button.set_enable(can_add_camera || can_add_light);
-        if (!can_add_camera && !can_add_light)
-            return;
-
         m_component_options = &m_toolbar->add<bgui::linear>(
-            bgui::orientation::horizontal
+            bgui::orientation::vertical
         );
         m_component_options->add_class("editor-surface");
         m_component_options->style.layout.require_mode(
@@ -316,6 +366,12 @@ private:
             bgui::mode::wrap_content
         );
         m_component_options->set_enable(false);
+        if (!registry->get<commons::transform>(id))
+            m_component_options->add<bgui::button>("Transform", 0.28f,
+                [this, id]() { add_component<commons::transform>(id); });
+        if (!registry->get<commons::renderer>(id))
+            m_component_options->add<bgui::button>("Renderer", 0.28f,
+                [this, id]() { add_component<commons::renderer>(id); });
         if (can_add_camera) {
             auto& camera_button = m_component_options->add<bgui::button>(
                 "Camera",
@@ -334,6 +390,11 @@ private:
             );
             light_button.add_class("editor-input");
         }
+        if (!registry->get<commons::physics>(id))
+            m_component_options->add<bgui::button>("Physics", 0.28f,
+                [this, id]() { add_component<commons::physics>(id); });
+        m_component_options->add<bgui::text>("Script: drop a .lua file onto an entity", 0.25f);
+        m_edit_status = &m_toolbar->add<bgui::text>("", 0.25f);
     }
 
     bgui::tree& add_section(
@@ -346,8 +407,6 @@ private:
         section.add_class("editor-section");
         section.set_icon("circle", 0.27f);
         section.children().add_class("editor-surface");
-        section.children().style.visual.background.normal =
-            bgui::color{0.040f, 0.045f, 0.052f, 1.f};
         section.children().style.layout.padding = bgui::vec4i{6, 6, 6, 6};
         section.children().style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::start,
@@ -355,22 +414,16 @@ private:
         };
 
         if (removable) {
-            auto& remove_row = section.children().add<bgui::linear>(
-                bgui::orientation::horizontal
-            );
-            remove_row.add_class("editor-property-row");
-            configure_row(remove_row);
-            remove_row.add<bgui::icon>("trash_alt", 0.27f);
-            auto& remove_button = remove_row.add<bgui::button>(
-                "Remove Component",
+            auto& remove_button = section.header().add<bgui::button>(
+                "",
                 0.27f,
                 remove_component
             );
-            remove_button.add_class("editor-input");
-            remove_button.style.layout.require_mode(
-                bgui::mode::match_parent,
-                bgui::mode::wrap_content
-            );
+            remove_button.add_class("editor-icon-button");
+            remove_button.add_class("component-remove-button");
+            remove_button.style.layout.require_size(22.f, 22.f);
+            remove_button.get_label().set_enable(false);
+            remove_button.add<bgui::icon>("trash_alt", 0.25f).receives_input(false);
         }
 
         return section;
@@ -443,16 +496,36 @@ private:
             true,
             [this, id]() { remove_component<commons::renderer>(id); }
         );
-        auto& icon_row = section.children().add<bgui::linear>(
-            bgui::orientation::horizontal
-        );
-        configure_row(icon_row);
-        icon_row.add<bgui::icon>("file", 0.27f);
-        const auto source = renderer->m_modelo
-            ? renderer->m_modelo->get_source_path()
-            : std::string{"No model assigned"};
-        auto& source_label = icon_row.add<bgui::text>(source, 0.27f);
-        source_label.style.layout.require_width(bgui::mode::stretch);
+        auto& model_field = section.children().add<bgui::field>(
+            "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", 0.27f);
+        auto* model_input = &model_field.get_inputbox();
+        auto assign_model = [this, id, renderer](const std::filesystem::path& requested) {
+            auto path = requested.is_absolute() ? requested : m_context->project_root / requested;
+            try {
+                auto model = std::make_unique<commons::model>(path.string());
+                if (model->meshes.empty()) {
+                    m_edit_status->set_buffer("Could not load model: " + requested.string());
+                    return;
+                }
+                auto registry = m_context->registry;
+                auto next = std::make_shared<commons::renderer>(model.release());
+                next->my_object = id;
+                next->reg = registry;
+                next->visible = renderer->visible;
+                auto apply = [registry, id](const auto& component) {
+                    registry->entities[id][commons::renderer::mask] = component;
+                };
+                apply(next);
+                m_context->record_action(
+                    [apply, renderer]() { apply(renderer); },
+                    [apply, next]() { apply(next); });
+                refresh();
+            } catch (const std::exception& error) {
+                m_edit_status->set_buffer(error.what());
+            }
+        };
+        model_input->m_enter_func = [assign_model](const std::string& path) { assign_model(path); };
+        m_asset_targets.push_back({model_input, assign_model});
 
         if (!renderer->m_modelo)
             return;
@@ -528,7 +601,72 @@ private:
                     );
                 }
             );
+
+            for (const auto& factor : commons::pbr_factors) {
+                add_number_field(section.children(), factor.label,
+                    commons::pbr_value(material, factor),
+                    [renderer, index, factor]() {
+                        return commons::pbr_value(renderer->m_modelo->meshes[index].getMaterial(), factor);
+                    },
+                    [renderer, index, factor](float value) {
+                        auto updated = renderer->m_modelo->meshes[index].getMaterial();
+                        updated.set_uniform(std::string("material.") + factor.name,
+                            std::clamp(value, 0.f, 1.f));
+                        renderer->m_modelo->meshes[index].setMaterial(updated);
+                    });
+            }
+            for (const auto& map : commons::pbr_maps)
+                add_material_map(section.children(), renderer, index, map);
         }
+    }
+
+    void add_material_map(bgui::linear& content,
+        const std::shared_ptr<commons::renderer>& renderer, std::size_t index,
+        const commons::pbr_map& map) {
+        const auto material = renderer->m_modelo->meshes[index].getMaterial();
+        auto& label = content.add<bgui::text>(map.label, 0.27f);
+        label.add_class("editor-property-label");
+        auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
+        configure_row(row);
+        auto& input = row.add<bgui::inputbox>(material.getTextura(map.name).path,
+            "Drop a texture or enter its path", 0.26f);
+        input.style.layout.require_width(bgui::mode::stretch);
+        auto assign = [this, renderer, index, map, input = &input](const std::filesystem::path& requested) {
+            if (!renderer->m_modelo || index >= renderer->m_modelo->meshes.size())
+                return;
+            auto before = renderer->m_modelo->meshes[index].getMaterial();
+            auto after = before;
+            if (requested.empty()) {
+                after.textures.erase(map.name);
+                after.set_uniform(std::string("use_") + map.name, false);
+            } else {
+                auto path = requested.is_absolute() ? requested : m_context->project_root / requested;
+                try {
+                    auto& texture = bgui::asset_manager::get_instance().load_texture(path.string());
+                    after.set_texture(map.name, commons::texture{0, texture.m_path});
+                    after.set_uniform(std::string("use_") + map.name, true);
+                } catch (const std::exception& error) {
+                    m_edit_status->set_buffer(error.what());
+                    return;
+                }
+            }
+            auto apply = [renderer, index](const commons::material& value) {
+                if (renderer->m_modelo && index < renderer->m_modelo->meshes.size())
+                    renderer->m_modelo->meshes[index].setMaterial(value);
+            };
+            apply(after);
+            m_context->record_action([apply, before]() { apply(before); },
+                [apply, after]() { apply(after); });
+            input->set_buffer(after.getTextura(map.name).path);
+            m_edit_status->set_buffer("");
+        };
+        input.m_enter_func = [assign](const std::string& path) { assign(path); };
+        m_asset_targets.push_back({&input, assign});
+        auto& clear = row.add<bgui::button>("", 0.25f, [assign]() { assign({}); });
+        clear.add_class("editor-icon-button");
+        clear.style.layout.require_size(22.f, 22.f);
+        clear.get_label().set_enable(false);
+        clear.add<bgui::icon>("close", 0.25f).receives_input(false);
     }
 
     void add_camera(
@@ -762,7 +900,10 @@ private:
             id,
             m_context->registry->get_components(id)
         };
-        m_context->registry->add<Component>(entity);
+        if constexpr (std::is_same_v<Component, commons::renderer>)
+            m_context->registry->add<Component>(entity, new commons::model());
+        else
+            m_context->registry->add<Component>(entity);
         auto registry = m_context->registry;
         auto component = registry->get<Component>(id);
         m_context->record_action(

@@ -9,6 +9,11 @@ struct viewport_input_state {
     bool gizmo_active{false};
 };
 
+inline bool viewport_camera_modifier() {
+    return bgui::get_pressed(bgui::input_key::space) &&
+        !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus());
+}
+
 inline bool viewport_input_blocked_by_modal() {
     const auto& root_elements = bgui::get_layout().get_elements();
     const auto overlays = root_elements.find(bgui::layer::overlay);

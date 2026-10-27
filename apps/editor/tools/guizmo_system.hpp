@@ -206,7 +206,7 @@ public:
 
         const bool left_down = bgui::get_pressed(
             bgui::input_key::mouse_left
-        );
+        ) && !viewport_camera_modifier();
 
         const bgui::vec2i mouse_position =
             bgui::get_mouse_position();

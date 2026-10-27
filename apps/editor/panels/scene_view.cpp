@@ -26,10 +26,39 @@ struct scene_view_state {
 
 namespace {
 
+class preview_card final : public bgui::linear {
+public:
+    preview_card() : bgui::linear(bgui::orientation::vertical) {}
+    bool clips_children() const override { return true; }
+};
+
+class navigation_hint final : public bgui::text {
+public:
+    explicit navigation_hint(std::shared_ptr<scene_view_state> state)
+        : bgui::text("Space + drag: look    Shift + Space + drag: pan\n"
+                     "Scroll: dolly    Space + WASD / QE: move", 0.25f),
+          m_state(std::move(state)) {
+        receives_input(false);
+        set_flex(false);
+        set_wrap(false);
+    }
+    void on_update() override {
+        if (!m_state->image)
+            return;
+        const auto rect = m_state->image->processed_rect();
+        set_final_rect(rect.x + 8, rect.y + std::max(0, rect.w - 32),
+            std::max(0, rect.z - 16), 28);
+    }
+private:
+    std::shared_ptr<scene_view_state> m_state;
+};
+
 class camera_preview_overlay final : public bgui::element {
 public:
-    camera_preview_overlay(bgui::image& image, std::shared_ptr<camera_preview_state> state)
-        : m_image(&image), m_state(std::move(state)) {
+    camera_preview_overlay(bgui::linear& frame, bgui::text& title, bgui::image& image,
+        std::shared_ptr<camera_preview_state> state, std::shared_ptr<editor_context> context)
+        : m_frame(&frame), m_title(&title), m_image(&image),
+          m_state(std::move(state)), m_context(std::move(context)) {
         receives_input(false);
         set_flex(false);
         style.visual.visible = false;
@@ -38,14 +67,25 @@ public:
     void on_update() override {
         if (!m_image || !m_state || !m_state->hovered ||
             !m_state->main_runtime_camera) {
-            if (m_image)
-                m_image->set_enable(false);
+            m_frame->set_enable(false);
             return;
         }
 
-        constexpr int preview_width = 240;
-        constexpr int preview_height = 150;
-        constexpr int margin = 12;
+        const float ui_scale = bgui::get_global_scale();
+        const int margin = static_cast<int>(12.f * ui_scale);
+        const int padding = static_cast<int>(6.f * ui_scale);
+        const int header = static_cast<int>(18.f * ui_scale);
+        const auto& viewport = m_state->viewport;
+        const float available_width = viewport.z - 2 * (margin + padding);
+        const float available_height = viewport.w - 2 * (margin + padding) - header;
+        const float scale = std::min({1.f, available_width / (240.f * ui_scale),
+            available_height / (150.f * ui_scale)});
+        if (scale <= 0.f) {
+            m_frame->set_enable(false);
+            return;
+        }
+        const int preview_width = std::max(1, static_cast<int>(240 * ui_scale * scale));
+        const int preview_height = std::max(1, static_cast<int>(150 * ui_scale * scale));
         auto& camera = m_state->main_runtime_camera;
         if (!camera->flag_fb) {
             camera->createFB();
@@ -55,15 +95,19 @@ public:
             camera->viewport({preview_width, preview_height});
         }
         if (camera->framebuffer_texture() == 0) {
-            m_image->set_enable(false);
+            m_frame->set_enable(false);
             return;
         }
 
-        const auto& viewport = m_state->viewport;
+        const int frame_width = preview_width + 2 * padding;
+        const int frame_height = preview_height + 2 * padding + header;
         const int preview_x = std::max(
             viewport.x + margin,
-            viewport.x + viewport.z - preview_width - margin
+            viewport.x + viewport.z - frame_width - margin
         );
+        const auto name = m_context->entity_names.find(camera->my_object);
+        m_title->set_buffer(name != m_context->entity_names.end()
+            ? name->second : "Camera " + std::to_string(camera->my_object));
         m_image->set_external_texture(
             camera->framebuffer_texture(),
             bgui::vec2{
@@ -71,13 +115,17 @@ public:
                 static_cast<float>(camera->viewportFBO.y)
             }
         );
-        m_image->set_final_rect(preview_x, viewport.y + margin, preview_width, preview_height);
-        m_image->set_enable(true);
+        m_frame->set_final_rect(preview_x, viewport.y + margin, frame_width, frame_height);
+        m_image->set_size(preview_width / ui_scale, preview_height / ui_scale);
+        m_frame->set_enable(true);
     }
 
 private:
+    bgui::linear* m_frame;
+    bgui::text* m_title;
     bgui::image* m_image;
     std::shared_ptr<camera_preview_state> m_state;
+    std::shared_ptr<editor_context> m_context;
 };
 
 class scene_view_surface final : public bgui::linear {
@@ -204,13 +252,32 @@ void scene_view::build(bgui::dock& dock) {
         m_camera_preview
     );
 
-    auto& camera_preview = scene_window.add<bgui::image, bgui::layer::overlay>();
+    auto& preview_frame = scene_window.add<preview_card, bgui::layer::overlay>();
+    preview_frame.add_class("camera-preview-card");
+    preview_frame.receives_input(false);
+    preview_frame.set_flex(false);
+    preview_frame.set_enable(false);
+    auto& preview_header = preview_frame.add<bgui::linear>(bgui::orientation::horizontal);
+    preview_header.style.layout.require_height(bgui::mode::pixel, 18.f);
+    preview_header.style.layout.require_width(bgui::mode::match_parent);
+    preview_header.style.layout.padding = bgui::vec4i{0};
+    preview_header.receives_input(false);
+    preview_header.add<bgui::icon>("camera", 0.24f).receives_input(false);
+    auto& preview_title = preview_header.add<bgui::text>("Camera Preview", 0.27f);
+    preview_title.receives_input(false);
+    preview_title.style.layout.require_width(bgui::mode::stretch);
+    preview_title.set_wrap(false);
+    auto& camera_preview = preview_frame.add<bgui::image>();
+    camera_preview.add_class("camera-preview-image");
     camera_preview.receives_input(false);
-    camera_preview.set_enable(false);
     scene_window.add<camera_preview_overlay, bgui::layer::overlay>(
+        preview_frame,
+        preview_title,
         camera_preview,
-        m_camera_preview
+        m_camera_preview,
+        m_context
     );
+    scene_window.add<navigation_hint, bgui::layer::overlay>(m_state);
 }
 
 void scene_view::update() {

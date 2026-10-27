@@ -375,6 +375,7 @@ int main(int argc, char** argv) {
 
     auto editor_context = std::make_shared<editor::ui::editor_context>(registry);
     editor_context->editor_camera_entity = camera_entity.id;
+    editor_context->project_root = std::filesystem::absolute(project_path).parent_path();
 
     auto& editor_root = bgui::get_layout().add<bgui::linear>(
         bgui::orientation::vertical
@@ -454,6 +455,10 @@ int main(int argc, char** argv) {
             const std::filesystem::path& asset,
             const bgui::vec2i& mouse_position
         ) {
+            if (components_panel.drop_asset(asset, mouse_position))
+                return;
+            if (!editor::ui::files_view::supports_model(asset))
+                return;
             if (!scene.is_open())
                 return;
 
@@ -559,6 +564,7 @@ int main(int argc, char** argv) {
         ) {
         editor_context->clear_history();
         editor_context->selected_entity.reset();
+        editor_context->project_root = std::filesystem::absolute(loaded_project_path).parent_path();
         entities_panel.refresh();
         components_panel.refresh();
         files_panel.set_project_file(loaded_project_path);

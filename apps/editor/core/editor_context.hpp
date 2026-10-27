@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,11 +27,13 @@ struct editor_context {
         : registry(std::move(entity_registry)) {}
 
     std::shared_ptr<commons::ecs> registry;
+    std::filesystem::path project_root;
     std::vector<history_action> undo_stack;
     std::vector<history_action> redo_stack;
     std::optional<entity_id> selected_entity;
     std::optional<entity_id> editor_camera_entity;
     bool is_playing{false};
+    std::size_t history_revision{0};
     std::unordered_map<entity_id, std::string> entity_names;
     std::unordered_set<entity_id> hidden_entities;
     std::unordered_set<entity_id> locked_entities;
@@ -49,6 +52,7 @@ struct editor_context {
         auto action = std::move(undo_stack.back());
         undo_stack.pop_back();
         action.undo();
+        ++history_revision;
         redo_stack.push_back(std::move(action));
         return true;
     }
@@ -59,6 +63,7 @@ struct editor_context {
         auto action = std::move(redo_stack.back());
         redo_stack.pop_back();
         action.redo();
+        ++history_revision;
         undo_stack.push_back(std::move(action));
         return true;
     }
@@ -66,6 +71,7 @@ struct editor_context {
     void clear_history() {
         undo_stack.clear();
         redo_stack.clear();
+        ++history_revision;
     }
 
     void record_entity_creation(const entity_id id) {

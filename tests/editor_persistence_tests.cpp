@@ -328,6 +328,10 @@ TEST(ProjectPersistenceTest, SavesRendererMaterialVisibilityAndLockState) {
         "material.albedo",
         commons::color{0.2f, 0.4f, 0.6f, 0.8f}
     );
+    material.set_uniform("material.metallic", 0.7f);
+    material.set_uniform("material.roughness", 0.4f);
+    material.set_uniform("material.ao", 0.9f);
+    material.set_texture("tex_normal", commons::texture{0, "/textures/normal.png"});
     renderer->m_modelo->meshes.front().setMaterial(material);
 
     editor::ui::project_persistence_system::entity_state_set locked_entities{
@@ -356,6 +360,13 @@ TEST(ProjectPersistenceTest, SavesRendererMaterialVisibilityAndLockState) {
     EXPECT_FALSE(saved_renderer["visible"].GetBool());
     ASSERT_GE(saved_renderer["materials"].Size(), 1U);
     const auto& albedo = saved_renderer["materials"][0]["albedo"];
+    const auto& pbr = saved_renderer["materials"][0];
+    ASSERT_TRUE(pbr.HasMember("metallic"));
+    EXPECT_FLOAT_EQ(pbr["metallic"].GetFloat(), 0.7f);
+    EXPECT_FLOAT_EQ(pbr["roughness"].GetFloat(), 0.4f);
+    EXPECT_FLOAT_EQ(pbr["ao"].GetFloat(), 0.9f);
+    ASSERT_TRUE(pbr.HasMember("maps"));
+    EXPECT_STREQ(pbr["maps"]["tex_normal"].GetString(), "/textures/normal.png");
     ASSERT_EQ(albedo.Size(), 4U);
     EXPECT_GE(albedo[0].GetFloat(), 0.f);
     EXPECT_GE(albedo[1].GetFloat(), 0.f);

@@ -45,7 +45,7 @@ public:
         const bool just_pressed = left_down && !m_left_was_down;
         m_left_was_down = left_down;
 
-        if (viewport_input_blocked_by_modal()) {
+        if (viewport_input_blocked_by_modal() || viewport_camera_modifier()) {
             m_pending_pick.reset();
             return;
         }

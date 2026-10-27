@@ -106,16 +106,32 @@ void main() {
     vec2 novoUv = uvMundo ? Position.xz * 0.1 : Uv;
 
     vec4 albedo = (use_tex_albedo ? texture(tex_albedo, novoUv) : vec4(1.0)) * material.albedo;
-    float metallic = use_tex_metallic ? texture(tex_metallic, novoUv).r * 2.0 : material.metallic;
-    float roughness = use_tex_roughness ? texture(tex_roughness, novoUv).r * 0.1 : material.roughness;
-    float ao = use_tex_ao ? texture(tex_ao, novoUv).r : material.ao;
+    float metallic = clamp(material.metallic * (use_tex_metallic ? texture(tex_metallic, novoUv).r : 1.0), 0.0, 1.0);
+    float roughness = clamp(material.roughness * (use_tex_roughness ? texture(tex_roughness, novoUv).r : 1.0), 0.04, 1.0);
+    float ao = clamp(material.ao * (use_tex_ao ? texture(tex_ao, novoUv).r : 1.0), 0.0, 1.0);
 
     vec3 N = dot(Normal, Normal) > 1e-8
         ? normalize(Normal)
         : vec3(0.0, 1.0, 0.0);
     if (use_tex_normal) {
-        N = texture(tex_normal, novoUv).rgb * 2.0 - 1.0;
-        N = normalize(N);
+        // Normal maps are tangent-space vectors, not world-space normals.
+        vec3 dpdx = dFdx(Position);
+        vec3 dpdy = dFdy(Position);
+        vec2 duvdx = dFdx(novoUv);
+        vec2 duvdy = dFdy(novoUv);
+        float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+        if (abs(determinant) > 1e-8) {
+            vec3 T = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
+            vec3 sourceB = (dpdy * duvdx.x - dpdx * duvdy.x) / determinant;
+            T -= N * dot(N, T);
+            vec3 mapped = texture(tex_normal, novoUv).rgb * 2.0 - 1.0;
+            if (dot(T, T) > 1e-8 && dot(mapped, mapped) > 1e-8) {
+                T = normalize(T);
+                vec3 B = normalize(cross(N, T));
+                B *= dot(B, sourceB) < 0.0 ? -1.0 : 1.0;
+                N = normalize(mat3(T, B, N) * mapped);
+            }
+        }
     }
 
     vec3 V = normalize(viewPos - Position);

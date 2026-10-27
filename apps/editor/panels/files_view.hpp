@@ -40,6 +40,10 @@ public:
     using drop_callback =
         std::function<void(const std::filesystem::path&, const bgui::vec2i&)>;
 
+    static bool supports_model(const std::filesystem::path& path) {
+        return is_model_file(path);
+    }
+
     explicit files_view(std::filesystem::path project_file, drop_callback on_drop = {})
         : m_project_root(resolve_project_root(std::move(project_file))),
           m_on_drop(std::move(on_drop)),
@@ -759,7 +763,7 @@ private:
                     open_document(file);
                     request_refresh();
                 },
-                is_model_file(file)
+                (is_model_file(file) || is_image_file(file))
                     ? [this, file](const bgui::vec2i& position) {
                           if (m_on_drop)
                               m_on_drop(file, position);

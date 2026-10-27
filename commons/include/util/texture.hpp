@@ -35,10 +35,7 @@ namespace COMMONS_NS {
 
         texture() = default;
         texture(unsigned int id, std::string path) : id(id), path(path) {}
-        void bind(int slot) const {
-            glActiveTexture(GL_TEXTURE0 + slot);
-            glBindTexture(GL_TEXTURE_2D, this->id);
-        }
+        void bind(int slot) const;
 
         bool operator==(const texture& other) const {
             return id == other.id && path == other.path;

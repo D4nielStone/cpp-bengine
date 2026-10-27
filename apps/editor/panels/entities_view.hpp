@@ -8,6 +8,7 @@
 #include "components/transform.hpp"
 #include "editor_context.hpp"
 #include "panel.hpp"
+#include "viewport_input_state.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -49,44 +50,6 @@ public:
     using name_provider = std::function<std::string(entity_id)>;
 
 private:
-    class entity_button final : public bgui::button {
-    public:
-        entity_button(
-            const std::string& label,
-            std::function<void()> on_click,
-            std::function<void(const bgui::vec2i&)> on_drop
-        ) : bgui::button(label, 0.28f, on_click),
-            m_on_drop(std::move(on_drop)) {}
-
-        void on_pressed() override {
-            m_dragged = false;
-            m_drag_distance = 0;
-            bgui::button::on_pressed();
-        }
-
-        void set_drag(const bgui::vec2i& delta) override {
-            bgui::button::set_drag(delta);
-            m_drag_distance += std::abs(delta.x) + std::abs(delta.y);
-            if (m_drag_distance >= 5)
-                m_dragged = true;
-        }
-
-        void on_released() override {
-            if (!m_dragged) {
-                bgui::button::on_released();
-                return;
-            }
-            bgui::element::on_released();
-            if (m_on_drop)
-                m_on_drop(bgui::get_mouse_position());
-        }
-
-    private:
-        std::function<void(const bgui::vec2i&)> m_on_drop;
-        int m_drag_distance{0};
-        bool m_dragged{false};
-    };
-
     struct entry {
         entity_id id{};
         std::string label;
@@ -99,11 +62,13 @@ private:
 
     struct row {
         entity_id id{};
+        bgui::element* target{nullptr};
         bgui::button* selection{nullptr};
         bgui::button* expand{nullptr};
         bgui::linear* children{nullptr};
         bgui::icon* visibility{nullptr};
         bgui::icon* lock{nullptr};
+        bgui::tree* node{nullptr};
     };
 
     static constexpr const char* selected_class = "editor-entity-row-selected";
@@ -117,6 +82,9 @@ private:
     bgui::inputbox* m_filter{nullptr};
     bgui::linear* m_list{nullptr};
     bgui::tree* m_scene_tree{nullptr};
+    bgui::button* m_delete_button{nullptr};
+    bool m_delete_was_down{false};
+    std::unordered_map<entity_id, bool> m_expanded_entities;
 
     std::vector<row> m_rows;
     std::vector<entry> m_last_entries;
@@ -288,12 +256,13 @@ private:
 
     void drop_entity(const entity_id dragged_id, const bgui::vec2i& position) {
         for (const auto& item : m_rows) {
-            if (!item.selection || item.id == dragged_id)
+            if (!item.target)
                 continue;
-            const auto rect = item.selection->processed_rect();
+            const auto rect = item.target->processed_rect();
             if (position.x >= rect.x && position.x < rect.x + rect.z &&
                 position.y >= rect.y && position.y < rect.y + rect.w) {
-                reparent_entity(dragged_id, item.id);
+                if (item.id != dragged_id)
+                    reparent_entity(dragged_id, item.id);
                 return;
             }
         }
@@ -439,7 +408,7 @@ private:
 
     void update_row_styles() {
         const bgui::color transparent{0.f, 0.f, 0.f, 0.f};
-        const bgui::color selected_background{0.16f, 0.30f, 0.44f, 1.f};
+        const bgui::color selected_background{0.216f, 0.216f, 0.216f, 1.f};
 
         for (const auto& item : m_rows) {
             if (!item.selection)
@@ -549,49 +518,20 @@ private:
         const bool has_children = child_it != children_by_parent.end() &&
             !child_it->second.empty();
 
-        auto& container = parent.add<bgui::linear>(bgui::orientation::vertical);
-        container.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        auto& row_layout = container.add<bgui::linear>(bgui::orientation::horizontal);
-        row_layout.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        row_layout.style.layout.padding = bgui::vec4i{0, 2, 0, 2};
-
-        auto& disclosure = row_layout.add<bgui::button>(
-            has_children ? "v" : "",
-            0.22f,
-            []() {}
-        );
-        disclosure.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
-        disclosure.style.layout.require_width(bgui::mode::pixel, 14.f);
-        disclosure.style.layout.require_height(bgui::mode::pixel, 20.f);
-        disclosure.style.layout.padding = bgui::vec4i{0};
-        disclosure.get_label().set_wrap(false);
-
-        auto& icon = row_layout.add<bgui::icon>(entity_icon(item.id), 0.2f);
-        icon.add_class("entity-row-icon");
-        icon.style.layout.require_mode(bgui::mode::pixel, bgui::mode::wrap_content);
-        icon.style.layout.require_width(bgui::mode::pixel, 14.f);
+        auto& node = parent.add<bgui::tree>(item.label, 0.28f, has_children);
+        node.set_leaf(!has_children);
+        node.set_icon(entity_icon(item.id), 0.24f);
+        if (normalized_filter(m_filter->get_buffer()).empty() && m_expanded_entities.contains(item.id))
+            node.set_expanded(m_expanded_entities.at(item.id));
+        auto& row_layout = node.header();
         const auto id = item.id;
-        auto& selection = row_layout.add<entity_button>(
-            item.label,
-            [this, id]() { select(id); },
+        row_layout.set_function([this, id]() { select(id); });
+        node.set_on_drop(
             [this, id](const bgui::vec2i& position) {
                 drop_entity(id, position);
             }
         );
-        selection.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        selection.get_label().style.layout.align = bgui::vec<2, bgui::alignment>{
-            bgui::alignment::start,
-        };
-        selection.get_label().set_wrap(false);
+        node.label().set_wrap(false);
 
         auto& visibility_button = row_layout.add<bgui::button>(
             "",
@@ -609,25 +549,10 @@ private:
         configure_icon_button(lock_button, 20);
         auto& lock_icon = add_button_icon(lock_button, "key", 0.24f);
 
-        auto& nested = container.add<bgui::linear>(bgui::orientation::vertical);
-        nested.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        nested.style.layout.padding = bgui::vec4i{16, 0, 0, 0};
-        nested.set_enable(has_children);
-        if (has_children) {
-            auto* nested_ptr = &nested;
-            auto* disclosure_ptr = &disclosure;
-            disclosure.set_function([nested_ptr, disclosure_ptr]() {
-                const bool expanded = !nested_ptr->is_enabled();
-                nested_ptr->set_enable(expanded);
-                disclosure_ptr->get_label().set_buffer(expanded ? "v" : ">");
-            });
-        }
+        auto& nested = node.children();
 
-        m_rows.push_back({id, &selection, &disclosure, &nested,
-            &visibility_icon, &lock_icon});
+        m_rows.push_back({id, &row_layout, &row_layout, &node.disclosure(), &nested,
+            &visibility_icon, &lock_icon, &node});
         if (has_children) {
             for (const auto child_id : child_it->second) {
                 const auto child = entries_by_id.find(child_id);
@@ -705,12 +630,14 @@ public:
         add_button_icon(add_entity, "plus", 0.26f);
 
         auto& remove_entity = m_toolbar->add<bgui::button>(
-            "−",
+            "",
             0.28f,
             [this]() { delete_selected_entity(); }
         );
         remove_entity.add_class("entities-remove-button");
         configure_icon_button(remove_entity, 18);
+        add_button_icon(remove_entity, "trash_alt", 0.24f);
+        m_delete_button = &remove_entity;
 
         auto& search_icon = m_toolbar->add<bgui::icon>("search", 0.24f);
         search_icon.receives_input(false);
@@ -751,6 +678,20 @@ public:
     void update() override {
         if (!m_root || !m_filter || !m_list)
             return;
+
+        const bool delete_down = bgui::get_pressed(bgui::input_key::delete_key);
+        if (delete_down && !m_delete_was_down &&
+            !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) &&
+            !viewport_input_blocked_by_modal() && m_context && !m_context->is_playing)
+            delete_selected_entity();
+        m_delete_was_down = delete_down;
+        if (m_delete_button) {
+            const bool can_delete = m_context && m_context->selected_entity &&
+                m_context->selected_entity != m_context->editor_camera_entity &&
+                !m_context->locked_entities.contains(*m_context->selected_entity);
+            m_delete_button->receives_input(can_delete);
+            m_delete_button->set_style_state(can_delete ? bgui::state::normal : bgui::state::disabled);
+        }
 
         const auto entries = collect_entries();
         const auto current_filter = m_filter->get_buffer();
@@ -826,6 +767,9 @@ private:
         if (!m_list)
             return;
 
+        for (const auto& row : m_rows)
+            if (row.node)
+                m_expanded_entities[row.id] = row.node->is_expanded();
         m_rows.clear();
         const auto filter = normalized_filter(
             m_filter ? m_filter->get_buffer() : std::string{}

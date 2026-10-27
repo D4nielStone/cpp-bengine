@@ -59,3 +59,22 @@ target_include_directories(editor_persistence_tests
 target_compile_features(editor_persistence_tests PRIVATE cxx_std_20)
 
 gtest_discover_tests(editor_persistence_tests)
+
+add_executable(editor_interaction_tests editor_interaction_tests.cpp)
+target_link_libraries(editor_interaction_tests PRIVATE GTest::gtest_main commons)
+target_include_directories(editor_interaction_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+    ${CMAKE_SOURCE_DIR}/apps/editor/tools
+)
+gtest_discover_tests(editor_interaction_tests)
+
+add_executable(editor_render_tests
+    editor_render_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
+)
+target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main commons)
+target_include_directories(editor_render_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_compile_definitions(editor_render_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(editor_render_tests)

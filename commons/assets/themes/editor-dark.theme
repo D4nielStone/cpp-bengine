@@ -32,3 +32,34 @@ visual.border.normal = 0.0
 visual.border.size = 0
 visual.border.radius = 6
 layout.align = center, center
+
+[class.editor-surface]
+visual.visible = true
+visual.background.normal = 0.10, 0.10, 0.10, 1.0
+
+[class.editor-section]
+layout.margin = 0, 4
+
+[class.editor-icon-button]
+layout.size = 22, 22
+layout.padding = 0
+layout.align = center, center
+visual.background.normal = 0.0
+visual.background.hover = 0.17, 0.17, 0.17, 1.0
+visual.background.pressed = 0.19, 0.19, 0.19, 1.0
+visual.border.normal = 0.0
+visual.border.size = 0
+
+[class.camera-preview-card]
+visual.visible = true
+visual.background.normal = 0.094, 0.094, 0.094, 1.0
+visual.border.normal = 0.25, 0.25, 0.25, 1.0
+visual.border.size = 1
+visual.border.radius = 8
+layout.padding = 6
+
+[class.camera-preview-image]
+visual.border.normal = 0.0
+visual.border.size = 0
+visual.border.radius = 5
+layout.margin = 0
