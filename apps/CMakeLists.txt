@@ -20,6 +20,7 @@ target_link_libraries(runtime_app PRIVATE commons)
 add_executable(
     editor_app
     editor_app.cpp
+    editor/systems/native_file_dialog.cpp
     editor/panels/editor_ui.cpp
     editor/systems/build_process.cpp
     editor/systems/project_creation_system.cpp
@@ -33,7 +34,7 @@ add_executable(
 target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
 target_link_libraries(editor_app PRIVATE commons)
 if(WIN32)
-    target_link_libraries(editor_app PRIVATE windowscodecs ole32)
+    target_link_libraries(editor_app PRIVATE windowscodecs ole32 shell32 uuid)
 else()
     find_package(PNG REQUIRED)
     target_link_libraries(editor_app PRIVATE PNG::PNG)

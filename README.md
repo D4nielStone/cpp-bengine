@@ -46,6 +46,11 @@ editor viewport.
 
 # Dependencies
 
+The editor's **Browse** buttons use the system file/folder dialog. On Linux,
+install `zenity` or `kdialog` (for example, `sudo apt-get install zenity`).
+On Windows the editor uses the built-in Explorer dialog. The Files panel
+continues to show project assets inside the editor.
+
 The following dependencies must be installed:
 
 - CMake 3.20 or higher

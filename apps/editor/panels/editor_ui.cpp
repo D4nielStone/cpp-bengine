@@ -1,4 +1,5 @@
 #include "editor_ui.hpp"
+#include "native_file_dialog.hpp"
 #include "project_creation_system.hpp"
 
 #include <components/directional_light.hpp>
@@ -193,32 +194,6 @@ editor_ui::editor_ui(
                 if (!m_project_modal)
                     create_project_modal(m_project_path, "");
 
-                std::error_code error;
-                auto start_directory = std::filesystem::path(m_project_path);
-                const bool is_directory =
-                    std::filesystem::is_directory(start_directory, error);
-                if (error) {
-                    m_project_picker_status->set_buffer(
-                        "Could not inspect current project path: " +
-                        error.message()
-                    );
-                    if (m_project_modal)
-                        m_project_modal->set_enable(true);
-                    return;
-                }
-                if (!is_directory)
-                    start_directory = start_directory.parent_path();
-                if (start_directory.empty()) {
-                    start_directory = std::filesystem::current_path(error);
-                }
-                if (error) {
-                    m_project_picker_status->set_buffer(
-                        "Could not locate a folder to browse: " +
-                        error.message()
-                    );
-                } else {
-                    refresh_project_picker(start_directory.string());
-                }
                 if (m_project_modal)
                     m_project_modal->set_enable(true);
             });
@@ -596,223 +571,15 @@ void editor_ui::start_platform_build(const build_target target) {
 }
 
 void editor_ui::create_build_directory_modal() {
-    if (m_build_directory_modal) {
-        m_build_directory_modal->set_enable(true);
-        if (m_build_directory_picker_input && m_build_directory_input) {
-            m_build_directory_picker_input->set_buffer(
-                m_build_directory_input->get_buffer()
-            );
-            refresh_build_directory_picker(
-                m_build_directory_picker_input->get_buffer()
-            );
-        }
-        return;
+    std::string error;
+    const auto selected = editor::browse_native(
+        m_build_directory_input->get_buffer(), true, error);
+    if (!selected.empty()) {
+        m_build_directory = selected;
+        m_build_directory_input->set_buffer(selected.string());
     }
-
-    const auto initial_directory = m_build_directory_input
-        ? m_build_directory_input->get_buffer()
-        : m_build_directory.string();
-    m_build_directory_modal = &bgui::get_layout().add<
-        bgui::modal,
-        bgui::layer::overlay
-    >();
-    m_build_directory_modal->content().add<bgui::text>(
-        "Choose an existing folder for platform build output.",
-        0.3f
-    );
-    m_build_directory_picker_input =
-        &m_build_directory_modal->content().add<bgui::inputbox>(
-            initial_directory,
-            "Build directory...",
-            0.28f
-        );
-    auto& path_actions = m_build_directory_modal->content().add<bgui::linear>(
-        bgui::orientation::horizontal
-    );
-    path_actions.style.layout.require_mode(
-        bgui::mode::match_parent,
-        bgui::mode::wrap_content
-    );
-    path_actions.add<bgui::button>(
-        "Browse",
-        0.28f,
-        [this]() {
-            if (m_build_directory_picker_input)
-                refresh_build_directory_picker(
-                    m_build_directory_picker_input->get_buffer()
-                );
-        }
-    );
-    path_actions.add<bgui::button>(
-        "Parent folder",
-        0.28f,
-        [this]() {
-            if (!m_build_directory_picker_input)
-                return;
-            const auto parent = std::filesystem::path(
-                m_build_directory_picker_input->get_buffer()
-            ).parent_path();
-            if (!parent.empty())
-                refresh_build_directory_picker(parent.string());
-        }
-    );
-    path_actions.add<bgui::button>(
-        "Cancel",
-        0.28f,
-        [this]() {
-            if (m_build_directory_modal)
-                m_build_directory_modal->set_enable(false);
-        }
-    );
-    m_build_directory_picker_status =
-        &m_build_directory_modal->content().add<bgui::text>(
-            "Select a folder or enter its path.",
-            0.28f
-        );
-    m_build_directory_picker_list =
-        &m_build_directory_modal->content().add<bgui::linear>(
-            bgui::orientation::vertical
-        );
-    m_build_directory_picker_list->style.layout.require_mode(
-        bgui::mode::match_parent,
-        bgui::mode::pixel
-    );
-    m_build_directory_picker_list->style.layout.require_height(
-        bgui::mode::pixel,
-        220.f
-    );
-    m_build_directory_picker_list->set_scrollable(true);
-    m_build_directory_modal->set_confirmation_text("Use folder");
-    m_build_directory_modal->set_on_confirm([this]() {
-        const auto selected_path = m_build_directory_picker_input
-            ? m_build_directory_picker_input->get_buffer()
-            : std::string{};
-        std::error_code error;
-        auto path = std::filesystem::absolute(selected_path, error)
-            .lexically_normal();
-        if (error) {
-            if (m_build_status)
-                m_build_status->set_buffer(
-                    "Could not resolve build directory: " + error.message()
-                );
-        } else if (!std::filesystem::is_directory(path, error) || error) {
-            if (m_build_status) {
-                m_build_status->set_buffer(
-                    error
-                        ? "Could not inspect build directory: " +
-                            error.message()
-                        : "The selected build path is not a directory."
-                );
-            }
-        } else {
-            m_build_directory = path;
-            if (m_build_directory_input)
-                m_build_directory_input->set_buffer(path.string());
-            if (m_build_status)
-                m_build_status->set_buffer(
-                    "Build directory selected: " + path.string()
-                );
-        }
-        m_build_directory_modal = nullptr;
-        m_build_directory_picker_input = nullptr;
-        m_build_directory_picker_list = nullptr;
-        m_build_directory_picker_status = nullptr;
-    });
-    refresh_build_directory_picker(initial_directory);
-}
-
-void editor_ui::refresh_build_directory_picker(
-    const std::string& directory
-) {
-    if (!m_build_directory_picker_input ||
-        !m_build_directory_picker_list ||
-        !m_build_directory_picker_status) {
-        return;
-    }
-
-    std::error_code error;
-    auto path = std::filesystem::path(directory);
-    if (path.empty())
-        path = std::filesystem::current_path(error);
-    if (!error)
-        path = std::filesystem::absolute(path, error).lexically_normal();
-    if (error) {
-        m_build_directory_picker_status->set_buffer(
-            "Could not resolve directory: " + error.message()
-        );
-        return;
-    }
-    if (!std::filesystem::is_directory(path, error) || error) {
-        m_build_directory_picker_status->set_buffer(
-            error
-                ? "Could not inspect directory: " + error.message()
-                : "The selected path is not a directory."
-        );
-        return;
-    }
-
-    m_build_directory_picker_input->set_buffer(path.string());
-    m_build_directory_picker_status->set_buffer(
-        "Select this folder or navigate into a subfolder."
-    );
-    for (auto& [layer, elements] :
-         m_build_directory_picker_list->get_elements()) {
-        (void)layer;
-        while (!elements.empty())
-            m_build_directory_picker_list->remove(elements.back().get());
-    }
-
-    std::vector<std::filesystem::path> directories;
-    std::filesystem::directory_iterator iterator(path, error);
-    if (error) {
-        m_build_directory_picker_status->set_buffer(
-            "Could not list directory: " + error.message()
-        );
-        return;
-    }
-    const std::filesystem::directory_iterator end;
-    for (; iterator != end; iterator.increment(error)) {
-        if (error) {
-            m_build_directory_picker_status->set_buffer(
-                "Could not finish listing directory: " + error.message()
-            );
-            return;
-        }
-        std::error_code entry_error;
-        if (iterator->is_directory(entry_error) && !entry_error)
-            directories.push_back(iterator->path());
-    }
-    if (error) {
-        m_build_directory_picker_status->set_buffer(
-            "Could not finish listing directory: " + error.message()
-        );
-        return;
-    }
-
-    std::sort(
-        directories.begin(),
-        directories.end(),
-        [](const auto& left, const auto& right) {
-            return left.filename().string() < right.filename().string();
-        }
-    );
-    for (const auto& entry : directories) {
-        auto& item = m_build_directory_picker_list->add<bgui::button>(
-            "[Folder] " + entry.filename().string(),
-            0.28f,
-            [this, entry]() {
-                refresh_build_directory_picker(entry.string());
-            }
-        );
-        item.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-    }
-    if (directories.empty())
-        m_build_directory_picker_status->set_buffer(
-            "This folder has no accessible subdirectories."
-        );
+    if (!error.empty() && m_build_status)
+        m_build_status->set_buffer(error);
 }
 
 void editor_ui::update_build_process() {
@@ -1046,136 +813,13 @@ void editor_ui::open_global_physics_modal() {
     m_global_physics_modal->set_enable(true);
 }
 
-void editor_ui::refresh_project_picker(const std::string& directory) {
-    if (!m_project_directory_input || !m_project_directory_list)
-        return;
-
-    std::error_code error;
-    auto path = std::filesystem::path(directory);
-    if (path.empty())
-        path = std::filesystem::current_path(error);
-    if (error) {
-        m_project_picker_status->set_buffer(
-            "Could not resolve the current directory: " + error.message()
-        );
-        return;
-    }
-
-    path = std::filesystem::absolute(path, error).lexically_normal();
-    if (error) {
-        m_project_picker_status->set_buffer(
-            "Could not resolve directory: " + error.message()
-        );
-        return;
-    }
-
-    if (!std::filesystem::is_directory(path, error) || error) {
-        m_project_picker_status->set_buffer(
-            error ? "Could not inspect directory: " + error.message()
-                  : "The selected path is not a directory."
-        );
-        return;
-    }
-
-    m_project_directory_input->set_buffer(path.string());
-    m_project_picker_status->set_buffer(
-        "Choose a folder, or select a .bengine, .world, or .scene file."
-    );
-
-    for (auto& [layer, elements] : m_project_directory_list->get_elements()) {
-        (void)layer;
-        while (!elements.empty())
-            m_project_directory_list->remove(elements.back().get());
-    }
-
-    std::vector<std::filesystem::path> directories;
-    std::vector<std::filesystem::path> project_files;
-    std::filesystem::directory_iterator iterator(path, error);
-    if (error) {
-        m_project_picker_status->set_buffer(
-            "Could not list directory: " + error.message()
-        );
-        return;
-    }
-
-    const std::filesystem::directory_iterator end;
-    for (; iterator != end; iterator.increment(error)) {
-        if (error) {
-            m_project_picker_status->set_buffer(
-                "Could not finish listing directory: " + error.message()
-            );
-            return;
-        }
-
-        std::error_code entry_error;
-        if (iterator->is_directory(entry_error) && !entry_error) {
-            directories.push_back(iterator->path());
-            continue;
-        }
-        if (entry_error || !iterator->is_regular_file(entry_error) || entry_error)
-            continue;
-
-        auto extension = iterator->path().extension().string();
-        std::transform(
-            extension.begin(),
-            extension.end(),
-            extension.begin(),
-            [](const unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            }
-        );
-        if (extension == ".bengine" || extension == ".world" ||
-            extension == ".scene") {
-            project_files.push_back(iterator->path());
-        }
-    }
-    if (error) {
-        m_project_picker_status->set_buffer(
-            "Could not finish listing directory: " + error.message()
-        );
-        return;
-    }
-
-    const auto by_name = [](const auto& left, const auto& right) {
-        return left.filename().string() < right.filename().string();
-    };
-    std::sort(directories.begin(), directories.end(), by_name);
-    std::sort(project_files.begin(), project_files.end(), by_name);
-
-    for (const auto& entry : directories) {
-        auto& item = m_project_directory_list->add<bgui::button>(
-            "[Folder] " + entry.filename().string(),
-            0.28f,
-            [this, entry]() { refresh_project_picker(entry.string()); }
-        );
-        item.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-    }
-    for (const auto& entry : project_files) {
-        auto& item = m_project_directory_list->add<bgui::button>(
-            "[Project] " + entry.filename().string(),
-            0.28f,
-            [this, entry]() {
-                if (m_project_directory_input)
-                    m_project_directory_input->set_buffer(entry.string());
-                if (m_project_picker_status)
-                    m_project_picker_status->set_buffer(
-                        "Selected project file: " + entry.filename().string()
-                    );
-            }
-        );
-        item.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-    }
-
-    if (directories.empty() && project_files.empty())
-        m_project_picker_status->set_buffer(
-            "This folder has no subdirectories or supported project files."
-        );
+void editor_ui::refresh_project_picker(const std::string& initial) {
+    std::string error;
+    const auto selected = editor::browse_native(initial, false, error);
+    if (!selected.empty() && m_project_directory_input)
+        m_project_directory_input->set_buffer(selected.string());
+    if (!error.empty() && m_project_picker_status)
+        m_project_picker_status->set_buffer(error);
 }
 
 bool editor_ui::load_project_selection() {
@@ -1191,27 +835,6 @@ bool editor_ui::load_project_selection() {
     }
 
     std::error_code error;
-    if (m_choose_new_project_location) {
-        if (!std::filesystem::is_directory(selected_path, error) || error) {
-            m_project_picker_status->set_buffer(
-                error ? "Could not inspect selected folder: " + error.message()
-                      : "Choose an existing folder for the new project."
-            );
-            return false;
-        }
-        selected_path = std::filesystem::absolute(selected_path, error).lexically_normal();
-        if (error) {
-            m_project_picker_status->set_buffer("Could not resolve folder: " + error.message());
-            return false;
-        }
-        if (m_new_project_location_input)
-            m_new_project_location_input->set_buffer(selected_path.string());
-        m_choose_new_project_location = false;
-        m_project_modal->set_enable(false);
-        if (m_new_project_modal)
-            m_new_project_modal->set_enable(true);
-        return true;
-    }
     if (!std::filesystem::is_directory(selected_path, error)) {
         if (error) {
             m_project_picker_status->set_buffer(
@@ -1351,50 +974,19 @@ void editor_ui::create_project_modal(
         if (m_new_project_modal)
             m_new_project_modal->set_enable(true);
     });
-    path_actions.add<bgui::button>(
-        "Parent folder",
-        0.3f,
-        [this]() {
-            if (!m_project_directory_input)
-                return;
-            const auto parent = std::filesystem::path(
-                m_project_directory_input->get_buffer()
-            ).parent_path();
-            if (!parent.empty())
-                refresh_project_picker(parent.string());
-        }
-    );
     m_project_picker_status = &m_project_modal->content().add<bgui::text>(
         status,
         0.28f
     );
-    m_project_directory_list = &m_project_modal->content().add<bgui::linear>(
-        bgui::orientation::vertical
-    );
-    m_project_directory_list->style.layout.require_mode(
-        bgui::mode::match_parent,
-        bgui::mode::pixel
-    );
-    m_project_directory_list->style.layout.require_height(
-        bgui::mode::pixel,
-        220.f
-    );
-    m_project_directory_list->set_scrollable(true);
     m_project_modal->set_confirmation_text("Open");
     m_project_modal->set_on_confirm([this]() {
         const auto selected_path = m_project_directory_input
             ? m_project_directory_input->get_buffer()
             : std::string{};
-        const bool choosing_location = m_choose_new_project_location;
         const bool loaded = load_project_selection();
         if (loaded) {
-            if (choosing_location) {
-                m_project_modal->set_confirmation_text("Open");
-                return;
-            }
             m_project_modal = nullptr;
             m_project_directory_input = nullptr;
-            m_project_directory_list = nullptr;
             m_project_picker_status = nullptr;
             return;
         }
@@ -1403,9 +995,6 @@ void editor_ui::create_project_modal(
             ? m_project_picker_status->get_buffer()
             : std::string{"Could not load the selected project."};
         create_project_modal(selected_path, status);
-        const auto directory = std::filesystem::path(selected_path).parent_path();
-        if (!directory.empty())
-            refresh_project_picker(directory.string());
         if (m_project_directory_input)
             m_project_directory_input->set_buffer(selected_path);
         if (m_project_picker_status)
@@ -1440,21 +1029,21 @@ void editor_ui::create_new_project_modal() {
             : default_location.string(),
         "Parent folder", 0.32f
     );
+    auto& status = content.add<bgui::text>("", 0.28f);
     auto& actions = content.add<bgui::linear>(bgui::orientation::horizontal);
     actions.style.layout.require_mode(
         bgui::mode::match_parent,
         bgui::mode::wrap_content
     );
-    actions.add<bgui::button>("Browse...", 0.3f, [this]() {
-        if (!m_project_modal)
-            create_project_modal(m_project_path, "");
-        m_choose_new_project_location = true;
-        m_project_modal->set_confirmation_text("Select Folder");
-        refresh_project_picker(m_new_project_location_input->get_buffer());
-        m_new_project_modal->set_enable(false);
-        m_project_modal->set_enable(true);
+    actions.add<bgui::button>("Browse...", 0.3f, [this, &status]() {
+        std::string error;
+        const auto selected = editor::browse_native(
+            m_new_project_location_input->get_buffer(), true, error);
+        if (!selected.empty())
+            m_new_project_location_input->set_buffer(selected.string());
+        if (!error.empty())
+            status.set_buffer(error);
     });
-    auto& status = content.add<bgui::text>("", 0.28f);
     m_new_project_modal->set_confirmation_text("Create Project");
     m_new_project_modal->set_on_confirm([this, &status]() {
         const auto name = m_new_project_name_input->get_buffer();

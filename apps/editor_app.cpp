@@ -8,6 +8,7 @@
 #include "systems/ui_system.hpp"
 
 #include "editor/panels/editor_ui.hpp"
+#include "editor/systems/native_file_dialog.hpp"
 #include "editor/core/editor_context.hpp"
 #include "editor/systems/project_persistence_system.hpp"
 #include "editor/systems/project_creation_system.hpp"
@@ -207,94 +208,23 @@ project_choice show_project_manager(
     location_input.style.layout.require_width(bgui::mode::stretch);
     location_input.style.layout.require_height(bgui::mode::wrap_content);
 
-    auto& browser = actions.add<bgui::linear>(bgui::orientation::vertical);
-    browser.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
-    browser.style.layout.require_height(bgui::mode::pixel, 150.f);
-    browser.style.layout.set_padding(6, 5);
-    browser.add_class("project-card");
-    browser.set_scrollable(true);
-    browser.set_enable(false);
-    std::filesystem::path browser_directory;
-    bgui::inputbox* browser_target = nullptr;
-    bool browser_selects_directory = false;
-    std::function<void(const std::filesystem::path&)> refresh_browser;
-    refresh_browser = [&](const std::filesystem::path& requested) {
-        std::error_code error;
-        auto directory = std::filesystem::absolute(requested, error).lexically_normal();
-        if (error || !std::filesystem::is_directory(directory, error) || error)
-            return;
-        browser_directory = directory;
-        for (auto& [layer, elements] : browser.get_elements()) {
-            (void)layer;
-            while (!elements.empty())
-                browser.remove(elements.back().get());
-        }
-        auto& location = browser.add<bgui::text>(directory.string(), 0.48f);
-        location.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        auto& use_folder = browser.add<bgui::button>("Use this folder", 0.48f, [&]() {
-            if (browser_target)
-                browser_target->set_buffer(browser_directory.string());
-            browser.set_enable(false);
-        });
-        use_folder.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        if (directory.has_parent_path() && directory.parent_path() != directory) {
-            auto& parent = browser.add<bgui::button>("..  Parent folder", 0.48f, [&]() {
-                refresh_browser(browser_directory.parent_path());
-            });
-            parent.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        }
-        std::vector<std::filesystem::path> directories;
-        std::vector<std::filesystem::path> project_files;
-        for (std::filesystem::directory_iterator it(directory, error), end;
-             !error && it != end; it.increment(error)) {
-            std::error_code entry_error;
-            if (it->is_directory(entry_error) && !entry_error) {
-                directories.push_back(it->path());
-            } else if (!entry_error && it->is_regular_file(entry_error) && !entry_error) {
-                const auto extension = it->path().extension().string();
-                if (extension == ".bengine" || extension == ".world" || extension == ".scene")
-                    project_files.push_back(it->path());
-            }
-        }
-        const auto by_name = [](const auto& left, const auto& right) {
-            return left.filename().string() < right.filename().string();
-        };
-        std::sort(directories.begin(), directories.end(), by_name);
-        std::sort(project_files.begin(), project_files.end(), by_name);
-        for (const auto& entry : directories) {
-            auto& item = browser.add<bgui::button>("[Folder] " + entry.filename().string(), 0.48f, [&, entry]() {
-                refresh_browser(entry);
-            });
-            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        }
-        for (const auto& entry : project_files) {
-            auto& item = browser.add<bgui::button>("[Project] " + entry.filename().string(), 0.48f, [&, entry]() {
-                if (browser_target && !browser_selects_directory)
-                    browser_target->set_buffer(entry.string());
-                browser.set_enable(false);
-            });
-            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        }
-    };
     auto& browse_button = path_row.add<bgui::button>("Browse...", 0.36f, [&]() {
-        const auto current = path_input.get_buffer().empty()
-            ? std::filesystem::current_path()
-            : std::filesystem::path(path_input.get_buffer()).parent_path();
-        browser_target = &path_input;
-        browser_selects_directory = false;
-        refresh_browser(current.empty() ? std::filesystem::current_path() : current);
-        browser.set_enable(true);
+        std::string error;
+        const auto selected = editor::browse_native(path_input.get_buffer(), false, error);
+        if (!selected.empty())
+            path_input.set_buffer(selected.string());
+        if (!error.empty())
+            status->set_buffer(error);
     });
     browse_button.style.layout.require_width(bgui::mode::pixel, 84.f);
     browse_button.style.layout.require_height(bgui::mode::wrap_content);
     auto& location_browse_button = location_row.add<bgui::button>("Browse...", 0.34f, [&]() {
-        browser_target = &location_input;
-        browser_selects_directory = true;
-        const auto location = location_input.get_buffer();
-        refresh_browser(location.empty()
-            ? std::filesystem::current_path()
-            : std::filesystem::path(location));
-        browser.set_enable(true);
+        std::string error;
+        const auto selected = editor::browse_native(location_input.get_buffer(), true, error);
+        if (!selected.empty())
+            location_input.set_buffer(selected.string());
+        if (!error.empty())
+            status->set_buffer(error);
     });
     location_browse_button.style.layout.require_width(bgui::mode::pixel, 84.f);
     location_browse_button.style.layout.require_height(bgui::mode::wrap_content);

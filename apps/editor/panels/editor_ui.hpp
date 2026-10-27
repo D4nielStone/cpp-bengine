@@ -85,11 +85,7 @@ private:
     bgui::text* m_build_status{nullptr};
     bgui::progress_bar* m_build_progress{nullptr};
     bgui::modal* m_build_modal{nullptr};
-    bgui::modal* m_build_directory_modal{nullptr};
     bgui::inputbox* m_build_directory_input{nullptr};
-    bgui::inputbox* m_build_directory_picker_input{nullptr};
-    bgui::linear* m_build_directory_picker_list{nullptr};
-    bgui::text* m_build_directory_picker_status{nullptr};
     bgui::button* m_build_directory_browse_button{nullptr};
     bgui::modal* m_project_modal{nullptr};
     bgui::modal* m_new_project_modal{nullptr};
@@ -104,12 +100,10 @@ private:
     std::array<bgui::inputbox*, 3> m_light_color_inputs{};
     bgui::inputbox* m_light_intensity_input{nullptr};
     std::array<bgui::inputbox*, 3> m_gravity_inputs{};
-    bgui::linear* m_project_directory_list{nullptr};
     bgui::text* m_project_picker_status{nullptr};
     bool m_is_playing{false};
     bool m_is_paused{false};
     bool m_build_running{false};
-    bool m_choose_new_project_location{false};
     std::filesystem::path m_build_directory;
     std::filesystem::path m_repository_root;
     std::unique_ptr<build_process> m_build_process;
@@ -133,7 +127,6 @@ private:
     void update_build_process();
     void create_build_modal();
     void create_build_directory_modal();
-    void refresh_build_directory_picker(const std::string& directory);
 };
 
 }

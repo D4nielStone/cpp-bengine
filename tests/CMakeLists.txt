@@ -78,3 +78,14 @@ target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main commons)
 target_include_directories(editor_render_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_compile_definitions(editor_render_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(editor_render_tests)
+
+add_executable(native_file_dialog_tests
+    native_file_dialog_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/native_file_dialog.cpp
+)
+target_include_directories(native_file_dialog_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(native_file_dialog_tests PRIVATE GTest::gtest_main)
+if(WIN32)
+    target_link_libraries(native_file_dialog_tests PRIVATE ole32 shell32 uuid)
+endif()
+gtest_discover_tests(native_file_dialog_tests)
