@@ -1,5 +1,14 @@
 # Bubble Engine stabilization report
 
+## UI polish — phase 1: project manager (2026-10-27)
+
+| Item | Status and evidence | Change and regression coverage | Validation limits / review |
+|---|---|---|---|
+| Blue project-manager surfaces | CONFIRMED by the per-channel blue overrides in `apps/editor_app.cpp` | Removed those overrides; manager surfaces, cards, muted labels and previews now use classes in `commons/assets/themes/editor-dark.theme`, following the existing neutral dark palette. | Interactive layout and aesthetic review remain manual. Existing local entity/persistence/sample changes were preserved. |
+| Square project preview corners | CONFIRMED by failing `GL3Test.ImageRoundsCornersAndPreservesTextureAndBorder` (corner pixels remained red; border was absent) | BGUI's image shader now respects radius and border, with a one-pixel antialiased contour. Previews and empty placeholders share a 6px radius. The regression reads actual OpenGL framebuffer pixels. | Test passed on the available Intel/Mesa display. Other GPU drivers and Windows remain untested. The test skips explicitly when no display/context is available. |
+
+Validation: clean build of editor/runtime and all 39/39 CTest entries passed via `bash scripts/build.sh /tmp/cpp-bengine-ui-phase1-LDJeeW --test`. The pre-existing local persistence edit emits a missing-return warning in `get_repository_root`; that unrelated function was not changed in this phase.
+
 ## Project manager startup
 
 | Check | Status | Evidence | Notes |

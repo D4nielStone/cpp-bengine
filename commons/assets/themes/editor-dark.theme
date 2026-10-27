@@ -7,3 +7,28 @@ layout.padding = 0, 4
 [class.window-controls]
 layout.align = start, center
 layout.padding = 0
+
+[class.project-manager]
+visual.visible = true
+
+[class.project-manager-header]
+visual.visible = true
+visual.background.normal = 0.094, 0.094, 0.094, 1.0
+
+[class.project-manager-muted]
+visual.text.normal = 0.60, 0.60, 0.60, 1.0
+
+[class.project-card]
+visual.visible = true
+visual.background.normal = 0.12, 0.12, 0.12, 1.0
+visual.border.normal = 0.17, 0.17, 0.17, 1.0
+visual.border.size = 1
+visual.border.radius = 6
+
+[class.project-preview]
+visual.visible = true
+visual.background.normal = 0.10, 0.10, 0.10, 1.0
+visual.border.normal = 0.0
+visual.border.size = 0
+visual.border.radius = 6
+layout.align = center, center

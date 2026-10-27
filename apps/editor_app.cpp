@@ -90,15 +90,15 @@ project_choice show_project_manager(
     auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
     manager_root = &root;
     root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-    root.style.visual.background.normal = bgui::color{0.035f, 0.043f, 0.058f, 1.f};
+    root.add_class("project-manager");
     auto& header = root.add<bgui::linear>(bgui::orientation::vertical);
     header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     header.style.layout.padding = bgui::vec4i{24, 16, 24, 12};
-    header.style.visual.background.normal = bgui::color{0.055f, 0.068f, 0.09f, 1.f};
+    header.add_class("project-manager-header");
     auto& title = header.add<bgui::text>("Bubble Engine", 0.68f);
     title.style.layout.set_margin(0, 3);
     auto& subtitle = header.add<bgui::text>("PROJECT MANAGER  /  Choose a workspace or start something new", 0.3f);
-    subtitle.style.visual.background.normal = bgui::color{0.48f, 0.58f, 0.72f, 1.f};
+    subtitle.add_class("project-manager-muted");
 
     auto& project_dock = root.add<bgui::dock>();
     project_dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
@@ -108,10 +108,6 @@ project_choice show_project_manager(
     auto& recent = project_dock.add_window("Recent Projects", bgui::dock_area::left);
     auto& actions = project_dock.add_window("Project Setup", bgui::dock_area::center);
     recent.style.layout.padding = bgui::vec4i{16, 12, 16, 16};
-    recent.style.visual.background.normal = bgui::color{0.075f, 0.09f, 0.12f, 1.f};
-    recent.style.visual.border.normal = bgui::color{0.18f, 0.22f, 0.28f, 1.f};
-    recent.style.visual.border_size = 1.f;
-    recent.style.visual.border_radius = 7.f;
     auto& recent_title = recent.add<bgui::text>("Your workspaces", 0.42f);
     recent_title.style.layout.set_margin(0, 8);
 
@@ -133,21 +129,19 @@ project_choice show_project_manager(
         card.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         card.style.layout.require_height(bgui::mode::pixel, 88.f);
         card.style.layout.set_padding(6, 5);
-        card.style.visual.background.normal = bgui::color{0.075f, 0.082f, 0.095f, 1.f};
-        card.style.visual.border.normal = bgui::color{0.2f, 0.22f, 0.25f, 1.f};
-        card.style.visual.border_size = 1.f;
-        card.style.visual.border_radius = 4.f;
+        card.add_class("project-card");
 
         const auto preview_path = editor::ui::project_preview_path(path);
         std::error_code preview_error;
         if (std::filesystem::is_regular_file(preview_path, preview_error) && !preview_error) {
             auto& preview = card.add<bgui::image>(preview_path.string());
             preview.set_size(120.f, 68.f);
+            preview.add_class("project-preview");
         } else {
             auto& placeholder = card.add<bgui::linear>(bgui::orientation::vertical);
             placeholder.style.layout.require_size(120.f, 68.f);
             placeholder.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
-            placeholder.style.visual.background.normal = bgui::color{0.035f, 0.04f, 0.05f, 1.f};
+            placeholder.add_class("project-preview");
             placeholder.add<bgui::text>("No preview", 0.24f);
         }
 
@@ -161,14 +155,11 @@ project_choice show_project_manager(
         );
         button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         button.style.layout.set_padding(5, 3);
-        details.add<bgui::text>(folder_name.empty() ? path : folder_name, 0.26f);
+        details.add<bgui::text>(folder_name.empty() ? path : folder_name, 0.26f)
+            .add_class("project-manager-muted");
     }
 
     actions.style.layout.padding = bgui::vec4i{22, 16, 22, 18};
-    actions.style.visual.background.normal = bgui::color{0.055f, 0.067f, 0.087f, 1.f};
-    actions.style.visual.border.normal = bgui::color{0.18f, 0.22f, 0.28f, 1.f};
-    actions.style.visual.border_size = 1.f;
-    actions.style.visual.border_radius = 7.f;
     auto& actions_title = actions.add<bgui::text>("Start building", 0.48f);
     actions_title.style.layout.set_margin(0, 8);
     auto& open_label = actions.add<bgui::text>("Open a project", 0.32f);
@@ -220,10 +211,7 @@ project_choice show_project_manager(
     browser.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
     browser.style.layout.require_height(bgui::mode::pixel, 150.f);
     browser.style.layout.set_padding(6, 5);
-    browser.style.visual.background.normal = bgui::color{0.045f, 0.05f, 0.06f, 1.f};
-    browser.style.visual.border.normal = bgui::color{0.16f, 0.18f, 0.21f, 1.f};
-    browser.style.visual.border_size = 1.f;
-    browser.style.visual.border_radius = 4.f;
+    browser.add_class("project-card");
     browser.set_scrollable(true);
     browser.set_enable(false);
     std::filesystem::path browser_directory;
