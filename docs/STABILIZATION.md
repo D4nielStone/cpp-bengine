@@ -1,5 +1,34 @@
 # Bubble Engine stabilization report
 
+## Avaliação de prontidão — 2026-10-28
+
+Avaliação e plano completos em [STABILITY_ASSESSMENT.md](STABILITY_ASSESSMENT.md).
+Estimativa de engenharia: **61/100 de prontidão** (faixa de julgamento 55–70),
+classificação **alpha funcional**, e **21–34 dias úteis** para o escopo proposto
+de primeira versão Linux/Windows. A pontuação é ponderada por risco/evidência,
+não porcentagem de código concluído. Nenhuma correção de produção nesta etapa.
+
+| Item | Status / evidência | Próxima ação e limites |
+|---|---|---|
+| A1 — ownership ECS/componentes | CONFIRMADO: teste dirigido guarda `weak_ptr`, cria entidade e sai do escopo; registro não expira. Repetido contra build limpo. | Corrigir ciclo de ownership e testar desligamento; API pública e liberação com contexto OpenGL exigem decisão explícita. Não foi medido crescimento em sessão prolongada. |
+| A2 — verificação de invariantes | CONFIRMADO: máscara declara Camera ausente e `validate_invariants()` retorna true. | Adicionar regressão e comparar máscara/componentes. O teste injeta corrupção nos mapas públicos; não demonstra corrupção pelo fluxo de UI. |
+| A3 — opções de build | CONFIRMADO: editor/runtime continuam como alvos com ambas as opções OFF. | Corrige a conclusão histórica excessiva sobre P1-b: as opções existem, mas não governam `apps/CMakeLists.txt`. |
+| A4 — distribuição | PARCIAL: modo relativo e cópia de assets existem na exportação; CI nativa publica só executáveis. | Validar pacote relocável com dependências fora do checkout nas duas plataformas. |
+| A5 — retorno ausente | PARCIAL: compilador avisa sobre `get_repository_root`; chamada problemática não reproduzida. | Confirmar contrato antes da correção. |
+| A6 — configuração Release Linux | CONFIRMADO no cache: helper usa `--config Release`, mas não define tipo de build em Makefiles. | Configurar e testar explicitamente Release otimizado. |
+
+Validação: `bash scripts/build.sh /tmp/bengine-stability-audit-20261028 --test`;
+build novo de editor/runtime e **111/111 entradas CTest passaram**, sem skips
+nos logs detalhados, inclusive verificações OpenGL. Dois testes extras de
+diagnóstico em `/tmp/bengine-audit-probes.cpp` falharam como esperado e foram
+repetidos contra as bibliotecas novas; não foram adicionados à suíte normal.
+Logs: `/tmp/bengine-stability-audit-20261028.log`,
+`/tmp/bengine-audit-probes-clean.log`. O host selecionou Lua 5.4, sem validar
+Lua 5.3. Windows, sanitizadores, pacote relocável, falha real de disco/energia
+e uso interativo completo continuam sem validação nesta avaliação. Alterações
+locais do FPP foram preservadas. Estratégia: ciclo de vida → build/pacote →
+aceitação → contratos/persistência → candidata de release, uma fase por vez.
+
 ## Inspector layout — compact properties (2026-10-28)
 
 | Item | Status and evidence | Change and regression coverage | Validation limits / review |
