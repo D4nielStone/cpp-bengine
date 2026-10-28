@@ -1,4 +1,5 @@
 #include "project_persistence_system.hpp"
+#include "project_file_transaction.hpp"
 
 #include "components/camera.hpp"
 #include "components/code.hpp"
@@ -459,54 +460,6 @@ bool validate_scene(const rapidjson::Document& document, std::string& error) {
     return validate_entities(document["entities"], error);
 }
 
-bool write_document(
-    const std::filesystem::path& target,
-    const rapidjson::Document& document,
-    const char* document_type,
-    std::string& error
-) {
-    rapidjson::StringBuffer buffer;
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
-    document.Accept(writer);
-
-    const auto temp_path = target.parent_path() /
-        (target.filename().string() + ".tmp");
-    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
-    if (!output) {
-        error = "Could not open " + std::string(document_type) +
-            " file '" + temp_path.string() + "' for writing.";
-        return false;
-    }
-    output.write(buffer.GetString(), static_cast<std::streamsize>(buffer.GetSize()));
-    output.flush();
-    if (!output) {
-        output.close();
-        std::error_code ignore;
-        std::filesystem::remove(temp_path, ignore);
-        error = "Could not finish writing " + std::string(document_type) +
-            " file '" + target.string() + "'.";
-        return false;
-    }
-    output.close();
-    if (output.fail()) {
-        std::error_code ignore;
-        std::filesystem::remove(temp_path, ignore);
-        error = "Could not finalize " + std::string(document_type) +
-            " file '" + target.string() + "' after write.";
-        return false;
-    }
-
-    std::error_code rename_error;
-    std::filesystem::rename(temp_path, target, rename_error);
-    if (rename_error) {
-        std::error_code remove_error;
-        std::filesystem::remove(temp_path, remove_error);
-        error = "Could not replace " + std::string(document_type) +
-            " file '" + target.string() + "': " + rename_error.message();
-        return false;
-    }
-    return true;
-}
 
 }
 
@@ -738,10 +691,13 @@ bool project_persistence_system::save(
     }
 
     scene_document.AddMember("entities", entities, allocator);
-    if (!write_document(scene_target, scene_document, "scene", error))
-        return false;
+    std::vector<project_files::document> pending_documents{
+        {scene_target, project_files::encode(scene_document)}
+    };
 
     if (writing_scene) {
+        if (!project_files::save(absolute_target, pending_documents, error))
+            return false;
         m_scene_path = absolute_target;
         return true;
     }
@@ -778,12 +734,8 @@ bool project_persistence_system::save(
     );
     project_document.AddMember("scene", scene_path_value, project_allocator);
 
-    if (!write_document(
-            absolute_target,
-            project_document,
-            "project",
-            error
-        ))
+    pending_documents.push_back({absolute_target, project_files::encode(project_document)});
+    if (!project_files::save(absolute_target, pending_documents, error))
         return false;
 
     m_project_path = absolute_target;
@@ -801,6 +753,8 @@ bool project_persistence_system::load(
         return false;
     }
 
+    if (!project_files::recover(path, error))
+        return false;
     std::ifstream input(path, std::ios::binary);
     if (!input) {
         error = "Could not open project file '" + path + "'.";

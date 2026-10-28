@@ -89,3 +89,13 @@ if(WIN32)
     target_link_libraries(native_file_dialog_tests PRIVATE ole32 shell32 uuid)
 endif()
 gtest_discover_tests(native_file_dialog_tests)
+
+add_executable(editor_persistence_transaction_tests
+    editor_persistence_transaction_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
+)
+target_include_directories(editor_persistence_transaction_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+)
+target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editor_persistence_transaction_tests)

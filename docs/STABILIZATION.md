@@ -80,9 +80,9 @@ The regression tests use a synthetic font and BGUI's headless input path; they d
 
 | ID | Status | Evidence | Notes |
 |---|---|---|---|
-| P0-a | Confirmed and fixed | [apps/editor/project_persistence_system.cpp](../apps/editor/project_persistence_system.cpp) now writes a temporary file and validates the stream before replacing the target. | Prevents partial writes from destroying the previous project file. |
-| P0-b | Confirmed and fixed | [apps/editor/project_persistence_system.cpp](../apps/editor/project_persistence_system.cpp) stages `staged_entity_names` and swaps it only after the full scene load succeeds. | Prevents losing names on a failed or partial load. |
-| P0-c | Confirmed and fixed | [apps/editor/project_persistence_system.cpp](../apps/editor/project_persistence_system.cpp) now swaps `entities`, `mascaras`, and `live_entities` together. `ProjectPersistenceTest.KeepsLoadedEntityIdsInTheLiveRegistry` failed before the fix and passes after it. | The previous swap omitted `live_entities`, leaving loaded IDs inaccessible through `ecs::get()`. |
+| P0-a | CONFIRMADO (falha residual) e corrigido | O truncamento direto já não existia, mas `PersistenceTransactionTest.FailedProjectTemporaryOpenPreservesSavedScene` falhou antes da correção: a cena mudava de `Original` para `Changed` apesar de `save()` retornar `false`. | [project_file_transaction.hpp](../apps/editor/systems/project_file_transaction.hpp) prepara ambos os arquivos, publica registro com imagens anteriores, substitui os destinos e remove o registro como confirmação. Falhas detectadas restauram os anteriores; abertura/salvamento pelo mesmo caminho recupera uma transação interrompida. |
+| P0-b | NÃO CONFIRMADO no código atual | Nomes são preparados em `staged_entity_names` e aplicados após o carregamento. `FailedStagingPreservesNamesAndActiveRegistry` e `InvalidInputsPreserveNamesAndActiveRegistry` passam. | Nenhuma correção de produção para nomes. Testes sem contexto OpenGL verificam nomes, visibilidade e bloqueios. |
+| P0-c | NÃO CONFIRMADO no código atual nos cenários testados | O carregamento prepara outro ECS antes da aplicação. Os testes de falha preservam `entities`, `mascaras`, `live_entities` e identidade dos componentes; `SuccessfulLoadReplacesSceneAndRebindsComponents` verifica substituição e vínculos no sucesso. | Não foi simulada falha de alocação durante a aplicação final; não se afirma garantia forte para todas as exceções. |
 | P0-d | Confirmed and fixed | [commons/include/core/ecs.hpp](../commons/include/core/ecs.hpp) keeps the entity alive and its mask entry synchronized when `remove<T>()` removes its final component. `EcsInvariantTest.RemovingLastComponentKeepsEntityAlive` failed before the fix and checks both component removal and explicit entity removal. | Entity lifetime is independent of component count; `remove(id)` remains the operation that removes the entity and all its components. |
 | P0-e | Confirmed and fixed | [commons/src/core/ecs.cpp](../commons/src/core/ecs.cpp) centralizes ID allocation and liveness through `live_entities`. | Avoids duplicate active IDs and destructive reuse. |
 | P0-f | Confirmed and fixed | [commons/include/core/ecs.hpp](../commons/include/core/ecs.hpp) now guards the weak-ownership hookup and falls back safely if the ECS is not held by `std::shared_ptr`. | Avoids `std::bad_weak_ptr` during add operations. |
@@ -169,3 +169,63 @@ Validation: configured a fresh `/tmp/cpp-bengine-native-dialog` build using the 
 Validação: configuração nova em `/tmp/cpp-bengine-bgui-audit`, com `BUILD_TESTING`, `BUILD_EDITOR` e `BUILD_RUNTIME` habilitados, reutilizando o GoogleTest local via `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`. Build completa a partir dessa pasta nova concluída, seguida por `bash scripts/build.sh /tmp/cpp-bengine-bgui-audit --test` para validar os arquivos finais. CTest: **71/71 entradas passaram**. O executável BGUI `gl3_tests` também passou seu teste com contexto OpenGL real, sem skip. Três regressões novas falharam antes das correções e passaram depois. Logs: `/tmp/bgui-audit-before.log`, `/tmp/bgui-audit-build.log`, `/tmp/bgui-audit-final.log`, `/tmp/bgui-utf8-before-sanitizers.log` e `/tmp/bgui-utf8-sanitizers.log`.
 
 Limites: Windows, Vulkan, interação manual do editor e desempenho de uma sessão completa não foram validados. A auditoria cobre os caminhos revisados de estilo/layout, texto, cache/recorte, widgets e registro dos testes; não certifica ausência de outros defeitos. O build apontou aviso de retorno ausente em `project_persistence_system::get_repository_root`, em código de persistência já modificado fora desta fase; ficou pendente para revisão separada. Alterações locais anteriores e concorrentes foram preservadas e não incluídas no commit de correção da BGUI. Nenhuma decisão de design pendente nas quatro correções acima.
+
+## Revalidação P0-a–c — 2026-10-27
+
+Escopo: somente persistência. Alterações locais preexistentes foram preservadas.
+A reprodução inicial adicionou seis testes: cinco passaram e um confirmou a
+perda da cena anterior quando a abertura de `project.bengine.tmp` falha.
+Evidência: `/tmp/bengine-p0abc-reproduction-tests.log`. O build completo inicial
+passou; CTest teve 88/92 sucessos. Além da reprodução, falharam três testes de
+alterações locais anteriores: `EditorAssetWorkflowTest.TextUndoDoesNotConsumeSceneHistory`,
+`LuaApi.UnityStyleTransformAndLegacyApiCoexist` e
+`EditorDocuments.DockTabsPreserveBuffersAndSaveWithShortcut`.
+
+O usuário escolheu explicitamente recuperação após interrupção (regra 6).
+Foi introduzido um auxiliar interno de transação, sem mudar a API pública ou os
+formatos de projeto/cena. Todos os documentos são serializados antes da escrita.
+Os temporários ficam ao lado dos destinos; `<caminho-de-entrada>.transaction`
+armazena os conteúdos anteriores e a ausência de arquivos ainda não existentes.
+O registro é publicado por renomeação antes da primeira substituição. Sua remoção
+é o ponto de confirmação: interrupções anteriores restauram a versão completa
+anterior; interrupções posteriores mantêm a nova. A restauração é repetível e
+preserva o registro se não conseguir terminar. Registros inválidos impedem a
+abertura sem alterar o ECS. Windows usa `MoveFileExW` para substituir arquivos
+existentes; Linux usa `rename`.
+
+Testes adicionados em `tests/editor_persistence_transaction_tests.cpp`:
+- falha ao preparar temporários de cena/projeto e componente não serializável;
+- JSON inválido, referência ausente, entidade inválida e rejeição após iniciar
+  a preparação do ECS, preservando nomes, mapas, IDs e câmera;
+- carregamento bem-sucedido com componentes vinculados ao ECS ativo;
+- encerramento de subprocessos em cada etapa: preparação, publicação do registro,
+  primeira/segunda substituição e confirmação;
+- interrupção durante a recuperação, nova tentativa após erro de recuperação,
+  falha real de substituição por temporário ausente e primeiro salvamento interrompido;
+- cena avulsa, salvamento após transação pendente, registro corrompido, caminhos
+  auxiliares sobrepostos e tentativa de restaurar arquivo alheio à cena declarada.
+
+Validação final: build limpo isolado de editor, runtime e testes concluído;
+**70/70 testes passaram**, incluindo os **17 novos testes** de persistência, sem
+nenhum teste ignorado no Linux. A fonte isolada contém somente esta fase sobre
+HEAD, com submódulos nas revisões registradas (inclusive o backend da BGUI).
+A integração com a árvore de trabalho atual também compilou: **100/103 testes
+passaram**, permanecendo exclusivamente as mesmas três falhas locais anteriores
+listadas acima. Nenhuma dessas alterações locais foi incluída no commit desta fase.
+Comando de CI: `bash scripts/build.sh <pasta> --test`; GoogleTest usa a cópia local
+já existente em `out/_deps/googletest-src`. Logs:
+`/tmp/bengine-p0abc-clean-tests.log` (isolado) e
+`/tmp/bengine-p0abc-final-workspace.log` (árvore com alterações locais).
+
+Limites e riscos: recuperação após **interrupção do processo**, não garantia de
+durabilidade contra queda de energia (não há `fsync`/`FlushFileBuffers`). A
+recuperação procura o registro pelo caminho de entrada usado para salvar:
+reabrir o projeto recupera seu par projeto/cena; abrir uma cena avulsa recupera
+seu próprio registro, mas não procura registros de outros projetos que a usem.
+Não há suporte a escritores simultâneos. Os sufixos `.tmp` e `.transaction` são
+reservados; destinos com links simbólicos, múltiplos hard links ou sobreposições
+são recusados. Windows, falha real de disco cheio, falhas de alocação e revisão
+visual do editor/FPP não foram validados. Os testes novos não criam contexto
+OpenGL. Os sete testes que encerram subprocessos usam `fork` e são explicitamente
+ignorados no Windows; os demais testes não exigem esse recurso. O aviso preexistente de retorno ausente em `get_repository_root` permanece
+fora desta fase.
