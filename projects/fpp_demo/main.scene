@@ -68,30 +68,38 @@
             }
         },
         {
-            "id": 100,
+            "id": 4,
             "locked": false,
-            "name": "PlayerCamera",
+            "name": "floor",
             "components": {
-                "camera": {
-                    "fov": 75.0,
-                    "zfar": 200.0,
-                    "scale": 1.0,
-                    "ortho": false,
-                    "ceu": [
-                        109,
-                        198,
-                        219,
-                        255
+                "renderer": {
+                    "model": "assets/models/floor.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
                     ],
-                    "skybox": false
-                },
-                "code": {
-                    "directory": "scripts/fpp_camera.lua"
+                    "visible": true
                 },
                 "transform": {
                     "position": [
                         0.0,
-                        1.649999976158142,
+                        0.0,
                         0.0
                     ],
                     "rotation": [
@@ -105,8 +113,143 @@
                         1.0
                     ]
                 }
-            },
-            "parent": 106
+            }
+        },
+        {
+            "id": 5,
+            "locked": false,
+            "name": "pickup",
+            "components": {
+                "renderer": {
+                    "model": "assets/models/pickup.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 6,
+            "locked": false,
+            "components": {
+                "renderer": {
+                    "model": "/home/d4nl/repos/cpp-bengine/commons/assets/models/cube.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        2.9394125938415527,
+                        -56.10905456542969,
+                        -120.77899932861328
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 100,
+            "locked": false,
+            "parent": 106,
+            "name": "PlayerCamera",
+            "components": {
+                "code": {
+                    "directory": "scripts/fpp_camera.lua"
+                },
+                "camera": {
+                    "fov": 75.0,
+                    "zfar": 200.0,
+                    "scale": 1.0,
+                    "ortho": false,
+                    "ceu": [
+                        109,
+                        198,
+                        219,
+                        255
+                    ],
+                    "skybox": false
+                },
+                "transform": {
+                    "position": [
+                        -4.76837158203125e-7,
+                        1.6500003337860107,
+                        -0.0000019073486328125
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.019787486642599106,
+                        0.0
+                    ],
+                    "scale": [
+                        0.9999999403953552,
+                        1.0,
+                        1.0
+                    ]
+                }
+            }
         },
         {
             "id": 101,
@@ -122,7 +265,17 @@
                                 1.0,
                                 1.0,
                                 1.0
-                            ]
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "project.bengine.preview.png",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
                         }
                     ],
                     "visible": true
@@ -167,7 +320,17 @@
                                 1.0,
                                 1.0,
                                 1.0
-                            ]
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
                         }
                     ],
                     "visible": true
@@ -203,16 +366,29 @@
             "locked": false,
             "name": "PickupOrb",
             "components": {
+                "code": {
+                    "directory": "scripts/fpp_game.lua"
+                },
                 "renderer": {
                     "model": "assets/models/pickup.obj",
                     "materials": [
                         {
                             "albedo": [
-                                0.6000000238418579,
-                                0.6000000238418579,
-                                0.6000000238418579,
+                                0.7202275395393372,
+                                0.7248945236206055,
+                                0.3759590685367584,
                                 1.0
-                            ]
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
                         }
                     ],
                     "visible": true
@@ -223,9 +399,6 @@
                     "mass": 1.0,
                     "friction": 0.5,
                     "restitution": 0.0
-                },
-                "code": {
-                    "directory": "scripts/fpp_game.lua"
                 },
                 "transform": {
                     "position": [
@@ -260,7 +433,17 @@
                                 1.0,
                                 1.0,
                                 1.0
-                            ]
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
                         }
                     ],
                     "visible": true
@@ -305,7 +488,17 @@
                                 1.0,
                                 1.0,
                                 1.0
-                            ]
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
                         }
                     ],
                     "visible": true
@@ -344,20 +537,6 @@
                 "code": {
                     "directory": "scripts/fpp_player.lua"
                 },
-                "renderer": {
-                    "model": "assets/models/capsule.obj",
-                    "materials": [
-                        {
-                            "albedo": [
-                                0.7200000286102295,
-                                0.7799999713897705,
-                                0.8600000143051147,
-                                1.0
-                            ]
-                        }
-                    ],
-                    "visible": true
-                },
                 "transform": {
                     "position": [
                         0.0,
@@ -365,9 +544,9 @@
                         5.0
                     ],
                     "rotation": [
-                        0.0,
-                        -90.0,
-                        0.0
+                        -178.77110290527344,
+                        58.87841796875,
+                        -178.47035217285156
                     ],
                     "scale": [
                         1.0,
