@@ -4,6 +4,7 @@
 #include "build_process.hpp"
 #include "project_persistence_system.hpp"
 #include "ui_persistence_system.hpp"
+#include "editor_context.hpp"
 
 #include <bgui.hpp>
 #include <lay/dock.hpp>
@@ -55,6 +56,7 @@ public:
     );
     void set_exit_callback(std::function<void()> callback);
     void confirm_exit();
+    void set_editor_context(std::shared_ptr<editor_context> context);
 
     template <typename T, typename... Args>
     T& add_panel(Args&&... args) {
@@ -69,6 +71,7 @@ public:
 
 private:
     bgui::dock& m_dock;
+    std::shared_ptr<editor_context> m_context;
     project_persistence_system& m_project_persistence;
     std::shared_ptr<commons::ecs> m_registry;
     std::string m_project_path;
@@ -116,6 +119,8 @@ private:
     );
     void create_new_project_modal();
     void create_exit_modal();
+    void open_preferences_modal();
+    void apply_layout(bool wide);
     void open_global_lighting_modal();
     void open_global_physics_modal();
     void create_global_lighting_modal();

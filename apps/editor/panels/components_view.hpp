@@ -9,6 +9,7 @@
 #include "components/transform.hpp"
 #include "components/physics.hpp"
 #include "util/pbr_material.hpp"
+#include "script_tools.hpp"
 
 #include <bgui.hpp>
 #include <elem/checkbox.hpp>
@@ -271,7 +272,7 @@ private:
                 [physics]() { return physics->m_massa; },
                 [physics](float mass) { physics->setMass(std::max(0.f, mass)); });
         }
-
+        add_script(id, registry->get<commons::code>(id));
     }
 
     std::string entity_name(const entity_id id) const {
@@ -667,6 +668,25 @@ private:
         clear.style.layout.require_size(22.f, 22.f);
         clear.get_label().set_enable(false);
         clear.add<bgui::icon>("close", 0.25f).receives_input(false);
+    }
+
+    void add_script(entity_id id, const std::shared_ptr<commons::code>& script) {
+        auto& section = add_section("Lua Script", static_cast<bool>(script),
+            [this, id]() { remove_component<commons::code>(id); });
+        auto& input = section.children().add<bgui::inputbox>(
+            script ? script->file : "", "Drop a Lua script or enter its path", 0.27f);
+        input.style.layout.require_width(bgui::mode::match_parent);
+        auto assign = [this, id](const std::filesystem::path& path) {
+            std::string error;
+            if (attach_lua_script(m_context, id, path, error)) refresh();
+            else m_edit_status->set_buffer(error);
+        };
+        input.m_enter_func = [assign](const std::string& path) { assign(path); };
+        m_asset_targets.push_back({&input, assign});
+        auto& hint = section.children().add<bgui::text>(
+            "Drop onto an entity in Scene or Hierarchy. Replacing a script supports Undo.", 0.25f);
+        hint.add_class("editor-muted");
+        hint.style.layout.require_width(bgui::mode::match_parent);
     }
 
     void add_camera(

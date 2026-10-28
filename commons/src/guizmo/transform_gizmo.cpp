@@ -256,8 +256,8 @@ bool editor::transform_gizmo::update(
     const auto position = target->get_world_position();
     if (!project(camera, viewport, position, m_center))
         return m_dragging;
-    if (m_center.x < viewport.x || m_center.x > viewport.x + viewport.z ||
-        m_center.y < viewport.y || m_center.y > viewport.y + viewport.w)
+    if (!m_dragging && (m_center.x < viewport.x || m_center.x > viewport.x + viewport.z ||
+        m_center.y < viewport.y || m_center.y > viewport.y + viewport.w))
         return m_dragging && left_down;
 
     const auto axis_vectors = oriented_axes(target->get_world_rotation());

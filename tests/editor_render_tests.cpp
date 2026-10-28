@@ -2,10 +2,12 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <bgui.hpp>
+#include <bgui_backend_freetype.hpp>
 #include <gtest/gtest.h>
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
 #include "project_persistence_system.hpp"
+#include "viewport_sync.hpp"
 #include <chrono>
 #include <filesystem>
 #include <array>
@@ -86,6 +88,23 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     std::filesystem::remove_all(folder);
 }
 
+TEST_F(EditorRenderTest, SmallInterfaceTextUsesAntialiasedMipmappedGlyphs) {
+    bgui::set_up_freetype();
+    struct cleanup { ~cleanup() { bgui::shutdown_freetype(); } } cleanup;
+    auto& font = bgui::ft_load_font("Editor quality regression",
+        (std::filesystem::path(COMMONS_ASSET_DIR) / "fonts/HackNerdFont-Regular.ttf").string(), 40);
+    EXPECT_TRUE(std::any_of(font.atlas.m_buffer.begin(), font.atlas.m_buffer.end(),
+        [](unsigned char coverage) { return coverage > 0 && coverage < 255; }))
+        << "FreeType must retain partial glyph coverage";
+    EXPECT_TRUE(font.atlas.m_generate_mipmap)
+        << "40px glyphs are displayed at about 11px and need minification filtering";
+    const auto id = bgui::gl3_get_texture(font.atlas);
+    glBindTexture(GL_TEXTURE_2D, id);
+    GLint level_width{};
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &level_width);
+    EXPECT_GT(level_width, 0);
+}
+
 TEST_F(EditorRenderTest, NeutralNormalMapPreservesLightingOnAHorizontalSurface) {
     glViewport(0, 0, 64, 64);
     glDisable(GL_DEPTH_TEST);
@@ -153,4 +172,58 @@ TEST_F(EditorRenderTest, NeutralNormalMapPreservesLightingOnAHorizontalSurface) 
     EXPECT_NEAR(roughness_mapped[0], untextured[0], 2)
         << "A white map must preserve the editable material roughness factor";
     glDeleteTextures(1, &normal);
+}
+
+TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextCameraPass) {
+    bgui::scoped_interface interface;
+    auto camera = std::make_shared<commons::camera>();
+    camera->viewport({32, 24});
+    camera->createFB();
+    auto& image = bgui::get_layout().add<bgui::image>();
+    editor::ui::viewport_sync_system sync(camera, image);
+    camera->ceu = {1.f, 0.f, 0.f, 1.f};
+    camera->drawFB();
+    for (const bgui::vec2i size : {bgui::vec2i{40, 30}, {63, 47}, {29, 17}}) {
+        image.set_final_rect(15, 20, size.x, size.y);
+        const auto rendered_size = camera->viewportFBO;
+        // UI mutation happens after the scene render. It must preserve that image.
+        sync.update({});
+        EXPECT_EQ(camera->viewportFBO, rendered_size);
+        glBindTexture(GL_TEXTURE_2D, camera->framebuffer_texture());
+        GLint storage_width{};
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &storage_width);
+        EXPECT_EQ(storage_width, rendered_size.x);
+        camera->drawFB();
+        EXPECT_EQ(camera->viewportFBO, size);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        bgui::draw_data draw;
+        image.get_requires(&draw);
+        ASSERT_EQ(draw.m_quad_requires.size(), 1u);
+        EXPECT_EQ(draw.m_quad_requires.front().m_material.m_texture.m_id,
+                  camera->framebuffer_texture());
+        std::vector<unsigned char> pixels(size.x * size.y * 3);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glBindTexture(GL_TEXTURE_2D, camera->framebuffer_texture());
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        for (std::size_t pixel = 0; pixel < pixels.size(); pixel += 3) {
+            ASSERT_EQ(pixels[pixel], 255);
+            ASSERT_EQ(pixels[pixel + 1], 0);
+            ASSERT_EQ(pixels[pixel + 2], 0);
+        }
+    }
+    const auto before = camera->viewportFBO;
+    image.set_final_rect(0, 0, 71, 53);
+    sync.update({});
+    image.set_final_rect(0, 0, before.x, before.y);
+    sync.update({});
+    camera->request_framebuffer_size({0, -1});
+    camera->drawFB();
+    EXPECT_EQ(camera->viewportFBO, before);
+    auto preview = std::make_shared<commons::camera>();
+    preview->request_framebuffer_size({19, 13});
+    EXPECT_FALSE(preview->flag_fb);
+    preview->drawFB();
+    EXPECT_TRUE(preview->flag_fb);
+    EXPECT_EQ(preview->viewportFBO, (bgui::vec2i{19, 13}));
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
 }

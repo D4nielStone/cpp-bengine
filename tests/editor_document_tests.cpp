@@ -46,6 +46,11 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
     auto* editor = find<editor::ui::lua_inputbox>(*first, [](auto&) { return true; });
     ASSERT_NE(editor, nullptr);
     EXPECT_EQ(find<bgui::button>(first->get_context(), [](auto&) { return true; }), nullptr);
+    EXPECT_EQ(editor->processed_x(), first->get_context().processed_x());
+    EXPECT_EQ(editor->processed_y(), first->get_context().processed_y());
+    EXPECT_EQ(editor->get_parent()->computed_style.layout.padding, bgui::vec4i{0});
+    EXPECT_EQ(editor->computed_style.layout.padding, bgui::vec4i{0});
+    EXPECT_EQ(editor->get_label().computed_style.layout.margin, bgui::vec4i{0});
 
     editor->set_buffer("changed");
     editor->set_focused(true);

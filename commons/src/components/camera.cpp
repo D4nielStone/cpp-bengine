@@ -16,7 +16,17 @@ bgui::vec3 normalized(const bgui::vec3& v) {
     return {v.x / length, v.y / length, v.z / length};
 }
 
+void camera::request_framebuffer_size(const bgui::vec2i& size) {
+    if (size.x > 0 && size.y > 0)
+        m_requested_framebuffer_size = size;
+}
+
 void camera::drawFB() {
+    if (m_requested_framebuffer_size.x > 0 && m_requested_framebuffer_size.y > 0) {
+        viewport(m_requested_framebuffer_size);
+        if (!flag_fb) createFB();
+        m_requested_framebuffer_size = {0, 0};
+    }
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
@@ -257,7 +267,10 @@ glm::mat4 camera::getViewMatrix() {
         return viewMatrix;
 
     position = m_transform->get_world_position();
-    const auto world_rotation = m_transform->get_world_rotation();
+    // Unparented cameras keep their continuous yaw/pitch convention. Matrix
+    // decomposition chooses equivalent Euler triples that flip beyond 90 degrees.
+    const auto world_rotation = m_transform->parent_id
+        ? m_transform->get_world_rotation() : m_transform->get_rotation();
 
     // Recalculate reference vectors
     bgui::vec3 frente = {

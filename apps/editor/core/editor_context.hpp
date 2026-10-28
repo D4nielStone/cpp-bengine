@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ecs.hpp"
+#include "editor_preferences.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -33,6 +34,7 @@ struct editor_context {
     std::optional<entity_id> selected_entity;
     std::optional<entity_id> editor_camera_entity;
     bool is_playing{false};
+    editor_preferences preferences;
     std::size_t history_revision{0};
     std::unordered_map<entity_id, std::string> entity_names;
     std::unordered_set<entity_id> hidden_entities;

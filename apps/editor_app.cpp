@@ -21,6 +21,7 @@
 #include "editor/systems/ui_persistence_system.hpp"
 #include "editor/systems/runtime_process.hpp"
 #include "editor/systems/undo_redo_shortcuts_system.hpp"
+#include "editor/systems/ui_scale_system.hpp"
 
 #include <lay/linear.hpp>
 #include <lay/dock.hpp>
@@ -277,6 +278,7 @@ int main(int argc, char** argv) {
 
     commons::window window("Bubble Engine - Editor", argc == 1 ? 980 : 1200, 600);
     window.add<commons::ui_system>();
+    bgui::get_layout().add<editor::ui::ui_scale_system>();
 
     if (argc == 1) {
         bgui::linear* manager_root = nullptr;
@@ -356,6 +358,7 @@ int main(int argc, char** argv) {
         project_path,
         locate_build_directory(argv[0])
     );
+    editor.set_editor_context(editor_context);
     editor.set_history_callbacks(
         [editor_context]() { editor_context->undo(); },
         [editor_context]() { editor_context->redo(); }
@@ -379,12 +382,34 @@ int main(int argc, char** argv) {
     auto& components_panel = editor.add_panel<editor::ui::components_view>(
         editor_context
     );
+    editor::ui::files_view* asset_browser = nullptr;
     auto& files_panel = editor.add_panel<editor::ui::files_view>(
         project_path,
-        [&scene, editor_context, &entities_panel, &components_panel](
+        [&scene, editor_context, &entities_panel, &components_panel, &asset_browser](
             const std::filesystem::path& asset,
             const bgui::vec2i& mouse_position
         ) {
+            if (editor_context->is_playing || editor::ui::viewport_input_blocked_by_modal()) return;
+            if (editor::ui::is_lua_script(asset)) {
+                auto target = entities_panel.entity_at(mouse_position);
+                if (!target && scene.is_open()) {
+                    if (editor::ui::viewport_contains_drop(&scene.image(), mouse_position)) {
+                        target = scene.entity_at(mouse_position);
+                        if (!target) target = editor_context->selected_entity;
+                    }
+                }
+                if (target) {
+                    std::string error;
+                    if (editor::ui::attach_lua_script(editor_context, *target, asset, error)) {
+                        editor_context->selected_entity = target;
+                        components_panel.refresh();
+                        if (asset_browser) asset_browser->set_asset_status("Script associado à entidade.");
+                    } else if (asset_browser) asset_browser->set_asset_status(error);
+                } else if (!components_panel.drop_asset(asset, mouse_position) && asset_browser) {
+                    asset_browser->set_asset_status("Solte sobre uma entidade, ou selecione uma antes de soltar na Scene.");
+                }
+                return;
+            }
             if (components_panel.drop_asset(asset, mouse_position))
                 return;
             if (!editor::ui::files_view::supports_model(asset))
@@ -392,11 +417,7 @@ int main(int argc, char** argv) {
             if (!scene.is_open())
                 return;
 
-            const auto viewport = scene.image().processed_rect();
-            if (mouse_position.x < viewport.x ||
-                mouse_position.x > viewport.x + viewport.z ||
-                mouse_position.y < viewport.y ||
-                mouse_position.y > viewport.y + viewport.w)
+            if (!editor::ui::viewport_contains_drop(&scene.image(), mouse_position))
                 return;
 
             auto model_path = asset.string();
@@ -420,6 +441,7 @@ int main(int argc, char** argv) {
             components_panel.refresh();
         }
     );
+    asset_browser = &files_panel;
     auto render_system = window.add<commons::render_system>();
     auto& runtime_tools_panel =
         editor.add_panel<editor::ui::runtime_tools_view>(

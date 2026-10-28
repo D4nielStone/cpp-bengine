@@ -70,6 +70,24 @@ target_include_directories(editor_interaction_tests PRIVATE
 )
 gtest_discover_tests(editor_interaction_tests)
 
+add_executable(editor_script_tests editor_script_tests.cpp)
+target_include_directories(editor_script_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+)
+target_link_libraries(editor_script_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editor_script_tests)
+
+add_executable(editor_asset_workflow_tests editor_asset_workflow_tests.cpp)
+target_include_directories(editor_asset_workflow_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+    ${CMAKE_SOURCE_DIR}/apps/editor/tools
+)
+target_link_libraries(editor_asset_workflow_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editor_asset_workflow_tests)
+
 add_executable(editor_render_tests
     editor_render_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
@@ -90,15 +108,30 @@ if(WIN32)
 endif()
 gtest_discover_tests(native_file_dialog_tests)
 
-add_executable(editor_persistence_transaction_tests
-    editor_persistence_transaction_tests.cpp
+add_executable(ui_scale_tests ui_scale_tests.cpp)
+target_include_directories(ui_scale_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(ui_scale_tests PRIVATE GTest::gtest_main bgui)
+gtest_discover_tests(ui_scale_tests)
+
+add_executable(editor_menu_tests
+    editor_menu_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels/editor_ui.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/ui_persistence_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/build_process.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/native_file_dialog.cpp
 )
-target_include_directories(editor_persistence_transaction_tests PRIVATE
+target_include_directories(editor_menu_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
-target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main commons)
-gtest_discover_tests(editor_persistence_transaction_tests)
+target_link_libraries(editor_menu_tests PRIVATE GTest::gtest_main commons bgui)
+if(WIN32)
+    target_link_libraries(editor_menu_tests PRIVATE ole32 shell32 uuid)
+endif()
+gtest_discover_tests(editor_menu_tests)
 
 add_executable(lua_api_tests lua_api_tests.cpp)
 target_link_libraries(lua_api_tests PRIVATE GTest::gtest_main commons)
@@ -121,3 +154,13 @@ target_include_directories(editor_document_tests PRIVATE
 )
 target_link_libraries(editor_document_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(editor_document_tests)
+
+add_executable(editor_persistence_transaction_tests
+    editor_persistence_transaction_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
+)
+target_include_directories(editor_persistence_transaction_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+)
+target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editor_persistence_transaction_tests)

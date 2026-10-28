@@ -1,6 +1,9 @@
 #include "editor_ui.hpp"
 #include "native_file_dialog.hpp"
 #include "project_creation_system.hpp"
+#include "ui_scale_system.hpp"
+
+#include <elem/checkbox.hpp>
 
 #include <components/directional_light.hpp>
 
@@ -107,6 +110,31 @@ public:
     }
 };
 
+class preferences_content final : public bgui::linear {
+public:
+    preferences_content() : bgui::linear(bgui::orientation::vertical) {
+        set_scrollable(true);
+    }
+
+    void on_update() override {
+        const auto viewport = bgui::get_context_size();
+        const float scale = bgui::get_global_scale();
+        const bgui::vec2 size{
+            std::clamp(viewport.x / scale - 64.f, 160.f, 420.f),
+            std::clamp(viewport.y / scale - 120.f, 80.f, 380.f)
+        };
+        if (size.x != m_size.x || size.y != m_size.y) {
+            style.layout.require_size(size.x, size.y);
+            mark_style_dirty();
+            m_size = size;
+        }
+        bgui::linear::on_update();
+    }
+
+private:
+    bgui::vec2 m_size{0.f, 0.f};
+};
+
 void report_result(
     const char* action,
     const bool success,
@@ -182,9 +210,13 @@ editor_ui::editor_ui(
     create_project_modal(m_project_path, "");
 
     menu_bar.add_menu(
-        "Files",
+        "File",
         0.3f,
-        [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
+        [this](bgui::context_menu& menu) {
+            menu.add_button("New Project...", [this]() {
+                create_new_project_modal();
+                m_new_project_modal->set_enable(true);
+            });
             menu.add_button("Save Project", [this]() {
                 std::string error;
                 const bool success = m_project_persistence.save(m_project_path, error);
@@ -198,16 +230,7 @@ editor_ui::editor_ui(
                     m_project_modal->set_enable(true);
             });
             menu.add_separator();
-            menu.add_button("Save UI", [ui_persistence_ptr]() {
-                std::string error;
-                const bool success = ui_persistence_ptr->save(ui_configuration_path, error);
-                report_result("Saving UI", success, error);
-            });
-            menu.add_button("Load UI", [ui_persistence_ptr]() {
-                std::string error;
-                const bool success = ui_persistence_ptr->load(ui_configuration_path, error);
-                report_result("Loading UI", success, error);
-            });
+            menu.add_button("Exit", [this]() { confirm_exit(); });
         }
     );
     menu_bar.add_menu(
@@ -235,9 +258,31 @@ editor_ui::editor_ui(
         }
     );
     menu_bar.add_menu(
+        "View", 0.3f,
+        [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
+            menu.add_button("Zoom In     Ctrl +", []() { change_ui_scale(1); });
+            menu.add_button("Zoom Out    Ctrl -", []() { change_ui_scale(-1); });
+            menu.add_button("Actual Size (100%)    Ctrl 0", []() { reset_ui_scale(); });
+            menu.add_separator();
+            menu.add_button("Layout: Standard", [this]() { apply_layout(false); });
+            menu.add_button("Layout: Wide Scene", [this]() { apply_layout(true); });
+            menu.add_button("Save Layout", [ui_persistence_ptr]() {
+                std::string error;
+                const bool success = ui_persistence_ptr->save(ui_configuration_path, error);
+                report_result("Saving UI", success, error);
+            });
+            menu.add_button("Load Layout", [ui_persistence_ptr]() {
+                std::string error;
+                const bool success = ui_persistence_ptr->load(ui_configuration_path, error);
+                report_result("Loading UI", success, error);
+            });
+        }
+    );
+    menu_bar.add_menu(
         "Settings",
         0.3f,
         [this](bgui::context_menu& menu) {
+            menu.add_button("Editor Preferences...", [this]() { open_preferences_modal(); });
             menu.add_button(
                 "Global Lighting",
                 [this]() { open_global_lighting_modal(); }
@@ -1149,11 +1194,100 @@ void editor_ui::set_runtime_pause_callback(
     m_runtime_pause_callback = std::move(callback);
 }
 
+void editor_ui::set_editor_context(std::shared_ptr<editor_context> context) {
+    m_context = std::move(context);
+}
+
+void editor_ui::apply_layout(bool wide) {
+    auto configuration = m_dock.get_configuration();
+    configuration.splits.clear();
+    configuration.tab_groups.clear();
+    configuration.left_ratio = wide ? .16f : .24f;
+    configuration.right_ratio = wide ? .18f : .24f;
+    configuration.bottom_ratio = wide ? .18f : .24f;
+    for (auto& window : configuration.windows) {
+        window.floating = false;
+        window.weight = 1.f;
+        if (window.title == "Scene")
+            window.area = bgui::dock_area::center;
+        else if (window.title == "Hierarchy")
+            window.area = bgui::dock_area::left;
+        else if (window.title == "Arquivos")
+            window.area = bgui::dock_area::bottom;
+        else if (window.title == "Inspector" || window.title == "Editor Diagnostics")
+            window.area = bgui::dock_area::right;
+    }
+    m_dock.apply_configuration(configuration);
+}
+
+void editor_ui::open_preferences_modal() {
+    if (!m_context)
+        return;
+    auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+    auto& content = modal.content().add<preferences_content>();
+    content.add<bgui::text>("Editor Preferences", .4f);
+    content.add<bgui::text>("Preferences apply to this editor session.", .26f);
+    auto& grid = content.add<bgui::checkbox>(
+        "Show scene grid", .3f, m_context->preferences.show_grid);
+    constexpr std::array labels{
+        "Movement speed (0.1 - 100)", "Sprint multiplier (1 - 10)",
+        "Mouse sensitivity (0.01 - 2)", "Zoom sensitivity (0.01 - 10)",
+        "Camera smoothing (0.1 - 100)"
+    };
+    const auto values = [](const editor_preferences& preferences) {
+        return std::array{preferences.movement_speed, preferences.sprint_multiplier,
+            preferences.mouse_sensitivity, preferences.zoom_sensitivity,
+            preferences.smoothing_speed};
+    };
+    std::array<bgui::inputbox*, 5> inputs{};
+    const auto current = values(m_context->preferences);
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        content.add<bgui::text>(labels[i], .28f);
+        inputs[i] = &content.add<bgui::inputbox>(format_number(current[i]), "", .3f);
+    }
+    auto& status = content.add<bgui::text>("", .27f);
+    content.add<bgui::button>("Reset Navigation", .3f, [inputs, values]() {
+        const auto defaults = values(editor_preferences{});
+        for (std::size_t i = 0; i < inputs.size(); ++i)
+            inputs[i]->set_buffer(format_number(defaults[i]));
+    });
+    content.add<bgui::button>("Apply", .3f,
+        [context = m_context, inputs, &grid, &status, &modal]() {
+            editor_preferences candidate;
+            candidate.show_grid = grid.checked();
+            const std::array fields{&candidate.movement_speed, &candidate.sprint_multiplier,
+                &candidate.mouse_sensitivity, &candidate.zoom_sensitivity,
+                &candidate.smoothing_speed};
+            for (std::size_t i = 0; i < inputs.size(); ++i) {
+                if (!parse_number(inputs[i]->get_buffer(), *fields[i])) {
+                    status.set_buffer("Enter a finite number in every field.");
+                    return;
+                }
+            }
+            if (!candidate.valid()) {
+                status.set_buffer("Use the range shown beside each setting.");
+                return;
+            }
+            context->preferences = candidate;
+            modal.set_enable(false);
+            bgui::add_function([parent = modal.get_parent(), pointer = &modal]() {
+                if (parent)
+                    parent->remove(pointer);
+            });
+        });
+    modal.set_confirmation_text("Cancel");
+}
+
 void editor_ui::set_exit_callback(std::function<void()> callback) {
     m_exit_callback = std::move(callback);
 }
 
 void editor_ui::confirm_exit() {
+    if (!m_project_persistence.has_unsaved_changes(m_project_path)) {
+        if (m_exit_callback)
+            m_exit_callback();
+        return;
+    }
     if (!m_exit_modal)
         create_exit_modal();
     else

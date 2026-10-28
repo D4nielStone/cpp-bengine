@@ -5,6 +5,7 @@
 */Dockerfile
 */Makefile
 */Makefile.in
+editor-recent-projects.cfg
 
 # Ignorar pastas de dependências e binários
 */editor

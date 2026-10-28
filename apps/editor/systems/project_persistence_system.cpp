@@ -30,6 +30,12 @@ namespace {
 
 using component_mask = commons::component::mask;
 
+std::string saved_state_key(const std::string& path) {
+    std::error_code error;
+    const auto absolute = std::filesystem::absolute(path, error);
+    return (error ? std::filesystem::path(path) : absolute).lexically_normal().string();
+}
+
 bool is_number(const rapidjson::Value& value) {
     return value.IsNumber();
 }
@@ -498,7 +504,54 @@ bool project_persistence_system::save(
     const std::string& path,
     std::string& error
 ) const {
+    std::string snapshot;
+    if (!serialize_project(path, error, true, snapshot))
+        return false;
+    m_saved_states[saved_state_key(path)] = {std::move(snapshot), m_scene_path};
+    return true;
+}
+
+bool project_persistence_system::has_unsaved_changes(const std::string& path) const {
+    const auto saved = m_saved_states.find(saved_state_key(path));
+    if (saved == m_saved_states.end())
+        return true;
+    std::string snapshot, error;
+    if (!serialize_project(path, error, false, snapshot))
+        return true;
+    rapidjson::Document current, previous;
+    current.Parse(snapshot.c_str());
+    previous.Parse(saved->second.snapshot.c_str());
+    return current.HasParseError() || previous.HasParseError() || current != previous;
+}
+
+bool project_persistence_system::serialize_project(
+    const std::string& path, std::string& error,
+    bool write_files, std::string& snapshot
+) const {
     error.clear();
+    snapshot = "[";
+    std::vector<project_files::document> pending_documents;
+    const auto emit = [&](const std::filesystem::path& target,
+                          const rapidjson::Document& document, const char* type) {
+        rapidjson::Document canonical;
+        canonical.CopyFrom(document, canonical.GetAllocator());
+        if (canonical.HasMember("entities")) {
+            auto& entities = canonical["entities"];
+            std::sort(entities.Begin(), entities.End(), [](const auto& a, const auto& b) {
+                return a["id"].GetUint() < b["id"].GetUint();
+            });
+        }
+        rapidjson::StringBuffer buffer;
+        rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+        canonical.Accept(writer);
+        if (snapshot.size() > 1)
+            snapshot += ',';
+        snapshot.append(buffer.GetString(), buffer.GetSize());
+        (void)type;
+        if (write_files)
+            pending_documents.push_back({target, std::string(buffer.GetString(), buffer.GetSize())});
+        return true;
+    };
     if (!m_registry) {
         error = "Cannot save a project without an ECS registry.";
         return false;
@@ -522,7 +575,10 @@ bool project_persistence_system::save(
     const bool writing_scene = is_scene_path(absolute_target);
     auto scene_target = absolute_target;
     if (!writing_scene) {
-        if (m_project_path == absolute_target && !m_scene_path.empty()) {
+        const auto saved = m_saved_states.find(absolute_target.string());
+        if (saved != m_saved_states.end()) {
+            scene_target = saved->second.scene_path;
+        } else if (m_project_path == absolute_target && !m_scene_path.empty()) {
             scene_target = m_scene_path;
         } else if (!m_asset_root.empty() &&
                    absolute_target.parent_path() == m_asset_root) {
@@ -691,14 +747,16 @@ bool project_persistence_system::save(
     }
 
     scene_document.AddMember("entities", entities, allocator);
-    std::vector<project_files::document> pending_documents{
-        {scene_target, project_files::encode(scene_document)}
-    };
+    if (!emit(scene_target, scene_document, "scene"))
+        return false;
 
     if (writing_scene) {
-        if (!project_files::save(absolute_target, pending_documents, error))
-            return false;
-        m_scene_path = absolute_target;
+        snapshot += ']';
+        if (write_files) {
+            if (!project_files::save(absolute_target, pending_documents, error))
+                return false;
+            m_scene_path = absolute_target;
+        }
         return true;
     }
 
@@ -734,12 +792,20 @@ bool project_persistence_system::save(
     );
     project_document.AddMember("scene", scene_path_value, project_allocator);
 
-    pending_documents.push_back({absolute_target, project_files::encode(project_document)});
-    if (!project_files::save(absolute_target, pending_documents, error))
+    if (!emit(
+            absolute_target,
+            project_document,
+            "project"
+        ))
         return false;
 
-    m_project_path = absolute_target;
-    m_scene_path = scene_target;
+    snapshot += ']';
+    if (write_files) {
+        if (!project_files::save(absolute_target, pending_documents, error))
+            return false;
+        m_project_path = absolute_target;
+        m_scene_path = scene_target;
+    }
     return true;
 }
 
@@ -879,6 +945,7 @@ bool project_persistence_system::load(
     entity_name_map staged_entity_names;
     entity_state_set staged_hidden_entities;
     entity_state_set staged_locked_entities;
+    std::unordered_map<std::uint32_t, commons::entity> staged_entities;
     for (const auto& entity_data : (*scene_data)["entities"].GetArray()) {
         const auto id = entity_data["id"].GetUint();
         if (id == m_editor_camera_id)
@@ -890,16 +957,50 @@ bool project_persistence_system::load(
             return false;
         }
 
-        auto entity = staged_registry->create(id);
         if (entity_data.HasMember("name") && entity_data["name"].IsString())
             staged_entity_names.emplace(id, entity_data["name"].GetString());
         if (entity_data.HasMember("locked") &&
             entity_data["locked"].GetBool()) {
             staged_locked_entities.insert(id);
         }
+        staged_entities.emplace(id, staged_registry->create(id));
+    }
+
+    // Build every local transform and parent link before loading scripts. Script
+    // setup callbacks can then safely read their own and their parent's pose.
+    for (const auto& entity_data : (*scene_data)["entities"].GetArray()) {
+        const auto id = entity_data["id"].GetUint();
+        if (id == m_editor_camera_id)
+            continue;
         const auto& components = entity_data["components"];
+        const auto transform_member = components.FindMember("transform");
+        auto& entity = staged_entities.at(id);
+        if (transform_member == components.MemberEnd() ||
+            !parse_component(
+                "transform",
+                transform_member->value,
+                *staged_registry,
+                entity,
+                project_directory
+            )) {
+            error = "Could not load transform on entity " + std::to_string(id) + ".";
+            return false;
+        }
+        if (entity_data.HasMember("parent"))
+            staged_registry->get<commons::transform>(id)->parent_id =
+                entity_data["parent"].GetUint();
+    }
+
+    for (const auto& entity_data : (*scene_data)["entities"].GetArray()) {
+        const auto id = entity_data["id"].GetUint();
+        if (id == m_editor_camera_id)
+            continue;
+        const auto& components = entity_data["components"];
+        auto& entity = staged_entities.at(id);
         for (auto component = components.MemberBegin(); component != components.MemberEnd(); ++component) {
             const std::string name(component->name.GetString(), component->name.GetStringLength());
+            if (name == "transform" || name == "code")
+                continue;
             if (!parse_component(
                     name,
                     component->value,
@@ -912,9 +1013,27 @@ bool project_persistence_system::load(
                 return false;
             }
         }
-        if (entity_data.HasMember("parent"))
-            staged_registry->get<commons::transform>(id)->parent_id =
-                entity_data["parent"].GetUint();
+    }
+
+    for (const auto& entity_data : (*scene_data)["entities"].GetArray()) {
+        const auto id = entity_data["id"].GetUint();
+        if (id == m_editor_camera_id)
+            continue;
+        const auto& components = entity_data["components"];
+        const auto code_member = components.FindMember("code");
+        if (code_member != components.MemberEnd()) {
+            auto& entity = staged_entities.at(id);
+            if (!parse_component(
+                    "code",
+                    code_member->value,
+                    *staged_registry,
+                    entity,
+                    project_directory
+                )) {
+                error = "Could not load code on entity " + std::to_string(id) + ".";
+                return false;
+            }
+        }
         const auto renderer = staged_registry->get<commons::renderer>(id);
         if (renderer && !renderer->visible)
             staged_hidden_entities.insert(id);
@@ -969,6 +1088,11 @@ bool project_persistence_system::load(
     m_project_path = staged_project_path;
     m_scene_path = staged_scene_path;
     m_global_gravity = staged_global_gravity;
+
+    std::string snapshot, snapshot_error;
+    m_saved_states.erase(saved_state_key(path));
+    if (serialize_project(path, snapshot_error, false, snapshot))
+        m_saved_states[saved_state_key(path)] = {std::move(snapshot), m_scene_path};
 
     return true;
 }

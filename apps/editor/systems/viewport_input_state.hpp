@@ -10,7 +10,7 @@ struct viewport_input_state {
 };
 
 inline bool viewport_camera_modifier() {
-    return bgui::get_pressed(bgui::input_key::space) &&
+    return bgui::get_pressed(bgui::input_key::left_control) &&
         !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus());
 }
 
@@ -51,6 +51,15 @@ inline bool mouse_over_viewport(const bgui::element* viewport) {
         mouse.y >= viewport->processed_y() &&
         mouse.x < viewport->processed_x() + viewport->processed_width() &&
         mouse.y < viewport->processed_y() + viewport->processed_height();
+}
+
+inline bool viewport_contains_drop(const bgui::element* viewport, const bgui::vec2i& point) {
+    if (!viewport || viewport_input_blocked_by_modal()) return false;
+    for (auto* element = viewport; element; element = element->get_parent())
+        if (!element->is_enabled()) return false;
+    const auto rect = viewport->processed_rect();
+    return point.x >= rect.x && point.x < rect.x + rect.z &&
+        point.y >= rect.y && point.y < rect.y + rect.w;
 }
 
 }

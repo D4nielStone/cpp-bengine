@@ -3,6 +3,8 @@
 #define GLFW_INCLUDE_NONE
 #include <bgui.hpp>
 #include "camera_movement.hpp"
+#include "guizmo/transform_gizmo.hpp"
+#include "guizmo_system.hpp"
 #include "components_view.hpp"
 #include "entities_view.hpp"
 
@@ -95,7 +97,7 @@ TEST_F(EditorInteractionTest, TrackpadPrimaryDragPanAndKeyboardNavigationUseLerp
     editor::ui::camera_movement_system movement(
         registry->get<commons::camera>(entity.id), image, {}, [&]() { return time; });
     movement.setup(registry);
-    io.m_input_map[bgui::input_key::space] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
     io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
     movement.update(registry);
     io.m_mouse_position.x += 40;
@@ -204,4 +206,90 @@ TEST_F(EditorInteractionTest, DeleteDoesNotRemoveAnEntityWhileEditingText) {
     EXPECT_FALSE(registry->is_alive(entity.id));
     ASSERT_TRUE(context->undo());
     EXPECT_TRUE(registry->is_alive(entity.id));
+}
+
+TEST_F(EditorInteractionTest, CameraModifierUsesOnlyLeftControlAndRespectsTextFocus) {
+    auto& io = bgui::get_context();
+    io.m_input_map[bgui::input_key::space] = bgui::input_action::press;
+    EXPECT_FALSE(editor::ui::viewport_camera_modifier());
+    io.m_input_map.clear();
+    io.m_input_map[bgui::input_key::right_control] = bgui::input_action::press;
+    EXPECT_FALSE(editor::ui::viewport_camera_modifier());
+    io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
+    EXPECT_TRUE(editor::ui::viewport_camera_modifier());
+    std::string text;
+    auto& input = bgui::get_layout().add<bgui::inputbox>(text);
+    bgui::focus_keyboard(input);
+    EXPECT_FALSE(editor::ui::viewport_camera_modifier());
+}
+
+TEST_F(EditorInteractionTest, CameraForwardRemainsContinuousAcrossYawNinetyDegrees) {
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    auto transform = registry->get<commons::transform>(entity.id);
+    for (float yaw : {89.f, 91.f, 179.f, 181.f, 269.f, 271.f, 359.f, 361.f}) {
+        transform->set_rotation({20.f, yaw, 0.f});
+        camera->getViewMatrix();
+        EXPECT_NEAR(camera->forward.x, std::cos(glm::radians(yaw)) * std::cos(glm::radians(20.f)), 0.0001f);
+        EXPECT_NEAR(camera->forward.y, std::sin(glm::radians(20.f)), 0.0001f);
+        EXPECT_NEAR(camera->forward.z, std::sin(glm::radians(yaw)) * std::cos(glm::radians(20.f)), 0.0001f);
+    }
+}
+
+TEST_F(EditorInteractionTest, GizmoContinuesWhenItsCenterLeavesViewport) {
+    commons::camera camera;
+    camera.projMatriz = glm::mat4(1.f);
+    camera.viewMatrix = glm::mat4(1.f);
+    commons::transform target;
+    editor::transform_gizmo gizmo;
+    const bgui::vec4i viewport{0, 0, 400, 400};
+    ASSERT_TRUE(gizmo.update(camera, &target, viewport, {viewport}, {240, 200}, {}, true, true, true));
+    gizmo.update(camera, &target, viewport, {viewport}, {600, 200}, {360, 0}, false, false, true);
+    const auto outside = target.get_position();
+    ASSERT_GT(outside.x, 1.f);
+    gizmo.update(camera, &target, viewport, {viewport}, {620, 200}, {20, 0}, false, false, true);
+    EXPECT_GT(target.get_position().x, outside.x);
+    gizmo.update(camera, &target, viewport, {viewport}, {620, 200}, {}, false, false, false);
+    EXPECT_FALSE(gizmo.is_dragging());
+}
+
+TEST_F(EditorInteractionTest, GizmoDragKeepsCaptureOutsideSceneWindow) {
+    auto& window = bgui::get_layout().add<bgui::window>("Viewport", true);
+    window.style.layout.require_size(500.f, 400.f);
+    auto& image = window.add<bgui::image>();
+    image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    image.receives_input(true);
+    bgui::on_update();
+    auto entity = registry->create();
+    registry->add<commons::transform>(entity);
+    context->selected_entity = entity.id;
+    context->preferences.show_grid = false;
+    auto camera = std::make_shared<commons::camera>();
+    camera->projMatriz = glm::mat4(1.f);
+    camera->viewMatrix = glm::mat4(1.f);
+    auto state = std::make_shared<editor::ui::viewport_input_state>();
+    editor::ui::guizmo_system overlay(camera, image, context, state, {});
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {image.processed_x() + image.processed_width() / 2 + 40,
+                           image.processed_y() + image.processed_height() / 2};
+    bgui::on_update();
+    bgui::draw_data draw;
+    overlay.get_requires(&draw);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    overlay.get_requires(&draw);
+    ASSERT_TRUE(state->gizmo_active);
+    auto transform = registry->get<commons::transform>(entity.id);
+    io.m_mouse_position.x = 850;
+    bgui::on_update();
+    ASSERT_FALSE(editor::ui::viewport_owns_mouse(&image));
+    overlay.get_requires(&draw);
+    EXPECT_TRUE(state->gizmo_active);
+    EXPECT_GT(transform->get_position().x, 0.f);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    overlay.get_requires(&draw);
+    EXPECT_FALSE(state->gizmo_active);
+    EXPECT_FALSE(context->undo_stack.empty());
+    context->undo();
+    EXPECT_EQ(transform->get_position(), (bgui::vec3{0.f, 0.f, 0.f}));
 }

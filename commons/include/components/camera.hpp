@@ -58,6 +58,11 @@ namespace COMMONS_NS {
 		void createFB();
 		void deleteFB();
         unsigned int framebuffer_texture() const { return texture; }
+        // Apply UI resize requests when the next camera render starts.
+        void request_framebuffer_size(const bgui::vec2i& size);
+    private:
+        bgui::vec2i m_requested_framebuffer_size{0, 0};
+    public:
 		glm::mat4 getViewMatrix();
 		void viewport(const bgui::vec2i& viewp);
 

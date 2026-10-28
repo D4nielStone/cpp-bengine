@@ -27,6 +27,7 @@ public:
 
     bgui::image& image();
     bool is_open() const noexcept;
+    std::optional<editor_context::entity_id> entity_at(const bgui::vec2i& position) const;
     std::shared_ptr<viewport_input_state> input_state() const noexcept;
 
 private:

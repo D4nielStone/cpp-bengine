@@ -32,8 +32,16 @@ public:
 
     bool save(const std::string& path, std::string& error) const;
     bool load(const std::string& path, std::string& error) const;
+    bool has_unsaved_changes(const std::string& path) const;
 
 private:
+    bool serialize_project(const std::string& path, std::string& error,
+        bool write_files, std::string& snapshot) const;
+    struct saved_state {
+        std::string snapshot;
+        std::filesystem::path scene_path;
+    };
+    mutable std::unordered_map<std::string, saved_state> m_saved_states;
     std::shared_ptr<commons::ecs> m_registry;
     std::uint32_t m_editor_camera_id;
     entity_name_map* m_entity_names;

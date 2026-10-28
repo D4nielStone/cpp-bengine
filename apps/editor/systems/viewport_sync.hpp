@@ -29,10 +29,9 @@ namespace editor::ui {
             if (width <= 0 || height <= 0)
                 return;
 
+            m_camera->request_framebuffer_size({width, height});
             if (m_camera->viewportFBO.x != width ||
                 m_camera->viewportFBO.y != height) {
-                m_camera->viewport({width, height});
-
                 m_image->set_external_texture(
                     m_camera->framebuffer_texture(),
                     bgui::vec2{

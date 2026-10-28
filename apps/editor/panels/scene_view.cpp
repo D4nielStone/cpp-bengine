@@ -35,8 +35,8 @@ public:
 class navigation_hint final : public bgui::text {
 public:
     explicit navigation_hint(std::shared_ptr<scene_view_state> state)
-        : bgui::text("Space + drag: look    Shift + Space + drag: pan\n"
-                     "Scroll: dolly    Space + WASD / QE: move", 0.25f),
+        : bgui::text("Left Ctrl + drag: look    Shift + Left Ctrl + drag: pan\n"
+                     "Scroll: dolly    Left Ctrl + WASD / QE: move", 0.25f),
           m_state(std::move(state)) {
         receives_input(false);
         set_flex(false);
@@ -87,14 +87,8 @@ public:
         const int preview_width = std::max(1, static_cast<int>(240 * ui_scale * scale));
         const int preview_height = std::max(1, static_cast<int>(150 * ui_scale * scale));
         auto& camera = m_state->main_runtime_camera;
-        if (!camera->flag_fb) {
-            camera->createFB();
-            camera->viewport({preview_width, preview_height});
-        } else if (camera->viewportFBO.x != preview_width ||
-                   camera->viewportFBO.y != preview_height) {
-            camera->viewport({preview_width, preview_height});
-        }
-        if (camera->framebuffer_texture() == 0) {
+        camera->request_framebuffer_size({preview_width, preview_height});
+        if (!camera->flag_fb || camera->framebuffer_texture() == 0) {
             m_frame->set_enable(false);
             return;
         }
@@ -158,9 +152,10 @@ public:
           m_entity_picking(
               std::move(camera),
               *state->image,
-              std::move(context),
+              context,
               std::move(input_state)
-          ) {
+          ),
+          m_context(std::move(context)) {
         set_flex(false);
         // This overlay spans the scene window. It acts as the scene viewport's
         // input hit target so hit testing can consume input without hiding the
@@ -173,6 +168,12 @@ public:
 
     void on_update() override {
         m_viewport_sync.update(m_registry);
+        const auto& preferences = m_context->preferences;
+        m_camera_movement.set_movement_speed(preferences.movement_speed);
+        m_camera_movement.set_sprint_multiplier(preferences.sprint_multiplier);
+        m_camera_movement.set_mouse_sensitivity(preferences.mouse_sensitivity);
+        m_camera_movement.set_zoom_sensitivity(preferences.zoom_sensitivity);
+        m_camera_movement.set_smoothing_speed(preferences.smoothing_speed);
         m_camera_movement.update(m_registry);
         m_entity_picking.update(m_registry);
     }
@@ -182,6 +183,7 @@ private:
     viewport_sync_system m_viewport_sync;
     camera_movement_system m_camera_movement;
     entity_picking_system m_entity_picking;
+    std::shared_ptr<editor_context> m_context;
 };
 
 }
@@ -199,6 +201,11 @@ scene_view::scene_view(
       m_state(std::make_shared<scene_view_state>()) {
     if (!m_camera)
         throw std::invalid_argument("scene_view requires a camera");
+}
+
+std::optional<editor_context::entity_id> scene_view::entity_at(const bgui::vec2i& position) const {
+    if (!is_open()) return std::nullopt;
+    return entity_picking_system(m_camera, *m_state->image, m_context, m_input_state).pick_at(position);
 }
 
 void scene_view::build(bgui::dock& dock) {

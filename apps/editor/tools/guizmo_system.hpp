@@ -295,10 +295,8 @@ public:
 
         const auto visible_regions = visible_viewport_regions(viewport);
 
-        m_grid_gizmo.draw(
-            *m_camera,
-            viewport
-        );
+        if (m_context->preferences.show_grid)
+            m_grid_gizmo.draw(*m_camera, viewport);
 
         if (m_camera_preview) {
             m_camera_preview->viewport = viewport;
@@ -390,7 +388,7 @@ public:
                 mouse_delta,
                 mouse_over_view,
                 left_just_pressed && mouse_over_view,
-                left_down && viewport_owns_mouse(m_image)
+                left_down && (was_dragging || viewport_owns_mouse(m_image))
             );
             const bool is_dragging = m_guizmo.is_dragging();
             if (!was_dragging && is_dragging && m_context->selected_entity) {

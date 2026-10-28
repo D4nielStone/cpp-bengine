@@ -34,6 +34,8 @@ public:
         : bgui::linear(bgui::orientation::vertical) {}
 
     std::function<void()> before_update;
+    std::shared_ptr<bool> alive;
+    ~entities_refreshing_layout() override { if (alive) *alive = false; }
 
     void on_update() override {
         if (before_update)
@@ -78,6 +80,7 @@ private:
     name_provider m_get_name;
 
     detail::entities_refreshing_layout* m_root{nullptr};
+    std::shared_ptr<bool> m_surface_alive = std::make_shared<bool>(false);
     bgui::linear* m_toolbar{nullptr};
     bgui::inputbox* m_filter{nullptr};
     bgui::linear* m_list{nullptr};
@@ -595,6 +598,8 @@ public:
         auto& window_context = window.get_context();
         window_context.set_scrollable(false);
         m_root = &window_context.add<detail::entities_refreshing_layout>();
+        *m_surface_alive = true;
+        m_root->alive = m_surface_alive;
         m_root->style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::match_parent
@@ -676,7 +681,7 @@ public:
     }
 
     void update() override {
-        if (!m_root || !m_filter || !m_list)
+        if (!*m_surface_alive || !m_root || !m_filter || !m_list)
             return;
 
         const bool delete_down = bgui::get_pressed(bgui::input_key::delete_key);
@@ -751,11 +756,29 @@ public:
     }
 
     void refresh() {
+        if (!*m_surface_alive) return;
         refresh(collect_entries());
     }
 
     std::optional<entity_id> selected() const {
         return m_context ? m_context->selected_entity : std::nullopt;
+    }
+
+    std::optional<entity_id> entity_at(const bgui::vec2i& position) const {
+        if (!*m_surface_alive || !m_root) return std::nullopt;
+        const auto contains = [position](const bgui::element& element) {
+            const auto rect = element.processed_rect();
+            return position.x >= rect.x && position.x < rect.x + rect.z &&
+                position.y >= rect.y && position.y < rect.y + rect.w;
+        };
+        if (!contains(*m_root)) return std::nullopt;
+        for (const auto& row : m_rows) {
+            bool enabled = true;
+            for (auto* parent = row.target; parent; parent = parent->get_parent())
+                enabled = enabled && parent->is_enabled();
+            if (enabled && row.target && contains(*row.target)) return row.id;
+        }
+        return std::nullopt;
     }
 
     bgui::linear* root() const noexcept {

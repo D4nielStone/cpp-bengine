@@ -68,7 +68,13 @@ public:
         if (!pick_position)
             return;
 
-        const auto mouse = *pick_position;
+        m_context->selected_entity = pick_at(*pick_position);
+    }
+
+    std::optional<editor_context::entity_id> pick_at(const bgui::vec2i& mouse) const {
+        const auto registry = m_context ? m_context->registry : nullptr;
+        if (!m_camera || !m_image || !registry)
+            return std::nullopt;
         const int x = m_image->processed_x();
         const int y = m_image->processed_y();
         const int width = m_image->processed_width();
@@ -77,7 +83,7 @@ public:
         if (width <= 0 || height <= 0 ||
             mouse.x < x || mouse.x >= x + width ||
             mouse.y < y || mouse.y >= y + height) {
-            return;
+            return std::nullopt;
         }
 
         m_camera->getViewMatrix();
@@ -147,7 +153,7 @@ public:
             }
         );
 
-        m_context->selected_entity = hit_entity;
+        return hit_entity;
     }
 
 private:

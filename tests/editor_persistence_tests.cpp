@@ -138,6 +138,87 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     remove_project_files(path);
 }
 
+TEST(ProjectPersistenceTest, TracksSavedStateAcrossEditsUndoLoadsAndTemporaryExports) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    auto entity = registry->create();
+    registry->add<commons::transform>(entity);
+    editor::ui::project_persistence_system::entity_name_map names{{entity.id, "Original"}};
+    editor::ui::project_persistence_system::entity_state_set locked;
+    editor::ui::project_persistence_system persistence(registry, camera.id, &names, nullptr, &locked);
+    const auto path = temporary_project_path();
+    const auto exported = temporary_project_path();
+    std::string error;
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    const auto saved_contents = read_file(path);
+    editor::ui::project_persistence_system reloaded(registry, camera.id, &names, nullptr, &locked);
+    ASSERT_TRUE(reloaded.load(path.string(), error)) << error;
+    EXPECT_FALSE(reloaded.has_unsaved_changes(path.string()));
+    names[entity.id] = "Changed";
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    names[entity.id] = "Original";
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    locked.insert(entity.id);
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    locked.clear();
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    persistence.set_global_gravity({1.f, 2.f, 3.f});
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    persistence.set_global_gravity({0.f, -9.8f, 0.f});
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    registry->get<commons::transform>(entity.id)->set_position({1.f, 2.f, 3.f});
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    ASSERT_TRUE(persistence.save(exported.string(), error)) << error;
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    EXPECT_FALSE(persistence.save((path / "missing.bengine").string(), error));
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    EXPECT_EQ(read_file(path), saved_contents);
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    auto added = registry->create();
+    registry->add<commons::transform>(added);
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    registry->remove(added.id);
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    remove_project_files(path);
+    remove_project_files(exported);
+}
+
+TEST(ProjectPersistenceTest, TemporaryExportPreservesCustomSceneSavedState) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    const auto path = temporary_project_path();
+    const auto export_directory = temporary_project_path();
+    std::filesystem::create_directory(export_directory);
+    const auto exported = export_directory / "runtime.bengine";
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    const auto original_scene = scene_file_for_project(path);
+    auto custom_scene = original_scene;
+    custom_scene.replace_filename(original_scene.stem().string() + "-custom.scene");
+    std::filesystem::rename(original_scene, custom_scene);
+    auto contents = read_file(path);
+    const auto position = contents.find(original_scene.filename().string());
+    ASSERT_NE(position, std::string::npos);
+    contents.replace(position, original_scene.filename().string().size(), custom_scene.filename().string());
+    { std::ofstream output(path); output << contents; }
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    ASSERT_TRUE(persistence.save(exported.string(), error)) << error;
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    EXPECT_EQ(scene_file_for_project(path), custom_scene);
+    EXPECT_FALSE(persistence.has_unsaved_changes(path.string()));
+    remove_project_files(path);
+    remove_project_files(exported);
+    std::filesystem::remove_all(export_directory);
+}
+
 TEST(ProjectPreviewTest, UsesAProjectSpecificPreviewFilePath) {
     const auto project = std::filesystem::path("projects/sample.bengine");
     EXPECT_EQ(

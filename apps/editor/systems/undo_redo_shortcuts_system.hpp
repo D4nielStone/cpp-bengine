@@ -3,6 +3,8 @@
 #include "editor_context.hpp"
 
 #include <os/os.hpp>
+#include <bgui.hpp>
+#include <elem/inputbox.hpp>
 
 #include <memory>
 #include <utility>
@@ -31,13 +33,14 @@ public:
             bgui::get_pressed(bgui::input_key::left_shift) ||
             bgui::get_pressed(bgui::input_key::right_shift);
 
-        if (m_context && z_down && !m_z_was_down) {
+        const bool editing_text = dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) != nullptr;
+        if (!editing_text && m_context && z_down && !m_z_was_down) {
             if (shift_down)
                 m_context->redo();
             else
                 m_context->undo();
         }
-        if (m_context && y_down && !m_y_was_down)
+        if (!editing_text && m_context && y_down && !m_y_was_down)
             m_context->redo();
 
         m_z_was_down = z_down;

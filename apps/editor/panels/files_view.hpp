@@ -1,6 +1,7 @@
 #pragma once
 
 #include "panel.hpp"
+#include "../systems/script_tools.hpp"
 #include "lua_inputbox.hpp"
 
 #include <bgui.hpp>
@@ -125,6 +126,11 @@ public:
         request_refresh();
     }
 
+    void set_asset_status(std::string message) {
+        m_asset_status = std::move(message);
+        request_refresh();
+    }
+
 private:
     class frame_layout final : public bgui::linear {
     public:
@@ -180,6 +186,8 @@ private:
 
     std::filesystem::path m_project_root;
     drop_callback m_on_drop;
+    std::string m_asset_status;
+    std::string m_new_script_name{"NewScript.lua"};
     std::filesystem::path m_current_directory;
     std::filesystem::path m_selected_file;
     std::filesystem::path m_main_scene;
@@ -239,7 +247,12 @@ private:
         auto& root = m_document_window->add<frame_layout>(bgui::orientation::vertical);
         root.after_update = [this]() { update_document_editor(); };
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-        root.style.layout.padding = bgui::vec4i{5};
+        root.style.layout.padding = bgui::vec4i{0};
+        m_document_window->get_context().style.layout.padding = bgui::vec4i{0};
+        m_document_body = &root.add<bgui::linear>(bgui::orientation::vertical);
+        m_document_body->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+        m_document_body->style.layout.padding = bgui::vec4i{0};
+        m_document_body->set_scrollable(true);
         auto& status_row = root.add<bgui::linear>(bgui::orientation::horizontal);
         status_row.style.layout.require_mode(
             bgui::mode::match_parent,
@@ -255,10 +268,7 @@ private:
             bgui::alignment::end,
             bgui::alignment::center
         };
-        m_document_body = &root.add<bgui::linear>(bgui::orientation::vertical);
-        m_document_body->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
-        m_document_body->style.layout.padding = bgui::vec4i{6};
-        m_document_body->set_scrollable(true);
+
     }
 
     void open_document(const std::filesystem::path& path) {
@@ -333,6 +343,8 @@ private:
                 doc.editor = &m_document_body->add<bgui::inputbox>(
                     doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
             doc.editor->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+            doc.editor->style.layout.padding = bgui::vec4i{0};
+            doc.editor->get_label().style.layout.margin = bgui::vec4i{0};
             doc.editor->set_wrap(false);
             doc.editor->set_editor_guides_enabled(false);
             doc.editor->set_scrollable(true);
@@ -770,6 +782,27 @@ private:
         configure_label(path_label);
         path_label.add_class("editor-header");
 
+        auto& create_row = m_file_area->add<bgui::linear>(bgui::orientation::horizontal);
+        create_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        auto& filename = create_row.add<bgui::inputbox>(m_new_script_name, "Script.lua", 0.27f);
+        filename.add_class("new-script-name");
+        filename.style.layout.require_width(bgui::mode::stretch);
+        auto create = [this, input = &filename]() {
+            m_new_script_name = input->get_buffer();
+            std::filesystem::path created;
+            std::string error;
+            if (create_lua_script(m_current_directory, m_new_script_name, created, error)) {
+                m_selected_file = created;
+                m_asset_status = "Script criado. Arraste-o para uma entidade na Scene.";
+                open_document(created);
+            } else m_asset_status = error;
+            request_refresh();
+        };
+        filename.m_enter_func = [create](const std::string&) { create(); };
+        filename.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
+        create_row.add<bgui::button>("Novo script Lua", 0.27f, create).add_class("new-script-button");
+        if (!m_asset_status.empty()) add_message(m_asset_status);
+
         if (!m_selected_file.empty() && is_scene_file(m_selected_file)) {
             auto& action = m_file_area->add<bgui::button>(
                 m_selected_file == m_main_scene
@@ -820,7 +853,7 @@ private:
                     open_document(file);
                     request_refresh();
                 },
-                (is_model_file(file) || is_image_file(file))
+                (is_model_file(file) || is_image_file(file) || is_lua_script(file))
                     ? [this, file](const bgui::vec2i& position) {
                           if (m_on_drop)
                               m_on_drop(file, position);

@@ -23,6 +23,17 @@ Validation: clean build of editor/runtime and all 39/39 CTest entries passed via
 
 Validation: a clean editor/runtime build from an isolated snapshot completed in `/tmp/cpp-bengine-ui-phase2-isolated-build`. All 46/46 CTest entries passed, including actual OpenGL texture/normal-map rendering and the rounded-image regression, with no display skips. The added white-map regression first failed (roughness pixel 255 instead of 124); metallic/roughness/AO maps now multiply their editable factors and roughness has a safe minimum. Logs: `/tmp/cpp-bengine-phase2-isolated-final.log` (reproduction) and `/tmp/cpp-bengine-phase2-isolated-tests-final.log` (final suite). Physical trackpad feel, final aesthetic review and Windows remain unvalidated. The pre-existing missing-return warning in `get_repository_root` remains outside this phase. Unrelated local native-dialog, persistence-load, preferences, Lua and FPP edits are preserved.
 
+## UI polish — phase 3: scripts and text editing
+
+| Item | Status and evidence | Change and tests | Validation limits / review |
+|---|---|---|---|
+| Creating and attaching scripts | CONFIRMED: Files had no creation action and only models/images were draggable | Added a Lua template action in the current folder; existing files and traversal names are rejected. Lua drops target geometry in Scene, the selected entity over empty Scene, Hierarchy rows or the Inspector script field. Syntax is checked without running user code; attachment/replacement/removal supports Undo. Script paths inside the project remain relative. `EditorScriptTest` covers creation, preservation, syntax rejection, locks and history. Workflow tests exercise the actual creation button, Lua file drag and geometry hit testing. | The existing one-script-per-entity component model is preserved. Drop over empty Scene requires a selected entity; the UI explains this. Physical mouse/trackpad interaction remains unvalidated. |
+| Dirty marker and Ctrl+S | CONFIRMED: `EditorAssetWorkflowTest.CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiLoop` failed because the file panel update was never invoked by the actual UI loop | Browser and document layouts now update after their children, including while another dock tab is active. Shortcut edge state is recorded before saving to prevent recursive saves. Per-file dock windows and title synchronization retain buffers and show the dirty marker in the dock tab; the overlapping text-editor work is preserved. | Automated tests exercise the UI update loop and inspect file contents. Markdown keeps its existing preview behavior. Native desktop review remains pending. |
+| Text Undo affects scene history | CONFIRMED: `EditorAssetWorkflowTest.TextUndoDoesNotConsumeSceneHistory` consumed the scene action while an inputbox had keyboard focus | Scene Undo/Redo shortcuts now leave focused text editors to handle their own history. | Inputbox subclasses, including the Lua editor, are covered by the focus check. |
+| Pixelated small text | PARTIAL: FreeType already retains antialiased coverage and the UI enables antialiasing; the 40px atlas explicitly disabled mipmaps despite rendering text around 11px | Enabled font-atlas mipmaps so the existing OpenGL sampler can filter reduction. `EditorRenderTest.SmallInterfaceTextUsesAntialiasedMipmappedGlyphs` first failed for both the atlas flag and missing GPU mip level; it now passes and also verifies partial glyph coverage. | This confirms and fixes the minification path; final perceived sharpness across display scales and other GPU drivers remains a visual review item. No font API or rendering architecture was replaced. |
+
+Validation in progress: clean editor/runtime build and full tests in `/home/d4nl/.cache/cpp-bengine-ui-phase3-build`. Directed script, workflow and font tests have passed; scene/text Undo was reproduced separately before its fix. Other local project, native-dialog, preferences, Lua API/autocomplete and BGUI audit changes remain preserved.
+
 ## Project manager startup
 
 | Check | Status | Evidence | Notes |
@@ -157,6 +168,16 @@ Validation for this change (2026-10-27):
 
 Validation: configured a fresh `/tmp/cpp-bengine-native-dialog` build using the existing local GoogleTest source, then ran `bash scripts/build.sh /tmp/cpp-bengine-native-dialog --test`. Editor and runtime compiled. The complete build was blocked by unresolved BGUI symbols in the pre-existing local `editor_render_tests` target. Running CTest separately yielded 46 passed, one failed (`ProjectPersistenceTest.SavesRendererMaterialVisibilityAndLockState`: missing `pbr.metallic`) and one not run (`editor_render_tests_NOT_BUILT`), out of 48 entries. Those persistence/render test files were already locally modified before this change and were preserved. The five new native-dialog tests passed. Full green validation remains blocked by those unrelated failures; no stabilization diagnostic fixes were attempted in this phase.
 
+## Menubar and interface zoom (2026-10-27)
+
+| Item | Status and evidence | Changes and tests | Validation limits / review |
+|---|---|---|---|
+| Interface zoom shortcuts | CONFIRMADO: BGUI already exposed `get_global_scale`/`set_global_scale`, but its keyboard enum and GLFW mapping lacked `=`, `-`, `0` and keypad equivalents. | Added editor-only `ui_scale_system`, including the startup project manager. Ctrl+= / Ctrl+Shift+= / Ctrl+keypad-plus increase scale; Ctrl+- / Ctrl+keypad-minus decrease it; Ctrl+0 resets it. Steps are 10 percentage points, clamped to 50–200%, once per physical press. Five `UiScaleTest` cases cover modifiers, repeat suppression, keypad, reset, limits and pixel-element reflow. | The BGUI enum is extended at the end, preserving existing key values. Native keyboard delivery and visual rendering require desktop validation. Scale is session-only. |
+| View and File menus | CONFIRMADO: existing menu actions were limited to project/UI persistence, build, undo/redo, lighting and physics. | Added View zoom actions, Standard/Wide Scene layout presets and moved existing UI persistence into Save/Load Layout. File exposes existing New Project and exit confirmation flows. `EditorMenuTest` exercises zoom menu actions and preset region/ratio changes. | Layout presets rearrange existing panels; they do not recreate closed panels. Existing project creation, saving and build implementations are reused. |
+| Editor Preferences | CONFIRMADO: camera navigation values were private defaults and the scene grid was drawn unconditionally. | Added session preferences for grid visibility, movement speed, sprint multiplier, mouse sensitivity, scroll zoom sensitivity and smoothing. The Scene applies navigation settings on every update; gizmo drawing reads the grid toggle. Apply validates all fields atomically; Cancel leaves values unchanged; Reset Navigation restores defaults in the form. The modal body scrolls and adapts to viewport size and UI scale. `EditorMenuTest` covers application, invalid input, correction, cancellation and reset; `EditorPreferencesTest` checks each numeric range and finite-value requirement. | Preferences are session-only and do not change the project file format or public engine API. Visual grid and camera feel remain pending interactive verification. No P0/P1/P2 diagnosis fixes are part of this change. |
+
+Validation: configured a fresh build with `cmake -S . -B /tmp/cpp-bengine-menubar -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/repos/cpp-bengine/out/_deps/googletest-src`, following the options in `scripts/build.sh` and CI while reusing the available GoogleTest source. The full build and the final incremental build after the last edits both succeeded with `cmake --build /tmp/cpp-bengine-menubar --parallel 2`, including editor and runtime. `ctest --test-dir /tmp/cpp-bengine-menubar --output-on-failure` passed all 62 CTest entries, including the 11 new zoom/menu/preferences cases. Logs are `/tmp/cpp-bengine-menubar-build-final.log` and `/tmp/cpp-bengine-menubar-ctest.log`. Interactive rendering, physical keyboard/layout delivery and Windows execution were not validated. Existing unrelated local work, including staged files and nested BGUI/backend edits, was preserved. No commit was created because these edits overlap files with staged work and concurrent changes belonging to other in-progress work; committing whole files would include that work.
+
 ## Auditoria BGUI: estrutura, bugs e desempenho (2026-10-27)
 
 | Item | Status e evidência | Correção e testes | Limites e riscos para revisão |
@@ -169,6 +190,27 @@ Validation: configured a fresh `/tmp/cpp-bengine-native-dialog` build using the 
 Validação: configuração nova em `/tmp/cpp-bengine-bgui-audit`, com `BUILD_TESTING`, `BUILD_EDITOR` e `BUILD_RUNTIME` habilitados, reutilizando o GoogleTest local via `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`. Build completa a partir dessa pasta nova concluída, seguida por `bash scripts/build.sh /tmp/cpp-bengine-bgui-audit --test` para validar os arquivos finais. CTest: **71/71 entradas passaram**. O executável BGUI `gl3_tests` também passou seu teste com contexto OpenGL real, sem skip. Três regressões novas falharam antes das correções e passaram depois. Logs: `/tmp/bgui-audit-before.log`, `/tmp/bgui-audit-build.log`, `/tmp/bgui-audit-final.log`, `/tmp/bgui-utf8-before-sanitizers.log` e `/tmp/bgui-utf8-sanitizers.log`.
 
 Limites: Windows, Vulkan, interação manual do editor e desempenho de uma sessão completa não foram validados. A auditoria cobre os caminhos revisados de estilo/layout, texto, cache/recorte, widgets e registro dos testes; não certifica ausência de outros defeitos. O build apontou aviso de retorno ausente em `project_persistence_system::get_repository_root`, em código de persistência já modificado fora desta fase; ficou pendente para revisão separada. Alterações locais anteriores e concorrentes foram preservadas e não incluídas no commit de correção da BGUI. Nenhuma decisão de design pendente nas quatro correções acima.
+
+## Confirmação de saída somente com alterações não salvas (2026-10-27)
+
+| Item | Status e evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Aviso de salvar aparece mesmo após salvar | CONFIRMADO: `EditorMenuTest.SavedProjectExitsWithoutOpeningSaveConfirmation` falhou antes da correção (`exited == false` após salvar e chamar `confirm_exit`). | `confirm_exit` consulta `project_persistence_system::has_unsaved_changes` e encerra diretamente quando o estado coincide com o último salvamento/carregamento bem-sucedido. O teste passou após a correção e também verifica que uma edição posterior exige confirmação e que Save and Exit salva e encerra. | Menu File/Exit e fechamento da janela usam o mesmo caminho. Interação manual de desktop e Windows não foram validados. |
+| Detectar alterações além do histórico de undo/redo | CONFIRMADO: os dados persistidos incluem propriedades e configurações que podem ser alteradas diretamente. | A serialização existente é compartilhada com uma comparação em memória, sem gravar durante a consulta. Snapshots são separados por caminho e atualizados somente após save/load bem-sucedido. Objetos JSON são comparados por conteúdo e entidades são ordenadas por ID no snapshot, evitando diferenças por ordem dos mapas. `ProjectPersistenceTest.TracksSavedStateAcrossEditsUndoLoadsAndTemporaryExports` cobre nomes, locks, gravidade, transform, retorno ao estado anterior, criação/remoção, load, falha de save e exportação temporária. | O formato dos arquivos permanece igual; a API pública recebe apenas um método adicional. Mudanças fora dos dados serializados (como preferências de sessão) não exigem salvar o projeto. |
+| Projeto nunca salvo e cancelamento | CONFIRMADO por `EditorMenuTest.UnsavedProjectRequiresConfirmationAndCancelKeepsEditorOpen`. | Ausência de snapshot ou erro ao serializar mantém a confirmação. Cancel não fecha o editor; Discard and Exit fecha. | Erros de salvamento não atualizam o snapshot e não marcam o projeto como salvo. Nenhum item P0/P1/P2 foi corrigido nesta fase. |
+
+Validação desta fase: os três testes específicos passaram. Build limpa completa e suíte CTest em andamento em `/tmp/cpp-bengine-menubar`; resultado final será registrado abaixo. Alterações locais e concorrentes de outras fases foram preservadas.
+
+## Pausa ao alterar a escala da interface (2026-10-27)
+
+| Item | Status e evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Invalidação repetida durante o zoom | CONFIRMADO: o teste de uma árvore com 16 níveis falhou antes da correção; o último painel recebeu 18 visitas na cascata de estilos. | `element::compute_style` propaga alterações somente aos filhos ainda limpos, preservando a invalidação dos filhos já pendente. `AuditTest.ScaleCascadeDoesNotRepeatedlyInvalidateDirtyDescendants` limita a três visitas por painel e verifica a escala calculada. | Remove trabalho redundante na cascata, sem mudar a API pública nem a arquitetura de renderização. Não representa uma medição de FPS ou da duração da pausa no editor completo. |
+| Escala aplicada no quadro seguinte ao atalho | CONFIRMADO: teste antes da correção manteve geometria em 100×40 após a escala mudar para 110%, em vez de 110×44. | `bgui::on_update` resolve novamente os estilos quando a escala muda durante os eventos/updates, antes de medir e organizar a geometria. `AuditTest.ScaleChangeDuringUpdateReflowsInTheSameFrame` cobre esse caminho usado pelo atalho. | A nova cascata só ocorre quando a escala realmente mudou durante o update. |
+| Zoom no limite invalida toda a interface sem alterar a escala | CONFIRMADO: o teste anterior deixou a raiz com estilo sujo ao reaplicar 200%. | `set_global_scale` retorna imediatamente se o valor for o atual. `AuditTest.UnchangedScaleDoesNotInvalidateStyles` cobre a reaplicação. | Limites e passos dos atalhos são preservados. |
+| Travada relatada na sessão interativa | PARCIAL: os caminhos redundantes acima foram reproduzidos; a pausa visual da sessão do usuário não foi medida diretamente. | Três regressões sem GPU acompanham as correções na suíte BGUI `AuditTests`. | Interação manual com Ctrl+/Ctrl−, Windows e Vulkan não foram validados. A latência percebida precisa de revisão no desktop; nenhum item P0/P1/P2 foi tratado nesta fase. |
+
+Validação desta fase: build limpa em pasta nova `/tmp/cpp-bengine-zoom`, configurada com editor, runtime e testes habilitados e GoogleTest local; execução de `bash scripts/build.sh /tmp/cpp-bengine-zoom --test` em andamento. Resultado final será registrado abaixo. Alterações locais anteriores e concorrentes foram preservadas.
 
 ## Revalidação P0-a–c — 2026-10-27
 
@@ -253,3 +295,46 @@ O aviso preexistente de retorno ausente em `get_repository_root` permanece fora
 desta fase. Windows, interação visual da caixa de sugestões e uma partida
 interativa completa do FPP não foram validados. Alterações locais dos demais
 trabalhos foram preservadas.
+
+## Correções de interação e apresentação — etapa 1 (2026-10-27)
+
+| Item | Status / evidência | Alteração e cobertura | Limites / riscos |
+|---|---|---|---|
+| Traffic lights cortados | CONFIRMADO: `DockTest.TrafficLightsFitInsideControlsAtEveryScale` falhava com os botões fora do grupo em 1x, 1.5x e 2x. | `traffic_light` agora exige modo pixel, coerente com seu tamanho explícito. Teste passa nas três escalas. | Conferência visual no editor ainda pendente; sem mudança de API. |
+| Recuo nos documentos | CONFIRMADO: `EditorDocuments.DockTabsPreserveBuffersAndSaveWithShortcut` reproduziu x=11 contra x=0 do contexto. | Removidos paddings acumulados, margem do texto e padding do input; status movido para baixo. Asserções de geometria passam. | O teste completo também passa após a atualização concorrente de foco de abas na BGUI; a busca de botões foi limitada ao contexto do documento, excluindo os controles desabilitados do cabeçalho. |
+
+## Correções de interação e apresentação — etapas 2 e 3 (2026-10-27)
+
+| Item | Status / evidência | Alteração e cobertura | Limites / riscos |
+|---|---|---|---|
+| Imagens invertidas | CONFIRMADO: `ImageTest.FileTexturesUseTopLeftUVAndFramebuffersRemainFlipped` falhou antes da correção; imagens de arquivo recebiam UV vertical invertida apesar de decodificadas do topo para baixo. | UV normal para arquivos; textura externa mantém inversão padrão e opção explícita. `set_texture` restaura a orientação ao trocar a origem. | Verificação de comandos de desenho sem GPU; framebuffers da cena conservam a convenção anterior. |
+| Modificador do trackpad | CONFIRMADO: `CameraModifierUsesOnlyLeftControlAndRespectsTextFocus` falhou antes da correção. | Space substituído por Ctrl esquerdo, inclusive na ajuda e no teste de navegação; foco em edição de texto continua bloqueando o atalho. | Ctrl direito não ativa navegação; atalhos de texto preservados. |
+| Gizmo fora da cena | CONFIRMADO: `GizmoContinuesWhenItsCenterLeavesViewport` reproduziu posição estacionária em x=1.8 no segundo movimento externo. Havia também perda de captura no adaptador do editor. | Arraste ativo continua fora dos limites e da janela até soltar o botão; início permanece condicionado à cena. Cobertura do núcleo e integração com desfazer. | Renderização continua recortada; projeção atrás da câmera permanece sem manipulação até retornar à frente. |
+| Inversão angular da câmera | CONFIRMADO: `CameraForwardRemainsContinuousAcrossYawNinetyDegrees` falhou antes da correção em yaw 89/91/179/181/269/271/359/361 com pitch 20. | Câmera sem pai usa seus ângulos contínuos diretamente, evitando decomposição matricial ambígua. | Câmeras com pai mantêm comportamento anterior; navegação usa câmera do editor sem pai. Sem alteração da API pública. |
+
+## Correções de arraste e resize — etapa 4 (2026-10-27)
+
+| Item | Status / evidência | Alteração e cobertura | Limites / riscos |
+|---|---|---|---|
+| Resize inexato | CONFIRMADO: `DockTest.FloatingWindowDragAndCornerResizePublishExactGeometryInSameFrame` falhou no canto superior esquerdo: X era sobrescrito ao atualizar Y e tamanho só mudava no quadro seguinte. | Coordenadas calculadas conjuntamente; estilo do tamanho resolvido antes do arrange do mesmo quadro. Teste cobre cinco movimentos e cinco resizes consecutivos em 1x, 1.5x e 2x, conservando as bordas opostas. | Respeita limites mínimos/máximos e escala existentes. |
+| Interior atrasado ao arrastar | PARCIAL: conteúdo aninhado, incluindo label, acompanha a janela no mesmo quadro no teste de geometria; usuário identifica principalmente cena e imagens. | Mantida cobertura de arraste e investigado ciclo das texturas abaixo. | Não foi reproduzido atraso geral de todos os elementos; sem correção especulativa no layout. |
+| Artefatos na cena durante resize | CONFIRMADO no fluxo: `scene_view_runtime::on_update` chamava `viewport_sync` depois de `render_system`, fazendo `glTexImage2D` descartar a imagem renderizada antes de exibi-la. O preview também alocava durante atualização da UI. | UI solicita o tamanho; a câmera só realoca no início do próximo `drawFB`, antes de renderizar. Cena e preview mantêm os pixels prontos até esse momento, inclusive após reabrir a janela. Teste OpenGL `DeferredViewportResizePreservesRenderedPixelsUntilNextCameraPass` verifica preservação do armazenamento, todos os pixels após três tamanhos, pedidos inválidos e primeira alocação do preview. | A geometria publicada do quadro anterior define a resolução do próximo render, evitando descartar pixels prontos; pode haver ajuste de resolução de um quadro durante resize. Validação visual manual ainda pendente. |
+
+Validação final destas quatro etapas: build de editor/runtime a partir da pasta
+nova `build/interaction-clean`, seguindo `bash scripts/build.sh
+build/interaction-clean --test`. Após recompilar todas as dependências da câmera,
+**110/110 entradas CTest passaram**, sem skips, incluindo os testes OpenGL da
+BGUI e `DeferredViewportResizePreservesRenderedPixelsUntilNextCameraPass`.
+Esse último teste também falhou com o resize imediato anterior (armazenamento
+mudava de 32 para 40 pixels durante a atualização da UI). Os testes de imagem
+verificam ainda que o retângulo enviado ao desenho acompanha o arraste no mesmo
+quadro. Log final: `/tmp/bengine-verified-final.log`; reprodução do descarte de
+framebuffer: `/tmp/bengine-framebuffer-red.log`.
+
+Windows, sensação física do trackpad e revisão visual interativa de arraste e
+resize continuam sem validação. O atraso geral de conteúdo não foi reproduzido
+nos testes de geometria; os artefatos confirmados de framebuffer foram tratados.
+O aviso preexistente de retorno ausente em `get_repository_root` permanece fora
+deste escopo. A API existente foi preservada; `camera::request_framebuffer_size`
+é uma adição para solicitar resize sem descartar os pixels do quadro pronto.
+Alterações locais anteriores e concorrentes foram preservadas nos commits finais.
