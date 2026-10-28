@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <glm/gtc/quaternion.hpp>
 
 #include <utils/vec.hpp>
 
@@ -39,6 +40,12 @@ namespace editor {
         int m_active_axis{-1};
         bool m_dragging{false};
         float m_last_mouse_angle{0.f};
+        float m_rotation_start_angle{0.f};
+        float m_rotation_angle{0.f};
+        float m_rotation_radius{1.f};
+        bool m_rotation_plane_valid{false};
+        glm::quat m_rotation_start{1.f, 0.f, 0.f, 0.f};
+        glm::quat m_rotation_parent{1.f, 0.f, 0.f, 0.f};
         float m_start_scale{1.f};
         bgui::vec2 m_center{};
         bgui::vec2 m_drag_axis_screen{};

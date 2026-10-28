@@ -327,3 +327,118 @@ TEST_F(EditorInteractionTest, InspectorUsesCompactAlignedPropertyRows) {
     EXPECT_EQ(fov->get_inputbox().processed_x(), scale->get_inputbox().processed_x());
     EXPECT_EQ(fov->get_inputbox().processed_height(), 22);
 }
+
+TEST_F(EditorInteractionTest, RotationGizmoUsesWorldQuaternionAndKeepsWorldRings) {
+    commons::camera camera;
+    camera.projMatriz = glm::perspective(glm::radians(45.f), 1.f, 0.1f, 100.f);
+    camera.viewMatrix = glm::translate(glm::mat4(1.f), glm::vec3(0.f, 0.f, -5.f));
+    commons::transform target({}, {35.f, 20.f, 15.f});
+    const auto initial = target.get_world_model_matrix();
+    editor::transform_gizmo gizmo;
+    const bgui::vec4i viewport{0, 0, 400, 400};
+    bgui::get_context().m_input_map[bgui::input_key::r] = bgui::input_action::press;
+    // World Z ring: 74 pixels from center, away from the edge-on X/Y rings.
+    ASSERT_TRUE(gizmo.update(camera, &target, viewport, {viewport}, {252, 148}, {}, true, true, true));
+    EXPECT_EQ(target.get_rotation(), (bgui::vec3{35.f, 20.f, 15.f}));
+    gizmo.update(camera, &target, viewport, {viewport}, {148, 148}, {-104, 0}, true, false, true);
+    const auto expected = glm::rotate(glm::mat4(1.f), glm::radians(90.f), glm::vec3(0, 0, 1)) * initial;
+    const auto actual = target.get_world_model_matrix();
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r)
+            EXPECT_NEAR(actual[c][r], expected[c][r], 0.001f);
+    gizmo.update(camera, &target, viewport, {viewport}, {148, 148}, {}, true, false, false);
+    // Ring remains in world XY after releasing an already rotated object.
+    ASSERT_TRUE(gizmo.update(camera, &target, viewport, {viewport}, {252, 148}, {}, true, true, true));
+}
+
+TEST_F(EditorInteractionTest, RotationClockShowsSweepAndDisappearsOnRelease) {
+    commons::camera camera;
+    camera.projMatriz = glm::mat4(1.f);
+    camera.viewMatrix = glm::mat4(1.f);
+    commons::transform target;
+    editor::transform_gizmo gizmo;
+    const bgui::vec4i viewport{0, 0, 400, 400};
+    bgui::get_context().m_input_map[bgui::input_key::r] = bgui::input_action::press;
+    ASSERT_TRUE(gizmo.update(camera, &target, viewport, {viewport}, {252, 148}, {}, true, true, true));
+    auto& draw = bgui::get_draw_list();
+    draw.clear();
+    gizmo.update(camera, &target, viewport, {viewport}, {148, 148}, {-104, 0}, true, false, true);
+    int sector_vertices = 0;
+    for (const auto& vertex : draw.get_vertices()) {
+        if (std::abs(vertex.m_color.w - 0.22f) < 0.001f) {
+            ++sector_vertices;
+            EXPECT_GE(vertex.m_position.x, 0.f);
+            EXPECT_LE(vertex.m_position.x, 400.f);
+            EXPECT_LE(vertex.m_position.y, 200.001f);
+        }
+    }
+    EXPECT_GT(sector_vertices, 0);
+    draw.clear();
+    gizmo.update(camera, &target, viewport, {viewport}, {148, 148}, {}, true, false, false);
+    for (const auto& vertex : draw.get_vertices())
+        EXPECT_NE(vertex.m_color.w, 0.22f);
+}
+
+TEST_F(EditorInteractionTest, RotationUsesPlaneAngleForObliqueRingAndAccumulatesTurns) {
+    commons::camera camera;
+    camera.projMatriz = glm::ortho(-2.f, 2.f, -2.f, 2.f, -10.f, 10.f);
+    camera.viewMatrix = glm::rotate(glm::mat4(1.f), glm::radians(60.f), glm::vec3(1, 0, 0));
+    commons::transform target;
+    editor::transform_gizmo gizmo;
+    const bgui::vec4i viewport{0, 0, 400, 400};
+    bgui::get_context().m_input_map[bgui::input_key::r] = bgui::input_action::press;
+    ASSERT_TRUE(gizmo.update(camera, &target, viewport, {viewport}, {252, 174}, {}, true, true, true));
+    // Equal world-plane angles are not equal screen polar angles on this ellipse.
+    const std::vector<bgui::vec2i> points{{148,174}, {148,226}, {252,226}, {252,174}, {148,174}};
+    for (const auto& point : points)
+        gizmo.update(camera, &target, viewport, {viewport}, point, {}, true, false, true);
+    const auto expected = glm::rotate(glm::mat4(1.f), glm::radians(90.f), glm::vec3(0, 0, 1));
+    const auto actual = target.get_world_model_matrix();
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r)
+            EXPECT_NEAR(actual[c][r], expected[c][r], 0.001f);
+}
+
+TEST_F(EditorInteractionTest, WorldRotationGizmoRespectsRotatedParent) {
+    auto parent_entity = registry->create();
+    registry->add<commons::transform>(parent_entity);
+    auto child_entity = registry->create();
+    registry->add<commons::transform>(child_entity);
+    auto parent = registry->get<commons::transform>(parent_entity.id);
+    auto child = registry->get<commons::transform>(child_entity.id);
+    parent->set_rotation({30.f, 20.f, 10.f});
+    child->set_rotation({15.f, 25.f, 35.f});
+    ASSERT_TRUE(child->set_parent(parent_entity.id, false));
+    const auto initial = child->get_world_model_matrix();
+    commons::camera camera;
+    camera.projMatriz = glm::mat4(1.f);
+    camera.viewMatrix = glm::mat4(1.f);
+    editor::transform_gizmo gizmo;
+    const bgui::vec4i viewport{0, 0, 400, 400};
+    bgui::get_context().m_input_map[bgui::input_key::r] = bgui::input_action::press;
+    ASSERT_TRUE(gizmo.update(camera, child.get(), viewport, {viewport}, {252, 148}, {}, true, true, true));
+    gizmo.update(camera, child.get(), viewport, {viewport}, {148, 148}, {-104, 0}, true, false, true);
+    const auto expected = glm::rotate(glm::mat4(1.f), glm::radians(90.f), glm::vec3(0, 0, 1)) * initial;
+    const auto actual = child->get_world_model_matrix();
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r)
+            EXPECT_NEAR(actual[c][r], expected[c][r], 0.001f);
+}
+
+TEST_F(EditorInteractionTest, EdgeOnRotationRemainsFiniteAndReversesWithDrag) {
+    commons::camera camera;
+    camera.projMatriz = glm::mat4(1.f);
+    camera.viewMatrix = glm::mat4(1.f);
+    commons::transform target;
+    editor::transform_gizmo gizmo;
+    const bgui::vec4i viewport{0, 0, 400, 400};
+    bgui::get_context().m_input_map[bgui::input_key::r] = bgui::input_action::press;
+    ASSERT_TRUE(gizmo.update(camera, &target, viewport, {viewport}, {200, 148}, {}, true, true, true));
+    gizmo.update(camera, &target, viewport, {viewport}, {200, 170}, {0, 22}, true, false, true);
+    EXPECT_GT(std::abs(target.get_rotation().x), 1.f);
+    gizmo.update(camera, &target, viewport, {viewport}, {200, 148}, {0, -22}, true, false, true);
+    const auto actual = target.get_world_model_matrix();
+    for (int c = 0; c < 4; ++c)
+        for (int r = 0; r < 4; ++r)
+            EXPECT_NEAR(actual[c][r], c == r ? 1.f : 0.f, 0.001f);
+}

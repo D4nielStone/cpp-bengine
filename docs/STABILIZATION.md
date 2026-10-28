@@ -375,3 +375,25 @@ O aviso preexistente de retorno ausente em `get_repository_root` permanece fora
 deste escopo. A API existente foi preservada; `camera::request_framebuffer_size`
 é uma adição para solicitar resize sem descartar os pixels do quadro pronto.
 Alterações locais anteriores e concorrentes foram preservadas nos commits finais.
+
+
+## Gizmo de rotação — 2026-10-28
+
+| Item | Status / evidência | Alteração e cobertura | Limites / riscos |
+|---|---|---|---|
+| Anéis giram com o objeto e giro incorreto em objeto inclinado | CONFIRMADO: `RotationGizmoUsesWorldQuaternionAndKeepsWorldRings` falhou antes da correção, comparando a matriz final com um giro mundial de 90°. O código usava eixos orientados pelo objeto e somava Euler. | Anéis de rotação em eixos mundiais; composição por quaternion normalizado a partir da orientação inicial. Conversão final respeita a ordem Rx·Ry·Rz do Transform, preservando API, Inspector e formato das cenas. Teste inclui projeção em perspectiva e verifica que o clique inicial preserva exatamente os valores anteriores, usados pelo desfazer. `WorldRotationGizmoRespectsRotatedParent` cobre pai rotacionado. | Apenas o gizmo usa quaternion internamente; armazenamento público continua em Euler. Escalas não uniformes em ancestrais podem introduzir shear, que o Transform existente não representa. |
+| Ângulo do mouse em anéis oblíquos | CONFIRMADO por leitura: `atan2` da tela era usado para qualquer plano. | Ângulo obtido pela interseção do raio do mouse com o plano mundial selecionado. `RotationUsesPlaneAngleForObliqueRingAndAccumulatesTurns` cobre projeção oblíqua, passagem por ±π e mais de uma volta. `EdgeOnRotationRemainsFiniteAndReversesWithDrag` cobre arraste reversível em anel exatamente de perfil. | De perfil, o plano não tem interseção única: usa tangente projetada e sensibilidade de 74 pixels/radiano. Movimentos maiores que meia volta entre eventos não têm sentido unívoco. |
+| Indicador de relógio | CONFIRMADO: solicitado pelo usuário e ausente no desenho anterior. | Setor translúcido, arco e ponteiros inicial/atual no plano do anel, recortados às regiões visíveis. `RotationClockShowsSweepAndDisappearsOnRelease` verifica os vértices do setor e seu desaparecimento ao soltar. | Após uma volta, o preenchimento permanece completo; o ponteiro continua seguindo o ângulo acumulado. Revisão visual interativa ainda pendente. |
+
+Validação desta etapa: build de editor/runtime iniciado em diretório novo pelo
+comando do CI `bash scripts/build.sh build/rotation-clean --test` e recompilação
+final após os últimos ajustes: **116/116 entradas CTest passaram, sem skips**.
+Os cinco testes específicos não criam contexto OpenGL. Log final:
+`/tmp/bengine-rotation-final.log`. A primeira execução completa detectou também
+alteração mínima dos Euler no clique inicial; a versão final só aplica rotação
+após mover o mouse, preservando os valores exatos do snapshot de desfazer.
+Windows e revisão visual/manual do indicador e da sensação de arraste não foram
+validados. Escalas não uniformes em ancestrais permanecem limitadas pelo modelo
+TRS existente. O aviso preexistente de retorno ausente em `get_repository_root`
+apareceu no build novo e permanece fora do escopo.
+Não foram alterados os arquivos locais do projeto FPP.

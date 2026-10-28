@@ -4,9 +4,11 @@
 #include <array>
 #include <cmath>
 #include <vector>
+#include <glm/gtx/euler_angles.hpp>
 
 #include "components/camera.hpp"
 #include "components/transform.hpp"
+#include "core/ecs.hpp"
 
 #include <bgui.hpp>
 
@@ -219,6 +221,35 @@ bool project(
     return true;
 }
 
+    glm::quat orientation(const glm::mat4& matrix) {
+        glm::vec3 scale, translation, skew;
+        glm::vec4 perspective;
+        glm::quat rotation(1.f, 0.f, 0.f, 0.f);
+        glm::decompose(matrix, scale, rotation, translation, skew, perspective);
+        return glm::normalize(rotation);
+    }
+
+    // Intersect the mouse ray with the selected world rotation plane. Screen
+    // polar angles do not describe angles on an oblique projected circle.
+    bool rotation_angle(const commons::camera& camera, const bgui::vec4i& viewport,
+        const bgui::vec2& mouse, const bgui::vec3& center, int axis, float& angle) {
+        const auto inverse = glm::inverse(camera.projMatriz * camera.viewMatrix);
+        const float x = 2.f * (mouse.x - viewport.x) / viewport.z - 1.f;
+        const float y = 1.f - 2.f * (mouse.y - viewport.y) / viewport.w;
+        auto near_point = inverse * glm::vec4(x, y, -1.f, 1.f);
+        auto far_point = inverse * glm::vec4(x, y, 1.f, 1.f);
+        if (std::abs(near_point.w) < 0.00001f || std::abs(far_point.w) < 0.00001f) return false;
+        const auto origin = glm::vec3(near_point) / near_point.w;
+        const auto direction = glm::vec3(far_point) / far_point.w - origin;
+        if (std::abs(direction[axis]) < 0.0001f * glm::length(direction)) return false;
+        const auto offset = origin + direction * ((center[axis] - origin[axis]) / direction[axis]) -
+            glm::vec3(center.x, center.y, center.z);
+        const auto plane = rotation_planes[axis];
+        if (glm::length(offset) < 0.0001f) return false;
+        angle = std::atan2(offset[plane[1]], offset[plane[0]]);
+        return std::isfinite(angle);
+    }
+
     bool key_pressed(const bgui::input_key key) {
         const auto& inputs = bgui::get_context().m_input_map;
         const auto found = inputs.find(key);
@@ -260,11 +291,12 @@ bool editor::transform_gizmo::update(
         m_center.y < viewport.y || m_center.y > viewport.y + viewport.w))
         return m_dragging && left_down;
 
-    const auto axis_vectors = oriented_axes(target->get_world_rotation());
+    const auto axis_vectors = m_mode == mode::rotate ? axes : oriented_axes(target->get_world_rotation());
     std::array<bgui::vec2, 3> axis_ends{};
     std::array<bgui::vec2, 3> axis_directions{};
     std::array<float, 3> pixels_per_unit{};
     std::array<std::vector<bgui::vec2>, 3> rings;
+    std::array<float, 3> ring_radii{};
     int hovered_axis = -1;
     float hovered_distance = 10.f;
     const bgui::vec2 mouse{
@@ -296,6 +328,7 @@ bool editor::transform_gizmo::update(
             auto& ring = rings[axis_index];
             float world_radius = ring_radius;
             for (int adjustment = 0; adjustment < 3; ++adjustment) {
+                ring_radii[axis_index] = world_radius;
                 ring.clear();
                 float maximum_screen_radius = 0.f;
                 ring.reserve(48);
@@ -348,8 +381,38 @@ bool editor::transform_gizmo::update(
         }
         if (m_mode == mode::scale)
             m_start_scale = target->get_scale()[m_active_axis];
-        if (m_mode == mode::rotate)
-            m_last_mouse_angle = std::atan2(mouse.y - m_center.y, mouse.x - m_center.x);
+        if (m_mode == mode::rotate) {
+            m_rotation_angle = 0.f;
+            m_rotation_radius = ring_radii[m_active_axis];
+            m_rotation_plane_valid = rotation_angle(camera, viewport, mouse, position,
+                m_active_axis, m_last_mouse_angle);
+            if (!m_rotation_plane_valid) {
+                // Edge-on rings have no unique ray/plane intersection. Use the
+                // tangent of the nearest rendered segment as a stable fallback.
+                const auto& ring = rings[m_active_axis];
+                float nearest = 1e10f;
+                for (std::size_t i = 0; i < ring.size(); ++i) {
+                    const float distance = length(mouse - ring[i]);
+                    if (distance < nearest) {
+                        nearest = distance;
+                        m_last_mouse_angle = 2.f * pi * i / ring.size();
+                        const auto tangent = ring[(i + 1) % ring.size()] - ring[(i + ring.size() - 1) % ring.size()];
+                        m_drag_axis_screen = tangent / std::max(length(tangent), 0.01f);
+                    }
+                }
+            }
+            m_rotation_start_angle = m_last_mouse_angle;
+            const auto local_axes = oriented_axes(target->get_rotation());
+            glm::mat3 local(1.f);
+            for (int i = 0; i < 3; ++i)
+                local[i] = glm::vec3(local_axes[i].x, local_axes[i].y, local_axes[i].z);
+            m_rotation_start = glm::quat_cast(local);
+            m_rotation_parent = glm::quat(1.f, 0.f, 0.f, 0.f);
+            if (target->parent_id && target->reg) {
+                if (const auto parent = target->reg->get<commons::transform>(target->parent_id))
+                    m_rotation_parent = orientation(parent->get_world_model_matrix());
+            }
+        }
     }
 
     if (m_dragging && left_down && m_active_axis >= 0) {
@@ -369,17 +432,29 @@ bool editor::transform_gizmo::update(
             auto scale = target->get_scale();
             scale[m_active_axis] = std::max(0.001f, m_start_scale * (1.f + amount));
             target->set_scale(scale);
-        } else if (m_mode == mode::rotate) {
-            const float angle = std::atan2(mouse.y - m_center.y, mouse.x - m_center.x);
-            float delta = angle - m_last_mouse_angle;
-            if (delta > pi) delta -= 2.f * pi;
-            if (delta < -pi) delta += 2.f * pi;
-            bgui::vec3 rotation_delta{};
-            rotation_delta[m_active_axis] = delta * 180.f / pi;
-            auto world_rotation = target->get_world_rotation();
-            world_rotation = world_rotation + rotation_delta;
-            target->set_world_rotation(world_rotation);
-            m_last_mouse_angle = angle;
+        } else if (m_mode == mode::rotate && !left_just_pressed) {
+            float angle = m_last_mouse_angle;
+            float delta = 0.f;
+            if (m_rotation_plane_valid) {
+                if (rotation_angle(camera, viewport, mouse, position, m_active_axis, angle)) {
+                    delta = angle - m_last_mouse_angle;
+                    if (delta > pi) delta -= 2.f * pi;
+                    if (delta < -pi) delta += 2.f * pi;
+                    m_last_mouse_angle = angle;
+                }
+            } else if (!left_just_pressed) {
+                delta = dot(mouse - m_drag_start_mouse, m_drag_axis_screen) / 74.f;
+            }
+            m_drag_start_mouse = mouse;
+            m_rotation_angle += delta;
+            const auto axis = axes[m_active_axis];
+            const auto world_delta = glm::angleAxis(m_rotation_angle, glm::vec3(axis.x, axis.y, axis.z));
+            const auto local = glm::normalize(glm::inverse(m_rotation_parent) * world_delta *
+                m_rotation_parent * m_rotation_start);
+            // Transform stores Rx * Ry * Rz; glm::eulerAngles uses a different order.
+            float x, y, z;
+            glm::extractEulerAngleXYZ(glm::mat4_cast(local), x, y, z);
+            target->set_rotation({glm::degrees(x), glm::degrees(y), glm::degrees(z)});
         }
     }
 
@@ -415,6 +490,34 @@ bool editor::transform_gizmo::update(
                 end + bgui::vec2{5.f, 5.f},
                 {end.x - 5.f, end.y + 5.f}
             });
+        }
+    }
+    if (m_dragging && m_mode == mode::rotate && m_active_axis >= 0) {
+        const auto plane = rotation_planes[m_active_axis];
+        const auto clock_point = [&](float angle, bgui::vec2& projected) {
+            return project(camera, viewport, position + axes[plane[0]] * (std::cos(angle) * m_rotation_radius) +
+                axes[plane[1]] * (std::sin(angle) * m_rotation_radius), projected);
+        };
+        // Triangle fan keeps each filled primitive convex, including angles >180°.
+        const float sweep = std::clamp(m_rotation_angle, -2.f * pi, 2.f * pi);
+        const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(sweep) * 24.f / pi)));
+        bgui::vec2 previous;
+        if (clock_point(m_rotation_start_angle, previous)) {
+            const auto first = previous;
+            for (int i = 1; i <= steps; ++i) {
+                bgui::vec2 next;
+                if (!clock_point(m_rotation_start_angle + sweep * i / steps, next)) break;
+                draw_list.set_color({1.f, 0.86f, 0.28f, 0.22f});
+                add_clipped_polygon(draw_list, visible_regions, {m_center, previous, next});
+                draw_list.set_color({1.f, 0.86f, 0.28f, 1.f});
+                add_clipped_line(draw_list, visible_regions, previous, next, 3.f);
+                previous = next;
+            }
+            draw_list.set_color({1.f, 0.86f, 0.28f, 1.f});
+            add_clipped_line(draw_list, visible_regions, m_center, first, 2.f);
+            bgui::vec2 hand;
+            if (clock_point(m_rotation_start_angle + m_rotation_angle, hand))
+                add_clipped_line(draw_list, visible_regions, m_center, hand, 3.f);
         }
     }
     draw_list.set_color({1.f, 1.f, 1.f, 1.f});
