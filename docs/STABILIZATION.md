@@ -1,5 +1,13 @@
 # Bubble Engine stabilization report
 
+## Inspector layout — compact properties (2026-10-28)
+
+| Item | Status and evidence | Change and regression coverage | Validation limits / review |
+|---|---|---|---|
+| Compact, aligned property controls | CONFIRMED: `EditorInteractionTest.InspectorUsesCompactAlignedPropertyRows` initially failed because numeric inputs were 15px high instead of the shared 22px target; code also placed vector names and controls on separate lines. | Vector properties now occupy one row. Numeric, model and material-map properties share a 112px label column, 22px inputs and 2px vertical row margins; component padding is reduced to 4px vertically. The new test checks vector row structure, numeric input alignment and height. Existing material edit/Undo coverage passes. | No public API or component behavior changed. Final aesthetic review, narrow-panel usability, Windows and display-scale variations remain unvalidated. Existing FPP project edits are preserved. |
+
+Validation: clean editor/runtime build succeeded and all 111/111 CTest entries passed in `/tmp/cpp-bengine-inspector-layout-build`, using `bash scripts/build.sh /tmp/cpp-bengine-inspector-layout-build --test`. Both directed Inspector tests passed in the existing local build. Log: `/tmp/cpp-bengine-inspector-layout-validation.log`.
+
 ## UI polish — phase 1: project manager (2026-10-27)
 
 | Item | Status and evidence | Change and regression coverage | Validation limits / review |

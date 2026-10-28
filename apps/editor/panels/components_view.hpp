@@ -173,6 +173,33 @@ private:
         };
     }
 
+    static void configure_property_label(bgui::text& label) {
+        label.add_class("editor-property-label");
+        label.style.layout.require_mode(bgui::mode::pixel, bgui::mode::wrap_content);
+        label.style.layout.require_width(bgui::mode::pixel, 112.f);
+        label.style.layout.margin = bgui::vec4i{0, 0, 4, 0};
+    }
+
+    static void configure_property_row(bgui::linear& row) {
+        configure_row(row);
+        row.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
+        row.style.layout.margin = bgui::vec4i{0, 2, 0, 2};
+    }
+
+    static void configure_property_input(bgui::inputbox& input) {
+        input.add_class("editor-input");
+        input.style.layout.require_mode(bgui::mode::stretch, bgui::mode::pixel);
+        input.style.layout.require_height(bgui::mode::pixel, 22.f);
+        input.style.layout.margin = bgui::vec4i{0, 0, 0, 0};
+        input.style.layout.padding = bgui::vec4i{4, 2, 4, 2};
+    }
+
+    static void configure_property_field(bgui::field& field) {
+        configure_property_row(field);
+        configure_property_label(field.get_label());
+        configure_property_input(field.get_inputbox());
+    }
+
     void clear_content() {
         m_asset_targets.clear();
         m_entity_tree = nullptr;
@@ -408,7 +435,7 @@ private:
         section.add_class("editor-section");
         section.set_icon("circle", 0.27f);
         section.children().add_class("editor-surface");
-        section.children().style.layout.padding = bgui::vec4i{6, 6, 6, 6};
+        section.children().style.layout.padding = bgui::vec4i{6, 4, 6, 4};
         section.children().style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::start,
             bgui::alignment::start
@@ -499,6 +526,7 @@ private:
         );
         auto& model_field = section.children().add<bgui::field>(
             "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", 0.27f);
+        configure_property_field(model_field);
         auto* model_input = &model_field.get_inputbox();
         auto assign_model = [this, id, renderer](const std::filesystem::path& requested) {
             auto path = requested.is_absolute() ? requested : m_context->project_root / requested;
@@ -625,13 +653,13 @@ private:
         const std::shared_ptr<commons::renderer>& renderer, std::size_t index,
         const commons::pbr_map& map) {
         const auto material = renderer->m_modelo->meshes[index].getMaterial();
-        auto& label = content.add<bgui::text>(map.label, 0.27f);
-        label.add_class("editor-property-label");
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
-        configure_row(row);
+        configure_property_row(row);
+        auto& label = row.add<bgui::text>(map.label, 0.27f);
+        configure_property_label(label);
         auto& input = row.add<bgui::inputbox>(material.getTextura(map.name).path,
             "Drop a texture or enter its path", 0.26f);
-        input.style.layout.require_width(bgui::mode::stretch);
+        configure_property_input(input);
         auto assign = [this, renderer, index, map, input = &input](const std::filesystem::path& requested) {
             if (!renderer->m_modelo || index >= renderer->m_modelo->meshes.size())
                 return;
@@ -799,18 +827,16 @@ private:
         const std::function<void(std::size_t, float)>& on_change
     ) {
         auto current_value = std::make_shared<bgui::vec3>(value);
-        auto& name = parent.add<bgui::text>(label, 0.29f);
-        name.add_class("editor-property-label");
-        name.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-
-        auto& values = parent.add<bgui::linear>(
-            bgui::orientation::horizontal
-        );
+        auto& row = parent.add<bgui::linear>(bgui::orientation::horizontal);
+        configure_property_row(row);
+        auto& name = row.add<bgui::text>(label, 0.27f);
+        configure_property_label(name);
+        auto& values = row.add<bgui::linear>(bgui::orientation::horizontal);
         values.add_class("editor-property-row");
         configure_row(values);
+        values.style.layout.require_width(bgui::mode::stretch);
+        values.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
+        values.style.layout.margin = bgui::vec4i{0, 0, 0, 0};
 
         constexpr const char* axes[]{"X", "Y", "Z"};
         for (std::size_t axis = 0; axis < 3; ++axis) {
@@ -856,9 +882,7 @@ private:
                 },
                 bgui::input_mode::inputbox
             );
-            input.add_class("editor-input");
-            input.style.layout.require_width(bgui::mode::stretch);
-            input.style.layout.require_height(bgui::mode::pixel, 22.f);
+            configure_property_input(input);
         }
         *current_value = get_value();
     }
@@ -874,7 +898,7 @@ private:
         auto& field = parent.add<bgui::field>(
             label,
             format_value(value),
-            0.29f,
+            0.27f,
             [this, on_change, current_value, label](const std::string& buffer) {
                 float parsed{};
                 const auto result = std::from_chars(
@@ -904,11 +928,7 @@ private:
                 );
             }
         );
-        field.add_class("editor-input");
-        field.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
+        configure_property_field(field);
         *current_value = get_value();
     }
 

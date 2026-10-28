@@ -293,3 +293,37 @@ TEST_F(EditorInteractionTest, GizmoDragKeepsCaptureOutsideSceneWindow) {
     context->undo();
     EXPECT_EQ(transform->get_position(), (bgui::vec3{0.f, 0.f, 0.f}));
 }
+
+TEST_F(EditorInteractionTest, InspectorUsesCompactAlignedPropertyRows) {
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+    auto* position = find_element<bgui::text>(dock, [](auto& item) {
+        return item.get_buffer() == "Position";
+    });
+    auto* axis = find_element<bgui::text>(dock, [](auto& item) {
+        return item.get_buffer() == "X";
+    });
+    ASSERT_NE(position, nullptr);
+    ASSERT_NE(axis, nullptr);
+    EXPECT_EQ(position->get_parent(), axis->get_parent()->get_parent());
+    std::size_t row_children = 0;
+    for (const auto& [layer, children] : position->get_parent()->as_layout()->get_elements())
+        row_children += children.size();
+    EXPECT_EQ(row_children, 2u);
+    auto* fov = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Field of View";
+    });
+    auto* scale = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Orthographic Scale";
+    });
+    ASSERT_NE(fov, nullptr);
+    ASSERT_NE(scale, nullptr);
+    bgui::on_update();
+    EXPECT_EQ(fov->get_inputbox().processed_x(), scale->get_inputbox().processed_x());
+    EXPECT_EQ(fov->get_inputbox().processed_height(), 22);
+}
