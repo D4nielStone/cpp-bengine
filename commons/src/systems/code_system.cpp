@@ -71,6 +71,9 @@ void code_system::update(const std::shared_ptr<ecs>& registry) {
             try {
                 auto bubble = script->estado_lua["bubble"].get<sol::table>();
                 bubble["delta_time"] = delta_time;
+                auto time = script->estado_lua["Time"].get<sol::table>();
+                time["deltaTime"] = delta_time;
+                time["time"] = time["time"].get<float>() + delta_time;
                 script->update();
             } catch (const sol::error& error) {
                 m_failed.insert(script.get());

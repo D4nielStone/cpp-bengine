@@ -32,12 +32,15 @@
  */
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <bullet/btBulletDynamicsCommon.h>
 #include <sol/sol.hpp>
 #include "commons_namespace.hpp"
 
 namespace COMMONS_NS {
+    struct ecs;
     namespace api {
+        void setUnityApi(sol::state&, const std::shared_ptr<ecs>&, std::uint32_t);
 	     /**  Define as classes da api */
 	  	void setClasses(sol::state&);
          /**  Define os namespaces da api como math e inputs */

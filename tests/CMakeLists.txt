@@ -99,3 +99,25 @@ target_include_directories(editor_persistence_transaction_tests PRIVATE
 )
 target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(editor_persistence_transaction_tests)
+
+add_executable(lua_api_tests lua_api_tests.cpp)
+target_link_libraries(lua_api_tests PRIVATE GTest::gtest_main commons)
+target_compile_definitions(lua_api_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(lua_api_tests)
+
+add_executable(text_editor_tests text_editor_tests.cpp)
+target_link_libraries(text_editor_tests PRIVATE GTest::gtest_main bgui)
+gtest_discover_tests(text_editor_tests)
+
+add_executable(lua_completion_tests lua_completion_tests.cpp)
+target_include_directories(lua_completion_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
+target_link_libraries(lua_completion_tests PRIVATE GTest::gtest_main bgui)
+gtest_discover_tests(lua_completion_tests)
+
+add_executable(editor_document_tests editor_document_tests.cpp)
+target_include_directories(editor_document_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
+)
+target_link_libraries(editor_document_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editor_document_tests)

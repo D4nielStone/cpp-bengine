@@ -1,6 +1,7 @@
 #pragma once
 
 #include "panel.hpp"
+#include "lua_inputbox.hpp"
 
 #include <bgui.hpp>
 #include <elem/button.hpp>
@@ -64,7 +65,9 @@ public:
             bgui::dock_area::bottom,
             0.3f
         );
-        m_root = &window.add<bgui::linear>(bgui::orientation::horizontal);
+        auto& browser = window.add<frame_layout>(bgui::orientation::horizontal);
+        browser.after_update = [this]() { update(); };
+        m_root = &browser;
         m_root->style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::match_parent
@@ -123,6 +126,16 @@ public:
     }
 
 private:
+    class frame_layout final : public bgui::linear {
+    public:
+        using bgui::linear::linear;
+        std::function<void()> after_update;
+        void on_update() override {
+            bgui::linear::on_update();
+            if (after_update) after_update();
+        }
+    };
+
     class file_button final : public bgui::button {
     public:
         file_button(
@@ -176,14 +189,16 @@ private:
     bgui::linear* m_file_area{nullptr};
     bgui::dock* m_dock{nullptr};
     bgui::window* m_document_window{nullptr};
-    bgui::linear* m_document_tabs{nullptr};
     bgui::linear* m_document_body{nullptr};
     bgui::text* m_document_status{nullptr};
     struct document {
         std::filesystem::path path;
         std::string original;
         std::string buffer;
-        bgui::button* tab{nullptr};
+        bgui::window* window{nullptr};
+        bgui::linear* body{nullptr};
+        bgui::text* status{nullptr};
+        bool opened{false};
         bgui::inputbox* editor{nullptr};
         bgui::element* rendered{nullptr};
         bool image{false};
@@ -221,14 +236,10 @@ private:
             return;
         m_document_window = &m_dock->add_window("Editor", bgui::dock_area::center, 0.3f);
         m_document_window->set_tabbed(true);
-        auto& root = m_document_window->add<bgui::linear>(bgui::orientation::vertical);
+        auto& root = m_document_window->add<frame_layout>(bgui::orientation::vertical);
+        root.after_update = [this]() { update_document_editor(); };
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         root.style.layout.padding = bgui::vec4i{5};
-        m_document_tabs = &root.add<bgui::linear>(bgui::orientation::horizontal);
-        m_document_tabs->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        auto& save = m_document_tabs->add<bgui::button>("Salvar", 0.27f,
-            [this]() { save_active_document(); });
-        save.style.layout.padding = bgui::vec4i{7, 3, 7, 3};
         auto& status_row = root.add<bgui::linear>(bgui::orientation::horizontal);
         status_row.style.layout.require_mode(
             bgui::mode::match_parent,
@@ -252,9 +263,7 @@ private:
 
     void open_document(const std::filesystem::path& path) {
         if (is_model_file(path)) return;
-        ensure_document_window();
-        if (!m_document_window)
-            return;
+        if (!m_dock) return;
         auto found = m_documents.find(path);
         if (found == m_documents.end()) {
             document doc;
@@ -269,10 +278,21 @@ private:
             }
             auto [it, inserted] = m_documents.emplace(path, std::move(doc));
             found = it;
+        }
+        if (!found->second.window) {
             auto& item = found->second;
-            item.tab = &m_document_tabs->add<bgui::button>(path.filename().string(), 0.27f,
-                [this, path]() { activate_document(path); });
-            item.tab->style.layout.padding = bgui::vec4i{7, 3, 7, 3};
+            m_document_window = nullptr;
+            ensure_document_window();
+            item.window = m_document_window;
+            item.body = m_document_body;
+            item.status = m_document_status;
+            item.window->set_title(path.filename().string());
+            for (const auto& [key, doc] : m_documents) {
+                if (doc.window && doc.window != item.window) {
+                    m_dock->merge_window_as_tab(*doc.window, *item.window);
+                    break;
+                }
+            }
         }
         activate_document(path);
     }
@@ -282,11 +302,14 @@ private:
         if (found == m_documents.end()) return;
         if (m_active_document && m_active_document->editor)
             m_active_document->buffer = m_active_document->editor->get_buffer();
-        for (auto* element : m_active_content)
-            m_document_body->remove(element);
-        m_active_content.clear();
         m_active_document = &found->second;
         auto& doc = *m_active_document;
+        m_document_window = doc.window;
+        m_document_body = doc.body;
+        m_document_status = doc.status;
+        m_dock->focus_window(doc.window);
+        if (doc.opened) return;
+        doc.opened = true;
         set_document_status("", false);
         if (doc.image) {
             try {
@@ -304,11 +327,14 @@ private:
         } else if (is_markdown_file(doc.path)) {
             render_markdown(doc);
         } else {
-            doc.editor = &m_document_body->add<bgui::inputbox>(
-                doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
+            if (lower_extension(doc.path) == ".lua")
+                doc.editor = &m_document_body->add<lua_inputbox>(doc.buffer);
+            else
+                doc.editor = &m_document_body->add<bgui::inputbox>(
+                    doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
             doc.editor->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
             doc.editor->set_wrap(false);
-            doc.editor->set_editor_guides_enabled(true);
+            doc.editor->set_editor_guides_enabled(false);
             doc.editor->set_scrollable(true);
             doc.editor->set_highlight_rules(highlight_rules(doc.path));
             m_active_content.push_back(doc.editor);
@@ -383,21 +409,52 @@ private:
     }
 
     void update_document_editor() {
+        for (auto& [path, doc] : m_documents) {
+            bool attached = false;
+            if (m_dock)
+                for (const auto& [layer, children] : m_dock->get_elements())
+                    for (const auto& child : children)
+                        attached |= child.get() == doc.window;
+            if (!attached) {
+                doc.window = nullptr;
+                doc.body = nullptr;
+                doc.status = nullptr;
+                doc.editor = nullptr;
+                doc.opened = false;
+                if (m_active_document == &doc) {
+                    m_active_document = nullptr;
+                    m_document_window = nullptr;
+                    m_document_body = nullptr;
+                    m_document_status = nullptr;
+                }
+                continue;
+            }
+            if (doc.editor) {
+                doc.buffer = doc.editor->get_buffer();
+                if (doc.editor->is_focused() && doc.window->is_enabled()) {
+                    m_active_document = &doc;
+                    m_document_window = doc.window;
+                    m_document_body = doc.body;
+                    m_document_status = doc.status;
+                }
+            }
+            if (doc.window)
+                doc.window->set_title(doc.path.filename().string() +
+                    (doc.buffer != doc.original ? "*" : ""));
+        }
         const bool control_down =
             bgui::get_pressed(bgui::input_key::left_control) ||
             bgui::get_pressed(bgui::input_key::right_control);
         const bool save_down = control_down && bgui::get_pressed(bgui::input_key::s);
-        if (save_down && !m_save_shortcut_down && m_active_document &&
-            m_active_document->editor && m_active_document->editor->is_focused())
-            save_active_document();
+        const bool should_save = save_down && !m_save_shortcut_down && m_active_document &&
+            m_active_document->editor && m_active_document->editor->is_focused();
         m_save_shortcut_down = save_down;
+        if (should_save) save_active_document();
 
         if (!m_active_document) return;
         if (m_active_document->editor)
             m_active_document->buffer = m_active_document->editor->get_buffer();
         const bool dirty = m_active_document->buffer != m_active_document->original;
-        m_active_document->tab->get_label().set_buffer(
-            m_active_document->path.filename().string() + (dirty ? "*" : ""));
         if (m_document_window)
             m_document_window->set_title(m_active_document->path.filename().string() + (dirty ? "*" : ""));
     }

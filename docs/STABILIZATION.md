@@ -229,3 +229,27 @@ visual do editor/FPP não foram validados. Os testes novos não criam contexto
 OpenGL. Os sete testes que encerram subprocessos usam `fork` e são explicitamente
 ignorados no Windows; os demais testes não exigem esse recurso. O aviso preexistente de retorno ausente em `get_repository_root` permanece
 fora desta fase.
+
+## API Lua e edição de texto — 2026-10-27
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| API Lua próxima da Unity | CONFIRMADO: `code::setup()` expunha somente tabelas `bubble.*`; escopo escolhido pelo usuário: base, preservando compatibilidade | `gameObject`, `GameObject.Find(id)`, `GetComponent`, Vector3, Transform, Time, Input e Debug. `LuaApi.*` cobre acesso ao ECS, movimentação, API antiga, tempos e entidades removidas. Detalhes em `docs/LUA_API.md`. | Subconjunto explícito: busca por ID; Transform, Renderer e Rigidbody; sem novos callbacks de ciclo de vida. Entrada real por teclado/janela e Windows exigem validação interativa. |
+| Exemplo FPP migrado | CONFIRMADO: os três scripts usavam exclusivamente `bubble.*`; a cena atual identifica PlayerCapsule como 106 e PlayerCamera como 100 | Scripts agora usam a API nova. `Input.GetMouseDelta`, `Renderer.enabled`, consulta a Rigidbody e `Destroy` mantêm movimento, câmera e coleta sem chamadas antigas. `LuaApi.FppScriptsMoveLookAndCollectUsingTheNewApi` executa os scripts reais com entrada simulada. | A convenção de yaw existente (+X em zero) foi preservada; reprodução interativa completa do jogo ainda pendente. |
+| Rolagem multilinha | CONFIRMADO: `inputbox` era um `linear` horizontal, enquanto a rolagem é vertical; regressão `TextEditor.MultilineCanScrollWithoutFocus` | Campo multilinha usa orientação vertical. Teste sem GPU usa fonte sintética e verifica deslocamento do texto. | Rolagem vertical; não foi adicionada uma barra horizontal à BGUI. |
+| Guias e botões duplicados | CONFIRMADO por `files_view::activate_document()` e `ensure_document_window()` | Guias desabilitadas e removida a barra com Salvar/botões de arquivo. Arquivos usam abas próprias da dock, mantendo buffers/undo ao alternar. `EditorDocuments.*` cobre abertura, troca e Ctrl+S. | Markdown continua como visualização, conforme comportamento existente. Revisão visual interativa pendente. |
+| Asterisco na dock | CONFIRMADO: `dock::ensure_tab_controls()` copiava o título apenas ao criar a aba; regressão `TextEditor.DockTabFollowsWindowTitle` | Rótulo acompanha mudanças de título; `*` depende da comparação com o conteúdo salvo. Teste de integração verifica remoção após salvar. | Títulos ainda são usados pelo mecanismo existente de persistência da dock; identidade persistente independente de nome fica fora desta fase. |
+| Autocomplete Lua pequeno | CONFIRMADO como recurso novo solicitado | Catálogo da API do motor, sugestões após `.`/`:`, filtro por prefixo, aliases simples de Transform/GameObject, ↑/↓, Tab/Enter, Esc, clique e desfazer. `LuaCompletion.*` cobre resolução, supressão em comentários/strings, teclado e foco após clique. | Não é um servidor de linguagem: sem resolução geral de módulos, classes do usuário ou escopos complexos. Catálogo precisa acompanhar adições à API. |
+
+Validação: build novo de editor/runtime em `build/lua-editor`, seguindo
+`bash scripts/build.sh build/lua-editor --test`, e reexecução completa de CTest:
+**110/110 entradas passaram**. Os 12 testes desta fase passaram, incluindo a
+execução dos scripts reais do FPP com entrada simulada. A versão isolada do
+patch de edição também passou na checagem de sintaxe C++.
+
+O teste local `TextUndoDoesNotConsumeSceneHistory` foi ajustado para simular
+foco real com `bgui::focus_keyboard`, em vez de alterar somente a flag do campo.
+O aviso preexistente de retorno ausente em `get_repository_root` permanece fora
+desta fase. Windows, interação visual da caixa de sugestões e uma partida
+interativa completa do FPP não foram validados. Alterações locais dos demais
+trabalhos foram preservadas.

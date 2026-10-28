@@ -1,26 +1,23 @@
 -- Shared game logic for the FPP demo.
-
-local orb = { active = true, collected = false }
-local player_id = 100
+local collected = false
+local player
 
 function setup()
-    bubble.log("FPP demo started.")
+    player = GameObject.Find(106) -- PlayerCapsule in main.scene
+    Debug.Log("FPP demo started.")
 end
 
 function update()
-    if orb.collected then
-        return
-    end
-
-    local px, py, pz = bubble.entity.get_position(player_id)
-    local ox, oy, oz = bubble.transform.get_position()
-    local dx = px - ox
-    local dy = py - oy
-    local dz = pz - oz
+    if collected or not player or not player.transform then return end
+    local position = player.transform.position
+    local pickup = transform.position
+    local dx, dy, dz = position.x - pickup.x, position.y - pickup.y, position.z - pickup.z
     if dx * dx + dy * dy + dz * dz < 3.24 then
-        orb.collected = true
-        bubble.entity.set_visible(bubble.meuID, false)
-        bubble.entity.remove_physics(bubble.meuID)
-        bubble.log("Pickup collected.")
+        collected = true
+        local visual = gameObject:GetComponent("Renderer")
+        if visual then visual.enabled = false end
+        local body = gameObject:GetComponent("Rigidbody")
+        if body then Destroy(body) end
+        Debug.Log("Pickup collected.")
     end
 end

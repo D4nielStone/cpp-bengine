@@ -12,6 +12,7 @@
 #include <GLFW/glfw3.h>
 
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -96,16 +97,24 @@ void code::setup() {
                 return false;
 
             int glfw_key = GLFW_KEY_UNKNOWN;
-            if (key == "W" || key == "w")
-                glfw_key = GLFW_KEY_W;
-            else if (key == "A" || key == "a")
-                glfw_key = GLFW_KEY_A;
-            else if (key == "S" || key == "s")
-                glfw_key = GLFW_KEY_S;
-            else if (key == "D" || key == "d")
-                glfw_key = GLFW_KEY_D;
-            else if (key == "SPACE" || key == "space")
+            if (key.size() == 1) {
+                const auto c = static_cast<unsigned char>(key.front());
+                const int upper = std::toupper(c);
+                if ((upper >= 'A' && upper <= 'Z') || (upper >= '0' && upper <= '9'))
+                    glfw_key = upper;
+            } else if (key == "Space" || key == "SPACE" || key == "space")
                 glfw_key = GLFW_KEY_SPACE;
+            else if (key == "Escape") glfw_key = GLFW_KEY_ESCAPE;
+            else if (key == "Return") glfw_key = GLFW_KEY_ENTER;
+            else if (key == "Tab") glfw_key = GLFW_KEY_TAB;
+            else if (key == "LeftShift") glfw_key = GLFW_KEY_LEFT_SHIFT;
+            else if (key == "RightShift") glfw_key = GLFW_KEY_RIGHT_SHIFT;
+            else if (key == "LeftControl") glfw_key = GLFW_KEY_LEFT_CONTROL;
+            else if (key == "RightControl") glfw_key = GLFW_KEY_RIGHT_CONTROL;
+            else if (key == "UpArrow") glfw_key = GLFW_KEY_UP;
+            else if (key == "DownArrow") glfw_key = GLFW_KEY_DOWN;
+            else if (key == "LeftArrow") glfw_key = GLFW_KEY_LEFT;
+            else if (key == "RightArrow") glfw_key = GLFW_KEY_RIGHT;
 
             return glfw_key != GLFW_KEY_UNKNOWN &&
                 glfwGetKey(window, glfw_key) == GLFW_PRESS;
@@ -227,6 +236,7 @@ void code::setup() {
     );
     bubble["transform"] = transform_api;
 
+    api::setUnityApi(estado_lua, reg, my_object);
     estado_lua.script_file(arquivoCompleto);
 
     f_setup = estado_lua["setup"];
