@@ -241,3 +241,16 @@ TEST(EcsInvariantTest, RemovingLastComponentKeepsEntityAlive)
     EXPECT_TRUE(registry->mascaras.find(entity.id) == registry->mascaras.end());
     EXPECT_TRUE(registry->validate_invariants());
 }
+
+TEST(MaterialTexturePathTest, NormalizesWindowsSeparatorsAndParentDirectoriesWithoutGpu)
+{
+    material value;
+    value.set_texture("tex_albedo", texture{17, "/project/assets/Models/../Texture\\\\Bark___1.jpg"});
+    const auto stored = value.getTextura("tex_albedo");
+    EXPECT_EQ(std::filesystem::path(stored.path).generic_string(), "/project/assets/Texture/Bark___1.jpg");
+    EXPECT_EQ(stored.id, 17u);
+    value.set_texture("tex_albedo", texture{0, "../Texture\\textura.jpg"});
+    EXPECT_EQ(std::filesystem::path(value.getTextura("tex_albedo").path).generic_string(), "../Texture/textura.jpg");
+    value.set_texture("tex_albedo", texture{0, ""});
+    EXPECT_TRUE(value.getTextura("tex_albedo").path.empty());
+}

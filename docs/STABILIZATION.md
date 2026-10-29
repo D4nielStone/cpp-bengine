@@ -542,6 +542,15 @@ Windows, outros gerenciadores de arquivos e revisão manual interativa ainda nã
 As limitações de formato de imagem e hover externo registradas na fase anterior permanecem.
 Alterações locais anteriores e o trabalho concorrente de cobertura das bases foram preservados.
 
+## Texturas com separadores Windows e referências salvas (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Barras invertidas em texturas de material | CONFIRMADO: `MaterialTexturePathTest.NormalizesWindowsSeparatorsAndParentDirectoriesWithoutGpu` falhou antes da correção com barras simples e duplicadas no Linux. | `material::set_texture` converte separadores e normaliza segmentos `..`; preserva ID e caminho vazio. O teste passou sem DISPLAY/WAYLAND_DISPLAY. | Convenção de caminhos de assets: barras invertidas representam separadores. Não procura arquivos por nome nem altera diretórios arbitrariamente. Windows e revisão visual ainda não validados. |
+| Caminho do projeto local `New Project` | CONFIRMADO: cena referenciava `assets/Texture` enquanto os sete arquivos existem em `assets/models/Texture`; o MTL referencia `Texture` ao lado de `trees9.obj`. | Sete referências da cena local corrigidas para `assets/models/Texture/…`; existência verificada após leitura do JSON. | Projeto local não versionado, fora do commit. Não há evidência de que `../Texture` válido falhe: reprodução independente importou esse caso corretamente. A origem histórica das referências erradas não foi reproduzida. |
+
+Validação completa: build limpo de editor/runtime e **200/200 testes CTest passaram** em `/tmp/bengine-texture-clean-20261029`, configurado com BUILD_TESTING, BUILD_RUNTIME e BUILD_EDITOR ligados, conforme CMake/CI. O teste novo também passou explicitamente sem DISPLAY/WAYLAND_DISPLAY. Nenhum skip foi encontrado no LastTest.log. Windows e abertura manual do modelo no editor não foram validados; a suíte inclui testes OpenGL, mas isso não comprova a aparência deste modelo. O estado compartilhado inclui alterações anteriores fora deste commit. Como na CI, `--config Release` sem CMAKE_BUILD_TYPE não comprova otimização Release no gerador único. Logs: `/tmp/bengine-texture-clean-configure.log`, `/tmp/bengine-texture-clean-build.log`, `/tmp/bengine-texture-clean-tests.log`.
+
 ## Persistência, memória e proteção de arquivos — testes (2026-10-29)
 
 Fase restrita a testes e documentação: `tests/persistence_integrity_tests.cpp`

@@ -27,6 +27,8 @@
 #include "util/material.hpp"
 #include "util/pbr_material.hpp"
 #include <unordered_set>
+#include <algorithm>
+#include <filesystem>
 using namespace COMMONS_NS;
 
 material::material(std::map<std::string, uniform> unifs) {
@@ -39,7 +41,11 @@ void material::set_uniform(const std::string& nome, const uniform& prop) {
 }
 
 void material::set_texture(const std::string& nome, const texture& prop) {
-    textures[nome] = prop;
+    auto normalized = prop;
+    // Imported materials and saved scenes may use Windows separators on Linux.
+    std::replace(normalized.path.begin(), normalized.path.end(), '\\', '/');
+    normalized.path = std::filesystem::path(normalized.path).lexically_normal().string();
+    textures[nome] = std::move(normalized);
 }
 
 uniform material::getUniforme(const std::string& nome) const {
