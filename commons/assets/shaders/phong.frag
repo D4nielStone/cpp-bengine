@@ -31,6 +31,37 @@ struct PointLight {
     float quadratic;
 };
 
+uniform bool shadowEnabled;
+uniform sampler2D shadowMap;
+uniform mat4 lightSpaceMatrix;
+uniform float shadowBias;
+uniform float shadowStrength;
+
+float shadowVisibility(vec3 normal, vec3 lightDirection) {
+    if (!shadowEnabled) return 1.0;
+    vec4 lightPosition = lightSpaceMatrix * vec4(Position, 1.0);
+    vec3 projected = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
+    float bias = max(shadowBias * (1.0 - dot(normal, lightDirection)), shadowBias);
+    vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0));
+    // Bound receiver depth variation across the PCF footprint (one texel plus
+    // half a texel of nearest-sample rounding). The geometric depth derivatives
+    // also work with normal maps, whose shading normals do not describe this slope.
+    vec3 dx = dFdx(projected);
+    vec3 dy = dFdy(projected);
+    if (any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) return 1.0;
+    float determinant = dx.x * dy.y - dx.y * dy.x;
+    if (abs(determinant) > 1e-12) {
+        vec2 depthGradient = vec2(dy.y * dx.z - dx.y * dy.z,
+                                  dx.x * dy.z - dy.x * dx.z) / determinant;
+        bias += 1.5 * dot(abs(depthGradient), texel);
+    }
+    float blocked = 0.0;
+    for (int x = -1; x <= 1; ++x)
+        for (int y = -1; y <= 1; ++y)
+            blocked += projected.z - bias > texture(shadowMap, projected.xy + vec2(x, y) * texel).r ? 1.0 : 0.0;
+    return 1.0 - shadowStrength * blocked / 9.0;
+}
+
 uniform Material material;
 uniform DirLight dirLight;
 uniform PointLight pointLights[MAX_POINT_LIGHTS];
@@ -142,7 +173,7 @@ void main() {
 
     vec3 L_dir = normalize(-dirLight.direction);
     vec3 radiance_dir = dirLight.color * dirLight.intensity;
-    result += calculateLightLo(L_dir, radiance_dir, N, V, albedo.rgb, metallic, roughness);
+    result += shadowVisibility(N, L_dir) * calculateLightLo(L_dir, radiance_dir, N, V, albedo.rgb, metallic, roughness);
 
     for (int i = 0; i < pointLightCount && i < MAX_POINT_LIGHTS; ++i) {
         PointLight light = pointLights[i];

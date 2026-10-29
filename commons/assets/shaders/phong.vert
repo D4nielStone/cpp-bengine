@@ -22,7 +22,7 @@ void main()
     Uv = aUV;
 
     // Usa transformação por instância se habilitada
-    mat4 model_matrix = instance ? transformacoes[instance_id] : model;
+    mat4 model_matrix = instance ? transformacoes[gl_InstanceID] : model;
 
     Normal = mat3(transpose(inverse(model_matrix))) * aNormal;
     Position = vec3(model_matrix * vec4(aPos, 1.0));

@@ -412,3 +412,47 @@ TEST(LuaApi, FindAcceptsObjectNamesAndKeepsNumericLookup) {
     registry.reset();
     EXPECT_NO_THROW(lua.script("assert(GameObject.Find('42') == nil)"));
 }
+
+TEST(LuaApi, ShadowControlsUpdateNativeComponentsAndSerialize) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity);
+    registry->add<commons::directional_light>(entity, bgui::vec3{0,-1,0}, bgui::vec3{0.1f}, bgui::vec3{1}, 1.f);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUnityApi(lua, registry, entity.id);
+    ASSERT_NO_THROW(lua.script(R"(
+        local r = gameObject:GetComponent('Renderer')
+        assert(r.castShadows and r.receiveShadows)
+        r.castShadows = false
+        r.receiveShadows = false
+        local l = gameObject:GetComponent('DirectionalLight')
+        l.shadows = false
+        l.shadowDistance = 35
+        l.shadowBias = 0.002
+        l.shadowStrength = 0.7
+    )"));
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->cast_shadows);
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->receive_shadows);
+    auto light = registry->get<commons::directional_light>(entity.id);
+    rapidjson::Document data(rapidjson::kObjectType);
+    ASSERT_TRUE(light->serialize(data, data.GetAllocator()));
+    commons::directional_light loaded;
+    ASSERT_TRUE(loaded.analyze(data));
+    EXPECT_FALSE(loaded.shadows);
+    EXPECT_FLOAT_EQ(loaded.shadow_distance, 35.f);
+    EXPECT_FLOAT_EQ(loaded.shadow_bias, 0.002f);
+    EXPECT_FLOAT_EQ(loaded.shadow_strength, 0.7f);
+    data.RemoveMember("shadows");
+    data.RemoveMember("shadow_distance");
+    data.RemoveMember("shadow_bias");
+    data.RemoveMember("shadow_strength");
+    commons::directional_light legacy;
+    ASSERT_TRUE(legacy.analyze(data));
+    EXPECT_TRUE(legacy.shadows);
+    EXPECT_FLOAT_EQ(legacy.shadow_distance, 50.f);
+    data.AddMember("shadow_bias", "invalid", data.GetAllocator());
+    EXPECT_FALSE(legacy.analyze(data));
+}

@@ -579,6 +579,8 @@ private:
             true,
             [this, id]() { remove_component<commons::renderer>(id); }
         );
+        add_shadow_toggle(section.children(), "Cast Shadows", renderer, &commons::renderer::cast_shadows);
+        add_shadow_toggle(section.children(), "Receive Shadows", renderer, &commons::renderer::receive_shadows);
         auto& model_field = section.children().add<bgui::field>(
             "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", 0.27f);
         configure_property_field(model_field);
@@ -596,6 +598,8 @@ private:
                 next->my_object = id;
                 next->reg = registry;
                 next->visible = renderer->visible;
+                next->cast_shadows = renderer->cast_shadows;
+                next->receive_shadows = renderer->receive_shadows;
                 auto apply = [registry, id](const auto& component) {
                     registry->entities[id][commons::renderer::mask] = component;
                 };
@@ -873,6 +877,20 @@ private:
 
     }
 
+    template<class Content, class Component>
+    void add_shadow_toggle(Content& content, const char* label,
+        std::shared_ptr<Component> component, bool Component::*field) {
+        auto& checkbox = content.template add<bgui::checkbox>(label, 0.29f, component.get()->*field);
+        checkbox.set_on_change([this, component, field](bool enabled) {
+            const bool previous = component.get()->*field;
+            if (previous == enabled) return;
+            component.get()->*field = enabled;
+            m_context->record_action(
+                [component, field, previous]() { component.get()->*field = previous; },
+                [component, field, enabled]() { component.get()->*field = enabled; });
+        });
+    }
+
     void add_directional_light(
         const entity_id id,
         const std::shared_ptr<commons::directional_light>& light
@@ -886,6 +904,16 @@ private:
         );
         auto& content = section.children();
 
+        add_shadow_toggle(content, "Shadows", light, &commons::directional_light::shadows);
+        add_number_field(content, "Shadow Resolution", static_cast<float>(light->shadow_resolution),
+            [light]() { return static_cast<float>(light->shadow_resolution); },
+            [light](float v) { light->shadow_resolution = static_cast<int>(std::clamp(v, 128.f, 8192.f)); });
+        add_number_field(content, "Shadow Distance", light->shadow_distance,
+            [light]() { return light->shadow_distance; }, [light](float v) { light->shadow_distance = v; });
+        add_number_field(content, "Shadow Bias", light->shadow_bias,
+            [light]() { return light->shadow_bias; }, [light](float v) { light->shadow_bias = v; });
+        add_number_field(content, "Shadow Strength", light->shadow_strength,
+            [light]() { return light->shadow_strength; }, [light](float v) { light->shadow_strength = v; });
         add_vector_field(
             content,
             "Direction",

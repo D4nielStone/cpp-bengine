@@ -604,6 +604,55 @@ TEST_F(EditorInteractionTest, PrimaryDragRotatesWithoutSelectingAndGizmoBlocksCa
     EXPECT_FALSE(context->selected_entity); // Short click on empty space still selects/clears.
 }
 
+TEST_F(EditorInteractionTest, InspectorShadowControlsSupportUndoAndRedo) {
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, new commons::model());
+    registry->add<commons::directional_light>(entity);
+    const auto renderer = registry->get<commons::renderer>(entity.id);
+    const auto light = registry->get<commons::directional_light>(entity.id);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+    for (const auto& [label, value] : {std::pair{"Cast Shadows", &renderer->cast_shadows},
+            {"Receive Shadows", &renderer->receive_shadows}, {"Shadows", &light->shadows}}) {
+        auto* checkbox = find_element<bgui::checkbox>(dock, [label](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(checkbox, nullptr) << label;
+        EXPECT_TRUE(*value);
+        checkbox->on_clicked();
+        EXPECT_FALSE(*value);
+        ASSERT_TRUE(context->undo());
+        EXPECT_TRUE(*value);
+        ASSERT_TRUE(context->redo());
+        EXPECT_FALSE(*value);
+    }
+    auto* resolution = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Shadow Resolution";
+    });
+    ASSERT_NE(resolution, nullptr);
+    resolution->get_inputbox().m_enter_func("1024");
+    EXPECT_EQ(light->shadow_resolution, 1024);
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(light->shadow_resolution, 2048);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(light->shadow_resolution, 1024);
+    resolution->get_inputbox().m_enter_func("-5");
+    EXPECT_EQ(light->shadow_resolution, 128);
+    resolution->get_inputbox().m_enter_func("99999");
+    EXPECT_EQ(light->shadow_resolution, 8192);
+    auto* distance = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Shadow Distance";
+    });
+    ASSERT_NE(distance, nullptr);
+    distance->get_inputbox().m_enter_func("75");
+    EXPECT_FLOAT_EQ(light->shadow_distance, 75.f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(light->shadow_distance, 50.f);
+}
+
 
 TEST_F(EditorInteractionTest, InspectorExposesBodyTypesAndColliderControlsWithHistory) {
     auto entity = registry->create();

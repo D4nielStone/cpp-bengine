@@ -54,7 +54,8 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
         },
         "Rotate", &transform::rotate);
     lua.new_usertype<renderer>("Renderer", sol::no_constructor,
-        "enabled", &renderer::visible, "visible", &renderer::visible);
+        "enabled", &renderer::visible, "visible", &renderer::visible,
+        "castShadows", &renderer::cast_shadows, "receiveShadows", &renderer::receive_shadows);
     lua.new_usertype<physics>("Rigidbody", sol::no_constructor,
         "mass", sol::property([](const physics& p) { return p.m_massa; }, &physics::setMass),
         "friction", sol::property([](const physics& p) { return p.friction; }, &physics::setFriccao),
@@ -73,7 +74,9 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
         "backgroundColor", &camera::ceu, "useSkybox", &camera::m_use_skybox);
     lua.new_usertype<directional_light>("DirectionalLight", sol::no_constructor,
         "direction", &directional_light::direction, "ambient", &directional_light::ambient,
-        "color", &directional_light::color, "intensity", &directional_light::intensity);
+        "color", &directional_light::color, "intensity", &directional_light::intensity,
+        "shadows", &directional_light::shadows, "shadowDistance", &directional_light::shadow_distance,
+        "shadowBias", &directional_light::shadow_bias, "shadowStrength", &directional_light::shadow_strength);
     lua.new_usertype<point_light>("PointLight", sol::no_constructor,
         "position", &point_light::position, "color", &point_light::color,
         "intensity", &point_light::intensity, "constant", &point_light::constant,

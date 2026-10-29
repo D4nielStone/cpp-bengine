@@ -10,6 +10,8 @@ namespace COMMONS_NS {
     public:
         model* m_modelo{nullptr};
 	    bool visible{true};
+        bool cast_shadows{true};
+        bool receive_shadows{true};
 		static constexpr mask mask = COMPONENTE_RENDER;
 		renderer(model* mesh) : m_modelo(mesh) {
 		}
@@ -22,12 +24,18 @@ namespace COMMONS_NS {
                 m_modelo = new model(m_directory.c_str());
             }
             else return false;
+            if (value.HasMember("cast_shadows") && value["cast_shadows"].IsBool())
+                cast_shadows = value["cast_shadows"].GetBool();
+            if (value.HasMember("receive_shadows") && value["receive_shadows"].IsBool())
+                receive_shadows = value["receive_shadows"].GetBool();
 			return true;
         };
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override
         {
             if (!m_modelo)
                 return false;
+            value.AddMember("cast_shadows", cast_shadows, allocator);
+            value.AddMember("receive_shadows", receive_shadows, allocator);
             value.AddMember("model", rapidjson::Value(m_modelo->get_source_path().c_str(), allocator), allocator);
             return true;
         };

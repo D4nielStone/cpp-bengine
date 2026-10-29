@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tuple>
 #include "lua_inputbox.hpp"
 using editor::ui::complete_lua;
 
@@ -95,5 +96,19 @@ TEST(LuaCompletion, InfersWritableComponentProperties) {
         const auto result = complete_lua(source, source.size());
         ASSERT_TRUE(result) << source;
         EXPECT_EQ(result->members, (std::vector<std::string>{property}));
+    }
+}
+
+TEST(LuaCompletion, OffersShadowControls) {
+    for (const auto& [component, prefix, expected] : {
+            std::tuple{"Renderer", "cast", "castShadows"},
+            {"Renderer", "receive", "receiveShadows"},
+            {"DirectionalLight", "shadowD", "shadowDistance"},
+            {"DirectionalLight", "shadowB", "shadowBias"},
+            {"DirectionalLight", "shadowS", "shadowStrength"}}) {
+        const auto source = std::string("local c = gameObject:GetComponent(\"") + component + "\")\nc." + prefix;
+        auto result = complete_lua(source, source.size());
+        ASSERT_TRUE(result);
+        EXPECT_NE(std::find(result->members.begin(), result->members.end(), expected), result->members.end());
     }
 }

@@ -11,6 +11,9 @@ namespace COMMONS_NS {
 	class render_system : public system {
 	  public:
 	    render_system() = default;
+      ~render_system() override;
+      render_system(const render_system&) = delete;
+      render_system& operator=(const render_system&) = delete;
 		  void setup(const std::shared_ptr<ecs>&) override;
       void update(const std::shared_ptr<ecs>&) override;
 
@@ -27,6 +30,9 @@ namespace COMMONS_NS {
       }
 
     private:
+      unsigned int m_shadow_fbo{0}, m_shadow_texture{0};
+      int m_shadow_resolution{0};
+      bool prepare_shadow_map(int resolution);
       double m_last_render_time_ms{0.0};
       std::size_t m_last_camera_count{0};
       std::size_t m_last_rendered_entity_count{0};

@@ -173,3 +173,8 @@ To install the library and headers to a specific prefix, run:
 ```
 cmake --install out --prefix install
 ```
+
+A iluminação direcional oferece sombras em tempo real (shadow mapping com PCF,
+resolução padrão 2048² ajustável de 128 a 8192 no Inspector), controles **Cast Shadows / Receive Shadows** no Renderer e ajustes de
+alcance, bias e intensidade no Inspector e em Lua. Veja os exemplos em
+[API Lua](docs/LUA_API.md#sombras-em-tempo-real).

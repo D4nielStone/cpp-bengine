@@ -19,6 +19,7 @@ namespace COMMONS_NS {
         mesh(const std::vector<vertex>& vertices, const std::vector<unsigned int> &indices, const material& material);
         std::vector<vertex>         getVertices() const;
         std::vector<transform>      getInstances() const;
+        const std::vector<transform>& instances() const noexcept { return m_instances; }
         std::vector<unsigned int>   getIndices() const;
         material                    getMaterial() const;
         unsigned int                getVertexArray() const;

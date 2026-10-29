@@ -16,6 +16,21 @@ bool directional_light::analyze(const rapidjson::Value& value)
     ambient = {value["ambient"].GetArray()[0].GetFloat(), value["ambient"].GetArray()[1].GetFloat(), value["ambient"].GetArray()[2].GetFloat()};
     color = {value["color"].GetArray()[0].GetFloat(), value["color"].GetArray()[1].GetFloat(), value["color"].GetArray()[2].GetFloat()};
     intensity = value["intensity"].GetFloat();
+    shadows = !value.HasMember("shadows") || (value["shadows"].IsBool() && value["shadows"].GetBool());
+    for (const auto& [name, target] : {std::pair{"shadow_distance", &shadow_distance},
+            {"shadow_bias", &shadow_bias}, {"shadow_strength", &shadow_strength}}) {
+        if (value.HasMember(name)) {
+            if (!value[name].IsNumber()) return false;
+            *target = value[name].GetFloat();
+        }
+    }
+    shadow_resolution = 2048; // Projects saved before this setting retain the original resolution.
+    if (value.HasMember("shadow_resolution")) {
+        const auto& resolution = value["shadow_resolution"];
+        if (!resolution.IsInt() || resolution.GetInt() < 128 || resolution.GetInt() > 8192) return false;
+        shadow_resolution = resolution.GetInt();
+    }
+    if (value.HasMember("shadows") && !value["shadows"].IsBool()) return false;
 
     return true;
 };
@@ -41,6 +56,11 @@ bool directional_light::serialize(rapidjson::Value& value, rapidjson::Document::
     value.AddMember("ambient", ambient_v, allocator);
     value.AddMember("color", cor_v, allocator);
     value.AddMember("intensity", intensity, allocator);
+    value.AddMember("shadows", shadows, allocator);
+    value.AddMember("shadow_resolution", shadow_resolution, allocator);
+    value.AddMember("shadow_distance", shadow_distance, allocator);
+    value.AddMember("shadow_bias", shadow_bias, allocator);
+    value.AddMember("shadow_strength", shadow_strength, allocator);
     return true;
 }
 

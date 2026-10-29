@@ -1,6 +1,9 @@
 #include "systems/render_system.hpp"
 
 #include <chrono>
+#include <algorithm>
+#include <cmath>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "components/camera.hpp"
@@ -16,6 +19,57 @@
 #include <vector>
 
 using namespace COMMONS_NS;
+
+namespace {
+float finite_clamp(float value, float fallback, float low, float high) {
+    return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+}
+}
+
+render_system::~render_system() {
+    // Systems may outlive the window during application shutdown.
+    if (glad_glGetString && glGetString(GL_VERSION)) {
+        if (m_shadow_texture) glDeleteTextures(1, &m_shadow_texture);
+        if (m_shadow_fbo) glDeleteFramebuffers(1, &m_shadow_fbo);
+    }
+}
+
+bool render_system::prepare_shadow_map(int resolution) {
+    GLint max_texture_size;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    resolution = std::min(std::clamp(resolution, 128, 8192), max_texture_size);
+    if (m_shadow_fbo && m_shadow_resolution == resolution) return true;
+    GLint framebuffer, read_framebuffer, texture;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_framebuffer);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    if (!m_shadow_fbo) glGenFramebuffers(1, &m_shadow_fbo);
+    if (!m_shadow_texture) glGenTextures(1, &m_shadow_texture);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, resolution, resolution,
+        0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    const float border[] = {1, 1, 1, 1};
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadow_texture, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    const bool complete = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_framebuffer);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    if (!complete) {
+        glDeleteTextures(1, &m_shadow_texture);
+        glDeleteFramebuffers(1, &m_shadow_fbo);
+        m_shadow_texture = m_shadow_fbo = 0;
+    }
+    m_shadow_resolution = complete ? resolution : 0;
+    return complete;
+}
 
 void render_system::setup(const std::shared_ptr<ecs>&) {
 }
@@ -36,6 +90,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         bgui::vec3(1.0f),
         1.0f
     };
+    global_direction_light.shadows = false; // No shadow pass for the implicit fallback light.
     reg->cada<directional_light>([&](const uint32_t light_entity) {
         if (reg->has<camera>(light_entity))
             return;
@@ -77,6 +132,68 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             direction_light.direction = camera_light->get_world_direction();
         }
 
+        glm::mat4 light_space{1.f};
+        const glm::vec3 direction{direction_light.direction.x, direction_light.direction.y, direction_light.direction.z};
+        const bool valid_direction = std::isfinite(glm::dot(direction, direction)) && glm::dot(direction, direction) > 1e-8f;
+        const bool shadows = direction_light.shadows && valid_direction && prepare_shadow_map(direction_light.shadow_resolution);
+        GLint shadow_binding = 0, active_texture = GL_TEXTURE0;
+        if (shadows) {
+            const float distance = finite_clamp(direction_light.shadow_distance, 50.f, 1.f, 10000.f);
+            const glm::vec3 center{camera_component->position.x, camera_component->position.y, camera_component->position.z};
+            const auto ray = glm::normalize(direction);
+            const auto up = std::abs(ray.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
+            light_space = glm::ortho(-distance, distance, -distance, distance, 0.1f, distance * 4.f) *
+                glm::lookAt(center - ray * (distance * 2.f), center, up);
+            GLint framebuffer, viewport[4], depth_function;
+            GLboolean depth_mask;
+            const bool depth_test = glIsEnabled(GL_DEPTH_TEST);
+            const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
+            const bool cull = glIsEnabled(GL_CULL_FACE);
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
+            glGetIntegerv(GL_VIEWPORT, viewport);
+            glGetIntegerv(GL_DEPTH_FUNC, &depth_function);
+            glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_shadow_fbo);
+            glViewport(0, 0, m_shadow_resolution, m_shadow_resolution);
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glDepthFunc(GL_LESS);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_CULL_FACE); // Thin and double-sided surfaces can cast shadows.
+            glClear(GL_DEPTH_BUFFER_BIT);
+            shader depth_shader("shadow.vert", "shadow.frag");
+            depth_shader.use();
+            depth_shader.setMat4("lightSpaceMatrix", glm::value_ptr(light_space));
+            for (const auto& [renderer, transform] : renderables) {
+                if (!renderer || !transform || !renderer->visible || !renderer->cast_shadows || !renderer->m_modelo) continue;
+                for (auto& mesh : renderer->m_modelo->meshes) {
+                    if (mesh.isOverlayed()) continue;
+                    if (!mesh.isLoaded()) mesh.load();
+                    const auto& instances = mesh.instances();
+                    auto draw = [&](const glm::mat4& matrix) {
+                        depth_shader.setMat4("model", glm::value_ptr(matrix));
+                        glBindVertexArray(mesh.getVertexArray());
+                        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.getIndices().size()), GL_UNSIGNED_INT, nullptr);
+                    };
+                    if (instances.empty()) draw(transform->get_model_matrix());
+                    else for (const auto& instance : instances) draw(instance.get_world_model_matrix());
+                }
+            }
+            glBindVertexArray(0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+            glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+            glDepthFunc(depth_function);
+            glDepthMask(depth_mask);
+            if (!depth_test) glDisable(GL_DEPTH_TEST);
+            if (scissor) glEnable(GL_SCISSOR_TEST);
+            if (cull) glEnable(GL_CULL_FACE);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
+            glActiveTexture(GL_TEXTURE15);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &shadow_binding);
+            glBindTexture(GL_TEXTURE_2D, m_shadow_texture);
+            glActiveTexture(active_texture);
+        }
+
         for (const auto& [render_component, transform_component] : renderables) {
             if (!render_component || !transform_component || !render_component->m_modelo) {
                 debugging::emit(debug, "render", "Renderizador ou transformação inválida");
@@ -87,6 +204,11 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
 
             auto& shader = render_component->m_modelo->getShader();
             shader.use();
+            shader.setBool("shadowEnabled", shadows && render_component->receive_shadows);
+            shader.setInt("shadowMap", 15);
+            shader.setMat4("lightSpaceMatrix", glm::value_ptr(light_space));
+            shader.setFloat("shadowBias", finite_clamp(direction_light.shadow_bias, 0.001f, 0.f, 0.1f));
+            shader.setFloat("shadowStrength", finite_clamp(direction_light.shadow_strength, 1.f, 0.f, 1.f));
             shader.setMat4("view", glm::value_ptr(view));
             shader.setMat4("projection", glm::value_ptr(projection));
             shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
@@ -111,6 +233,11 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             ++m_last_rendered_entity_count;
         }
 
+        if (shadows) {
+            glActiveTexture(GL_TEXTURE15);
+            glBindTexture(GL_TEXTURE_2D, shadow_binding);
+            glActiveTexture(active_texture);
+        }
     });
 
     m_last_render_time_ms = std::chrono::duration<double, std::milli>(

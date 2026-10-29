@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
+#include "components/directional_light.hpp"
+#include "systems/render_system.hpp"
 #include "project_persistence_system.hpp"
 #include "viewport_sync.hpp"
 #include "guizmo/grid_gizmo.hpp"
@@ -61,6 +63,8 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     registry->add<commons::renderer>(entity, (source / "commons/assets/models/cube.obj").string().c_str());
     auto renderer = registry->get<commons::renderer>(entity.id);
     ASSERT_FALSE(renderer->m_modelo->meshes.empty());
+    renderer->cast_shadows = false;
+    renderer->receive_shadows = false;
     auto material = renderer->m_modelo->meshes[0].getMaterial();
     material.set_uniform("material.metallic", 0.73f);
     material.set_uniform("material.roughness", 0.39f);
@@ -77,6 +81,8 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     std::string error;
     ASSERT_TRUE(persistence.save(project.string(), error)) << error;
     ASSERT_TRUE(persistence.load(project.string(), error)) << error;
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->cast_shadows);
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->receive_shadows);
     const auto loaded = registry->get<commons::renderer>(entity.id)->m_modelo->meshes[0].getMaterial();
     EXPECT_FLOAT_EQ(loaded.getUniforme("material.metallic").valor.f, 0.73f);
     EXPECT_FLOAT_EQ(loaded.getUniforme("material.roughness").valor.f, 0.39f);
@@ -230,6 +236,119 @@ TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextC
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
 }
 
+TEST_F(EditorRenderTest, DirectionalShadowsRespectCasterReceiverAndLightControls) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera_entity = registry->create();
+    registry->add<commons::camera>(camera_entity);
+    auto camera = registry->get<commons::camera>(camera_entity.id);
+    registry->get<commons::transform>(camera_entity.id)->set_position({0,6,8});
+    registry->get<commons::transform>(camera_entity.id)->set_rotation({-36.8699f,-90,0});
+    camera->position = {0, 6, 8};
+    camera->viewMatrix = glm::lookAt(glm::vec3{0,6,8}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
+    camera->flag_orth = true;
+    camera->scale = 5.f;
+    camera->request_framebuffer_size({128,128});
+    auto light_entity = registry->create();
+    registry->add<commons::directional_light>(light_entity, bgui::vec3{1,-2,0}, bgui::vec3{0.1f}, bgui::vec3{1}, 1.f);
+    auto light = registry->get<commons::directional_light>(light_entity.id);
+    light->shadow_distance = 12.f;
+    commons::material surface;
+    surface.set_uniform("material.albedo", commons::color{0.6f,0.6f,0.6f,1.f});
+    surface.set_uniform("material.metallic", 0.f);
+    surface.set_uniform("material.roughness", 0.5f);
+    surface.set_uniform("material.ao", 1.f);
+    auto make_plane = [&]() {
+        auto model = new commons::model();
+        model->meshes.emplace_back(std::vector<commons::vertex>{
+            {{-1,0,-1},{0,1,0},{0,0}}, {{1,0,-1},{0,1,0},{1,0}},
+            {{1,0,1},{0,1,0},{1,1}}, {{-1,0,1},{0,1,0},{0,1}}},
+            std::vector<unsigned int>{0,2,1,0,3,2}, surface);
+        model->meshes[0].load();
+        return model;
+    };
+    auto floor_entity = registry->create();
+    registry->add<commons::renderer>(floor_entity, make_plane());
+    registry->get<commons::transform>(floor_entity.id)->set_scale({5,1,5});
+    auto floor = registry->get<commons::renderer>(floor_entity.id);
+    auto cube_entity = registry->create();
+    registry->get<commons::transform>(cube_entity.id)->set_position({0,2,0});
+    registry->add<commons::renderer>(cube_entity, make_plane());
+    auto cube = registry->get<commons::renderer>(cube_entity.id);
+    commons::render_system system;
+    auto render = [&]() {
+        system.update(registry);
+        std::vector<unsigned char> pixels(128*128*3);
+        glReadPixels(0,0,128,128,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+        return pixels;
+    };
+    auto shadowed = render();
+    light->shadows = false;
+    auto lit = render();
+    auto darkened = [](const auto& a, const auto& b) {
+        int count = 0;
+        for (size_t i = 0; i < a.size(); i += 3)
+            if (int(b[i]) - int(a[i]) > 10) ++count;
+        return count;
+    };
+    EXPECT_GT(darkened(shadowed, lit), 20);
+    auto previous_shadow = shadowed;
+    for (const int resolution : {128, 1024, 2048}) {
+        light->shadow_resolution = resolution;
+        light->shadows = true;
+        const auto resized_shadow = render();
+        EXPECT_GT(darkened(resized_shadow, lit), 20) << resolution;
+        EXPECT_NE(resized_shadow, previous_shadow) << resolution;
+        previous_shadow = resized_shadow;
+    }
+    light->shadows = true;
+    floor->receive_shadows = false;
+    EXPECT_LT(darkened(render(), lit), 10);
+    floor->receive_shadows = true;
+    cube->cast_shadows = false;
+    EXPECT_LT(darkened(render(), lit), 10);
+    cube->cast_shadows = true;
+    light->shadow_strength = 0;
+    EXPECT_EQ(render(), lit);
+    light->shadow_strength = 1;
+    registry->add<commons::directional_light>(camera_entity, bgui::vec3{1,-2,0}, bgui::vec3{0.1f}, bgui::vec3{1}, 1.f);
+    registry->get<commons::directional_light>(camera_entity.id)->shadows = false;
+    render();
+    GLint enabled = 1;
+    const auto program = floor->m_modelo->getShader().ID;
+    glGetUniformiv(program, glGetUniformLocation(program, "shadowEnabled"), &enabled);
+    EXPECT_EQ(enabled, 0); // The camera's light overrides the global light.
+    registry->remove<commons::directional_light>(camera_entity.id);
+    cube->visible = false;
+    auto hidden_shadowed = render();
+    light->shadows = false;
+    EXPECT_EQ(hidden_shadowed, render());
+    light->shadows = true;
+    // An isolated plane must not shadow itself, even at grazing light angles.
+    light->direction = {1,-0.2f,0};
+    registry->get<commons::transform>(cube_entity.id)->set_position({0,0.5f,0});
+    light->shadow_bias = 0.000001f;
+    for (const int resolution : {128, 512, 2048}) {
+        light->shadow_resolution = resolution;
+        light->shadows = true;
+        auto grazing_shadowed = render();
+        light->shadows = false;
+        const auto grazing_lit = render();
+        EXPECT_LT(darkened(grazing_shadowed, grazing_lit), 10) << resolution;
+        cube->visible = true;
+        light->shadows = true;
+        EXPECT_GT(darkened(render(), grazing_lit), 20) << resolution;
+        cube->visible = false;
+    }
+    light->shadows = true;
+    cube->visible = true;
+    registry->get<commons::transform>(cube_entity.id)->set_position({0,2,0});
+    light->direction = {0,-1,0}; // Stable up vector for vertical lights.
+    render();
+    light->direction = {0,0,0}; // Invalid directions safely disable the pass.
+    render();
+}
+
 
 TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
     auto registry = std::make_shared<commons::ecs>();
@@ -253,4 +372,25 @@ TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
     for (size_t i=0;i<pixels.size();i+=3) if (pixels[i+1]>150 && pixels[i+1]>pixels[i]*2) ++green;
     EXPECT_GT(green,10);
     registry->remove(2);registry->remove(1);
+}
+
+TEST(ShadowSettings, ResolutionRoundTripsAndValidatesWithoutGpu) {
+    commons::directional_light light;
+    light.shadow_resolution = 1024;
+    rapidjson::Document data(rapidjson::kObjectType);
+    ASSERT_TRUE(light.serialize(data, data.GetAllocator()));
+    commons::directional_light loaded;
+    ASSERT_TRUE(loaded.analyze(data));
+    EXPECT_EQ(loaded.shadow_resolution, 1024);
+    for (int invalid : {-1, 0, 127, 8193}) {
+        data["shadow_resolution"].SetInt(invalid);
+        EXPECT_FALSE(loaded.analyze(data));
+    }
+    data["shadow_resolution"].SetFloat(512.5f);
+    EXPECT_FALSE(loaded.analyze(data));
+    data["shadow_resolution"].SetString("invalid");
+    EXPECT_FALSE(loaded.analyze(data));
+    data.RemoveMember("shadow_resolution");
+    ASSERT_TRUE(loaded.analyze(data));
+    EXPECT_EQ(loaded.shadow_resolution, 2048);
 }

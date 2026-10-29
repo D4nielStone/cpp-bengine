@@ -88,9 +88,9 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
         if (!methods) names.insert(names.end(), {"mass", "friction", "restitution", "velocity"});
     } else if (!methods) {
         if (type == "camera") names = {"fieldOfView", "aspect", "nearClipPlane", "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox"};
-        else if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity"};
+        else if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "pointLight") names = {"position", "color", "intensity", "constant", "linear", "quadratic"};
-        else if (type == "renderer") names = {"enabled", "visible"};
+        else if (type == "renderer") names = {"enabled", "visible", "castShadows", "receiveShadows"};
         else if (type == "GameObject") names = {"Find"};
         else if (type == "Time") names = {"deltaTime", "time"};
         else if (type == "Input") names = {"GetAxis", "GetKey", "GetMouseDelta", "SetMouseCaptured"};

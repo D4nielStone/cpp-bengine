@@ -751,6 +751,49 @@ Evidências em `/home/d4nl/.cache/bengine-validation/fpp-ramp-20261029/`:
 `fpp-ramp-tests.log` e `fpp-ramp-runtime.log`. O cache de `out` permanece Debug;
 nenhuma alteração de arquitetura de renderização ou do ECS foi necessária.
 
+
+## Resolução de sombra no Inspector e shadow acne (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Resolução ausente no Inspector | CONFIRMADO: `InspectorShadowControlsSupportUndoAndRedo` falhou por não encontrar `Shadow Resolution`; renderizador usava constante 2048. | Campo numérico na luz direcional, padrão 2048, intervalo 128–8192; persistência JSON com compatibilidade para arquivos antigos e validação de tipo/intervalo. Inspector preserva desfazer/refazer. Renderizador redimensiona a textura ao mudar o valor e respeita `GL_MAX_TEXTURE_SIZE`. Testes cobrem edição/histórico/limites e persistência sem GPU, além da troca de resolução com leitura de pixels. | O limite efetivo da GPU pode ser menor que o valor salvo. Não foi adicionada nova API Lua nesta tarefa. |
+| Acne em superfície plana com iluminação rasante | CONFIRMADO: teste OpenGL com plano isolado, direção `(1,-0.2,0)` e bias `0.000001` encontrou 4692 pixels indevidamente escurecidos; limite esperado menor que 10. | Shader acrescenta ao bias a variação de profundidade geométrica no raio do filtro PCF, incluindo arredondamento da amostra mais próxima. Derivadas calculadas antes da saída por limites do mapa. Teste verifica ausência de acne e preservação da sombra de outro objeto em 128, 512 e 2048. | Compensação conservadora pode afastar sombras de contato, sobretudo em baixa resolução e ângulos extremos. Degenerações da projeção mantêm o bias configurado. Não houve avaliação visual manual do projeto FPP nem execução em Windows/outros drivers. |
+
+Validação em diretório novo concluída: editor, runtime e todos os alvos de teste
+compilaram com código 0. **231/232 entradas CTest passaram**, sem exclusões.
+Todos os testes de sombras passaram, incluindo OpenGL; edição/histórico e
+persistência também passaram com `DISPLAY` removido.
+A única falha foi `Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`:
+base da cápsula em Y=-24,64136 e velocidade Y=-20,36254. O executável antigo de
+`out/tests/engine_foundations_tests`, sem reconstrução nesta tarefa, reproduz os
+mesmos valores com a cena local atual (`fpp-existing-failure.log`). A cena do usuário
+e o sistema de física foram preservados; não se afirma suíte inteira verde.
+
+Comandos derivados do CMake/workflow:
+
+```sh
+cmake -S . -B /home/d4nl/.cache/bengine-validation/shadow-settings-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/repos/cpp-bengine/out/_deps/googletest-src
+cmake --build /home/d4nl/.cache/bengine-validation/shadow-settings-20261029 --parallel 2
+ctest --test-dir /home/d4nl/.cache/bengine-validation/shadow-settings-20261029 --output-on-failure -C Release
+```
+
+Após ajustar somente a posição do objeto no cenário de regressão rasante para sua
+sombra permanecer dentro do plano visível, `editor_render_tests` foi recompilado
+antes do CTest completo. Como no helper de CI, `CMAKE_BUILD_TYPE` não foi definido.
+Logs em `/home/d4nl/.cache/bengine-validation/shadow-settings-20261029/validation/`:
+`shadow-clean-build.log`, `shadow-all-tests.log`, `shadow-focused.log`,
+`shadow-inspector-headless.log`, `shadow-persistence-headless.log`,
+`shadow-inspector-red.log`, `shadow-acne-red.log` e `fpp-existing-failure.log`.
+O diretório `out` não foi reconstruído; os executáveis novos estão em `apps/`
+no diretório de validação acima. O editor já aberto usa o binário antigo.
+Os itens P0/P1/P2 do diagnóstico original não foram alterados nesta tarefa.
+Alterações locais anteriores foram preservadas, incluindo implementação prévia de
+sombras e mudanças já preparadas para commit nos mesmos arquivos.
+
+O usuário autorizou incluir a implementação anterior de sombras no mesmo commit.
+O commit reúne somente sombras, resolução, correção de acne, testes e documentação;
+mudanças locais de física, colisores, cena FPP, interface e submódulo ficam de fora.
+
 ## Colisor alinhado à malha/Transform e visualização F3 (2026-10-29)
 
 | Item | Status / evidência | Mudança e testes | Limites / revisão |
@@ -779,3 +822,30 @@ fixture idêntica com ajuste automático desligado; testes permanentes usam ajus
 Leitura dos vértices OBJ nos testes não usa o carregador de modelos que cria buffers GL.
 O cache de out usa Debug. Detalhes de uso em `docs/PHYSICS.md`. Itens P0/P1/P2 do
 inventário anterior não foram reabertos.
+
+### Validação do conteúdo separado para commit
+
+Após autorização do usuário, os arquivos mistos foram preparados parcialmente,
+sem modificar suas alterações locais restantes. Uma cópia exata da árvore
+preparada foi extraída em
+`/home/d4nl/.cache/bengine-validation/shadow-commit-20261029/source`, usando as
+revisões registradas dos submódulos (inclusive o backend da BGUI).
+Editor, runtime e todos os alvos compilaram do zero: **221/221 entradas CTest
+passaram**, sem exclusões (6,87 s), incluindo o teste gráfico de sombras e o teste
+de spawn do FPP com a cena versionada. Essa cópia valida o conjunto de sombras
+isolado sobre a base `a82ddf3d`, independentemente das demais alterações locais.
+Durante a validação, outro trabalho registrou as mudanças de física no commit
+`ede55e4f`, que passou a ser o pai do commit de sombras. A rodada anterior de
+231/232 continua sendo o resultado do workspace completo com essas alterações
+de física e com a cena local presentes; não se atribui o resultado 221/221 à
+árvore integrada posterior.
+
+```sh
+cmake -S /home/d4nl/.cache/bengine-validation/shadow-commit-20261029/source -B /home/d4nl/.cache/bengine-validation/shadow-commit-20261029/build -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/repos/cpp-bengine/out/_deps/googletest-src
+cmake --build /home/d4nl/.cache/bengine-validation/shadow-commit-20261029/build --parallel 2
+ctest --test-dir /home/d4nl/.cache/bengine-validation/shadow-commit-20261029/build --output-on-failure -C Release
+```
+
+Logs: `config.log`, `build.log`, `tests.log` e `shadow-focused.log` em
+`/home/d4nl/.cache/bengine-validation/shadow-commit-20261029/`.
+Somente esta nota de documentação foi acrescentada após a validação da árvore.

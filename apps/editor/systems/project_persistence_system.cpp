@@ -94,6 +94,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
     if (name == "renderer") {
         if (value.HasMember("model") && !value["model"].IsString())
             return false;
+        for (const auto* key : {"cast_shadows", "receive_shadows"})
+            if (value.HasMember(key) && !value[key].IsBool()) return false;
         if (value.HasMember("visible") && !value["visible"].IsBool())
             return false;
         if (!value.HasMember("model") && !value.HasMember("visible"))
@@ -293,6 +295,8 @@ bool parse_component(
                 renderer->m_modelo->meshes[index].setMaterial(material);
             }
         }
+        if (data.HasMember("cast_shadows")) renderer->cast_shadows = data["cast_shadows"].GetBool();
+        if (data.HasMember("receive_shadows")) renderer->receive_shadows = data["receive_shadows"].GetBool();
         if (data.HasMember("visible"))
             renderer->visible = data["visible"].GetBool();
         return true;
