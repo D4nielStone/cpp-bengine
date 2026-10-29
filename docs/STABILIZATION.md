@@ -592,6 +592,27 @@ de disco/energia e liberação de recursos GPU não foram validados. A suíte co
 reflete o estado compartilhado atual, incluindo alterações locais de outras tarefas;
 o commit desta fase contém somente testes/configuração/documentação próprios.
 
+## JPEG no Linux — BGUI, BEngine e Files view (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Leitura de JPG/JPEG | CONFIRMADO: o carregador não Windows chamava somente libpng; `ImageTest.DecodesJpegRgbGrayscaleAndCmykToRgba` falhou com JPEG real antes da correção (`/tmp/bengine-jpeg-red.log`). | BGUI identifica JPEG pela assinatura e usa libjpeg para converter RGB, tons de cinza, CMYK e JPEG progressivo para o mesmo buffer RGBA utilizado por PNG/WIC. Tratamento de erro mantém a aplicação viva; recursos são liberados inclusive na saída de erro da biblioteca C. Fixtures reais verificam dimensões, cores e alfa opaco; arquivo inválido deve lançar exceção. | API preservada. Não aplica orientação EXIF nem perfis ICC; a conversão CMYK é simples. PNG mantém o caminho anterior; Windows mantém WIC. |
+| Integração BEngine e Arquivos | CONFIRMADO: `commons::texture::bind` e a prévia do painel usam o carregador da BGUI, mas a classificação Linux do painel aceitava somente PNG. O teste de integração falhou em `.JPG`/`.JPEG` antes da correção (`/tmp/bengine-jpeg-editor-red.log`). | Teste de importar/copiar JPEG, abrir a prévia e aplicar ao objeto alvo sem GPU. Testes gráficos verificam imagem JPEG renderizada na BGUI e pixels da textura enviada ao OpenGL pelo BEngine. | O comportamento sem objeto sob o cursor permanece sem aplicação de textura. O painel agora aceita `.jpg`/`.jpeg` também no Linux, sem distinguir maiúsculas; teste cobre encaminhamento do arquivo arrastado e uma imagem real na janela de prévia. |
+| Dependências | CONFIRMADO: cabeçalhos libjpeg inicialmente ausentes; `libjpeg-dev`/`libjpeg-turbo8-dev` estão instalados na validação final. | CMake exige `JPEG::JPEG` somente fora do Windows. CI Linux instala `libjpeg-dev` e `libpng-dev`; README da BGUI documenta os pacotes. Nos testes iniciais, o pacote Ubuntu `libjpeg-turbo8-dev` 2.1.5 foi extraído localmente; o build final usa a instalação disponível no sistema. | Para builds Linux são necessários `libpng-dev` e `libjpeg-dev`; não há novos pacotes exigidos no Windows. |
+
+Validação JPEG concluída: **editor/runtime compilados em diretório novo e 206/206 entradas CTest disponíveis passaram**, incluindo OpenGL. Os testes de leitura JPEG da BGUI e de importação/prévia/arrasto/aplicação do editor também passaram sem display. Configuração derivada do CMake/CI:
+
+```sh
+cmake -S . -B /home/d4nl/.cache/bengine-validation/jpeg-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
+cmake --build /home/d4nl/.cache/bengine-validation/jpeg-20261029 --config Release --parallel 1
+ctest --test-dir /home/d4nl/.cache/bengine-validation/jpeg-20261029 --output-on-failure -C Release -E material_uv
+```
+
+Logs finais persistentes: `/home/d4nl/.cache/bengine-validation/jpeg-build.log` e `/home/d4nl/.cache/bengine-validation/jpeg-tests.log`. Os logs temporários anteriores não persistiram após a reinicialização do ambiente.
+Windows, outros drivers e arrasto manual a partir de gerenciador externo não foram validados.
+Como no helper da CI, `CMAKE_BUILD_TYPE` não foi definido; `--config Release` não implica
+otimização Release no gerador único. Alterações locais anteriores foram preservadas.
+
 ## Cliques bloqueados pelo aviso de arraste (2026-10-29)
 
 | Item | Status / evidência | Mudança e testes | Limites / revisão |
@@ -613,3 +634,14 @@ Logs: `/tmp/bengine-overlay-red.log`, `/tmp/bengine-overlay-green.log`,
 `/tmp/bengine-input-fix-build.log`, `/tmp/bengine-input-remaining-build.log`
 e `/tmp/bengine-input-tests.log`. Como no helper da CI, `CMAKE_BUILD_TYPE`
 não foi definido; `--config Release` não implica otimização em gerador único.
+
+A construção geral encontrou o alvo concorrente e ainda não concluído `material_uv_tests`,
+que inclui `loaders/mtl_uv.hpp` ausente. Esse trabalho foi preservado; somente seu placeholder
+`material_uv_tests_NOT_BUILT` ficou excluído do CTest acima. Não se afirma que o alvo
+alheio compila. Logs adicionais: `jpeg-editor-headless.log`, `jpeg-bgui-headless.log`,
+`jpeg-engine-gpu.log` e `jpeg-gl3-final.log` no mesmo diretório de validação.
+
+O novo teste gráfico inicialmente expôs cache estático de shaders preservado entre dois
+contextos OpenGL independentes (`GL_INVALID_VALUE` no segundo contexto). Esse ciclo de vida
+não foi alterado nesta fase: o caso existente agora testa PNG e JPEG no mesmo contexto,
+limpando o framebuffer entre as imagens. Revisão de múltiplos contextos permanece pendente.

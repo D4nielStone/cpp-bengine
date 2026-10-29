@@ -388,7 +388,7 @@ private:
         return ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
                ext == ".bmp" || ext == ".gif" || ext == ".tif" || ext == ".tiff";
 #else
-        return ext == ".png";
+        return ext == ".png" || ext == ".jpg" || ext == ".jpeg";
 #endif
     }
 

@@ -116,3 +116,25 @@ TEST(WindowFileDropTest, DropHintDarkensTheFramebufferAndDisappearsWithoutLeavin
     const auto cleared = render_pixel();
     EXPECT_EQ(cleared, hidden);
 }
+
+TEST(WindowFileDropTest, EngineTextureUploadsDecodedJpegPixels) {
+    if (!glfwInit()) GTEST_SKIP() << "No display for JPEG texture verification";
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    commons::window window("JPEG texture test", 100, 100);
+    const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() /
+        "external/cpp-bgui/tests/assets/rgb.jpg";
+    commons::texture texture{0, path.string()};
+    texture.bind(0);
+    int width = 0, height = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+    ASSERT_EQ(width, 3);
+    ASSERT_EQ(height, 2);
+    std::array<unsigned char, 24> pixels{};
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    EXPECT_GT(pixels[0], 240);
+    EXPECT_LT(pixels[1], 10);
+    EXPECT_LT(pixels[2], 10);
+    EXPECT_EQ(pixels[3], 255);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}

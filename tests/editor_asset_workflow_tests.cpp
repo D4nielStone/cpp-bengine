@@ -529,3 +529,41 @@ TEST_F(EditorAssetWorkflowTest, ExternalFilesCanBeCopiedDirectlyIntoAProjectFold
     EXPECT_TRUE(std::filesystem::exists(folder / "notes.txt"));
     EXPECT_THROW(files.import_file(folder / "notes.txt", folder), std::runtime_error);
 }
+
+TEST_F(EditorAssetWorkflowTest, JpegImportsPreviewsAndAppliesToTheTargetObject) {
+    const auto fixture = std::filesystem::path(__FILE__).parent_path().parent_path() /
+        "external/cpp-bgui/tests/assets/rgb.jpg";
+    std::filesystem::path dropped;
+    editor::ui::files_view files(folder, [&](const auto& path, const auto&) { dropped = path; });
+    const auto imported = files.import_file(fixture);
+    EXPECT_TRUE(std::filesystem::is_regular_file(imported));
+    EXPECT_NE(imported, fixture);
+    EXPECT_TRUE(files.supports_image("Preview.JPG"));
+    EXPECT_TRUE(files.supports_image("Preview.JPEG"));
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    files.build(dock);
+    auto* button = find<bgui::button>(dock, [](auto& value) {
+        return find<bgui::text>(value, [](auto& text) { return text.get_buffer() == "rgb.jpg"; });
+    });
+    ASSERT_NE(button, nullptr);
+    button->on_pressed();
+    button->set_drag({8, 2});
+    button->on_released();
+    EXPECT_EQ(dropped, imported);
+    button->on_pressed();
+    button->on_released();
+    bgui::on_update();
+    auto* preview = find<bgui::window>(dock, [](auto& value) { return value.get_title().get_buffer() == "rgb.jpg"; });
+    ASSERT_NE(preview, nullptr);
+    EXPECT_NE(find<bgui::image>(*preview, [](auto& value) { return typeid(value) == typeid(bgui::image); }), nullptr);
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto target = registry->create();
+    registry->add<commons::renderer>(target, new commons::model());
+    auto* model = registry->get<commons::renderer>(target.id)->m_modelo;
+    model->meshes.emplace_back(std::vector<commons::vertex>{}, std::vector<unsigned>{}, commons::material{});
+    std::string error;
+    ASSERT_TRUE(editor::ui::apply_dropped_albedo(context, target.id, imported, error)) << error;
+    EXPECT_EQ(model->meshes[0].getMaterial().getTextura("tex_albedo").path, imported.string());
+    EXPECT_FALSE(editor::ui::apply_dropped_albedo(context, 0, imported, error));
+}
