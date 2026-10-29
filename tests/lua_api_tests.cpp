@@ -113,6 +113,10 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
         script->setup();
         return script;
     };
+    registry->add<commons::physics>(player);
+    auto physical = registry->get<commons::physics>(player.id);
+    physical->set_body_type(commons::physics::body_type::character);
+    physical->setVelocidade({0.f, -3.f, 0.f});
     auto body = load(player, "fpp_player.lua");
     auto setup = body->f_setup();
     ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
@@ -123,7 +127,8 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     auto moved = body->f_update();
     ASSERT_TRUE(moved.valid()) << sol::error(moved).what();
     auto player_transform = registry->get<commons::transform>(player.id);
-    EXPECT_NEAR(player_transform->get_position().z, 0.25f, 0.0001f);
+    EXPECT_NEAR(physical->getVelocidade().z, 2.5f, 0.0001f);
+    EXPECT_FLOAT_EQ(physical->getVelocidade().y, -3.f);
     EXPECT_NEAR(player_transform->get_rotation().y, -91.2f, 0.0001f);
 
     auto look = load(camera, "fpp_camera.lua");

@@ -79,6 +79,7 @@ void physics_system::synchronize_entities(
         if (current != body->second || !transform_component) {
             if (body->second && body->second->m_rigid_body)
                 dynamic_world->removeRigidBody(body->second->m_rigid_body);
+            m_collision_revisions.erase(body->first);
             body = m_bodies.erase(body);
         } else {
             ++body;
@@ -92,15 +93,12 @@ void physics_system::synchronize_entities(
             if (!body || !entity_transform || m_bodies.contains(id))
                 return;
 
-            body->m_forma->setLocalScaling(btVector3(
-                std::abs(entity_transform->scale.x),
-                std::abs(entity_transform->scale.y),
-                std::abs(entity_transform->scale.z)
-            ));
+            body->refresh_collision(entity_transform->scale);
             const auto world_transform = to_bullet_transform(*entity_transform);
             body->m_rigid_body->setWorldTransform(world_transform);
             body->m_estado_de_movimento->setWorldTransform(world_transform);
-            dynamic_world->addRigidBody(body->m_rigid_body);
+            dynamic_world->addRigidBody(body->m_rigid_body, 1, body->collision_enabled ? -1 : 0);
+            m_collision_revisions[id] = body->collision_revision;
             m_bodies.emplace(id, std::move(body));
         }
     );
@@ -119,6 +117,24 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
         return;
 
     for (const auto& [id, body] : m_bodies) {
+        const auto tr = registry->get<transform>(id);
+        body->refresh_collision(tr->scale);
+        auto* proxy = body->m_rigid_body->getBroadphaseHandle();
+        const int group = body->m_massa <= 0.f ? btBroadphaseProxy::StaticFilter : btBroadphaseProxy::DefaultFilter;
+        const int filter = body->collision_enabled ? btBroadphaseProxy::AllFilter : 0;
+        if (proxy && (proxy->m_collisionFilterGroup != group || proxy->m_collisionFilterMask != filter ||
+            m_collision_revisions[id] != body->collision_revision)) {
+            m_collision_revisions[id] = body->collision_revision;
+            dynamic_world->removeRigidBody(body->m_rigid_body);
+            dynamic_world->addRigidBody(body->m_rigid_body, group, filter);
+        }
+        if (body->type == physics::body_type::character) {
+            auto pose = body->m_rigid_body->getWorldTransform();
+            pose.setRotation(to_bullet_transform(*tr).getRotation());
+            body->m_rigid_body->setWorldTransform(pose);
+            body->m_estado_de_movimento->setWorldTransform(pose);
+        }
+        dynamic_world->updateSingleAabb(body->m_rigid_body);
         if (!body || body->m_massa > 0.f)
             continue;
         const auto entity_transform = registry->get<transform>(id);
@@ -157,7 +173,7 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
         btScalar pitch;
         btScalar roll;
         world_transform.getBasis().getEulerZYX(yaw, pitch, roll);
-        entity_transform->set_rotation({
+        if (body->type != physics::body_type::character) entity_transform->set_rotation({
             static_cast<float>(roll) * radians_to_degrees,
             static_cast<float>(pitch) * radians_to_degrees,
             static_cast<float>(yaw) * radians_to_degrees

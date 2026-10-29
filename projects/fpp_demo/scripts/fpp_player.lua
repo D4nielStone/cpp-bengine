@@ -2,26 +2,27 @@
 local yaw = -90.0
 local move_speed = 2.5
 local body
+local rigidbody
 
 function setup()
     body = gameObject:GetComponent("Transform")
+    rigidbody = gameObject:GetComponent("Rigidbody")
     yaw = body.localEulerAngles.y
     Input.SetMouseCaptured(true)
     Debug.Log("FPP player body ready.")
 end
 
 function update()
-    local distance = move_speed * Time.deltaTime
+    local distance = move_speed
     local forward = Input.GetAxis("Vertical") * distance
     local right = Input.GetAxis("Horizontal") * distance
     local angle = math.rad(yaw)
-    local position = body.localPosition
-
-    -- Match the inherited camera basis at every body yaw.
-    body.localPosition = Vector3(
-        position.x + math.cos(angle) * forward + math.sin(angle) * right,
-        position.y,
-        position.z - math.sin(angle) * forward + math.cos(angle) * right
+    local velocity = rigidbody.velocity
+    -- Preserve gravity and contact response on the vertical axis.
+    rigidbody.velocity = Vector3(
+        math.cos(angle) * forward + math.sin(angle) * right,
+        velocity.y,
+        -math.sin(angle) * forward + math.cos(angle) * right
     )
 
     local mouse_x = Input.GetMouseDelta()

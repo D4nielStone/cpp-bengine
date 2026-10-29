@@ -43,6 +43,18 @@ namespace COMMONS_NS {
             mesh_shape
         };
 
+        enum class body_type { rigid, character, static_body };
+        body_type type{body_type::rigid};
+        bgui::vec3 collision_size{1.f, 1.f, 1.f};
+        bgui::vec3 collision_offset{0.f, 0.f, 0.f};
+        bool collision_enabled{true};
+        bool trigger{false};
+        void set_body_type(body_type value);
+        void configure_collision(shapes shape, const bgui::vec3& size,
+            const bgui::vec3& offset, bool enabled, bool sensor);
+        void refresh_collision(const bgui::vec3& entity_scale);
+        std::uint64_t collision_revision{0};
+        btCompoundShape* collision_shape{nullptr};
         shapes e_forma;
         physics(bool is_static = false, const shapes m_forma = shapes::box_shape);
         virtual ~physics();

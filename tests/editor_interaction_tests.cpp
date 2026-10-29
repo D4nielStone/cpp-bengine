@@ -603,3 +603,39 @@ TEST_F(EditorInteractionTest, PrimaryDragRotatesWithoutSelectingAndGizmoBlocksCa
     picker.update(registry);
     EXPECT_FALSE(context->selected_entity); // Short click on empty space still selects/clears.
 }
+
+
+TEST_F(EditorInteractionTest, InspectorExposesBodyTypesAndColliderControlsWithHistory) {
+    auto entity = registry->create();
+    registry->add<commons::physics>(entity);
+    auto physics = registry->get<commons::physics>(entity.id);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context); panel.build(dock); panel.update();
+    auto* type = find_element<bgui::combo_box>(dock, [](auto& item) {
+        return item.get_selected_option() == "Rigid Body";
+    });
+    auto* shape = find_element<bgui::combo_box>(dock, [](auto& item) {
+        return item.get_selected_option() == "Box";
+    });
+    ASSERT_NE(type, nullptr); ASSERT_NE(shape, nullptr);
+    // Programmatic selection follows the same callback as user selection.
+    type->set_selected_index(1);
+    EXPECT_EQ(physics->type, commons::physics::body_type::character);
+    EXPECT_EQ(physics->m_rigid_body->getAngularFactor(), btVector3(0,0,0));
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(physics->type, commons::physics::body_type::rigid);
+    ASSERT_TRUE(context->redo());
+    shape->set_selected_index(2);
+    EXPECT_EQ(physics->e_forma, commons::physics::shapes::forma_esfera);
+    auto* trigger = find_element<bgui::checkbox>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Trigger";
+    });
+    ASSERT_NE(trigger, nullptr); trigger->on_clicked(); EXPECT_TRUE(physics->trigger);
+    ASSERT_TRUE(context->undo()); EXPECT_FALSE(physics->trigger);
+    auto* enabled = find_element<bgui::checkbox>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Collision Enabled";
+    });
+    ASSERT_NE(enabled, nullptr); enabled->on_clicked(); EXPECT_FALSE(physics->collision_enabled);
+    registry->remove(entity.id);
+}

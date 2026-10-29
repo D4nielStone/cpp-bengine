@@ -677,3 +677,29 @@ ctest --test-dir /home/d4nl/.cache/bengine-validation/hover-20261029 --output-on
 
 Como no helper da CI, `CMAKE_BUILD_TYPE` não foi definido; não se afirma otimização
 Release no gerador único. Alterações de outros trabalhos foram preservadas.
+
+## Física configurável e gravidade do player FPP (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Tipos de corpo | CONFIRMADO: `CharacterFallsLandsAndAcceptsImpulsesWithoutTumbling` passa, com passos Bullet fixos sem GPU. | Adicionado seletor Rigid Body / Character Body / Static Body. Character é dinâmico, recebe gravidade/impulsos e trava rotação física, conforme decisão do usuário. Mudança de tipo atualiza massa, trava angular e registro no mundo. | Não implementa controlador cinemático, degraus ou salto. Construtor e métodos públicos anteriores preservados. |
+| Colisor configurável | CONFIRMADO: `ColliderShapeSizeAndOffsetCanChangeInWorld`, `TriggerReportsContactsWithoutBlockingAndDisabledColliderIsExcluded` e `ColliderConfigurationRoundTripsAndRejectsInvalidValues`. | Forma, escala local, deslocamento, ativação, trigger, atrito e restituição no componente existente. Forma composta aplica deslocamento sem deslocar Transform/câmera. Forma/escala/offset editados atualizam AABB e pares de colisão. Desativação também exclui consultas por raio. | Trigger fornece contatos nativos Bullet sem resposta; callbacks Lua não foram adicionados. Esferas exigem escala uniforme; plano infinito deve usar Static Body. Malhas fora do conjunto aprovado. |
+| Inspector e persistência | CONFIRMADO: `InspectorExposesBodyTypesAndColliderControlsWithHistory` e `RoundTripsCharacterAndColliderSettings` passam sem GPU. | Seletores, controles numéricos e toggles com histórico; novos campos persistem no JSON e arquivos antigos continuam aceitos. | Não houve inspeção visual/manual dos novos controles. O teste exercita seleção, toggles e desfazer/refazer. |
+| Movimento FPP | CONFIRMADO: `LuaApi.FppScriptsMoveLookAndCollectUsingTheNewApi` e `FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`. | Player usa cápsula Character Body de massa 80, rotação inicial vertical e colisor deslocado acima dos pés. Script controla velocidade horizontal e preserva velocidade Y. Rotação visual controlada por script não é sobrescrita pela simulação. | Abertura breve do runtime com display carregou o projeto e registrou setup do player sem erros de script. Movimento WASD e interação visual não foram exercitados manualmente. |
+| Limites físicos do cenário | CONFIRMADO por reprodução com configuração original do chão: o teste do spawn falha após quatro segundos de simulação (base da cápsula em Y=-78,3), pois o jogador em Z=17 fica fora do colisor antigo, de semiextensão 10. Com a configuração nova, o teste passa. | Escala do colisor do chão acompanha a malha de extensão 40; deslocamento/espessura posicionam a superfície em Y=0. Paredes ajustadas às dimensões das malhas. Nenhuma malha ou Transform de chão/parede foi alterado nesta tarefa. | Outros modelos adicionados localmente pelo usuário não receberam colisores automaticamente. |
+| Validação completa | CONFIRMADO no Linux: build novo completo terminou com código 0; CTest final passou em **217/217** (13,66 s). Todos os **30 testes de fundamentos** passaram. | Editor, runtime e todos os alvos de teste compilados em diretório novo. Testes novos, teste Lua atualizado e suíte completa executados. | A primeira rodada teve 216/217: o teste do aviso de arrasto havia sido compilado antes de uma atualização paralela de seu preparo de entrada. Após reconstruir esse alvo com a fonte atual, a suíte completa passou. Nenhum arquivo do aviso de arrasto foi alterado nesta tarefa. Windows não compilado/executado. |
+
+Comandos descobertos no CMake/workflow e usados nesta fase:
+
+```sh
+cmake -S . -B /home/d4nl/.cache/bengine-validation/fpp-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/.cache/bengine-validation/jpeg-20261029/_deps/googletest-src
+cmake --build /home/d4nl/.cache/bengine-validation/fpp-20261029 --parallel 2
+ctest --test-dir /home/d4nl/.cache/bengine-validation/fpp-20261029 --output-on-failure -C Release
+```
+
+Como no helper da CI, `CMAKE_BUILD_TYPE` não foi definido. O GoogleTest local foi
+reutilizado. Logs em `/home/d4nl/.cache/bengine-validation/fpp-20261029/validation/`:
+`fpp-clean-build.log`, `fpp-final-build.log`, `fpp-final-tests.log`, `fpp-foundations.log`,
+`fpp-floor-original-red.log`, `fpp-overlay-baseline-test.log` e `fpp-runtime.log`.
+Uso e semântica dos campos em `docs/PHYSICS.md`. Os itens P0/P1/P2 do diagnóstico
+não foram reabertos nesta implementação. Demais alterações locais foram preservadas.

@@ -257,6 +257,8 @@
             "name": "ArenaFloor",
             "components": {
                 "physics": {
+                    "collision_size": [2.0, 0.1, 2.0],
+                    "collision_offset": [0.0, 0.05, 0.0],
                     "shape": "box",
                     "static": true,
                     "mass": 0.0,
@@ -312,6 +314,8 @@
             "name": "NorthWall",
             "components": {
                 "physics": {
+                    "collision_size": [2.0, 2.0, 1.0],
+                    "collision_offset": [0.0, 0.0, 0.0],
                     "shape": "box",
                     "static": true,
                     "mass": 0.0,
@@ -425,6 +429,8 @@
             "name": "WestWall",
             "components": {
                 "physics": {
+                    "collision_size": [2.0, 2.0, 1.0],
+                    "collision_offset": [0.0, 0.0, 0.0],
                     "shape": "box",
                     "static": true,
                     "mass": 0.0,
@@ -480,6 +486,8 @@
             "name": "EastWall",
             "components": {
                 "physics": {
+                    "collision_size": [2.0, 2.0, 1.0],
+                    "collision_offset": [0.0, 0.0, 0.0],
                     "shape": "box",
                     "static": true,
                     "mass": 0.0,
@@ -534,6 +542,14 @@
             "locked": false,
             "name": "PlayerCapsule",
             "components": {
+                "physics": {
+                    "shape": "capsule", "body_type": "character", "static": false,
+                    "mass": 80.0, "friction": 0.0, "restitution": 0.0,
+                    "collision_size": [0.7, 0.6, 0.7],
+                    "collision_offset": [0.0, 0.9, 0.0],
+                    "collision_enabled": true, "trigger": false
+                },
+
                 "code": {
                     "directory": "scripts/fpp_player.lua"
                 },
@@ -544,9 +560,9 @@
                         17.151351928710938
                     ],
                     "rotation": [
-                        -156.19488525390625,
+                        0.0,
                         59.109825134277344,
-                        156.17837524414063
+                        0.0
                     ],
                     "scale": [
                         1.0,

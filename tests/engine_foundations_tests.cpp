@@ -350,3 +350,105 @@ TEST_F(ScriptLifecycle, MultipleScriptsKeepIndependentStatesAndReplacementInitia
     EXPECT_EQ(replacement->estado_lua["updates"].get<int>(), 1);
     EXPECT_EQ(first->estado_lua["updates"].get<int>(), 41);
 }
+
+
+TEST_F(Foundations, CharacterFallsLandsAndAcceptsImpulsesWithoutTumbling) {
+    auto ground = body(1, true, {0, -0.5f, 0});
+    at(1)->scale = {20, 1, 20};
+    body(2, false, {0, 4, 0});
+    auto player = registry->get<physics>(2);
+    player->configure_collision(physics::shapes::forma_capsula, {1,1,1}, {0,0,0}, true, false);
+    player->set_body_type(physics::body_type::character);
+    at(2)->set_rotation({0,45,0});
+    physics_system system; system.setup(registry);
+    for (int i = 0; i < 300; ++i) system.world()->stepSimulation(1.f/60.f, 0);
+    EXPECT_NEAR(player->m_rigid_body->getWorldTransform().getOrigin().y(), 1.4f, 0.05f);
+    player->m_rigid_body->applyCentralImpulse(btVector3(2,0,0));
+    EXPECT_GT(player->getVelocidade().x, 0);
+    EXPECT_EQ(player->m_rigid_body->getAngularFactor(), btVector3(0,0,0));
+    system.speed = 0; system.update(registry);
+    EXPECT_FLOAT_EQ(at(2)->rotation.y, 45);
+    player->set_body_type(physics::body_type::static_body);
+    system.update(registry);
+    EXPECT_TRUE(player->m_rigid_body->isStaticObject());
+    player->set_body_type(physics::body_type::rigid);
+    system.update(registry);
+    EXPECT_FALSE(player->m_rigid_body->isStaticObject());
+    EXPECT_EQ(player->m_rigid_body->getAngularFactor(), btVector3(1,1,1));
+}
+
+TEST(EnginePhysics, ColliderConfigurationRoundTripsAndRejectsInvalidValues) {
+    physics source;
+    source.configure_collision(physics::shapes::forma_esfera, {2,3,4}, {1,2,3}, false, true);
+    source.set_body_type(physics::body_type::character);
+    rapidjson::Document doc;
+    source.serialize(doc, doc.GetAllocator());
+    physics restored(false, physics::shapes::forma_esfera);
+    ASSERT_TRUE(restored.analyze(doc));
+    EXPECT_EQ(restored.type, physics::body_type::character);
+    expect_vector(restored.collision_size, {2,3,4});
+    expect_vector(restored.collision_offset, {1,2,3});
+    EXPECT_FALSE(restored.collision_enabled);
+    EXPECT_TRUE(restored.trigger);
+    for (const char* json : {R"({"body_type":"ghost"})", R"({"trigger":1})",
+        R"({"collision_size":[1,0,1]})", R"({"collision_offset":[1,2]})"}) {
+        rapidjson::Document invalid; invalid.Parse(json);
+        EXPECT_FALSE(restored.analyze(invalid));
+    }
+}
+
+TEST_F(Foundations, TriggerReportsContactsWithoutBlockingAndDisabledColliderIsExcluded) {
+    body(1, true, {0,0,0});
+    body(2, false, {0,0.75f,0});
+    auto sensor = registry->get<physics>(1);
+    sensor->trigger = true;
+    physics_system system; system.setup(registry); system.speed = 0; system.update(registry);
+    system.world()->performDiscreteCollisionDetection();
+    EXPECT_GT(system.world()->getDispatcher()->getNumManifolds(), 0);
+    EXPECT_TRUE(sensor->m_rigid_body->getCollisionFlags() & btCollisionObject::CF_NO_CONTACT_RESPONSE);
+    sensor->collision_enabled = false;
+    system.update(registry);
+    EXPECT_EQ(sensor->m_rigid_body->getBroadphaseHandle()->m_collisionFilterMask, 0);
+    EXPECT_FALSE(system.cast_ray({{0,0,5},{0,0,-1}}).atingiu);
+}
+
+TEST_F(Foundations, ColliderShapeSizeAndOffsetCanChangeInWorld) {
+    body(1, true, {0,0,0});
+    physics_system system; system.setup(registry); system.speed = 0;
+    auto collider = registry->get<physics>(1);
+    collider->configure_collision(physics::shapes::box_shape, {2,2,2}, {3,0,0}, true, false);
+    system.update(registry);
+    EXPECT_FALSE(system.cast_ray({{0,0,5},{0,0,-1}}).atingiu);
+    EXPECT_TRUE(system.cast_ray({{3,0,5},{0,0,-1}}).atingiu);
+    collider->configure_collision(physics::shapes::forma_esfera, {1,1,1}, {0,0,0}, true, false);
+    system.update(registry);
+    EXPECT_TRUE(system.cast_ray({{0,0,5},{0,0,-1}}).atingiu);
+    EXPECT_FALSE(system.cast_ray({{3,0,5},{0,0,-1}}).atingiu);
+}
+
+TEST_F(Foundations, FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn) {
+    const auto scene = std::filesystem::path(__FILE__).parent_path().parent_path() /
+        "projects/fpp_demo/main.scene";
+    std::ifstream input(scene);
+    ASSERT_TRUE(input.good());
+    const std::string json{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    rapidjson::Document document; document.Parse(json.c_str());
+    ASSERT_FALSE(document.HasParseError());
+    for (const auto& item : document["entities"].GetArray()) {
+        if (item["id"].GetUint() != 101 && item["id"].GetUint() != 106) continue;
+        auto entity = registry->create(item["id"].GetUint());
+        ASSERT_TRUE(at(entity.id)->analyze(item["components"]["transform"]));
+        registry->add<physics>(entity, entity.id == 101,
+            entity.id == 101 ? physics::shapes::box_shape : physics::shapes::forma_capsula);
+        ASSERT_TRUE(registry->get<physics>(entity.id)->analyze(item["components"]["physics"]));
+    }
+    physics_system system; system.setup(registry);
+    for (int step = 0; step < 240; ++step) system.world()->stepSimulation(1.f/60.f, 0);
+    auto player = registry->get<physics>(106);
+    ASSERT_NE(player, nullptr);
+    btVector3 minimum, maximum;
+    player->m_rigid_body->getAabb(minimum, maximum);
+    EXPECT_NEAR(minimum.y(), 0.f, 0.04f);
+    EXPECT_NEAR(player->getVelocidade().y, 0.f, 0.04f);
+    EXPECT_EQ(player->type, physics::body_type::character);
+}

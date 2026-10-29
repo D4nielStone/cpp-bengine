@@ -50,6 +50,7 @@ namespace COMMONS_NS {
         btDiscreteDynamicsWorld* dynamic_world{nullptr};
         bgui::vec3 m_gravity{0.f, -9.8f, 0.f};
         std::unordered_map<std::uint32_t, std::shared_ptr<physics>> m_bodies;
+        std::unordered_map<std::uint32_t, std::uint64_t> m_collision_revisions;
         std::chrono::steady_clock::time_point m_last_update{};
     };
 }

@@ -13,6 +13,7 @@
 
 #include <bgui.hpp>
 #include <elem/checkbox.hpp>
+#include <elem/combo_box.hpp>
 #include <elem/color_picker.hpp>
 #include <elem/field.hpp>
 #include <elem/icon.hpp>
@@ -273,6 +274,61 @@ private:
         if (auto physics = registry->get<commons::physics>(id)) {
             auto& section = add_section("Physics", true,
                 [this, id]() { remove_component<commons::physics>(id); });
+            auto& content = section.children();
+            content.add<bgui::text>("Body Type", 0.27f);
+            auto& types = content.add<bgui::combo_box>(
+                std::vector<std::string>{"Rigid Body", "Character Body", "Static Body"},
+                0.29f, static_cast<std::size_t>(physics->type));
+            types.set_on_change([this, physics](std::size_t index, const std::string&) {
+                const auto before = physics->type;
+                const auto mass = physics->m_massa;
+                const auto after = static_cast<commons::physics::body_type>(index);
+                physics->set_body_type(after);
+                m_context->record_action([physics, before, mass]() {
+                    physics->setMass(mass); physics->set_body_type(before);
+                }, [physics, after]() { physics->set_body_type(after); });
+            });
+            content.add<bgui::text>("Collision Shape", 0.27f);
+            auto& shapes = content.add<bgui::combo_box>(
+                std::vector<std::string>{"Box", "Capsule", "Sphere", "Cylinder", "Cone", "Plane"},
+                0.29f, static_cast<std::size_t>(physics->e_forma));
+            shapes.set_on_change([this, physics](std::size_t index, const std::string&) {
+                const auto before = physics->e_forma;
+                const auto after = static_cast<commons::physics::shapes>(index);
+                auto apply = [physics](auto shape) { physics->configure_collision(shape,
+                    physics->collision_size, physics->collision_offset,
+                    physics->collision_enabled, physics->trigger); };
+                apply(after);
+                m_context->record_action([apply, before]() { apply(before); },
+                    [apply, after]() { apply(after); });
+            });
+            auto toggle = [this, physics, &content](const char* label, bool commons::physics::*field) {
+                auto& checkbox = content.add<bgui::checkbox>(label, 0.29f, physics.get()->*field);
+                checkbox.set_on_change([this, physics, field](bool value) {
+                    const bool previous = physics.get()->*field;
+                    physics.get()->*field = value;
+                    m_context->record_action([physics, field, previous]() { physics.get()->*field = previous; },
+                        [physics, field, value]() { physics.get()->*field = value; });
+                });
+            };
+            toggle("Collision Enabled", &commons::physics::collision_enabled);
+            toggle("Trigger", &commons::physics::trigger);
+            for (bool offset : {false, true}) {
+                auto get = [physics, offset]() { return offset ? physics->collision_offset : physics->collision_size; };
+                add_vector_field(content, offset ? "Collider Offset" : "Collider Scale", get(), get,
+                    [physics, offset](std::size_t axis, float value) {
+                        auto size = physics->collision_size, position = physics->collision_offset;
+                        (offset ? position : size)[axis] = offset ? value : std::max(0.001f, value);
+                        physics->configure_collision(physics->e_forma, size, position,
+                            physics->collision_enabled, physics->trigger);
+                    });
+            }
+            add_number_field(content, "Friction", physics->friction,
+                [physics]() { return physics->friction; },
+                [physics](float value) { physics->setFriccao(std::max(0.f, value)); });
+            add_number_field(content, "Restitution", physics->restitution,
+                [physics]() { return physics->restitution; },
+                [physics](float value) { physics->setRestituicao(std::clamp(value, 0.f, 1.f)); });
             add_number_field(section.children(), "Mass", physics->m_massa,
                 [physics]() { return physics->m_massa; },
                 [physics](float mass) { physics->setMass(std::max(0.f, mass)); });

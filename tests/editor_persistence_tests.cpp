@@ -621,3 +621,30 @@ TEST(ProjectPersistenceTest, RejectsComponentsWithoutSerializationSupport) {
 }
 
 }
+
+
+TEST(ProjectPersistenceTest, RoundTripsCharacterAndColliderSettings) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto player = registry->create(106);
+    registry->add<commons::physics>(player, false, commons::physics::shapes::forma_capsula);
+    auto body = registry->get<commons::physics>(player.id);
+    body->set_body_type(commons::physics::body_type::character);
+    body->setMass(80);
+    body->configure_collision(body->e_forma, {0.7f,0.6f,0.7f}, {0,0.9f,0}, false, true);
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const auto path = temporary_project_path(); std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    auto restored = registry->get<commons::physics>(106);
+    ASSERT_NE(restored, nullptr);
+    EXPECT_EQ(restored->type, commons::physics::body_type::character);
+    EXPECT_EQ(restored->e_forma, commons::physics::shapes::forma_capsula);
+    EXPECT_FLOAT_EQ(restored->m_massa, 80);
+    EXPECT_FLOAT_EQ(restored->collision_offset.y, 0.9f);
+    EXPECT_FLOAT_EQ(restored->collision_size.y, 0.6f);
+    EXPECT_FALSE(restored->collision_enabled); EXPECT_TRUE(restored->trigger);
+    remove_project_files(path);
+    registry->remove(106); registry->remove(17);
+}
