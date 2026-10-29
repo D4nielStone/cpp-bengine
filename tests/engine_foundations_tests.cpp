@@ -452,3 +452,59 @@ TEST_F(Foundations, FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn) {
     EXPECT_NEAR(player->getVelocidade().y, 0.f, 0.04f);
     EXPECT_EQ(player->type, physics::body_type::character);
 }
+
+TEST_F(Foundations, CompoundRampColliderMatchesRenderedEulerRotation) {
+    body(1, true, {10.393745f, 3.737701f, -3.352846f});
+    at(1)->set_rotation({62.297363f, -50.768600f, 50.344112f});
+    at(1)->scale = {6.252854f, 1.f, 9.099063f};
+    physics_system system; system.setup(registry);
+    const auto visual = at(1)->get_model_matrix();
+    const auto& physical = registry->get<physics>(1)->m_rigid_body->getWorldTransform();
+    for (int axis = 0; axis < 3; ++axis) {
+        const auto expected = glm::normalize(glm::vec3(visual[axis]));
+        const auto actual = physical.getBasis().getColumn(axis);
+        EXPECT_NEAR(actual.x(), expected.x, 0.0001f) << axis;
+        EXPECT_NEAR(actual.y(), expected.y, 0.0001f) << axis;
+        EXPECT_NEAR(actual.z(), expected.z, 0.0001f) << axis;
+    }
+}
+
+TEST_F(Foundations, RigidBodyOrientationRoundTripsCombinedEulerAngles) {
+    body(1, false);
+    at(1)->set_rotation({62.297363f, -50.768600f, 50.344112f});
+    const auto before = at(1)->get_model_matrix();
+    physics_system system; system.setup(registry); system.speed = 0; system.update(registry);
+    const auto after = at(1)->get_model_matrix();
+    for (int column = 0; column < 3; ++column)
+        for (int row = 0; row < 3; ++row)
+            EXPECT_NEAR(before[column][row], after[column][row], 0.0001f);
+}
+
+TEST_F(Foundations, FppCharacterClimbsTheRenderedRampSurface) {
+    body(1, true, {10.393745f, 3.737701f, -3.352846f});
+    at(1)->set_rotation({62.297363f, -50.768600f, 50.344112f});
+    at(1)->scale = {6.252854f, 1.f, 9.099063f};
+    const auto matrix = at(1)->get_model_matrix();
+    const auto normal = glm::normalize(glm::vec3(matrix[1]));
+    const auto uphill = glm::normalize(glm::vec3(0,1,0) - normal * normal.y);
+    const auto top = glm::vec3(matrix * glm::vec4(0,0.5f,0,1));
+    const auto spawn = top - uphill * 2.f + glm::vec3(0,0.25f,0);
+    body(2, false, {spawn.x, spawn.y, spawn.z});
+    auto player = registry->get<physics>(2);
+    player->configure_collision(physics::shapes::forma_capsula,
+        {0.7f,0.6f,0.7f}, {0,0.9f,0}, true, false);
+    player->set_body_type(physics::body_type::character);
+    player->setMass(80); player->setFriccao(0);
+    physics_system system; system.setup(registry);
+    for (int i = 0; i < 60; ++i) system.world()->stepSimulation(1.f/60.f, 0);
+    const auto start = player->m_rigid_body->getWorldTransform().getOrigin();
+    const auto horizontal = glm::normalize(glm::vec3(uphill.x,0,uphill.z));
+    for (int i = 0; i < 90; ++i) {
+        const auto velocity = player->getVelocidade();
+        player->setVelocidade({horizontal.x * 2.5f, velocity.y, horizontal.z * 2.5f});
+        system.world()->stepSimulation(1.f/60.f, 0);
+    }
+    const auto finish = player->m_rigid_body->getWorldTransform().getOrigin();
+    EXPECT_GT(finish.y(), start.y() + 0.8f);
+    EXPECT_GT((finish - start).dot(btVector3(uphill.x,uphill.y,uphill.z)), 2.f);
+}

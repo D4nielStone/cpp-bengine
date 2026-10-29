@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <glm/gtx/euler_angles.hpp>
 
 namespace commons {
 namespace {
@@ -14,12 +15,11 @@ constexpr float radians_to_degrees = 57.295779513082320876f;
 btTransform to_bullet_transform(const transform& value) {
     const auto position = value.get_position();
     const auto rotation = value.get_rotation();
-    btQuaternion orientation;
-    orientation.setEulerZYX(
-        rotation.z * degrees_to_radians,
-        rotation.y * degrees_to_radians,
-        rotation.x * degrees_to_radians
-    );
+    // Transform renders Rx * Ry * Rz; Bullet's Euler ZYX helper uses the reverse order.
+    const auto orientation =
+        btQuaternion(btVector3(1, 0, 0), rotation.x * degrees_to_radians) *
+        btQuaternion(btVector3(0, 1, 0), rotation.y * degrees_to_radians) *
+        btQuaternion(btVector3(0, 0, 1), rotation.z * degrees_to_radians);
 
     btTransform result;
     result.setIdentity();
@@ -169,15 +169,18 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
             {origin.getX(), origin.getY(), origin.getZ()}
         );
 
-        btScalar yaw;
-        btScalar pitch;
-        btScalar roll;
-        world_transform.getBasis().getEulerZYX(yaw, pitch, roll);
-        if (body->type != physics::body_type::character) entity_transform->set_rotation({
-            static_cast<float>(roll) * radians_to_degrees,
-            static_cast<float>(pitch) * radians_to_degrees,
-            static_cast<float>(yaw) * radians_to_degrees
-        });
+        if (body->type != physics::body_type::character) {
+            const auto orientation = world_transform.getRotation();
+            float x, y, z;
+            glm::extractEulerAngleXYZ(glm::mat4_cast(glm::quat(
+                orientation.w(), orientation.x(), orientation.y(), orientation.z()
+            )), x, y, z);
+            entity_transform->set_rotation({
+                x * radians_to_degrees,
+                y * radians_to_degrees,
+                z * radians_to_degrees
+            });
+        }
     }
 }
 

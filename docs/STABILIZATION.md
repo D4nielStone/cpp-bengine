@@ -728,3 +728,25 @@ O cache existente de `out` usa Debug. Logs e evidências preservados em
 `fpp-crash-gdb.log`, `fpp-crash-layout.log`, `fpp-fixed-layout.log`,
 `fpp-out-clean-build.log`, `fpp-out-tests.log`, `fpp-out-startup-fixed.log`,
 `fpp-out-startup-result.json`, `fpp-asan-runtime.log` e `fpp-asan-foundations.log`.
+
+## Player FPP não sobe a rampa — rotação do colisor (2026-10-29)
+
+| Item | Status / evidência | Correção e testes | Limites / revisão |
+|---|---|---|---|
+| Colisor diverge da rampa visível | CONFIRMADO: `CompoundRampColliderMatchesRenderedEulerRotation` falhou antes da correção. A rampa atual usa Euler `(62,297; -50,769; 50,344)` e escala `(6,253; 1; 9,099)`. A componente Y da normal visual é 0,8247, mas a normal física anterior era -0,2313. | `Transform` monta `Rx * Ry * Rz`; a conversão Bullet usava `setEulerZYX`, que monta a ordem inversa. `physics_system.cpp` agora compõe os três quaternions na mesma ordem do Transform. O teste compara os três eixos físicos com os eixos visuais, incluindo escala não uniforme. | Rampa/cenário/script do usuário não foram modificados. A correção vale para corpos com rotações combinadas; hierarquia física não foi ampliada nesta fase. |
+| Subida da cápsula | CONFIRMADO: `FppCharacterClimbsTheRenderedRampSurface` falhou antes da correção; a cápsula caía por não encontrar o colisor na superfície desenhada. | Teste Bullet sem GPU usa pose/dimensões da rampa e cápsula Character Body do FPP (massa 80, atrito zero, escala 0,7/0,6/0,7 e offset Y=0,9). Aplica velocidade horizontal de 2,5 m/s preservando Y, como o script. Após a correção, verifica ganho de altura maior que 0,8 m e avanço maior que 2 m na direção de subida. | Teste usa passos fixos e superfície isolada. Aproximação manual com WASD, diferentes entradas da rampa e transições em degraus não foram exercitadas. Não foi adicionado controlador cinemático nem novo limite de inclinação. |
+| Rotação física devolvida ao Transform | CONFIRMADO por `RigidBodyOrientationRoundTripsCombinedEulerAngles`. | A conversão de volta também extrai Euler na ordem XYZ, preservando a orientação visual dos Rigid Bodies. O teste compara matrizes antes/depois de sincronizar com simulação pausada. API pública preservada. | Ângulos Euler podem ter representações numéricas diferentes para a mesma orientação; a comparação por matriz verifica o resultado geométrico. |
+| Validação | CONFIRMADO: build completo terminou com código 0; **220/220 testes** passaram em `out` (6,05 s). Runtime abriu o FPP e permaneceu ativo por 10 s, sendo encerrado pela validação. | Três regressões adicionadas; **33/33** testes de fundamentos passaram após a correção, também sob ASan/UBSan (`detect_leaks=0`, sem validar vazamentos). Build completo de `out` executado com limpeza prévia. | Windows e subida manual no editor não foram validados. Alterações locais de outros trabalhos preservadas. |
+
+Build/teste seguem os alvos do CMake e o fluxo de CI já inspecionados:
+
+```sh
+cmake --build out --clean-first --parallel 2
+ctest --test-dir out --output-on-failure -C Release
+```
+
+Evidências em `/home/d4nl/.cache/bengine-validation/fpp-ramp-20261029/`:
+`fpp-ramp-red2.log` (dois testes falhando antes da correção),
+`fpp-ramp-green.log`, `fpp-ramp-asan-tests.log`, `fpp-ramp-clean-build.log`,
+`fpp-ramp-tests.log` e `fpp-ramp-runtime.log`. O cache de `out` permanece Debug;
+nenhuma alteração de arquitetura de renderização ou do ECS foi necessária.
