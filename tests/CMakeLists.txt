@@ -173,3 +173,8 @@ target_include_directories(window_file_drop_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
 )
 gtest_discover_tests(window_file_drop_tests)
+
+# Essential ECS, transform and Bullet contracts; no window or OpenGL context.
+add_executable(engine_foundations_tests engine_foundations_tests.cpp)
+target_link_libraries(engine_foundations_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(engine_foundations_tests)

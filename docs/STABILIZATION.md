@@ -478,3 +478,38 @@ e `/tmp/bengine-file-drop-final-tests.log`. O teste gráfico inicialmente revelo
 que o layout raiz reduzia o aviso a 15×15; a camada agora solicita explicitamente
 toda a área da janela e o teste verifica dimensão, escurecimento e remoção.
 As alterações locais preexistentes em iluminação, Inspector, Lua e projeto FPP foram preservadas.
+
+## Recursos essenciais — cobertura de contratos (2026-10-29)
+
+Fase limitada a testes e documentação. Nenhuma mudança de produção/API ou correção
+especulativa das hipóteses do AGENTS.md. Matriz das bases e suítes existentes em
+`tests/README.md`; novo executável `engine_foundations_tests` registrado no CTest.
+
+| Item | Status / evidência | Mudança e testes adicionados | Limites / revisão |
+|---|---|---|---|
+| ECS / P0-d, P0-e, P0-f | NÃO CONFIRMADOS nos cenários testados do código atual: `DuplicateAndAutomaticIdsNeverReplaceLivingEntities`, `StackRegistryCanCreateAndAddComponents` e o teste existente `RemovingLastComponentKeepsEntityAlive` passam. | Cinco testes cobrem colisão de IDs inclusive sem Transform, operações sobre entidade ausente sem criar mapas, reposição e iteração sem duplicatas, uso na stack e remoção com liberação de componente/nome. | Não se afirma que `validate_invariants()` detecte toda corrupção dos mapas públicos. O problema de ownership já registrado em A1 não foi corrigido; o fixture remove explicitamente as entidades ao terminar. |
+| Transform / hierarquia | CONFIRMADO: contratos exercitados por cinco novos testes aprovados. | Composição de translação/rotação/escala, conversão mundial/local, reparent/detach preservando posição mundial, rejeição de ciclos/pais ausentes e de matriz singular, round-trip TRS. | Sem nova decisão sobre shear ou decomposição com múltiplos eixos. Serialização do pai é responsabilidade da persistência de cena, não do round-trip local TRS. |
+| Física Bullet | CONFIRMADO: 13 novos casos aprovados (incluindo seis parâmetros de formas). | Setup idempotente, escala absoluta, gravidade, adição/reposição/remoção de corpos, Transform estático com simulação pausada, raycast mais próximo/ponto/normal/miss, queda e contato com chão, seis formas, material/massa, entradas inválidas, forças/velocidade/travas. | Passos fixos no mundo Bullet real, sem sleeps. O teste de queda valida sincronização de posição de volta ao Transform; não cobre precisão da rotação física hierárquica nem todas as combinações de formas. |
+| Ciclo Lua | CONFIRMADO: dois novos testes aprovados. | Anexar em execução inicializa uma vez; remoção interrompe updates; dois scripts mantêm estados independentes; reposição inicializa o novo e interrompe o anterior. | Usa Lua 5.4.6 neste host; Lua 5.3 não executado. Erros/logs/API/FPP permanecem cobertos pelas suítes existentes. |
+| Demais bases | PARCIAL: suites existentes de projeto/cena, recuperação transacional, câmera/render, assets, editor e BGUI passaram na execução completa. | Matriz documenta os arquivos que exercitam cada base. Não foram duplicados os testes existentes. | Matriz de contratos não equivale a 100% de cobertura de linhas ou combinações. As demais hipóteses do diagnóstico não foram reavaliadas individualmente nesta fase. |
+
+Validação em diretório novo, com os comandos derivados do CMake e do helper da CI:
+
+```sh
+cmake -S . -B /tmp/bengine-foundations-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
+cmake --build /tmp/bengine-foundations-20261029 --config Release --parallel 2
+env -u DISPLAY -u WAYLAND_DISPLAY /tmp/bengine-foundations-20261029/tests/engine_foundations_tests
+ctest --test-dir /tmp/bengine-foundations-20261029 --output-on-failure -C Release
+```
+
+Build novo de editor/runtime concluído; **25/25 casos novos passaram sem display**
+e **184/184 entradas CTest passaram**, sem skips no `LastTest.log`, incluindo a
+cobertura OpenGL existente. Logs: `/tmp/bengine-foundations-configure.log`,
+`/tmp/bengine-foundations-build.log`, `/tmp/bengine-foundations-headless.log`,
+`/tmp/bengine-foundations-ctest.log`. O CMake emitiu aviso de política CMP0135;
+nenhum warning/error do compilador foi encontrado no log do build.
+Como no helper da CI, o gerador único não recebeu `CMAKE_BUILD_TYPE`;
+`--config Release` não comprova execução otimizada Release nesse gerador.
+Windows, sanitizadores, pacote relocável, outros drivers e revisão interativa
+não foram validados. Alterações locais anteriores foram preservadas e ficam fora
+do commit desta fase; a execução completa reflete o estado atual compartilhado.
