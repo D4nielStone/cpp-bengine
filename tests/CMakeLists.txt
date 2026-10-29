@@ -157,6 +157,7 @@ gtest_discover_tests(editor_document_tests)
 
 add_executable(editor_persistence_transaction_tests
     editor_persistence_transaction_tests.cpp
+    persistence_integrity_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
 target_include_directories(editor_persistence_transaction_tests PRIVATE

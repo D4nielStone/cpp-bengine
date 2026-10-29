@@ -541,3 +541,44 @@ Logs: `/tmp/bengine-file-management-clean.log`, `/tmp/bengine-file-management-te
 Windows, outros gerenciadores de arquivos e revisão manual interativa ainda não validados.
 As limitações de formato de imagem e hover externo registradas na fase anterior permanecem.
 Alterações locais anteriores e o trabalho concorrente de cobertura das bases foram preservados.
+
+## Persistência, memória e proteção de arquivos — testes (2026-10-29)
+
+Fase restrita a testes e documentação: `tests/persistence_integrity_tests.cpp`
+integra o executável existente `editor_persistence_transaction_tests`. Nenhuma
+mudança de produção ou API. As demais alterações locais foram preservadas.
+
+| Item | Status / evidência | Testes adicionados | Limites / decisões pendentes |
+|---|---|---|---|
+| Persistência e corrupção de entrada / P0-b, P0-c | NÃO CONFIRMADOS nos novos cenários: falhas mantêm os mesmos componentes/mapas, nomes, entidades vivas, ocultas/bloqueadas e gravidade. | Todos os prefixos anteriores ao fechamento do JSON de projeto e cena; nove mutações de versão/esquema/vetores/IDs/pais/duplicatas; cena referenciada truncada. Round-trip repetido de nomes Unicode com aspas, quebras, tabulação e barra, e valores TRS. | Não reavalia cada hipótese histórica nem cobre toda entrada arbitrária. JSON sintaticamente válido com alteração de valores legítimos não é detectado como corrupção por estes testes. |
+| Proteção da gravação / P0-a | NÃO CONFIRMADO nos novos cenários: bytes anteriores de projeto/cena e arquivo alheio são preservados quando a gravação é recusada. | Temporário bloqueado por diretório limpa somente temporários próprios; nova tentativa funciona; hard link no destino e symlink no temporário não alteram o arquivo vinculado. | Testes de links podem fazer skip se o sistema não os permitir; neste host ambos executaram. Não simula disco cheio, falha física de armazenamento ou queda de energia. O protocolo existente não usa fsync. |
+| Journal corrompido e recuperação | CONFIRMADO: implementação valida o registro completo antes de restaurar; os testes verificam essa proteção. | Segunda entrada inválida não permite restaurar a primeira; sete formatos de journal inválido mantêm projeto/cena e o próprio journal byte a byte para diagnóstico. | Não há checksum para autenticar preimagens válidas adulteradas. Testes anteriores de interrupção do processo, rollback e recuperação repetida continuam no mesmo executável. |
+| Liberação de componentes ao recarregar | CONFIRMADO nos cenários testados por `weak_ptr` e contagem de referências. | 25 loads sucessivos liberam Transform, estado/componente Lua e corpo Bullet substituídos, preservando a câmera; 50 loads inválidos não retêm referências adicionais aos componentes ativos; componente removido permanece utilizável enquanto um proprietário externo o mantém e expira após soltá-lo. | Não mede RSS nem todos os recursos internos/GPU; contagem de referências dos componentes ativos não prova ausência de alocações perdidas no staging de erros tardios. |
+| Encerramento explícito do ECS | CONFIRMADO: remover a entidade libera Lua/Bullet e permite expirar o registro. | `ExplicitSceneShutdownReleasesRegistryLuaAndBulletComponents` verifica componentes e ECS com `weak_ptr`. | PARCIAL quanto a vazamentos globais: o ciclo de ownership A1 já documentado continua pendente; este teste exige remoção explícita, sem afirmar que soltar apenas o registro libere uma cena populada. ASan/LSan/UBSan não executados nesta fase. |
+
+Validação dirigida: **14/14 testes novos sem display**, executados com
+`env -u DISPLAY -u WAYLAND_DISPLAY` e filtro `PersistenceIntegrity.*`.
+O executável completo de transações também passou: **32/32 testes sem display**,
+incluindo os testes preexistentes de interrupção real do processo.
+Logs: `/tmp/bengine-integrity-directed-build.log`,
+`/tmp/bengine-integrity-directed-tests.log`,
+`/tmp/bengine-integrity-transactions-headless.log`.
+
+Validação final: build novo de editor/runtime concluído e **199/199 entradas CTest
+aprovadas**, sem skips no `LastTest.log`, incluindo os testes OpenGL existentes.
+Comandos derivados do CMake e do helper da CI:
+
+```sh
+cmake -S . -B /tmp/bengine-integrity-clean-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
+cmake --build /tmp/bengine-integrity-clean-20261029 --config Release --parallel 2
+ctest --test-dir /tmp/bengine-integrity-clean-20261029 --output-on-failure -C Release
+```
+
+Logs finais: `/tmp/bengine-integrity-clean-configure.log`,
+`/tmp/bengine-integrity-clean-build.log`, `/tmp/bengine-integrity-clean-tests.log`.
+Nenhum warning/error de compilador encontrado no log; permanece o aviso CMake
+CMP0135. Como na CI, `CMAKE_BUILD_TYPE` não foi definido: `--config Release` não
+comprova otimização Release com gerador único. Windows, sanitizadores, falha real
+de disco/energia e liberação de recursos GPU não foram validados. A suíte completa
+reflete o estado compartilhado atual, incluindo alterações locais de outras tarefas;
+o commit desta fase contém somente testes/configuração/documentação próprios.
