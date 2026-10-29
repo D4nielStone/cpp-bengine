@@ -69,6 +69,11 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     material.set_uniform("material.metallic", 0.73f);
     material.set_uniform("material.roughness", 0.39f);
     material.set_uniform("material.ao", 0.87f);
+    material.set_uniform("uvMundo", true);
+    material.set_uniform("material.uvOffsetX", -0.25f);
+    material.set_uniform("material.uvOffsetY", 0.5f);
+    material.set_uniform("material.uvRepeatX", 3.f);
+    material.set_uniform("material.uvRepeatY", 4.f);
     material.set_texture("tex_normal", normal);
     material.set_uniform("use_tex_normal", true);
     renderer->m_modelo->meshes[0].setMaterial(material);
@@ -87,6 +92,11 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     EXPECT_FLOAT_EQ(loaded.getUniforme("material.metallic").valor.f, 0.73f);
     EXPECT_FLOAT_EQ(loaded.getUniforme("material.roughness").valor.f, 0.39f);
     EXPECT_FLOAT_EQ(loaded.getUniforme("material.ao").valor.f, 0.87f);
+    EXPECT_TRUE(loaded.getUniforme("uvMundo").valor.b);
+    EXPECT_FLOAT_EQ(loaded.getUniforme("material.uvOffsetX").valor.f, -0.25f);
+    EXPECT_FLOAT_EQ(loaded.getUniforme("material.uvOffsetY").valor.f, 0.5f);
+    EXPECT_FLOAT_EQ(loaded.getUniforme("material.uvRepeatX").valor.f, 3.f);
+    EXPECT_FLOAT_EQ(loaded.getUniforme("material.uvRepeatY").valor.f, 4.f);
     EXPECT_EQ(loaded.getTextura("tex_normal").path, image_path.string());
     const auto enabled = loaded.getUniforme("use_tex_normal");
     EXPECT_EQ(enabled.m_type, commons::uniform::type::Bool);
@@ -393,4 +403,77 @@ TEST(ShadowSettings, ResolutionRoundTripsAndValidatesWithoutGpu) {
     data.RemoveMember("shadow_resolution");
     ASSERT_TRUE(loaded.analyze(data));
     EXPECT_EQ(loaded.shadow_resolution, 2048);
+}
+
+TEST_F(EditorRenderTest, TextureOffsetRepeatAndWorldProjectionChangePixelsAndResetBetweenMaterials) {
+    glViewport(0, 0, 64, 64);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_FRAMEBUFFER_SRGB);
+    commons::shader shader;
+    shader.use();
+    const auto identity = glm::mat4(1.f);
+    shader.setMat4("view", glm::value_ptr(identity));
+    shader.setMat4("projection", glm::value_ptr(identity));
+    shader.setMat4("model", glm::value_ptr(identity));
+    shader.setBool("shadowEnabled", false);
+    shader.setVec3("viewPos", {0, 0, 3});
+    shader.setVec3("dirLight.ambient", {1, 1, 1});
+    shader.setVec3("dirLight.color", {0, 0, 0});
+    shader.setVec3("dirLight.direction", {0, 0, -1});
+    shader.setFloat("dirLight.intensity", 1.f);
+    shader.setInt("pointLightCount", 0);
+    GLuint texture{};
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    const unsigned char pixels[]{255,0,0,255, 0,255,0,255};
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    commons::material material;
+    material.set_uniform("material.albedo", commons::color{1,1,1,1});
+    material.set_uniform("material.ao", 1.f);
+    material.set_uniform("material.roughness", 0.5f);
+    material.set_uniform("material.metallic", 0.f);
+    material.set_texture("tex_albedo", commons::texture{texture, ""});
+    material.set_uniform("use_tex_albedo", true);
+    commons::mesh plane({
+        {{-1,-1,0}, {0,0,1}, {0,0}}, {{1,-1,0}, {0,0,1}, {1,0}},
+        {{1,1,0}, {0,0,1}, {1,1}}, {{-1,1,0}, {0,0,1}, {0,1}}
+    }, {0,1,2,0,2,3}, material);
+    plane.load();
+    auto render = [&](const commons::material& value) {
+        plane.setMaterial(value);
+        glClear(GL_COLOR_BUFFER_BIT);
+        plane.draw(shader);
+        std::array<unsigned char, 4> pixel{};
+        glReadPixels(16, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+        return pixel;
+    };
+    const auto original = render(material);
+    EXPECT_GT(original[0], 200);
+    EXPECT_LT(original[1], 10);
+    auto edited = material;
+    edited.set_uniform("material.uvOffsetX", 0.5f);
+    EXPECT_GT(render(edited)[1], 200);
+    edited = material;
+    edited.set_uniform("material.uvRepeatX", 6.f); // UV > 1 must wrap, not clamp.
+    EXPECT_GT(render(edited)[1], 200);
+    edited.set_uniform("material.uvRepeatX", 4.f);
+    EXPECT_GT(render(edited)[0], 200);
+    edited = material;
+    edited.set_uniform("uvMundo", true);
+    const auto world = render(edited);
+    EXPECT_GT(world[1], 200); // Vertical face projects XY, not XZ.
+    const auto scaled = glm::scale(identity, glm::vec3{2,2,1});
+    shader.setMat4("model", glm::value_ptr(scaled));
+    EXPECT_EQ(render(edited), world); // Fixed world position keeps texel density.
+    shader.setMat4("model", glm::value_ptr(identity));
+    EXPECT_EQ(render(material), original); // Shared shader must not leak UV state.
+    GLint wrap{};
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &wrap);
+    EXPECT_EQ(wrap, GL_CLAMP_TO_EDGE); // BGUI texture state is preserved.
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    glDeleteTextures(1, &texture);
 }

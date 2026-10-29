@@ -117,6 +117,23 @@ void mesh::draw(shader &shader) {
         glDepthFunc(GL_ALWAYS);
 
     m_material.usar(shader);
+    // Restore wrap modes after drawing: BGUI shares these texture objects.
+    struct texture_wrap { GLuint slot; GLint s, t; };
+    std::vector<texture_wrap> previous_wraps;
+    GLint active_texture = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
+    for (GLuint slot = 0; slot < m_material.textures.size(); ++slot) {
+        glActiveTexture(GL_TEXTURE0 + slot);
+        GLint id = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &id);
+        if (!id) continue;
+        texture_wrap previous{slot, 0, 0};
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &previous.s);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &previous.t);
+        previous_wraps.push_back(previous);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
 
     glBindVertexArray(m_VAO);
 
@@ -127,6 +144,12 @@ void mesh::draw(shader &shader) {
     }
     glBindVertexArray(0);
 
+    for (auto it = previous_wraps.rbegin(); it != previous_wraps.rend(); ++it) {
+        glActiveTexture(GL_TEXTURE0 + it->slot);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, it->s);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, it->t);
+    }
+    glActiveTexture(active_texture);
     if(m_overlayed)
         glDepthFunc(GL_LESS);
 }

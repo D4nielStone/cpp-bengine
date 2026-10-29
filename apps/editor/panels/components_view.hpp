@@ -703,6 +703,31 @@ private:
                         renderer->m_modelo->meshes[index].setMaterial(updated);
                     });
             }
+            auto& world = section.children().add<bgui::checkbox>(
+                "WorldTexture", 0.29f, commons::world_texture(material));
+            world.set_on_change([this, renderer, index](bool enabled) {
+                auto apply = [renderer, index](bool value) {
+                    auto updated = renderer->m_modelo->meshes[index].getMaterial();
+                    updated.set_uniform("uvMundo", value);
+                    renderer->m_modelo->meshes[index].setMaterial(updated);
+                };
+                const bool before = commons::world_texture(renderer->m_modelo->meshes[index].getMaterial());
+                apply(enabled);
+                m_context->record_action([apply, before]() { apply(before); },
+                    [apply, enabled]() { apply(enabled); });
+            });
+            for (const auto& factor : commons::texture_factors) {
+                add_number_field(section.children(), factor.label,
+                    commons::pbr_value(material, factor),
+                    [renderer, index, factor]() {
+                        return commons::pbr_value(renderer->m_modelo->meshes[index].getMaterial(), factor);
+                    },
+                    [renderer, index, factor](float value) {
+                        auto updated = renderer->m_modelo->meshes[index].getMaterial();
+                        updated.set_uniform(std::string("material.") + factor.name, value);
+                        renderer->m_modelo->meshes[index].setMaterial(updated);
+                    });
+            }
             for (const auto& map : commons::pbr_maps)
                 add_material_map(section.children(), renderer, index, map);
         }

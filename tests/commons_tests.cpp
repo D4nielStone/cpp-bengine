@@ -1,3 +1,7 @@
+#include "util/pbr_material.hpp"
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <vector>
@@ -253,4 +257,33 @@ TEST(MaterialTexturePathTest, NormalizesWindowsSeparatorsAndParentDirectoriesWit
     EXPECT_EQ(std::filesystem::path(value.getTextura("tex_albedo").path).generic_string(), "../Texture/textura.jpg");
     value.set_texture("tex_albedo", texture{0, ""});
     EXPECT_TRUE(value.getTextura("tex_albedo").path.empty());
+}
+
+// Exercise the same Assimp UV import as model::load_model, without OpenGL.
+TEST(PrimitiveTextureTest, CubeTrianglesHaveNonDegenerateUvsOnEveryFace) {
+    Assimp::Importer importer;
+    const auto path = std::filesystem::path(BENGINE_SOURCE_DIR) / "commons/assets/models/cube.obj";
+    const auto* scene = importer.ReadFile(path.string(), aiProcess_Triangulate | aiProcess_FlipUVs |
+        aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals | aiProcess_PreTransformVertices);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_GT(scene->mNumMeshes, 0u);
+    for (unsigned m = 0; m < scene->mNumMeshes; ++m) {
+        const auto* mesh = scene->mMeshes[m];
+        ASSERT_TRUE(mesh->HasTextureCoords(0));
+        for (unsigned f = 0; f < mesh->mNumFaces; ++f) {
+            const auto& face = mesh->mFaces[f];
+            ASSERT_EQ(face.mNumIndices, 3u);
+            auto a = mesh->mTextureCoords[0][face.mIndices[0]];
+            auto b = mesh->mTextureCoords[0][face.mIndices[1]];
+            auto c = mesh->mTextureCoords[0][face.mIndices[2]];
+            EXPECT_GT(std::abs((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)), 0.99f);
+        }
+    }
+}
+
+TEST(PrimitiveTextureTest, LegacyMaterialsDefaultToOriginalUvsAndOneRepeat) {
+    const material legacy;
+    EXPECT_FALSE(world_texture(legacy));
+    for (const auto& factor : texture_factors)
+        EXPECT_FLOAT_EQ(pbr_value(legacy, factor), factor.fallback);
 }

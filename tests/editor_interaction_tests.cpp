@@ -707,3 +707,37 @@ TEST_F(EditorInteractionTest, ColliderFitAndRotationOffsetsAreAvailableInTheInsp
     }),nullptr);
     registry->remove(entity.id);
 }
+
+TEST_F(EditorInteractionTest, InspectorTextureMappingSupportsUndoAndRedo) {
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, new commons::model());
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    renderer->m_modelo->meshes.emplace_back(std::vector<commons::vertex>{},
+        std::vector<unsigned int>{}, commons::material{});
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock); panel.update();
+    for (const auto& factor : commons::texture_factors) {
+        auto* field = find_element<bgui::field>(dock, [&](auto& item) {
+            return item.get_label().get_buffer() == factor.label;
+        });
+        ASSERT_NE(field, nullptr);
+        EXPECT_EQ(field->get_inputbox().get_buffer(), factor.fallback == 0 ? "0" : "1");
+        field->get_inputbox().m_enter_func("-2.5");
+        auto value = [&]() { return commons::pbr_value(renderer->m_modelo->meshes[0].getMaterial(), factor); };
+        EXPECT_FLOAT_EQ(value(), -2.5f);
+        ASSERT_TRUE(context->undo()); EXPECT_FLOAT_EQ(value(), factor.fallback);
+        ASSERT_TRUE(context->redo()); EXPECT_FLOAT_EQ(value(), -2.5f);
+    }
+    auto* world = find_element<bgui::checkbox>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "WorldTexture";
+    });
+    ASSERT_NE(world, nullptr);
+    world->on_clicked();
+    EXPECT_TRUE(commons::world_texture(renderer->m_modelo->meshes[0].getMaterial()));
+    ASSERT_TRUE(context->undo());
+    EXPECT_FALSE(commons::world_texture(renderer->m_modelo->meshes[0].getMaterial()));
+    ASSERT_TRUE(context->redo());
+    EXPECT_TRUE(commons::world_texture(renderer->m_modelo->meshes[0].getMaterial()));
+}

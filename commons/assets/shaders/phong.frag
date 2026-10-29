@@ -13,6 +13,10 @@ struct Material {
     float metallic;
     float roughness;
     float ao;
+    float uvOffsetX;
+    float uvOffsetY;
+    float uvRepeatX;
+    float uvRepeatY;
 };
 
 struct DirLight {
@@ -134,7 +138,14 @@ vec3 calculateLightLo(vec3 L, vec3 radiance, vec3 N, vec3 V, vec3 albedo, float 
 }
 
 void main() {
-    vec2 novoUv = uvMundo ? Position.xz * 0.1 : Uv;
+    vec2 novoUv = Uv;
+    if (uvMundo) {
+        vec3 axis = abs(cross(dFdx(Position), dFdy(Position)));
+        novoUv = axis.y >= axis.x && axis.y >= axis.z ? Position.xz
+            : axis.x >= axis.z ? Position.zy : Position.xy;
+    }
+    novoUv = novoUv * vec2(material.uvRepeatX, material.uvRepeatY)
+        + vec2(material.uvOffsetX, material.uvOffsetY);
 
     vec4 albedo = (use_tex_albedo ? texture(tex_albedo, novoUv) : vec4(1.0)) * material.albedo;
     float metallic = clamp(material.metallic * (use_tex_metallic ? texture(tex_metallic, novoUv).r : 1.0), 0.0, 1.0);

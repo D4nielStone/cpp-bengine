@@ -66,6 +66,11 @@ texture material::getTextura(const std::string& nome) const {
 void material::usar(shader& shader) {
     shader.use();
 
+    // Reset optional state for each draw: materials share the shader program.
+    shader.setBool("uvMundo", false);
+    for (const auto& factor : texture_factors)
+        shader.setFloat(std::string("material.") + factor.name, pbr_value(*this, factor));
+
     for (const auto& [nome, prop] : uniforms) {
         switch (prop.m_type) {
             case uniform::type::Float:

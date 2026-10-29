@@ -115,6 +115,11 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
                        material[factor.name].GetDouble() <= 1.0)))
                     return false;
             }
+            if (material.HasMember("world_texture") && !material["world_texture"].IsBool())
+                return false;
+            for (const auto& factor : commons::texture_factors)
+                if (material.HasMember(factor.name) && !is_number(material[factor.name]))
+                    return false;
             if (material.HasMember("maps")) {
                 if (!material["maps"].IsObject())
                     return false;
@@ -275,6 +280,10 @@ bool parse_component(
                     if (saved.HasMember(factor.name))
                         material.set_uniform(std::string("material.") + factor.name,
                             saved[factor.name].GetFloat());
+                material.set_uniform("uvMundo", saved.HasMember("world_texture") && saved["world_texture"].GetBool());
+                for (const auto& factor : commons::texture_factors)
+                    material.set_uniform(std::string("material.") + factor.name,
+                        saved.HasMember(factor.name) ? saved[factor.name].GetFloat() : factor.fallback);
                 if (saved.HasMember("maps")) {
                     for (const auto& map : commons::pbr_maps) {
                         if (!saved["maps"].HasMember(map.name))
@@ -729,6 +738,11 @@ bool project_persistence_system::serialize_project(
                     color.PushBack(albedo.a, allocator);
                     material.AddMember("albedo", color, allocator);
                     for (const auto& factor : commons::pbr_factors) {
+                        rapidjson::Value key(factor.name, allocator);
+                        material.AddMember(key, commons::pbr_value(source_material, factor), allocator);
+                    }
+                    material.AddMember("world_texture", commons::world_texture(source_material), allocator);
+                    for (const auto& factor : commons::texture_factors) {
                         rapidjson::Value key(factor.name, allocator);
                         material.AddMember(key, commons::pbr_value(source_material, factor), allocator);
                     }

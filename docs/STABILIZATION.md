@@ -849,3 +849,45 @@ ctest --test-dir /home/d4nl/.cache/bengine-validation/shadow-commit-20261029/bui
 Logs: `config.log`, `build.log`, `tests.log` e `shadow-focused.log` em
 `/home/d4nl/.cache/bengine-validation/shadow-commit-20261029/`.
 Somente esta nota de documentação foi acrescentada após a validação da árvore.
+
+## Texturas do cubo e controles de mapeamento (2026-10-29)
+
+| Item | Status e evidência | Mudança / testes | Limites e decisões |
+|---|---|---|---|
+| Textura aparece como um único pixel | CONFIRMADO: `PrimitiveTextureTest.CubeTrianglesHaveNonDegenerateUvsOnEveryFace` falhou antes da correção em `HasTextureCoords(0) == false`, importando o OBJ com os mesmos flags do carregador. As faces de `cube.obj` omitiam os índices `vt`; `model::process_mesh` preenchia UVs com zero. | Faces agora referenciam os UVs existentes. Teste sem GPU exige área UV não nula em cada triângulo. Posições, índices de normais e API preservados. | A cena local usa `cube.obj` também para a superfície achatada. Não foi criado outro modelo de plano nem modificado o projeto do usuário. |
+| Offset / repetição / WorldTexture | IMPLEMENTADO conforme confirmação do usuário: projeção em coordenadas do mundo, mantendo densidade ao escalar o objeto. | Inspector oferece `UV Offset X/Y`, `Texture Repeat X/Y`, `WorldTexture`, com undo/redo. Valores persistem por material e aplicam a todos os mapas PBR. Sem campos novos: offset zero, repetição um, WorldTexture desligado. Testes de Inspector sem GPU, serialização sem GPU, round-trip com modelo real e leitura de pixels OpenGL. | Em UV normal, repetição significa repetições por UV unitária; em WorldTexture, repetições por unidade do mundo. Zero é permitido e valores negativos espelham. Projeção planar escolhe eixo dominante da face geométrica; superfícies curvas podem mostrar transições entre eixos (não é mistura triplanar). |
+| Repetição e estado compartilhado | CONFIRMADO: o backend BGUI carrega imagens com `GL_CLAMP_TO_EDGE`. | Desenho da malha usa `GL_REPEAT` temporariamente e restaura os modos anteriores, preservando imagens do editor. Teste gráfico verifica repetição além de UV=1, restauração e ausência de vazamento de parâmetros entre materiais. | Implementação usa as funções OpenGL já disponíveis no projeto, sem alterar a arquitetura ou o backend BGUI. |
+
+Validação final: editor, runtime e todos os testes compilados após limpeza de
+`out`. A tentativa paralela encontrou dependência ausente de `libbgui_core.a`;
+a retomada serial encontrou uma ocorrência de `Text file busy` na descoberta
+do teste. Reconfiguração e nova retomada serial concluíram sem mudança de código
+para contornar esses erros. **235/236 entradas CTest passaram**, sem testes
+ignorados. Todos os testes de texturas/Inspector/persistência passaram, inclusive
+leitura de pixels com OpenGL real em janela oculta.
+
+A única falha foi `Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`,
+que lê a cena local modificada antes desta tarefa. O mesmo teste passou com uma
+cópia isolada do arquivo de teste, cena de HEAD e bibliotecas recém-compiladas;
+nenhum arquivo do projeto local foi substituído. Não foram alterados posição,
+rotação, escala, materiais ou outros dados da cena do usuário.
+Não foram feitos teste manual do viewport nem build no Windows. A projeção em
+superfícies curvas não foi validada visualmente; a escolha entre eixos é discreta.
+Nenhuma quebra de API ou decisão pendente nesta fase. O inventário P0/P1/P2
+anterior não foi reaberto.
+
+Comandos usados (descobertos no CMake e workflow):
+
+```sh
+cmake --build out --clean-first --parallel 2
+cmake -S . -B out -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
+cmake --build out --parallel 1
+ctest --test-dir out --output-on-failure -C Release
+```
+
+Logs: `/home/d4nl/.cache/bengine-validation/uv-20261029/`:
+`clean-build.log`, `config.log`, `rebuild.log`, `retry-build.log`, `tests.log`,
+`inspector.log`, `persistence.log`, `render.log`, `reference-build.log` e
+`reference-test.log`. A cópia de referência foi compilada com as mesmas flags e
+bibliotecas do alvo CMake `engine_foundations_tests`; somente a localização do
+arquivo de teste e a cena lida por `__FILE__` mudam.

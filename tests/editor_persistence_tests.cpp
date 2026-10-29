@@ -412,6 +412,9 @@ TEST(ProjectPersistenceTest, SavesRendererMaterialVisibilityAndLockState) {
     material.set_uniform("material.metallic", 0.7f);
     material.set_uniform("material.roughness", 0.4f);
     material.set_uniform("material.ao", 0.9f);
+    material.set_uniform("uvMundo", true);
+    material.set_uniform("material.uvOffsetX", -0.25f);
+    material.set_uniform("material.uvRepeatY", 4.f);
     material.set_texture("tex_normal", commons::texture{0, "/textures/normal.png"});
     renderer->m_modelo->meshes.front().setMaterial(material);
 
@@ -446,6 +449,11 @@ TEST(ProjectPersistenceTest, SavesRendererMaterialVisibilityAndLockState) {
     EXPECT_FLOAT_EQ(pbr["metallic"].GetFloat(), 0.7f);
     EXPECT_FLOAT_EQ(pbr["roughness"].GetFloat(), 0.4f);
     EXPECT_FLOAT_EQ(pbr["ao"].GetFloat(), 0.9f);
+    EXPECT_TRUE(pbr["world_texture"].GetBool());
+    EXPECT_FLOAT_EQ(pbr["uvOffsetX"].GetFloat(), -0.25f);
+    EXPECT_FLOAT_EQ(pbr["uvOffsetY"].GetFloat(), 0.f);
+    EXPECT_FLOAT_EQ(pbr["uvRepeatX"].GetFloat(), 1.f);
+    EXPECT_FLOAT_EQ(pbr["uvRepeatY"].GetFloat(), 4.f);
     ASSERT_TRUE(pbr.HasMember("maps"));
     EXPECT_STREQ(pbr["maps"]["tex_normal"].GetString(), "/textures/normal.png");
     ASSERT_EQ(albedo.Size(), 4U);
