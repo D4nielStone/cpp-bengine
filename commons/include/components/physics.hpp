@@ -30,6 +30,7 @@
 #include <rapidjson/document.h>
 
 namespace COMMONS_NS {
+    class transform;
     struct physics : component {
         static constexpr mask mask { COMPONENTE_FISICA };
 
@@ -47,6 +48,9 @@ namespace COMMONS_NS {
         body_type type{body_type::rigid};
         bgui::vec3 collision_size{1.f, 1.f, 1.f};
         bgui::vec3 collision_offset{0.f, 0.f, 0.f};
+        bool fit_to_model{true};
+        bgui::vec3 collision_rotation{0.f, 0.f, 0.f};
+        btTransform synchronize_transform(const transform& value, model* geometry = nullptr);
         bool collision_enabled{true};
         bool trigger{false};
         void set_body_type(body_type value);
@@ -79,6 +83,8 @@ namespace COMMONS_NS {
         float friction{0.5f};
         float restitution{0.f};
         model* m_modelo{ nullptr };
+        bgui::vec3 m_bounds_min{0.f}, m_bounds_max{0.f};
+        bool m_has_model_bounds{false};
         btCollisionShape* m_forma{ nullptr };
         btDefaultMotionState* m_estado_de_movimento{ nullptr };
         btRigidBody* m_rigid_body{ nullptr };

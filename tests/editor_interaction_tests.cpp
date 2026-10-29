@@ -639,3 +639,22 @@ TEST_F(EditorInteractionTest, InspectorExposesBodyTypesAndColliderControlsWithHi
     ASSERT_NE(enabled, nullptr); enabled->on_clicked(); EXPECT_FALSE(physics->collision_enabled);
     registry->remove(entity.id);
 }
+
+
+TEST_F(EditorInteractionTest, ColliderFitAndRotationOffsetsAreAvailableInTheInspector) {
+    auto entity = registry->create(); registry->add<commons::physics>(entity);
+    auto body = registry->get<commons::physics>(entity.id);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context); panel.build(dock); panel.update();
+    auto* fit = find_element<bgui::checkbox>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Fit to Model";
+    });
+    ASSERT_NE(fit,nullptr); EXPECT_TRUE(body->fit_to_model);
+    fit->on_clicked(); EXPECT_FALSE(body->fit_to_model);
+    ASSERT_TRUE(context->undo()); EXPECT_TRUE(body->fit_to_model);
+    EXPECT_NE(find_element<bgui::text>(dock, [](auto& item) {
+        return item.get_buffer() == "Rotation Offset";
+    }),nullptr);
+    registry->remove(entity.id);
+}

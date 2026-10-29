@@ -632,6 +632,7 @@ TEST(ProjectPersistenceTest, RoundTripsCharacterAndColliderSettings) {
     auto body = registry->get<commons::physics>(player.id);
     body->set_body_type(commons::physics::body_type::character);
     body->setMass(80);
+    body->collision_rotation = {5,15,25};
     body->configure_collision(body->e_forma, {0.7f,0.6f,0.7f}, {0,0.9f,0}, false, true);
     editor::ui::project_persistence_system persistence(registry, editor_camera.id);
     const auto path = temporary_project_path(); std::string error;
@@ -641,6 +642,8 @@ TEST(ProjectPersistenceTest, RoundTripsCharacterAndColliderSettings) {
     ASSERT_NE(restored, nullptr);
     EXPECT_EQ(restored->type, commons::physics::body_type::character);
     EXPECT_EQ(restored->e_forma, commons::physics::shapes::forma_capsula);
+    EXPECT_TRUE(restored->fit_to_model);
+    EXPECT_FLOAT_EQ(restored->collision_rotation.y, 15);
     EXPECT_FLOAT_EQ(restored->m_massa, 80);
     EXPECT_FLOAT_EQ(restored->collision_offset.y, 0.9f);
     EXPECT_FLOAT_EQ(restored->collision_size.y, 0.6f);

@@ -34,6 +34,7 @@ struct editor_context {
     std::optional<entity_id> selected_entity;
     std::optional<entity_id> editor_camera_entity;
     bool is_playing{false};
+    bool show_colliders{false};
     editor_preferences preferences;
     std::size_t history_revision{0};
     std::unordered_map<entity_id, std::string> entity_names;

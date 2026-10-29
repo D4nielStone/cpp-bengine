@@ -295,6 +295,9 @@ public:
 
         const auto visible_regions = visible_viewport_regions(viewport);
 
+        if (m_context->show_colliders)
+            m_grid_gizmo.draw_colliders(*m_camera, viewport, m_context->registry);
+
         if (m_context->preferences.show_grid)
             m_grid_gizmo.draw(*m_camera, viewport);
 

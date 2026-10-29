@@ -387,3 +387,16 @@ void editor::grid_gizmo::draw_directional_light(
         viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 2.f
     );
 }
+
+
+void editor::grid_gizmo::draw_colliders(const COMMONS_NS::camera& camera,
+    const bgui::vec4i& viewport, const std::shared_ptr<commons::ecs>& registry) {
+    std::vector<grid_vertex> vertices;
+    for (const auto& line : collision_lines(registry)) {
+        for (const auto& point : {line.from, line.to})
+            vertices.push_back({point.x,point.y,point.z,line.color.x,line.color.y,line.color.z,1.f});
+    }
+    if (vertices.empty()) return;
+    ensure_resources(m_program, m_vao, m_vbo);
+    render_vertices(camera, viewport, vertices, m_program, m_vao, m_vbo, false, 1.5f);
+}

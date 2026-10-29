@@ -1,6 +1,7 @@
 #include "systems/physics_system.hpp"
 
 #include "components/transform.hpp"
+#include "components/renderer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,23 +10,11 @@
 namespace commons {
 namespace {
 
-constexpr float degrees_to_radians = 0.01745329251994329577f;
 constexpr float radians_to_degrees = 57.295779513082320876f;
 
-btTransform to_bullet_transform(const transform& value) {
-    const auto position = value.get_position();
-    const auto rotation = value.get_rotation();
-    // Transform renders Rx * Ry * Rz; Bullet's Euler ZYX helper uses the reverse order.
-    const auto orientation =
-        btQuaternion(btVector3(1, 0, 0), rotation.x * degrees_to_radians) *
-        btQuaternion(btVector3(0, 1, 0), rotation.y * degrees_to_radians) *
-        btQuaternion(btVector3(0, 0, 1), rotation.z * degrees_to_radians);
-
-    btTransform result;
-    result.setIdentity();
-    result.setOrigin(btVector3(position.x, position.y, position.z));
-    result.setRotation(orientation);
-    return result;
+btTransform entity_pose(physics& body, const transform& value, const std::shared_ptr<ecs>& registry, uint32_t id) {
+    const auto visual = registry->get<renderer>(id);
+    return body.synchronize_transform(value, visual ? visual->m_modelo : nullptr);
 }
 
 }
@@ -93,8 +82,7 @@ void physics_system::synchronize_entities(
             if (!body || !entity_transform || m_bodies.contains(id))
                 return;
 
-            body->refresh_collision(entity_transform->scale);
-            const auto world_transform = to_bullet_transform(*entity_transform);
+            const auto world_transform = entity_pose(*body, *entity_transform, registry, id);
             body->m_rigid_body->setWorldTransform(world_transform);
             body->m_estado_de_movimento->setWorldTransform(world_transform);
             dynamic_world->addRigidBody(body->m_rigid_body, 1, body->collision_enabled ? -1 : 0);
@@ -118,7 +106,7 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
 
     for (const auto& [id, body] : m_bodies) {
         const auto tr = registry->get<transform>(id);
-        body->refresh_collision(tr->scale);
+        const auto desired_pose = entity_pose(*body, *tr, registry, id);
         auto* proxy = body->m_rigid_body->getBroadphaseHandle();
         const int group = body->m_massa <= 0.f ? btBroadphaseProxy::StaticFilter : btBroadphaseProxy::DefaultFilter;
         const int filter = body->collision_enabled ? btBroadphaseProxy::AllFilter : 0;
@@ -130,7 +118,7 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
         }
         if (body->type == physics::body_type::character) {
             auto pose = body->m_rigid_body->getWorldTransform();
-            pose.setRotation(to_bullet_transform(*tr).getRotation());
+            pose.setRotation(desired_pose.getRotation());
             body->m_rigid_body->setWorldTransform(pose);
             body->m_estado_de_movimento->setWorldTransform(pose);
         }
@@ -140,7 +128,7 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
         const auto entity_transform = registry->get<transform>(id);
         if (!entity_transform)
             continue;
-        const auto world_transform = to_bullet_transform(*entity_transform);
+        const auto world_transform = desired_pose;
         body->m_rigid_body->setWorldTransform(world_transform);
         body->m_estado_de_movimento->setWorldTransform(world_transform);
         dynamic_world->updateSingleAabb(body->m_rigid_body);
@@ -165,12 +153,21 @@ void physics_system::update(const std::shared_ptr<ecs>& registry) {
         btTransform world_transform;
         body->m_rigid_body->getMotionState()->getWorldTransform(world_transform);
         const auto origin = world_transform.getOrigin();
-        entity_transform->set_position(
+        entity_transform->set_world_position(
             {origin.getX(), origin.getY(), origin.getZ()}
         );
 
         if (body->type != physics::body_type::character) {
-            const auto orientation = world_transform.getRotation();
+            auto orientation = world_transform.getRotation();
+            if (entity_transform->parent_id) {
+                if (auto parent = registry->get<transform>(entity_transform->parent_id)) {
+                    glm::vec3 scale(1), position(0), skew(0); glm::vec4 perspective(0); glm::quat parent_rotation(1,0,0,0);
+                    glm::decompose(parent->get_world_model_matrix(), scale, parent_rotation, position, skew, perspective);
+                    const auto local = glm::inverse(parent_rotation) * glm::quat(
+                        orientation.w(), orientation.x(), orientation.y(), orientation.z());
+                    orientation = btQuaternion(local.x, local.y, local.z, local.w);
+                }
+            }
             float x, y, z;
             glm::extractEulerAngleXYZ(glm::mat4_cast(glm::quat(
                 orientation.w(), orientation.x(), orientation.y(), orientation.z()

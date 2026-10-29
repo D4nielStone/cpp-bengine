@@ -4,8 +4,11 @@
 #include "components/physics.hpp"
 #include "systems/physics_system.hpp"
 #include "systems/code_system.hpp"
+#include "guizmo/collision_debug.hpp"
+#include "components/renderer.hpp"
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 using namespace commons;
 
@@ -507,4 +510,187 @@ TEST_F(Foundations, FppCharacterClimbsTheRenderedRampSurface) {
     const auto finish = player->m_rigid_body->getWorldTransform().getOrigin();
     EXPECT_GT(finish.y(), start.y() + 0.8f);
     EXPECT_GT((finish - start).dot(btVector3(uphill.x,uphill.y,uphill.z)), 2.f);
+}
+
+TEST(EnginePhysics, DefaultColliderFitsModelBoundsAndInheritsEntityScale) {
+    model geometry;
+    geometry.meshes.emplace_back(std::vector<vertex>{
+        vertex({-2,-1,-3},{0,1,0},{0,0}), vertex({4,3,5},{0,1,0},{1,1})
+    }, std::vector<unsigned int>{}, material{});
+    physics collider(true);
+    collider.setModelo(&geometry);
+    collider.refresh_collision({2,3,4});
+    btVector3 minimum, maximum;
+    collider.m_rigid_body->getAabb(minimum, maximum);
+    EXPECT_NEAR(minimum.x(), -4, 0.001f);
+    EXPECT_NEAR(minimum.y(), -3, 0.001f);
+    EXPECT_NEAR(minimum.z(), -12, 0.001f);
+    EXPECT_NEAR(maximum.x(), 8, 0.001f);
+    EXPECT_NEAR(maximum.y(), 9, 0.001f);
+    EXPECT_NEAR(maximum.z(), 20, 0.001f);
+}
+
+
+TEST_F(Foundations, AutoFitColliderFollowsParentTransformAndLocalOffsets) {
+    auto parent = registry->create(1);
+    at(1)->set_position({7,2,-3}); at(1)->set_rotation({0,35,0}); at(1)->scale = {2,3,4};
+    auto child = registry->create(2); at(2)->set_position({1,0,0});
+    ASSERT_TRUE(at(2)->set_parent(1, false));
+    auto geometry = new model();
+    geometry->meshes.emplace_back(std::vector<vertex>{vertex({-2,-1,-3},{},{0,0}),
+        vertex({4,3,5},{},{0,0})}, std::vector<unsigned int>{}, material{});
+    registry->add<renderer>(child, geometry);
+    registry->add<physics>(child, true);
+    auto collider = registry->get<physics>(2);
+    collider->collision_offset = {0.5f,1,0};
+    physics_system system; system.setup(registry);
+    btVector3 actual_min, actual_max;
+    collider->m_rigid_body->getAabb(actual_min, actual_max);
+    glm::vec3 expected_min(1e10f), expected_max(-1e10f);
+    const auto matrix = at(2)->get_world_model_matrix();
+    for (float x : {-2.f,4.f}) for (float y : {-1.f,3.f}) for (float z : {-3.f,5.f}) {
+        const auto world = glm::vec3(matrix * glm::vec4(x+0.5f,y+1,z,1));
+        expected_min = glm::min(expected_min,world); expected_max = glm::max(expected_max,world);
+    }
+    expect_vector({actual_min.x(),actual_min.y(),actual_min.z()}, {expected_min.x,expected_min.y,expected_min.z});
+    expect_vector({actual_max.x(),actual_max.y(),actual_max.z()}, {expected_max.x,expected_max.y,expected_max.z});
+    auto lines = editor::collision_lines(registry);
+    ASSERT_FALSE(lines.empty());
+    for (const auto& line : lines) for (const auto& p : {line.from,line.to}) {
+        EXPECT_GE(p.x, actual_min.x()-0.001f); EXPECT_LE(p.x,actual_max.x()+0.001f);
+        EXPECT_GE(p.y, actual_min.y()-0.001f); EXPECT_LE(p.y,actual_max.y()+0.001f);
+    }
+}
+
+TEST(EnginePhysics, FitAndRotationOffsetsPersistAndLegacySizesArePreserved) {
+    physics source;
+    EXPECT_TRUE(source.fit_to_model);
+    source.collision_rotation = {10,20,30};
+    source.collision_offset = {1,2,3}; source.collision_size = {2,3,4};
+    rapidjson::Document data;
+    source.serialize(data,data.GetAllocator());
+    physics restored; ASSERT_TRUE(restored.analyze(data));
+    EXPECT_TRUE(restored.fit_to_model);
+    expect_vector(restored.collision_rotation,{10,20,30});
+    data.RemoveMember("fit_to_model"); data.RemoveMember("collision_rotation");
+    physics legacy; ASSERT_TRUE(legacy.analyze(data)); EXPECT_FALSE(legacy.fit_to_model);
+    expect_vector(legacy.collision_size,{2,3,4});
+    data.AddMember("fit_to_model", "invalid", data.GetAllocator());
+    EXPECT_FALSE(legacy.analyze(data));
+}
+
+TEST_F(Foundations, ColliderPreviewSupportsEveryShapeAndShowsDisabledAndTriggerColors) {
+    auto object = body(1,true);
+    auto collider = registry->get<physics>(1);
+    for (const auto shape : {physics::shapes::box_shape,physics::shapes::forma_capsula,
+        physics::shapes::forma_esfera,physics::shapes::forma_cilindro,
+        physics::shapes::forma_cone,physics::shapes::forma_plano}) {
+        collider->configure_collision(shape,{1,1,1},{0,0,0},true,false);
+        auto lines = editor::collision_lines(registry);
+        ASSERT_FALSE(lines.empty()) << static_cast<int>(shape);
+        for (const auto& line : lines) for (int i = 0; i < 3; ++i)
+            EXPECT_TRUE(std::isfinite(line.from[i]));
+    }
+    collider->trigger = true;
+    auto lines = editor::collision_lines(registry);
+    EXPECT_GT(lines.front().color.z, lines.front().color.y);
+    collider->collision_enabled = false;
+    lines = editor::collision_lines(registry);
+    EXPECT_FLOAT_EQ(lines.front().color.x, lines.front().color.y);
+}
+
+
+TEST(EnginePhysics, RotationOffsetIsLocalAndSingularTransformDoesNotCorruptTheShape) {
+    physics collider(true);
+    collider.configure_collision(physics::shapes::box_shape,{2,1,4},{1,2,3},true,false);
+    collider.collision_rotation = {0,90,0};
+    collider.refresh_collision({2,2,2});
+    btVector3 minimum,maximum; collider.m_rigid_body->getAabb(minimum,maximum);
+    expect_vector({minimum.x(),minimum.y(),minimum.z()},{-2,3,4});
+    expect_vector({maximum.x(),maximum.y(),maximum.z()},{6,5,8});
+    transform singular; singular.scale={0,0,0};
+    const auto pose = collider.synchronize_transform(singular);
+    EXPECT_TRUE(std::isfinite(pose.getRotation().w()));
+    collider.refresh_collision({1,1,1});
+    collider.m_rigid_body->getAabb(minimum,maximum);
+    EXPECT_TRUE(std::isfinite(maximum.x()));
+}
+
+namespace {
+constexpr bool ramp_auto_fit = true;
+// Read the primitive's real vertices without model::load_model, which uploads OpenGL buffers.
+void read_collision_test_model(model& geometry, const std::filesystem::path& path) {
+    std::ifstream input(path); ASSERT_TRUE(input.good());
+    std::vector<vertex> vertices; std::string line;
+    while (std::getline(input,line)) {
+        if (!line.starts_with("v ")) continue;
+        std::istringstream row(line.substr(2)); bgui::vec3 p;
+        row >> p.x >> p.y >> p.z;
+        vertices.emplace_back(p,bgui::vec3{0,1,0},bgui::vec2{0,0});
+    }
+    ASSERT_FALSE(vertices.empty());
+    geometry.meshes.emplace_back(vertices,std::vector<unsigned int>{},material{});
+}
+}
+
+TEST_F(Foundations, SphereContactsTheVisibleRampSurfaceWithoutSinkingIntoTheModel) {
+    const auto root = std::filesystem::path(__FILE__).parent_path().parent_path();
+    auto* ramp_model = new model(); read_collision_test_model(*ramp_model,root / "commons/assets/models/cube.obj");
+    auto* sphere_model = new model(); read_collision_test_model(*sphere_model,root / "commons/assets/models/sphere.obj");
+    auto ramp = body(1,true,{8.9161205f,7.2638025f,-10.490142f});
+    at(1)->set_rotation({27.671965f,0,0}); at(1)->scale={6.252854f,1,9.099063f};
+    registry->add<renderer>(ramp,ramp_model);
+    registry->get<physics>(1)->fit_to_model = ramp_auto_fit;
+    auto sphere = body(2,false,{6.566506f,16.490759f,-11.271344f});
+    registry->add<renderer>(sphere,sphere_model);
+    auto ball = registry->get<physics>(2);
+    ball->configure_collision(physics::shapes::forma_esfera,{1,1,1},{0,0,0},true,false);
+    const auto matrix = at(1)->get_model_matrix();
+    const auto normal = glm::normalize(glm::vec3(matrix[1]));
+    const auto surface = glm::vec3(matrix * glm::vec4(0,1,0,1));
+    physics_system system; system.setup(registry);
+    bool hit=false;
+    for (int step=0;step<360 && !hit;++step) {
+        system.world()->stepSimulation(1.f/120.f,0);
+        auto* dispatcher=system.world()->getDispatcher();
+        for (int i=0;i<dispatcher->getNumManifolds();++i) {
+            const auto* manifold=dispatcher->getManifoldByIndexInternal(i);
+            for (int j=0;j<manifold->getNumContacts();++j) {
+                const auto& point=manifold->getContactPoint(j);
+                if (point.getDistance()>0.01f) continue;
+                const auto on_ramp=manifold->getBody0()==registry->get<physics>(1)->m_rigid_body ?
+                    point.getPositionWorldOnA() : point.getPositionWorldOnB();
+                const auto visible_distance=glm::dot(glm::vec3(on_ramp.x(),on_ramp.y(),on_ramp.z())-surface,normal);
+                EXPECT_NEAR(visible_distance,0.f,0.02f);
+                hit=true;
+            }
+        }
+    }
+    EXPECT_TRUE(hit);
+}
+
+TEST_F(Foundations, CharacterIsStoppedByTheVisibleRampSide) {
+    const auto root = std::filesystem::path(__FILE__).parent_path().parent_path();
+    auto* ramp_model = new model(); read_collision_test_model(*ramp_model,root / "commons/assets/models/cube.obj");
+    auto ramp=body(1,true,{8.9161205f,7.2638025f,-10.490142f});
+    at(1)->set_rotation({27.671965f,0,0}); at(1)->scale={6.252854f,1,9.099063f};
+    registry->add<renderer>(ramp,ramp_model);
+    registry->get<physics>(1)->fit_to_model = ramp_auto_fit;
+    const auto matrix=at(1)->get_model_matrix();
+    const auto normal=glm::normalize(glm::vec3(matrix[0]));
+    const auto surface=glm::vec3(matrix*glm::vec4(1,0,0,1));
+    const auto spawn=surface+normal*0.85f-glm::vec3(0,0.9f,0);
+    body(2,false,{spawn.x,spawn.y,spawn.z});
+    auto player=registry->get<physics>(2);
+    player->configure_collision(physics::shapes::forma_capsula,{0.7f,0.6f,0.7f},{0,0.9f,0},true,false);
+    player->set_body_type(physics::body_type::character);player->setMass(80);player->setFriccao(0);
+    physics_system system; system.set_gravity({0,0,0});system.setup(registry);
+    for (int step=0;step<240;++step) {
+        player->setVelocidade({-normal.x*2.5f,0,-normal.z*2.5f});
+        system.world()->stepSimulation(1.f/120.f,0);
+    }
+    const auto origin=player->m_rigid_body->getWorldTransform().getOrigin();
+    const auto distance=glm::dot(glm::vec3(origin.x(),origin.y()+0.9f,origin.z())-surface,normal);
+    EXPECT_GE(distance,0.32f);
+    EXPECT_NEAR(player->getVelocidade().x,0.f,0.1f);
 }

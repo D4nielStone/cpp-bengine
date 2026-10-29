@@ -8,6 +8,8 @@
 #include "components/renderer.hpp"
 #include "project_persistence_system.hpp"
 #include "viewport_sync.hpp"
+#include "guizmo/grid_gizmo.hpp"
+#include "components/physics.hpp"
 #include <chrono>
 #include <filesystem>
 #include <array>
@@ -226,4 +228,29 @@ TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextC
     EXPECT_TRUE(preview->flag_fb);
     EXPECT_EQ(preview->viewportFBO, (bgui::vec2i{19, 13}));
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+
+TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto eye = registry->create(1); registry->add<commons::camera>(eye);
+    auto camera = registry->get<commons::camera>(1);
+    registry->get<commons::transform>(1)->set_position({0,0,4});
+    registry->get<commons::transform>(1)->set_rotation({0,-90,0});
+    camera->viewport({64,64}); camera->createFB(); camera->getViewMatrix(); camera->obtProjectionMatrix();
+    auto object = registry->create(2); registry->add<commons::physics>(object,true);
+    camera->ceu = {0,0,0,1}; camera->drawFB();
+    glBindFramebuffer(GL_FRAMEBUFFER, camera->fbo);
+    glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); glLineWidth(1.f);
+    GLint before_fbo; glGetIntegerv(GL_FRAMEBUFFER_BINDING,&before_fbo);
+    editor::grid_gizmo overlay;
+    overlay.draw_colliders(*camera,{0,0,64,64},registry);
+    GLint after_fbo; glGetIntegerv(GL_FRAMEBUFFER_BINDING,&after_fbo);
+    EXPECT_EQ(before_fbo,after_fbo); EXPECT_FALSE(glIsEnabled(GL_DEPTH_TEST)); EXPECT_FALSE(glIsEnabled(GL_BLEND));
+    std::array<unsigned char,64*64*3> pixels{};
+    glReadPixels(0,0,64,64,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+    int green = 0;
+    for (size_t i=0;i<pixels.size();i+=3) if (pixels[i+1]>150 && pixels[i+1]>pixels[i]*2) ++green;
+    EXPECT_GT(green,10);
+    registry->remove(2);registry->remove(1);
 }

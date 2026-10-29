@@ -173,3 +173,17 @@ TEST(WindowFileDropTest, NativeEventObserverIsChainedAndRestoredWhenTheLoopEndsO
     if (restored) restored();
     EXPECT_EQ(observations, 4);
 }
+
+
+TEST(WindowFileDropTest, NativeF3KeyIsDeliveredToTheSharedInputState) {
+    if (!glfwInit()) GTEST_SKIP() << "No display for native key verification";
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    commons::window window("F3 input test", 100,100);
+    auto* native = glfwGetCurrentContext(); ASSERT_NE(native,nullptr);
+    const auto callback = glfwSetKeyCallback(native,nullptr); ASSERT_NE(callback,nullptr);
+    glfwSetKeyCallback(native,callback);
+    callback(native,GLFW_KEY_F3,0,GLFW_PRESS,0);
+    EXPECT_TRUE(bgui::get_pressed(bgui::input_key::f3));
+    callback(native,GLFW_KEY_F3,0,GLFW_RELEASE,0);
+    EXPECT_FALSE(bgui::get_pressed(bgui::input_key::f3));
+}

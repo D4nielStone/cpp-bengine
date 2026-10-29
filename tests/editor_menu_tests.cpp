@@ -220,3 +220,18 @@ TEST_F(EditorMenuTest, ResetUiRestoresStandardLayoutAndScaleWithoutClosingDocume
         if (window.title == "Scene") EXPECT_EQ(window.area, bgui::dock_area::center);
     }
 }
+
+
+TEST_F(EditorMenuTest, F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling) {
+    EXPECT_FALSE(context->show_colliders);
+    bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::press;
+    editor.update(); EXPECT_TRUE(context->show_colliders);
+    bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::repeat;
+    editor.update(); EXPECT_TRUE(context->show_colliders);
+    bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::release;
+    editor.update();
+    click("Show/Hide Colliders    F3");
+    EXPECT_FALSE(context->show_colliders);
+    bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::press;
+    editor.update(); EXPECT_TRUE(context->show_colliders);
+}

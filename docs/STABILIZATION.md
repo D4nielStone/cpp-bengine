@@ -750,3 +750,32 @@ Evidências em `/home/d4nl/.cache/bengine-validation/fpp-ramp-20261029/`:
 `fpp-ramp-green.log`, `fpp-ramp-asan-tests.log`, `fpp-ramp-clean-build.log`,
 `fpp-ramp-tests.log` e `fpp-ramp-runtime.log`. O cache de `out` permanece Debug;
 nenhuma alteração de arquitetura de renderização ou do ECS foi necessária.
+
+## Colisor alinhado à malha/Transform e visualização F3 (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Ajuste automático aos limites da malha | CONFIRMADO: `DefaultColliderFitsModelBoundsAndInheritsEntityScale` falhou antes da implementação; as seis faces não coincidiam com os limites esperados. | Novos componentes começam com `fit_to_model=true`. Limites locais dos vértices fornecem centro/dimensões; o Transform mundial aplica posição, rotação e escala. `AutoFitColliderFollowsParentTransformAndLocalOffsets` cobre pai e escala não uniforme. Sem modelo, a forma unitária continua disponível. | Caixa ajusta AABB local; esfera/cápsula/cilindro/cone são aproximações primitivas. Esfera usa raio conservador sob escala não uniforme. Não há ajuste contínuo a deformações de animação nem representação exata de cisalhamento. |
+| Configuração como offsets locais | CONFIRMADO: `FitAndRotationOffsetsPersistAndLegacySizesArePreserved`, `RotationOffsetIsLocalAndSingularTransformDoesNotCorruptTheShape` e persistência de projeto. | Posição e rotação locais usam zero como padrão; escala é multiplicador unitário sobre a referência. Inspector ganhou `Fit to Model` e `Rotation Offset`, com histórico. Configuração persiste; cenas sem o novo campo preservam tamanhos antigos e podem ativar ajuste pelo Inspector. Escalas singulares recebem dimensão mínima para manter Bullet válido. | Não foi alterado o Transform visual. Atualizações de hierarquia usam decomposição afim; escalas/rotações que geram cisalhamento são aproximadas. |
+| Contornos do colisor | CONFIRMADO: `ColliderPreviewSupportsEveryShapeAndShowsDisabledAndTriggerColors` sem GPU e `ColliderOverlayDrawsWireframeAndRestoresOpenGLState` com OpenGL real. | Geometria vem do `debugDrawObject` do Bullet e da mesma sincronização usada pela física; aparece mesmo sem simulação. Reutiliza renderizador de linhas dos gizmos, sem mudar arquitetura de renderização. Verde: sólido ativo; azul: trigger; cinza: desativado. Teste gráfico leu pixels verdes e verificou restauração de framebuffer, depth test e blending. | Teste gráfico usa janela oculta; aparência não foi avaliada manualmente nesta tarefa. |
+| F3 e menu View | CONFIRMADO: `F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling`, teste do Inspector e `NativeF3KeyIsDeliveredToTheSharedInputState`. | View → `Show/Hide Colliders    F3` e F3 compartilham estado no editor; tecla mantida/repeat não alterna repetidamente. Runtime também possui F3 e usa o mesmo desenho. BGUI adiciona enum sem renumerar valores existentes e mapeia GLFW_KEY_F3. Commits locais: BGUI `07aa11f`, backend `f7032c0`. | Visualização é temporária, sem modificar projeto/preferências. Runtime compilado e abertura exercitada; F3 manual no runtime e Windows não foram exercitados. Publicação dos commits de submódulos não foi executada. |
+| Esfera entra na rampa / player atravessa lateral | CONFIRMADO por reprodução com os vértices reais de cube.obj/sphere.obj e configuração observada da rampa (`fit_to_model=false`). `SphereContactsTheVisibleRampSurfaceWithoutSinkingIntoTheModel` mediu contato 0,500001 unidade dentro da superfície; `CharacterIsStoppedByTheVisibleRampSide` mediu cápsula já 2,776 unidades dentro da lateral visível. | Com ajuste ligado, os dois testes passam: esfera toca superfície da malha (tolerância 0,02) e cápsula é bloqueada na lateral, com velocidade normal zerada. Foi ligado `fit_to_model` da entidade 3 no arquivo local da cena. A tarefa não alterou sua posição/rotação/escala, conforme escolha do usuário. | A cena contém alterações prévias e edições em andamento do usuário; foi preservada como dado local não incluído no commit de código. Não foi movida a rampa para o chão. Passagem por baixo permanece possível quando há espaço. |
+| Validação completa | PARCIAL no cenário editado: build completo finalizou; **231/232 testes passaram**. Todos os novos testes passaram. | Build começou com limpeza de out e foi retomado sequencialmente após falhas transitórias de descoberta de teste (permissão) e link. Sem modificar código para contornar essas falhas. A única falha final é `FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`; esse mesmo teste passa com uma cópia isolada da cena de HEAD, sem alterar a cena de trabalho. | O teste antigo exige repouso no chão horizontal em Y=0; a cena local agora tem piso inclinado (rotação X=-170,413°, em vez de 180°). Não se corrigiu configuração de piso/spawn nem se afirmou que o spawn esteja abaixo do piso. Demais alterações locais, inclusive de outros trabalhos, preservadas. |
+
+Comandos de build/teste continuam os alvos do CMake e fluxo do workflow:
+
+```sh
+cmake --build out --clean-first --parallel 2
+cmake --build out --parallel 1
+ctest --test-dir out --output-on-failure -C Release
+```
+
+Logs em `/home/d4nl/.cache/bengine-validation/collider-20261029/`:
+`collider-fit-red.log`, `collider-final-foundations.log`, `collider-contact-red.log`,
+`collider-contact-green.log`, `collider-clean-build.log`, `collider-retry-build.log`,
+`collider-full-tests.log`, `collider-reference-test.log`, `collider-render.log`,
+`collider-native-f3.log` e `collider-runtime.log`. Reprodução negativa de contato usa
+fixture idêntica com ajuste automático desligado; testes permanentes usam ajuste ligado.
+Leitura dos vértices OBJ nos testes não usa o carregador de modelos que cria buffers GL.
+O cache de out usa Debug. Detalhes de uso em `docs/PHYSICS.md`. Itens P0/P1/P2 do
+inventário anterior não foram reabertos.

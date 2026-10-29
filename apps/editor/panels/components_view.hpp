@@ -311,8 +311,12 @@ private:
                         [physics, field, value]() { physics.get()->*field = value; });
                 });
             };
+            toggle("Fit to Model", &commons::physics::fit_to_model);
             toggle("Collision Enabled", &commons::physics::collision_enabled);
             toggle("Trigger", &commons::physics::trigger);
+            add_vector_field(content, "Rotation Offset", physics->collision_rotation,
+                [physics]() { return physics->collision_rotation; },
+                [physics](std::size_t axis, float value) { physics->collision_rotation[axis] = value; });
             for (bool offset : {false, true}) {
                 auto get = [physics, offset]() { return offset ? physics->collision_offset : physics->collision_size; };
                 add_vector_field(content, offset ? "Collider Offset" : "Collider Scale", get(), get,

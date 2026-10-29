@@ -259,6 +259,10 @@ editor_ui::editor_ui(
     menu_bar.add_menu(
         "View", 0.3f,
         [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
+            menu.add_button("Show/Hide Colliders    F3", [this]() {
+                if (m_context) m_context->show_colliders = !m_context->show_colliders;
+            });
+            menu.add_separator();
             menu.add_button("Zoom In     Ctrl +", []() { change_ui_scale(1); });
             menu.add_button("Zoom Out    Ctrl -", []() { change_ui_scale(-1); });
             menu.add_button("Actual Size (100%)    Ctrl 0", []() { reset_ui_scale(); });
@@ -1306,6 +1310,10 @@ void editor_ui::confirm_exit() {
 }
 
 void editor_ui::update() {
+    const bool f3 = bgui::get_pressed(bgui::input_key::f3);
+    if (m_context && f3 && !m_f3_was_down)
+        m_context->show_colliders = !m_context->show_colliders;
+    m_f3_was_down = f3;
     for (auto& panel : m_panels)
         if (panel)
             panel->update();

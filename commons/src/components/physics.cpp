@@ -1,4 +1,7 @@
 #include "components/physics.hpp"
+#include "components/transform.hpp"
+#include <algorithm>
+#include <limits>
 
 #include <rapidjson/document.h>
 
@@ -97,6 +100,17 @@ void physics::setModelo(model* model_value) {
             "Mesh physics shapes are not supported."
         );
     m_modelo = model_value;
+    m_has_model_bounds = false;
+    m_bounds_min = bgui::vec3(std::numeric_limits<float>::max());
+    m_bounds_max = bgui::vec3(std::numeric_limits<float>::lowest());
+    for (const auto& mesh : model_value->meshes)
+        for (const auto& vertex : mesh.getVertices()) {
+            m_has_model_bounds = true;
+            for (int axis = 0; axis < 3; ++axis) {
+                m_bounds_min[axis] = std::min(m_bounds_min[axis], vertex.position[axis]);
+                m_bounds_max[axis] = std::max(m_bounds_max[axis], vertex.position[axis]);
+            }
+        }
 }
 
 void physics::setForca(const bgui::vec3& vector) {
@@ -186,18 +200,69 @@ void physics::configure_collision(shapes shape, const bgui::vec3& size,
     refresh_collision({1,1,1});
 }
 
-void physics::refresh_collision(const bgui::vec3& scale) {
-    m_forma->setLocalScaling(btVector3(std::abs(scale.x)*collision_size.x,
-        std::abs(scale.y)*collision_size.y, std::abs(scale.z)*collision_size.z));
+void physics::refresh_collision(const bgui::vec3& entity_scale) {
+    auto scale = entity_scale;
+    for (int i = 0; i < 3; ++i)
+        if (std::abs(scale[i]) < 0.000001f) scale[i] = 0.000001f;
+    const auto previous_scale = m_forma->getLocalScaling();
+    const auto previous_local = collision_shape->getChildTransform(0);
+    bgui::vec3 base(1.f), center(0.f);
+    if (fit_to_model && m_has_model_bounds) {
+        for (int axis = 0; axis < 3; ++axis) {
+            base[axis] = std::max(0.001f, m_bounds_max[axis] - m_bounds_min[axis]);
+            center[axis] = (m_bounds_max[axis] + m_bounds_min[axis]) * 0.5f;
+        }
+        if (e_forma == shapes::forma_esfera)
+            base = bgui::vec3(std::max({base.x, base.y, base.z}));
+        if (e_forma == shapes::forma_capsula) {
+            base.x = base.z = std::max(base.x, base.z);
+            base.y = std::max(0.001f, (base.y - base.x) / 1.8f);
+        }
+    }
+    btVector3 shape_scale(std::abs(scale.x)*base.x*collision_size.x,
+        std::abs(scale.y)*base.y*collision_size.y, std::abs(scale.z)*base.z*collision_size.z);
+    if (fit_to_model && m_has_model_bounds && e_forma == shapes::forma_esfera) {
+        const auto radius_scale = std::max({shape_scale.x(),shape_scale.y(),shape_scale.z()});
+        shape_scale = btVector3(radius_scale,radius_scale,radius_scale);
+    }
+    m_forma->setLocalScaling(shape_scale);
     btTransform local; local.setIdentity();
-    local.setOrigin(btVector3(collision_offset.x*scale.x, collision_offset.y*scale.y,
-        collision_offset.z*scale.z));
+    local.setOrigin(btVector3((center.x+collision_offset.x)*scale.x,
+        (center.y+collision_offset.y)*scale.y, (center.z+collision_offset.z)*scale.z));
+    constexpr float radians = 0.01745329251994329577f;
+    local.setRotation(btQuaternion(btVector3(1,0,0), collision_rotation.x*radians) *
+        btQuaternion(btVector3(0,1,0), collision_rotation.y*radians) *
+        btQuaternion(btVector3(0,0,1), collision_rotation.z*radians));
+    if (previous_scale != m_forma->getLocalScaling() || !(previous_local == local)) {
+        ++collision_revision;
+        m_rigid_body->activate(true);
+    }
     collision_shape->updateChildTransform(0, local);
     auto flags = m_rigid_body->getCollisionFlags();
     flags = (trigger || !collision_enabled) ? flags | btCollisionObject::CF_NO_CONTACT_RESPONSE
         : flags & ~btCollisionObject::CF_NO_CONTACT_RESPONSE;
     m_rigid_body->setCollisionFlags(flags);
     setMass(m_massa);
+}
+
+btTransform physics::synchronize_transform(const transform& value, model* geometry) {
+    if (geometry && geometry != m_modelo) setModelo(geometry);
+    const auto matrix = value.get_world_model_matrix();
+    glm::vec3 scale(1.f), position(matrix[3]), skew(0.f);
+    glm::vec4 perspective(0.f);
+    glm::quat rotation(1.f,0.f,0.f,0.f);
+    if (!glm::decompose(matrix, scale, rotation, position, skew, perspective)) {
+        position = glm::vec3(matrix[3]);
+        rotation = glm::quat(1.f,0.f,0.f,0.f);
+        scale = {glm::length(glm::vec3(matrix[0])), glm::length(glm::vec3(matrix[1])),
+            glm::length(glm::vec3(matrix[2]))};
+    }
+    refresh_collision({scale.x, scale.y, scale.z});
+    btTransform result;
+    result.setIdentity();
+    result.setOrigin(btVector3(position.x,position.y,position.z));
+    result.setRotation(btQuaternion(rotation.x,rotation.y,rotation.z,rotation.w));
+    return result;
 }
 
 bgui::vec3 physics::getVelocidade() const {
@@ -224,8 +289,8 @@ bool physics::analyze(const rapidjson::Value& value) {
             return false;
         setRestituicao(value["restitution"].GetFloat());
     }
-    auto size = collision_size, offset = collision_offset;
-    for (auto entry : {std::pair{"collision_size", &size}, std::pair{"collision_offset", &offset}}) {
+    auto size = collision_size, offset = collision_offset, rotation = collision_rotation;
+    for (auto entry : {std::pair{"collision_size", &size}, std::pair{"collision_offset", &offset}, std::pair{"collision_rotation", &rotation}}) {
         if (!value.HasMember(entry.first)) continue;
         const auto& v = value[entry.first];
         if (!v.IsArray() || v.Size() != 3) return false;
@@ -234,8 +299,10 @@ bool physics::analyze(const rapidjson::Value& value) {
             (*entry.second)[i] = v[i].GetFloat();
         }
     }
-    for (const auto* key : {"collision_enabled", "trigger"})
+    for (const auto* key : {"collision_enabled", "trigger", "fit_to_model"})
         if (value.HasMember(key) && !value[key].IsBool()) return false;
+    fit_to_model = value.HasMember("fit_to_model") && value["fit_to_model"].GetBool();
+    collision_rotation = rotation;
     try { configure_collision(e_forma, size, offset,
         !value.HasMember("collision_enabled") || value["collision_enabled"].GetBool(),
         value.HasMember("trigger") && value["trigger"].GetBool()); }
@@ -266,11 +333,12 @@ bool physics::serialize(
     value.AddMember("static", m_massa <= 0.f, allocator);
     value.AddMember("body_type", rapidjson::Value(type == body_type::character ? "character" :
         type == body_type::static_body ? "static" : "rigid", allocator), allocator);
-    for (auto entry : {std::pair{"collision_size", collision_size}, std::pair{"collision_offset", collision_offset}}) {
+    for (auto entry : {std::pair{"collision_size", collision_size}, std::pair{"collision_offset", collision_offset}, std::pair{"collision_rotation", collision_rotation}}) {
         rapidjson::Value vector(rapidjson::kArrayType);
         for (int i = 0; i < 3; ++i) vector.PushBack(entry.second[i], allocator);
         value.AddMember(rapidjson::Value(entry.first, allocator), vector, allocator);
     }
+    value.AddMember("fit_to_model", fit_to_model, allocator);
     value.AddMember("collision_enabled", collision_enabled, allocator);
     value.AddMember("trigger", trigger, allocator);
     value.AddMember("mass", m_massa, allocator);

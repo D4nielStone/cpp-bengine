@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utils/vec.hpp>
+#include "guizmo/collision_debug.hpp"
 
 #include "commons_namespace.hpp"
 
@@ -22,6 +23,8 @@ namespace editor {
         float extent{50.f};
 
         void draw(const COMMONS_NS::camera& camera, const bgui::vec4i& viewport);
+        void draw_colliders(const COMMONS_NS::camera& camera, const bgui::vec4i& viewport,
+            const std::shared_ptr<commons::ecs>& registry);
         void draw_camera_frustum(
             const COMMONS_NS::camera& viewport_camera,
             const COMMONS_NS::camera& frustum_camera,

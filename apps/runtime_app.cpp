@@ -4,6 +4,7 @@
 #include "systems/code_system.hpp"
 #include "debugging/script_log.hpp"
 #include "systems/physics_system.hpp"
+#include "guizmo/grid_gizmo.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
 #include "editor/systems/project_persistence_system.hpp"
@@ -127,6 +128,24 @@ private:
 
 }
 
+namespace {
+struct runtime_collision_overlay final : commons::system {
+    editor::grid_gizmo gizmo;
+    bool visible{false}, was_down{false};
+    void setup(const std::shared_ptr<commons::ecs>&) override {}
+    void update(const std::shared_ptr<commons::ecs>& registry) override {
+        const bool down = bgui::get_pressed(bgui::input_key::f3);
+        if (down && !was_down) visible = !visible;
+        was_down = down;
+        if (!visible) return;
+        registry->cada<commons::camera>([&](uint32_t id) {
+            auto camera = registry->get<commons::camera>(id);
+            gizmo.draw_colliders(*camera, {0,0,camera->viewportFBO.x,camera->viewportFBO.y}, registry);
+        });
+    }
+};
+}
+
 int main(const int argc, char** argv) {
     std::string project_path;
     if ((argc == 3 || argc == 5) && std::string(argv[1]) == "--project" &&
@@ -217,6 +236,7 @@ int main(const int argc, char** argv) {
     physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
     window.add(physics_system);
     window.add(render_system);
+    window.add<runtime_collision_overlay>();
     if (!game_camera->flag_fb) {
         std::cerr << "[runtime] Could not create the game camera framebuffer.\n";
         return 1;
