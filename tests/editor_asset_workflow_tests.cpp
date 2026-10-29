@@ -272,6 +272,7 @@ TEST_F(EditorAssetWorkflowTest, DroppedImageChangesOnlyTargetMaterialsAndSupport
 TEST_F(EditorAssetWorkflowTest, DropHintIsTranslucentDoesNotCaptureInputAndClearsAfterLeaving) {
     auto context = std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
     bool native_hover = false;
+    bgui::get_context().m_mouse_position = {10, 10};
     auto& overlay = bgui::get_layout().add<editor::ui::asset_drop_overlay, bgui::layer::overlay>(
         [&]() { return native_hover; }, context);
     overlay.on_update();
@@ -294,6 +295,7 @@ TEST_F(EditorAssetWorkflowTest, DropHintIsTranslucentDoesNotCaptureInputAndClear
     native_hover = false;
     overlay.on_update();
     EXPECT_FALSE(*overlay.style.visual.visible);
+    bgui::get_context().m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
     editor::ui::asset_drag_active = true;
     overlay.on_update();
     EXPECT_TRUE(*overlay.style.visual.visible);

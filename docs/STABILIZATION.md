@@ -645,3 +645,35 @@ O novo teste gráfico inicialmente expôs cache estático de shaders preservado 
 contextos OpenGL independentes (`GL_INVALID_VALUE` no segundo contexto). Esse ciclo de vida
 não foi alterado nesta fase: o caso existente agora testa PNG e JPEG no mesmo contexto,
 limpando o framebuffer entre as imagens. Revisão de múltiplos contextos permanece pendente.
+
+## Aviso de arrasto — impedir ativação sem arquivo (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Falso positivo nativo X11 | CONFIRMADO na regra isolada: `XdndSelection` retida + botão pressionado + coordenadas internas bastavam, sem oferta de arquivo. A reprodução extraída da regra anterior falhou em `hover-red.log`. | Sessão explícita iniciada por `XdndEnter` com oferta `text/uri-list`; `XdndLeave`, `XdndDrop`, liberação do botão e mudança do dono da seleção encerram a sessão. Dois testes sem GPU cobrem seleção antiga, arrasto comum/texto, saída, retorno, soltura e troca de origem. | Testa a política separada do servidor X. Arrasto real por gerenciador externo não foi exercitado manualmente; oferta URI é a identificação de arquivo do protocolo usado pelo GLFW. O payload continua validado na importação. |
+| Estado interno e cursor fora da janela | CONFIRMADO: `InternalHintRequiresHeldButtonAndCursorInsideWindow` falhou antes da correção (`hover-internal-red.log`). | O aviso exige cursor dentro da área da janela e limpa o estado interno quando o botão esquerdo não está mais pressionado. O teste também verifica que um clique posterior não revive o aviso. | A saída durante um arrasto ainda pressionado só oculta o aviso; voltar com o mesmo arrasto permite mostrá-lo novamente. |
+| Integração com eventos GLFW | CONFIRMADO por build e teste nativo `NativeEventObserverIsChainedAndRestoredWhenTheLoopEndsOrThrows`. | Hook opcional no backend GLFW observa a fila antes de o GLFW consumi-la. O observador X11 mantém todos os eventos na fila, incluindo o drop original. O loop do BEngine preserva/restaura o observador anterior tanto ao finalizar como em exceção. | API existente preservada; novo hook aditivo. Windows e Wayland não foram executados nesta fase. A detecção OLE no Windows foi mantida. |
+
+Validação sem display: **7/7 testes de sessão/overlay passaram** em
+`editor_overlay_input_tests`. Teste nativo de encadeamento/restauração também passou
+com janela real oculta. **Validação final concluída em diretório novo: editor/runtime e todos os alvos compilaram; 217/217 entradas CTest passaram, sem exclusões e sem skips, incluindo OpenGL.**
+
+Logs persistentes em `/home/d4nl/.cache/bengine-validation/`: `hover-red.log`,
+`hover-internal-red.log`, `hover-focused-tests.log`, `hover-native-tests.log`,
+`hover-build.log`, `hover-final-build.log` e `hover-tests-final.log`. O ambiente interrompeu uma compilação;
+o build foi retomado em diretório persistente. O código-fonte local do GoogleTest,
+já obtido na fase JPEG, foi reutilizado para evitar nova obtenção pela rede.
+
+O alvo ausente `material_uv_tests` da fase JPEG já não consta da configuração atual.
+A execução final usou a construção geral e o CTest **sem filtros**. O teste antigo de
+transparência passou a simular o botão pressionado durante um arrasto real, mantendo
+a nova regressão separada para o estado sem botão. Configuração/build/CTest:
+
+```sh
+cmake -S . -B /home/d4nl/.cache/bengine-validation/hover-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/.cache/bengine-validation/jpeg-20261029/_deps/googletest-src
+cmake --build /home/d4nl/.cache/bengine-validation/hover-20261029 --config Release --parallel 1
+ctest --test-dir /home/d4nl/.cache/bengine-validation/hover-20261029 --output-on-failure -C Release
+```
+
+Como no helper da CI, `CMAKE_BUILD_TYPE` não foi definido; não se afirma otimização
+Release no gerador único. Alterações de outros trabalhos foram preservadas.

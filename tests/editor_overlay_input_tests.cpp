@@ -120,3 +120,57 @@ TEST_F(EditorOverlayInputTest, DropHintDoesNotBypassModalInputBlocking) {
     click(button);
     EXPECT_EQ(clicks, 1);
 }
+
+#include "../commons/src/os/file_drag_session.hpp"
+
+TEST(FileDragSessionTest, RetainedSelectionAndOrdinaryClicksAreNotAFileOffer) {
+    commons::detail::file_drag_session drag;
+    EXPECT_FALSE(drag.hovered(42, true, true));
+    drag.enter(42, false); // Plain text / editor widgets do not offer files.
+    EXPECT_FALSE(drag.hovered(42, true, true));
+    drag.enter(42, true);
+    EXPECT_TRUE(drag.hovered(42, true, true));
+    EXPECT_FALSE(drag.hovered(42, false, true));
+    EXPECT_TRUE(drag.hovered(42, true, true));
+    drag.leave(42);
+    EXPECT_FALSE(drag.hovered(42, true, true));
+}
+
+TEST(FileDragSessionTest, ReleaseOwnerChangeAndLeaveEndTheFileSession) {
+    commons::detail::file_drag_session drag;
+    drag.enter(42, true);
+    EXPECT_FALSE(drag.hovered(42, true, false));
+    EXPECT_FALSE(drag.hovered(42, true, true)); // A later click cannot revive it.
+    drag.enter(42, true);
+    EXPECT_FALSE(drag.hovered(43, true, true));
+    EXPECT_FALSE(drag.hovered(42, true, true));
+    drag.enter(42, true);
+    drag.leave(43); // Unrelated native messages cannot cancel this session.
+    EXPECT_TRUE(drag.hovered(42, true, true));
+    drag.leave(42); // Also used for drop/cancel.
+    EXPECT_FALSE(drag.hovered(42, true, true));
+}
+
+TEST_F(EditorOverlayInputTest, InternalHintRequiresHeldButtonAndCursorInsideWindow) {
+    auto& overlay = bgui::get_layout().add<editor::ui::asset_drop_overlay, bgui::layer::overlay>(
+        [] { return false; }, context);
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {100, 100};
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    editor::ui::asset_drag_active = true;
+    frame();
+    EXPECT_TRUE(*overlay.style.visual.visible);
+    io.m_mouse_position = {-1, 100};
+    frame();
+    EXPECT_FALSE(*overlay.style.visual.visible);
+    io.m_mouse_position = {100, 100};
+    frame();
+    EXPECT_TRUE(*overlay.style.visual.visible);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    frame();
+    EXPECT_FALSE(*overlay.style.visual.visible);
+    EXPECT_FALSE(editor::ui::asset_drag_active);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    frame();
+    EXPECT_FALSE(*overlay.style.visual.visible);
+}

@@ -138,3 +138,38 @@ TEST(WindowFileDropTest, EngineTextureUploadsDecodedJpegPixels) {
     EXPECT_EQ(pixels[3], 255);
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
 }
+
+#include <glfw/bgui_backend_glfw_events.hpp>
+
+TEST(WindowFileDropTest, NativeEventObserverIsChainedAndRestoredWhenTheLoopEndsOrThrows) {
+    if (!glfwInit()) GTEST_SKIP() << "No display for event observer verification";
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    commons::window window("Event observer test", 100, 100);
+    auto* native = glfwGetCurrentContext();
+    int observations = 0;
+    struct restore_callbacks {
+        bgui::glfw_event_observer observer;
+        std::function<void()> refresh;
+        ~restore_callbacks() {
+            bgui::set_glfw_event_observer(std::move(observer));
+            bgui::get_context().m_refresh_func = std::move(refresh);
+        }
+    } restore{bgui::set_glfw_event_observer([&] { ++observations; }), bgui::get_context().m_refresh_func};
+    auto& refresh = bgui::get_context().m_refresh_func;
+    refresh = [native] { glfwSetWindowShouldClose(native, GLFW_TRUE); };
+    window.loop();
+    EXPECT_EQ(observations, 1);
+    // Taking out the restored observer must return the caller's original function.
+    auto restored = bgui::set_glfw_event_observer({});
+    EXPECT_TRUE(bool(restored));
+    if (restored) restored();
+    EXPECT_EQ(observations, 2);
+    bgui::set_glfw_event_observer(std::move(restored));
+    glfwSetWindowShouldClose(native, GLFW_FALSE);
+    refresh = [] { throw std::runtime_error("refresh test"); };
+    EXPECT_THROW(window.loop(), std::runtime_error);
+    restored = bgui::set_glfw_event_observer({});
+    EXPECT_TRUE(bool(restored));
+    if (restored) restored();
+    EXPECT_EQ(observations, 4);
+}

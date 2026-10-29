@@ -38,7 +38,11 @@ public:
         set_final_rect(0, 0, size.x, size.y);
         m_title->set_final_rect(0, size.y / 2 - int(32 * scale), size.x, int(40 * scale));
         m_hint->set_final_rect(0, size.y / 2 + int(14 * scale), size.x, int(28 * scale));
-        const bool visible = !m_context->is_playing && !viewport_input_blocked_by_modal() &&
+        if (asset_drag_active && !bgui::get_pressed(bgui::input_key::mouse_left))
+            asset_drag_active = false;
+        const auto mouse = bgui::get_mouse_position();
+        const bool inside = mouse.x >= 0 && mouse.y >= 0 && mouse.x < size.x && mouse.y < size.y;
+        const bool visible = inside && !m_context->is_playing && !viewport_input_blocked_by_modal() &&
             (asset_drag_active || (m_native_hover && m_native_hover()));
         if (visible)
             m_hint->set_buffer(asset_drag_active ? "Solte na cena ou sobre um objeto" :

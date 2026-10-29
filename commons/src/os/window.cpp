@@ -8,6 +8,7 @@
 #include <glad.h>
 #include <bgui.hpp>
 #include <bgui_backend_glfw.hpp>
+#include <glfw/bgui_backend_glfw_events.hpp>
 #include <os/style_manager.hpp>
 
 namespace {
@@ -140,6 +141,7 @@ void window::refresh() {
         return;
     }
 
+    if (m_file_drop_bridge) m_file_drop_bridge->poll_events();
     auto drops = std::move(m_pending_drops);
     m_pending_drops.clear();
     for (const auto& drop : drops)
@@ -216,15 +218,22 @@ void window::loop() {
         bgui::swap_glfw();
     };
     m_looping = true;
+    bgui::glfw_event_observer previous_event_observer;
+    previous_event_observer = bgui::set_glfw_event_observer([this, &previous_event_observer]() {
+        if (previous_event_observer) previous_event_observer();
+        if (m_file_drop_bridge) m_file_drop_bridge->poll_events();
+    });
 
     try {
         bgui::glfw_main_loop();
     } catch (...) {
+        bgui::set_glfw_event_observer(std::move(previous_event_observer));
         refresh_callback = previous_callback;
         m_looping = false;
         throw;
     }
 
+    bgui::set_glfw_event_observer(std::move(previous_event_observer));
     refresh_callback = previous_callback;
     m_looping = false;
 }

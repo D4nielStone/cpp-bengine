@@ -1,4 +1,6 @@
 #include "file_drop_bridge.hpp"
+#include "file_drag_session.hpp"
+#include <array>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -12,6 +14,7 @@
 #include <shellapi.h>
 #include <bgui.hpp>
 #elif defined(BENGINE_X11_FILE_DRAG)
+#include <X11/Xatom.h>
 #define GLFW_EXPOSE_NATIVE_X11
 #include <GLFW/glfw3native.h>
 #endif
@@ -122,26 +125,95 @@ private:
 namespace {
 class x11_file_drag final : public file_drop_bridge {
 public:
-    explicit x11_file_drag(GLFWwindow* window) : window(window) {}
-    bool hovered() const override {
+    explicit x11_file_drag(GLFWwindow* window) : window(window) {
 #if GLFW_VERSION_MAJOR > 3 || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 4)
-        if (glfwGetPlatform() != GLFW_PLATFORM_X11) return false;
+        if (glfwGetPlatform() != GLFW_PLATFORM_X11) return;
 #endif
-        auto* display = glfwGetX11Display();
+        display = glfwGetX11Display();
+        if (!display) return;
+        native = glfwGetX11Window(window);
+        enter = XInternAtom(display, "XdndEnter", False);
+        leave = XInternAtom(display, "XdndLeave", False);
+        drop = XInternAtom(display, "XdndDrop", False);
+        selection = XInternAtom(display, "XdndSelection", False);
+        type_list = XInternAtom(display, "XdndTypeList", False);
+        uri_list = XInternAtom(display, "text/uri-list", False);
+    }
+    void poll_events() override {
+        if (!display) return;
+        struct pending_messages {
+            x11_file_drag* bridge;
+            std::array<XEvent, 64> events{};
+            std::size_t count{0};
+            bool overflow{false};
+        } pending{this};
+        XEvent ignored{};
+        // Observe without stealing GLFW events. The predicate only copies data:
+        // property queries must happen after Xlib releases the queue's lock.
+        XCheckIfEvent(display, &ignored, [](Display*, XEvent* event, XPointer self) -> Bool {
+            auto& pending = *reinterpret_cast<pending_messages*>(self);
+            const auto* bridge = pending.bridge;
+            if (event->type == ClientMessage && event->xclient.window == bridge->native &&
+                (event->xclient.message_type == bridge->enter || event->xclient.message_type == bridge->leave ||
+                    event->xclient.message_type == bridge->drop)) {
+                if (pending.count < pending.events.size()) pending.events[pending.count++] = *event;
+                else pending.overflow = true;
+            }
+            return False;
+        }, reinterpret_cast<XPointer>(&pending));
+        if (pending.overflow) session.enter(0, false);
+        else for (std::size_t i = 0; i < pending.count; ++i) observe(pending.events[i]);
+        (void)hovered(); // Clear ended sessions even while a modal hides the hint.
+    }
+    bool hovered() const override {
         if (!display) return false;
-        const auto selection = XInternAtom(display, "XdndSelection", True);
-        if (!selection || XGetSelectionOwner(display, selection) == None) return false;
         ::Window root{}, child{};
         int root_x{}, root_y{}, x{}, y{}, width{}, height{};
         unsigned mask{};
-        if (!XQueryPointer(display, glfwGetX11Window(window), &root, &child,
-            &root_x, &root_y, &x, &y, &mask)) return false;
+        if (!XQueryPointer(display, native, &root, &child,
+            &root_x, &root_y, &x, &y, &mask)) {
+            session.enter(0, false);
+            return false;
+        }
         glfwGetWindowSize(window, &width, &height);
-        return x >= 0 && y >= 0 && x < width && y < height &&
-            (mask & (Button1Mask | Button2Mask | Button3Mask));
+        const bool inside = glfwGetWindowAttrib(window, GLFW_VISIBLE) &&
+            !glfwGetWindowAttrib(window, GLFW_ICONIFIED) &&
+            x >= 0 && y >= 0 && x < width && y < height;
+        return session.hovered(XGetSelectionOwner(display, selection), inside,
+            (mask & (Button1Mask | Button2Mask | Button3Mask)) != 0);
     }
 private:
+    void observe(const XEvent& event) {
+        if (event.type != ClientMessage || event.xclient.window != native || event.xclient.format != 32) return;
+        const auto source = static_cast<::Window>(event.xclient.data.l[0]);
+        if (event.xclient.message_type == leave || event.xclient.message_type == drop) {
+            session.leave(source);
+        } else if (event.xclient.message_type == enter) {
+            bool files = false;
+            if (event.xclient.data.l[1] & 1) {
+                Atom actual_type{};
+                int format{};
+                unsigned long count{}, remaining{};
+                unsigned char* data = nullptr;
+                if (XGetWindowProperty(display, source, type_list, 0, 256, False,
+                    XA_ATOM, &actual_type, &format, &count, &remaining, &data) == Success &&
+                    actual_type == XA_ATOM && format == 32 && data) {
+                    const auto* types = reinterpret_cast<Atom*>(data);
+                    for (unsigned long i = 0; i < count; ++i) files |= types[i] == uri_list;
+                }
+                if (data) XFree(data);
+            } else {
+                for (int i = 2; i < 5; ++i)
+                    files |= static_cast<Atom>(event.xclient.data.l[i]) == uri_list;
+            }
+            session.enter(source, files);
+        }
+    }
     GLFWwindow* window;
+    Display* display{nullptr};
+    ::Window native{};
+    Atom enter{}, leave{}, drop{}, selection{}, type_list{}, uri_list{};
+    mutable file_drag_session session;
 };
 }
 #endif
