@@ -1,6 +1,7 @@
 #include "scene_view.hpp"
 
 #include "camera_movement.hpp"
+#include "scene_navigation.hpp"
 #include "entity_picking_system.hpp"
 #include "guizmo_system.hpp"
 #include "viewport_sync.hpp"
@@ -22,6 +23,7 @@ namespace editor::ui {
 
 struct scene_view_state {
     bgui::image* image{nullptr};
+    bool orbital{false};
 };
 
 namespace {
@@ -35,7 +37,7 @@ public:
 class navigation_hint final : public bgui::text {
 public:
     explicit navigation_hint(std::shared_ptr<scene_view_state> state)
-        : bgui::text("Left Ctrl + drag: look    Shift + Left Ctrl + drag: pan\n"
+        : bgui::text("Drag: look / orbit    Shift + Left Ctrl + drag: pan\n"
                      "Scroll: dolly    Left Ctrl + WASD / QE: move", 0.25f),
           m_state(std::move(state)) {
         receives_input(false);
@@ -48,6 +50,25 @@ public:
         const auto rect = m_state->image->processed_rect();
         set_final_rect(rect.x + 8, rect.y + std::max(0, rect.w - 32),
             std::max(0, rect.z - 16), 28);
+    }
+private:
+    std::shared_ptr<scene_view_state> m_state;
+};
+
+class tools_container final : public bgui::linear {
+public:
+    explicit tools_container(std::shared_ptr<scene_view_state> state)
+        : bgui::linear(bgui::orientation::horizontal), m_state(std::move(state)) {
+        add_class("scene-tools-container");
+        set_flex(false);
+        style.layout.padding = bgui::vec4i{4};
+    }
+    void on_update() override {
+        if (!m_state->image) return;
+        const auto rect = m_state->image->processed_rect();
+        const float scale = bgui::get_global_scale();
+        set_final_rect(rect.x + int(8 * scale), rect.y + int(8 * scale),
+            std::min(std::max(0, rect.z - int(16 * scale)), int(160 * scale)), int(34 * scale));
     }
 private:
     std::shared_ptr<scene_view_state> m_state;
@@ -150,12 +171,12 @@ public:
           m_viewport_sync(camera, *state->image),
           m_camera_movement(camera, *state->image, input_state),
           m_entity_picking(
-              std::move(camera),
+              camera,
               *state->image,
               context,
               std::move(input_state)
           ),
-          m_context(std::move(context)) {
+          m_context(std::move(context)), m_state(state), m_camera(camera) {
         set_flex(false);
         // This overlay spans the scene window. It acts as the scene viewport's
         // input hit target so hit testing can consume input without hiding the
@@ -174,6 +195,19 @@ public:
         m_camera_movement.set_mouse_sensitivity(preferences.mouse_sensitivity);
         m_camera_movement.set_zoom_sensitivity(preferences.zoom_sensitivity);
         m_camera_movement.set_smoothing_speed(preferences.smoothing_speed);
+        auto selected = m_context->selected_entity
+            ? m_context->registry->get<commons::transform>(*m_context->selected_entity) : nullptr;
+        if (m_state->orbital && selected) {
+            if (!m_camera_movement.is_orbital() || selected != m_selected_orbit) {
+                auto renderer = m_context->registry->get<commons::renderer>(selected->my_object);
+                m_camera_movement.focus_orbit_target(selected,
+                    selected_orbit_distance(*selected, renderer.get(), m_camera->fov));
+            }
+            m_selected_orbit = selected;
+        } else {
+            m_camera_movement.set_orbital(false);
+            m_selected_orbit.reset();
+        }
         m_camera_movement.update(m_registry);
         m_entity_picking.update(m_registry);
     }
@@ -184,6 +218,9 @@ private:
     camera_movement_system m_camera_movement;
     entity_picking_system m_entity_picking;
     std::shared_ptr<editor_context> m_context;
+    std::shared_ptr<scene_view_state> m_state;
+    std::shared_ptr<commons::camera> m_camera;
+    std::shared_ptr<commons::transform> m_selected_orbit;
 };
 
 }
@@ -284,6 +321,14 @@ void scene_view::build(bgui::dock& dock) {
         m_camera_preview,
         m_context
     );
+    auto& tools = scene_window.add<tools_container, bgui::layer::overlay>(m_state);
+    auto& mode = tools.add<bgui::button>("View: Normal", 0.28f, [] {});
+    mode.style.layout.require_size(150.f, 26.f);
+    mode.add<bgui::icon>("eye", 0.28f).receives_input(false);
+    mode.set_function([state = m_state, button = &mode] {
+        state->orbital = !state->orbital;
+        button->get_label().set_buffer(state->orbital ? "View: Orbital" : "View: Normal");
+    });
     scene_window.add<navigation_hint, bgui::layer::overlay>(m_state);
 }
 

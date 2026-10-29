@@ -99,7 +99,7 @@ private:
         m_last_applied_position = camera_position;
         m_last_applied_rotation = camera_rotation;
         if (m_orbit_target) {
-            m_orbit_center = m_orbit_target->get_position();
+            m_orbit_center = m_orbit_target->get_world_position();
         } else if (!m_manual_orbit) {
             const auto forward = get_forward();
 
@@ -175,6 +175,32 @@ public:
         m_orbit_initialized = false;
     }
 
+    bool is_orbital() const { return m_manual_orbit || bool(m_orbit_target); }
+
+    // Seed the pivot along the current sight line, preserving the eye on switch.
+    void set_orbital(bool enabled) {
+        if (enabled == is_orbital()) return;
+        m_orbit_target.reset();
+        m_manual_orbit = false;
+        m_orbit_initialized = false;
+        if (enabled && m_camera && m_camera->reg) {
+            auto transform = m_camera->reg->get<commons::transform>(m_camera->my_object);
+            if (transform) {
+                initialize_orbit(transform);
+                m_manual_orbit = true;
+            }
+        }
+    }
+
+    void focus_orbit_target(std::shared_ptr<commons::transform> target, float distance) {
+        if (!target || !m_camera || !m_camera->reg) return;
+        auto eye = m_camera->reg->get<commons::transform>(m_camera->my_object);
+        if (!eye) return;
+        set_orbit_target(std::move(target));
+        initialize_orbit(eye);
+        set_orbit_distance(distance);
+    }
+
     void set_orbit_target(
         std::shared_ptr<commons::transform> target
     ) {
@@ -211,7 +237,7 @@ public:
         const bgui::vec2i mouse = bgui::get_mouse_position();
         const bool trackpad_modifier = viewport_camera_modifier();
         const bool camera_button_down = bgui::get_pressed(bgui::input_key::mouse_right) ||
-            (trackpad_modifier && bgui::get_pressed(bgui::input_key::mouse_left));
+            bgui::get_pressed(bgui::input_key::mouse_left);
         const bool camera_button_just_pressed = camera_button_down && !m_camera_button_was_down;
         m_camera_button_was_down = camera_button_down;
 
@@ -280,7 +306,7 @@ public:
             initialize_orbit(camera_transform);
 
         if (m_orbit_target)
-            m_orbit_center = m_orbit_target->get_position();
+            m_orbit_center = m_orbit_target->get_world_position();
 
         if (!gizmo_active) {
             const bool dragging = camera_button_down && m_camera_drag_active;
@@ -328,7 +354,7 @@ public:
                 pan += (right * -static_cast<float>(mouse_delta.x) +
                     up * static_cast<float>(mouse_delta.y)) * (m_orbit_distance * 0.002f);
             m_desired_position += pan;
-            m_orbit_center += pan;
+            if (!m_orbit_target) m_orbit_center += pan;
 
             bgui::vec3 movement{0.0f, 0.0f, 0.0f};
 
@@ -363,8 +389,14 @@ public:
                 const auto displacement =
                     movement * speed * delta_time;
 
-                m_orbit_center += displacement;
-                m_desired_position += displacement;
+                if (m_orbit_target) {
+                    const float dolly = displacement.x * forward.x +
+                        displacement.y * forward.y + displacement.z * forward.z;
+                    set_orbit_distance(m_orbit_distance - dolly);
+                } else {
+                    m_orbit_center += displacement;
+                    m_desired_position += displacement;
+                }
 
             }
         }

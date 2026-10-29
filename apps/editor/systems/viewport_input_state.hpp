@@ -37,6 +37,7 @@ inline bool viewport_owns_mouse(const bgui::element* viewport) {
     auto* owner = viewport_owner_window(viewport);
     for (auto* current = bgui::get_mouse_target(); current;
          current = current->get_parent()) {
+        if (current->has_class("scene-tools-container")) return false;
         if (current == owner)
             return owner != nullptr;
     }

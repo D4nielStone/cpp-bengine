@@ -3,6 +3,8 @@
 #define GLFW_INCLUDE_NONE
 #include <bgui.hpp>
 #include "camera_movement.hpp"
+#include "scene_navigation.hpp"
+#include "entity_picking_system.hpp"
 #include "guizmo/transform_gizmo.hpp"
 #include "guizmo_system.hpp"
 #include "components_view.hpp"
@@ -441,4 +443,143 @@ TEST_F(EditorInteractionTest, EdgeOnRotationRemainsFiniteAndReversesWithDrag) {
     for (int c = 0; c < 4; ++c)
         for (int r = 0; r < 4; ++r)
             EXPECT_NEAR(actual[c][r], c == r ? 1.f : 0.f, 0.001f);
+}
+
+
+TEST_F(EditorInteractionTest, ParentedCameraKeepsPitchAndYawAcrossFullTurns) {
+    auto parent = registry->create();
+    auto child = registry->create();
+    registry->add<commons::camera>(child);
+    auto body = registry->get<commons::transform>(parent.id);
+    auto eye = registry->get<commons::transform>(child.id);
+    ASSERT_TRUE(eye->set_parent(parent.id, false));
+    eye->set_rotation({20.f, 0.f, 0.f});
+    body->set_scale({2.f, 0.5f, 3.f});
+    auto camera = registry->get<commons::camera>(child.id);
+    for (float yaw : {-721.f, -181.f, -91.f, -89.f, 89.f, 91.f, 181.f, 361.f, 721.f}) {
+        body->set_rotation({0.f, yaw, 0.f});
+        camera->getViewMatrix();
+        EXPECT_NEAR(camera->forward.x, std::cos(glm::radians(yaw)) * std::cos(glm::radians(20.f)), 0.0001f);
+        EXPECT_NEAR(camera->forward.y, std::sin(glm::radians(20.f)), 0.0001f);
+        EXPECT_NEAR(camera->forward.z, -std::sin(glm::radians(yaw)) * std::cos(glm::radians(20.f)), 0.0001f);
+    }
+}
+
+TEST_F(EditorInteractionTest, SwitchingOrbitalAndNormalPreservesEyeAndChangesDragPivot) {
+    auto& window = bgui::get_layout().add<bgui::window>("Viewport", true);
+    window.style.layout.require_size(500.f, 400.f);
+    auto& image = window.add<bgui::image>();
+    image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    image.receives_input(true);
+    bgui::on_update();
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {image.processed_x() + 80, image.processed_y() + 80};
+    bgui::on_update();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto eye = registry->get<commons::transform>(entity.id);
+    eye->set_position({2.f, 3.f, 4.f});
+    float time = 0.f;
+    editor::ui::camera_movement_system movement(
+        registry->get<commons::camera>(entity.id), image, {}, [&] { return time; });
+    movement.setup(registry);
+    movement.set_orbital(true);
+    ASSERT_TRUE(movement.is_orbital());
+    EXPECT_EQ(eye->get_position(), (bgui::vec3{2.f, 3.f, 4.f}));
+    io.m_input_map[bgui::input_key::mouse_right] = bgui::input_action::press;
+    movement.update(registry);
+    io.m_mouse_position.x += 100;
+    for (int i = 0; i < 90; ++i) { time += 1.f / 60.f; movement.update(registry); }
+    auto position = eye->get_position();
+    EXPECT_GT((position - bgui::vec3{2.f, 3.f, 4.f}).length(), 1.f);
+    EXPECT_NEAR((position - bgui::vec3{12.f, 3.f, 4.f}).length(), 10.f, 0.001f);
+    movement.set_orbital(false);
+    ASSERT_FALSE(movement.is_orbital());
+    io.m_mouse_position.x += 100;
+    for (int i = 0; i < 90; ++i) { time += 1.f / 60.f; movement.update(registry); }
+    EXPECT_EQ(eye->get_position(), position);
+}
+
+TEST_F(EditorInteractionTest, SelectedOrbitUsesWorldPivotAndObjectRelativeDistance) {
+    auto& window = bgui::get_layout().add<bgui::window>("Viewport", true);
+    window.style.layout.require_size(500.f, 400.f);
+    auto& image = window.add<bgui::image>();
+    image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    image.receives_input(true);
+    bgui::on_update();
+    auto camera_entity = registry->create();
+    registry->add<commons::camera>(camera_entity);
+    auto camera = registry->get<commons::camera>(camera_entity.id);
+    auto eye = registry->get<commons::transform>(camera_entity.id);
+    auto parent = registry->create();
+    auto target_entity = registry->create();
+    auto target = registry->get<commons::transform>(target_entity.id);
+    registry->get<commons::transform>(parent.id)->set_position({20.f, 0.f, 0.f});
+    target->set_parent(parent.id, false);
+    target->set_position({3.f, 4.f, 5.f});
+    const auto small = editor::ui::selected_orbit_distance(*target, nullptr, 45.f);
+    target->set_scale({4.f, 4.f, 4.f});
+    const auto large = editor::ui::selected_orbit_distance(*target, nullptr, 45.f);
+    EXPECT_NEAR(large, small * 4.f, 0.001f);
+    float time = 0.f;
+    editor::ui::camera_movement_system movement(camera, image, {}, [&] { return time; });
+    movement.setup(registry);
+    movement.focus_orbit_target(target, large);
+    for (int i = 0; i < 100; ++i) { time += 1.f / 60.f; movement.update(registry); }
+    EXPECT_NEAR((eye->get_position() - target->get_world_position()).length(), large, 0.001f);
+    EXPECT_NEAR(eye->get_position().x, 23.f - large, 0.001f);
+    target->set_position({5.f, 4.f, 5.f});
+    for (int i = 0; i < 100; ++i) { time += 1.f / 60.f; movement.update(registry); }
+    EXPECT_NEAR(eye->get_position().x, 25.f - large, 0.001f);
+}
+
+TEST_F(EditorInteractionTest, PrimaryDragRotatesWithoutSelectingAndGizmoBlocksCamera) {
+    auto& window = bgui::get_layout().add<bgui::window>("Viewport", true);
+    window.style.layout.require_size(500.f, 400.f);
+    auto& image = window.add<bgui::image>();
+    image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    image.receives_input(true);
+    bgui::on_update();
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {image.processed_x() + 80, image.processed_y() + 80};
+    bgui::on_update();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    auto eye = registry->get<commons::transform>(entity.id);
+    auto state = std::make_shared<editor::ui::viewport_input_state>();
+    float time = 0.f;
+    editor::ui::camera_movement_system movement(camera, image, state, [&] { return time; });
+    editor::ui::entity_picking_system picker(camera, image, context, state);
+    context->selected_entity = entity.id;
+    movement.setup(registry);
+    picker.setup(registry);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    movement.update(registry); picker.update(registry);
+    io.m_mouse_position.x += 40;
+    time += 1.f / 60.f;
+    movement.update(registry); picker.update(registry);
+    EXPECT_GT(eye->get_rotation().y, 0.f);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    picker.update(registry);
+    EXPECT_EQ(context->selected_entity, entity.id);
+    // Let smoothing settle before checking that a new gizmo drag adds no rotation.
+    for (int i = 0; i < 100; ++i) { time += 1.f / 60.f; movement.update(registry); }
+    const auto rotation = eye->get_rotation();
+    state->gizmo_active = true;
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    movement.update(registry);
+    io.m_mouse_position.x += 80;
+    time += 1.f / 60.f;
+    movement.update(registry);
+    EXPECT_NEAR(eye->get_rotation().y, rotation.y, 0.001f);
+    state->gizmo_active = false;
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    picker.update(registry);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    picker.update(registry);
+    EXPECT_EQ(context->selected_entity, entity.id);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    picker.update(registry);
+    EXPECT_FALSE(context->selected_entity); // Short click on empty space still selects/clears.
 }

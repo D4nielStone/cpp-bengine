@@ -116,8 +116,8 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     auto moved = body->f_update();
     ASSERT_TRUE(moved.valid()) << sol::error(moved).what();
     auto player_transform = registry->get<commons::transform>(player.id);
-    EXPECT_NEAR(player_transform->get_position().z, -0.25f, 0.0001f);
-    EXPECT_NEAR(player_transform->get_rotation().y, -88.8f, 0.0001f);
+    EXPECT_NEAR(player_transform->get_position().z, 0.25f, 0.0001f);
+    EXPECT_NEAR(player_transform->get_rotation().y, -91.2f, 0.0001f);
 
     auto look = load(camera, "fpp_camera.lua");
     setup = look->f_setup();

@@ -397,3 +397,22 @@ validados. Escalas não uniformes em ancestrais permanecem limitadas pelo modelo
 TRS existente. O aviso preexistente de retorno ausente em `get_repository_root`
 apareceu no build novo e permanece fora do escopo.
 Não foram alterados os arquivos locais do projeto FPP.
+
+
+## Visualização orbital e rotação FPP — 2026-10-28
+
+| Item | Status / evidência | Alteração e cobertura | Limites / riscos |
+|---|---|---|---|
+| Alternar navegação normal/orbital | CONFIRMADO: havia suporte interno a pivô, mas nenhuma opção na Scene. | Botão `View: Normal` / `View: Orbital`, com ícone válido `eye`, em `tools_container` sobreposto ao viewport. Orbital usa a posição mundial do objeto selecionado como pivô e distância inicial proporcional ao raio mundial da malha (ou escala, sem malha), considerando FOV. Selecionar outro objeto recalcula o enquadramento; mover o objeto atualiza o centro. Scroll ajusta a distância. `SelectedOrbitUsesWorldPivotAndObjectRelativeDistance` cobre hierarquia, escala e acompanhamento. A API de órbita manual permanece coberta por `SwitchingOrbitalAndNormalPreservesEyeAndChangesDragPivot`. | Modo mantido durante a vida do painel; não é preferência persistida. Sem seleção, navegação normal até selecionar um objeto. O enquadramento orbital usa esfera centrada na origem do objeto. |
+| Arraste direto no viewport | CONFIRMADO: rotação exigia botão direito ou Ctrl + botão esquerdo. | Botão esquerdo arrasta a câmera sem Ctrl; gizmo ativo impede a rotação. Picking aguarda soltar e cancela seleção em arraste maior que quatro pixels escalados. Toolbar não captura navegação nem picking. `PrimaryDragRotatesWithoutSelectingAndGizmoBlocksCamera` cobre rotação, seleção preservada e exclusão do gizmo. | Clique curto seleciona ao soltar. Ctrl + arraste e botão direito continuam disponíveis. |
+| Câmera FPP inverte em certos ângulos | CONFIRMADO: `ParentedCameraKeepsPitchAndYawAcrossFullTurns` falhou antes da correção. A câmera filha usava decomposição Euler do Transform mundial. | Direção local transformada pela composição quaternion das rotações ancestrais, sem decomposição Euler e sem influência da escala. Teste cobre yaw positivo/negativo, passagens por 90°, 180°, 360° e várias voltas mantendo pitch. | Convenção local das câmeras existentes preservada (+X em yaw zero). Pai segue rotação geométrica do Transform. Up continua alinhado à referência vertical mundial. |
+| Controles do exemplo FPP | CONFIRMADO: script tentava indexar `.x` no primeiro número retornado por `GetMouseDelta`. Movimento também não coincidia com a base da câmera filha. | Leitura do primeiro retorno numérico; yaw com sinal correspondente à câmera herdada; WASD usa a mesma base horizontal. Teste existente `FppScriptsMoveLookAndCollectUsingTheNewApi` atualizado para a direção herdada e aprovado. | Orientação inicial das cenas existentes pode parecer diferente porque passa a seguir a rotação real do pai. Arquivos da cena e configurações locais foram preservados. |
+
+Validação: build de editor e runtime concluído em diretório novo com
+`bash scripts/build.sh build/orbit-clean --test`. CTest: **134/135 passaram**;
+a única falha é `InspectorComponentsAreIndependentTreesAndAddButtonIsLast`,
+preexistente nas alterações locais de outra tarefa (botão Add Component não
+encontrado). Os testes desta etapa e o teste Lua do FPP passaram. Log completo:
+`/tmp/orbit-clean-final.log`. Revisão visual/manual da navegação e compilação
+Windows não executadas nesta etapa. O aviso preexistente de retorno ausente em
+`get_repository_root` permanece fora do escopo.

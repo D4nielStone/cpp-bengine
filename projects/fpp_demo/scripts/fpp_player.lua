@@ -1,4 +1,4 @@
--- Body movement follows the engine camera's yaw convention (+X at zero yaw).
+-- The camera looks along local +X; parent yaw rotates around world +Y.
 local yaw = -90.0
 local move_speed = 2.5
 local body
@@ -16,13 +16,16 @@ function update()
     local right = Input.GetAxis("Horizontal") * distance
     local angle = math.rad(yaw)
     local position = body.localPosition
+
+    -- Match the inherited camera basis at every body yaw.
     body.localPosition = Vector3(
-        position.x + math.cos(angle) * forward - math.sin(angle) * right,
+        position.x + math.cos(angle) * forward + math.sin(angle) * right,
         position.y,
-        position.z + math.sin(angle) * forward + math.cos(angle) * right
+        position.z - math.sin(angle) * forward + math.cos(angle) * right
     )
 
     local mouse_x = Input.GetMouseDelta()
-    yaw = yaw + mouse_x * 0.12
+    yaw = yaw - mouse_x * 0.12
+
     body.localEulerAngles = Vector3(0.0, yaw, 0.0)
 end

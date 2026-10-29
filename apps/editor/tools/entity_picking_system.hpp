@@ -43,32 +43,26 @@ public:
 
         const bool left_down = bgui::get_pressed(bgui::input_key::mouse_left);
         const bool just_pressed = left_down && !m_left_was_down;
+        const bool released = !left_down && m_left_was_down;
         m_left_was_down = left_down;
-
-        if (viewport_input_blocked_by_modal() || viewport_camera_modifier()) {
+        if (viewport_input_blocked_by_modal() || viewport_camera_modifier() ||
+            (m_input_state && m_input_state->gizmo_active)) {
             m_pending_pick.reset();
             return;
         }
-
-        std::optional<bgui::vec2i> pick_position;
-        if (m_pending_pick) {
-            if (m_input_state && m_input_state->gizmo_active) {
-                m_pending_pick.reset();
-            } else {
-                pick_position = m_pending_pick;
-                m_pending_pick.reset();
-            }
-        }
-
-        if (just_pressed && mouse_over_viewport(m_image) &&
-            !(m_input_state && m_input_state->gizmo_active)) {
+        if (just_pressed && mouse_over_viewport(m_image))
             m_pending_pick = bgui::get_mouse_position();
+        if (m_pending_pick) {
+            const auto delta = bgui::get_mouse_position() - *m_pending_pick;
+            const float threshold = 4.f * bgui::get_global_scale();
+            if (float(delta.x) * delta.x + float(delta.y) * delta.y > threshold * threshold)
+                m_pending_pick.reset();
         }
-
-        if (!pick_position)
-            return;
-
-        m_context->selected_entity = pick_at(*pick_position);
+        if (released && m_pending_pick) {
+            if (mouse_over_viewport(m_image))
+                m_context->selected_entity = pick_at(*m_pending_pick);
+            m_pending_pick.reset();
+        }
     }
 
     std::optional<editor_context::entity_id> pick_at(const bgui::vec2i& mouse) const {

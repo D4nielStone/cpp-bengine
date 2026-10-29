@@ -3,6 +3,7 @@
 #include "components/camera.hpp"
 #include "components/transform.hpp"
 #include "core/ecs.hpp"
+#include <unordered_set>
 
 using namespace COMMONS_NS;
 
@@ -267,17 +268,28 @@ glm::mat4 camera::getViewMatrix() {
         return viewMatrix;
 
     position = m_transform->get_world_position();
-    // Unparented cameras keep their continuous yaw/pitch convention. Matrix
-    // decomposition chooses equivalent Euler triples that flip beyond 90 degrees.
-    const auto world_rotation = m_transform->parent_id
-        ? m_transform->get_world_rotation() : m_transform->get_rotation();
-
-    // Recalculate reference vectors
-    bgui::vec3 frente = {
-        cos(glm::radians(world_rotation.y)) * cos(glm::radians(world_rotation.x)),    // x
-        sin(glm::radians(world_rotation.x)),                                          // y
-        sin(glm::radians(world_rotation.y)) * cos(glm::radians(world_rotation.x))     // z
-    };
+    const auto local_rotation = m_transform->get_rotation();
+    const float yaw = glm::radians(local_rotation.y);
+    const float pitch = glm::radians(local_rotation.x);
+    glm::vec3 direction{std::cos(yaw) * std::cos(pitch), std::sin(pitch),
+                        std::sin(yaw) * std::cos(pitch)};
+    // Compose ancestor rotations directly: Euler decomposition flips its pitch
+    // and yaw representation at the poles. Ignore scale, including nonuniform scale.
+    glm::quat inherited{1.f, 0.f, 0.f, 0.f};
+    std::unordered_set<uint32_t> visited{m_transform->my_object};
+    auto parent_id = m_transform->parent_id;
+    while (parent_id && reg && visited.insert(parent_id).second) {
+        auto parent = reg->get<transform>(parent_id);
+        if (!parent) break;
+        const auto r = parent->get_rotation();
+        const auto q = glm::angleAxis(glm::radians(r.x), glm::vec3(1, 0, 0)) *
+            glm::angleAxis(glm::radians(r.y), glm::vec3(0, 1, 0)) *
+            glm::angleAxis(glm::radians(r.z), glm::vec3(0, 0, 1));
+        inherited = q * inherited;
+        parent_id = parent->parent_id;
+    }
+    direction = inherited * direction;
+    const bgui::vec3 frente{direction.x, direction.y, direction.z};
     forward = normalized(frente);
 
     up = {0.f, 1.f, 0.f};
