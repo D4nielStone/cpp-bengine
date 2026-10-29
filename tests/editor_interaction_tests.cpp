@@ -445,6 +445,26 @@ TEST_F(EditorInteractionTest, EdgeOnRotationRemainsFiniteAndReversesWithDrag) {
             EXPECT_NEAR(actual[c][r], c == r ? 1.f : 0.f, 0.001f);
 }
 
+TEST_F(EditorInteractionTest, InspectorComponentsAreIndependentTreesAndAddButtonIsLast) {
+    auto entity = registry->create();
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+    auto* transform = find_element<bgui::tree>(dock, [](auto& item) {
+        return item.label().get_buffer() == "Transform";
+    });
+    auto* add = find_element<bgui::button>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "+ Add Component";
+    });
+    ASSERT_NE(transform, nullptr);
+    ASSERT_NE(add, nullptr);
+    EXPECT_EQ(transform->get_parent(), add->get_parent());
+    EXPECT_TRUE(transform->has_icon());
+    bgui::on_update();
+    EXPECT_GT(add->processed_y(), transform->processed_y());
+}
 
 TEST_F(EditorInteractionTest, ParentedCameraKeepsPitchAndYawAcrossFullTurns) {
     auto parent = registry->create();

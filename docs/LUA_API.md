@@ -19,7 +19,8 @@ end
 - `gameObject.id`: ID da entidade do script.
 - `gameObject.transform` e `transform`: Transform da entidade; ausente retorna `nil`.
 - `gameObject:GetComponent("Transform")`: consulta o Transform. Também aceita `"Renderer"`
-  (`enabled`, visibilidade) e `"Rigidbody"` (física). Outros nomes retornam `nil`.
+  (`enabled`/`visible`, visibilidade), `"Rigidbody"`, `"Camera"`,
+  `"DirectionalLight"` e `"PointLight"`. Outros nomes retornam `nil`.
   `Destroy(body)` remove um Rigidbody do ECS; o sistema de física sincroniza
   a remoção na próxima atualização.
 - `GameObject.Find(id)`: procura por ID numérico e retorna um objeto ou `nil`.
@@ -66,3 +67,31 @@ convenção de yaw da câmera do motor (+X em zero graus), calculando o deslocam
 antes de atribuir `localPosition`. A coleta usa `Renderer.enabled` e `Destroy`
 no Rigidbody, sem chamadas `bubble.*`. Testes executam os scripts reais com
 entrada simulada, sem precisar de uma janela.
+
+## Propriedades dos componentes
+
+Use `gameObject:GetComponent("Nome")` e atribua propriedades diretamente:
+
+```lua
+local light = gameObject:GetComponent("DirectionalLight")
+light.color = Vector3(1, 0.8, 0.5)
+light.intensity = 2
+local body = gameObject:GetComponent("Rigidbody")
+body.mass = 3
+body.velocity = Vector3(0, 2, 0)
+```
+
+- Rigidbody: `mass`, `friction`, `restitution`, `velocity`; métodos `AddForce(v)`,
+  `SetLinearFactor(v)` e `SetAngularFactor(v)`. Os setters atualizam o corpo Bullet.
+- Camera: `fieldOfView`, `aspect`, `nearClipPlane`, `farClipPlane`, `orthographic`,
+  `orthographicSize`, `backgroundColor` (`Color(r, g, b, a)`) e `useSkybox`.
+  O aspecto continua sendo atualizado pelo tamanho do viewport.
+- DirectionalLight: `direction`, `ambient`, `color`, `intensity`. A direção é local:
+  a rotação do Transform e de seus ancestrais é aplicada ao renderizar, sem
+  influência da posição ou escala e sem alterar a direção armazenada.
+- PointLight: `position`, `color`, `intensity`, `constant`, `linear`, `quadratic`.
+
+O painel Debug usa fundo escuro e recebe `print`, `Debug.Log` e falhas de
+carregamento, `setup()` e `update()`, inclusive do runtime separado. Erros incluem
+arquivo/linha e o rastreamento fornecido pelo Lua. A linha de status do editor de
+texto só ocupa espaço quando tem uma mensagem (por exemplo, após salvar).

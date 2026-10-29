@@ -16,6 +16,7 @@
 #include <elem/color_picker.hpp>
 #include <elem/field.hpp>
 #include <elem/icon.hpp>
+#include <elem/image.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/tree.hpp>
 #include <elem/window.hpp>
@@ -257,29 +258,6 @@ private:
     void build_entity(const entity_id id) {
         const auto registry = m_context->registry;
         build_toolbar(id);
-        m_entity_tree = &m_root->add<bgui::tree>(
-            "Components",
-            0.34f,
-            true
-        );
-        m_entity_tree->add_class("editor-header");
-        m_entity_tree->set_icon("home", 0.34f);
-        m_entity_tree->style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        m_entity_tree->children().add_class("editor-surface");
-
-        auto& id_label = m_entity_tree->children().add<bgui::text>(
-            "ID: " + std::to_string(id),
-            0.27f
-        );
-        id_label.add_class("editor-property-label");
-        id_label.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-
         if (auto transform = registry->get<commons::transform>(id))
             add_transform(transform);
 
@@ -300,6 +278,7 @@ private:
                 [physics](float mass) { physics->setMass(std::max(0.f, mass)); });
         }
         add_script(id, registry->get<commons::code>(id));
+        build_add_component(id);
     }
 
     std::string entity_name(const entity_id id) const {
@@ -366,8 +345,12 @@ private:
             bgui::mode::wrap_content
         );
 
-        auto& add_component_button = m_toolbar->add<bgui::button>(
-            "+ Add Component",
+    }
+
+    void build_add_component(const entity_id id) {
+        const auto registry = m_context->registry;
+        auto& add_component_button = m_root->add<bgui::button>(
+            "Add Component",
             0.28f,
             [this]() {
                 if (m_component_options)
@@ -385,7 +368,7 @@ private:
         const bool can_add_camera = !registry->get<commons::camera>(id);
         const bool can_add_light =
             !registry->get<commons::directional_light>(id);
-        m_component_options = &m_toolbar->add<bgui::linear>(
+        m_component_options = &m_root->add<bgui::linear>(
             bgui::orientation::vertical
         );
         m_component_options->add_class("editor-surface");
@@ -421,8 +404,18 @@ private:
         if (!registry->get<commons::physics>(id))
             m_component_options->add<bgui::button>("Physics", 0.28f,
                 [this, id]() { add_component<commons::physics>(id); });
-        m_component_options->add<bgui::text>("Script: drop a .lua file onto an entity", 0.25f);
-        m_edit_status = &m_toolbar->add<bgui::text>("", 0.25f);
+        auto& script_input = m_component_options->add<bgui::inputbox>(
+            "", "Add Lua script: drop a file or enter its path", 0.27f);
+        configure_property_input(script_input);
+        script_input.style.layout.require_width(bgui::mode::match_parent);
+        auto append_script = [this, id](const std::filesystem::path& path) {
+            std::string error;
+            if (attach_lua_script(m_context, id, path, error)) refresh();
+            else m_edit_status->set_buffer(error);
+        };
+        script_input.m_enter_func = [append_script](const std::string& path) { append_script(path); };
+        m_asset_targets.push_back({&script_input, append_script});
+        m_edit_status = &m_root->add<bgui::text>("", 0.25f);
     }
 
     bgui::tree& add_section(
@@ -430,10 +423,12 @@ private:
         const bool removable,
         const std::function<void()>& remove_component
     ) {
-        auto& section = m_entity_tree->add_child(name);
+        auto& section = m_root->add<bgui::tree>(name, 0.28f, true);
         section.set_expanded(true);
         section.add_class("editor-section");
-        section.set_icon("circle", 0.27f);
+        section.set_icon(name == "Transform" ? "directory_open" :
+            name == "Renderer" ? "cube" : name == "Camera" ? "camera" :
+            name == "Directional Light" ? "lightbulb" : name == "Physics" ? "circle" : "code", 0.24f);
         section.children().add_class("editor-surface");
         section.children().style.layout.padding = bgui::vec4i{6, 4, 6, 4};
         section.children().style.layout.align = bgui::vec<2, bgui::alignment>{
@@ -660,7 +655,24 @@ private:
         auto& input = row.add<bgui::inputbox>(material.getTextura(map.name).path,
             "Drop a texture or enter its path", 0.26f);
         configure_property_input(input);
-        auto assign = [this, renderer, index, map, input = &input](const std::filesystem::path& requested) {
+        auto& preview = content.add<bgui::image>();
+        preview.add_class("material-texture-preview");
+        preview.style.layout.require_size(96.f, 72.f);
+        auto show_preview = [this, preview = &preview](const std::string& value) {
+            preview->set_enable(false);
+            if (value.empty()) return;
+            try {
+                const std::filesystem::path path(value);
+                auto& texture = bgui::asset_manager::get_instance().load_texture(
+                    (path.is_absolute() ? path : m_context->project_root / path).string());
+                preview->set_texture(texture);
+                preview->set_enable(true);
+            } catch (const std::exception&) {
+                // Keep the path editable when a referenced texture is unavailable.
+            }
+        };
+        show_preview(material.getTextura(map.name).path);
+        auto assign = [this, renderer, index, map, show_preview, input = &input](const std::filesystem::path& requested) {
             if (!renderer->m_modelo || index >= renderer->m_modelo->meshes.size())
                 return;
             auto before = renderer->m_modelo->meshes[index].getMaterial();
@@ -687,6 +699,7 @@ private:
             m_context->record_action([apply, before]() { apply(before); },
                 [apply, after]() { apply(after); });
             input->set_buffer(after.getTextura(map.name).path);
+            show_preview(after.getTextura(map.name).path);
             m_edit_status->set_buffer("");
         };
         input.m_enter_func = [assign](const std::string& path) { assign(path); };
@@ -699,22 +712,52 @@ private:
     }
 
     void add_script(entity_id id, const std::shared_ptr<commons::code>& script) {
-        auto& section = add_section("Lua Script", static_cast<bool>(script),
-            [this, id]() { remove_component<commons::code>(id); });
-        auto& input = section.children().add<bgui::inputbox>(
-            script ? script->file : "", "Drop a Lua script or enter its path", 0.27f);
-        input.style.layout.require_width(bgui::mode::match_parent);
-        auto assign = [this, id](const std::filesystem::path& path) {
-            std::string error;
-            if (attach_lua_script(m_context, id, path, error)) refresh();
-            else m_edit_status->set_buffer(error);
-        };
-        input.m_enter_func = [assign](const std::string& path) { assign(path); };
-        m_asset_targets.push_back({&input, assign});
-        auto& hint = section.children().add<bgui::text>(
-            "Drop onto an entity in Scene or Hierarchy. Replacing a script supports Undo.", 0.25f);
-        hint.add_class("editor-muted");
-        hint.style.layout.require_width(bgui::mode::match_parent);
+        if (!script) return;
+        auto entries = script->scripts;
+        entries.insert(entries.begin(), script);
+        for (std::size_t index = 0; index < entries.size(); ++index) {
+            auto& section = add_section("Lua Script " + std::to_string(index + 1), true,
+                [this, id, script, index]() {
+                    auto registry = m_context->registry;
+                    auto before = script->scripts;
+                    if (index == 0) {
+                        std::shared_ptr<commons::code> next;
+                        if (!before.empty()) {
+                            next = std::make_shared<commons::code>(before.front()->file);
+                            next->arquivoCompleto = before.front()->arquivoCompleto;
+                            next->reg = registry;
+                            next->my_object = id;
+                            next->scripts.assign(before.begin() + 1, before.end());
+                        }
+                        auto apply = [registry, id](auto value) {
+                            if (value) registry->entities[id][commons::code::mask] = value;
+                            else registry->remove<commons::code>(id);
+                            if (value) registry->mascaras[id] |= commons::code::mask;
+                        };
+                        apply(next);
+                        m_context->record_action([apply, script]() { apply(script); },
+                            [apply, next]() { apply(next); });
+                    } else {
+                        auto after = before;
+                        after.erase(after.begin() + index - 1);
+                        script->scripts = after;
+                        m_context->record_action([script, before]() { script->scripts = before; },
+                            [script, after]() { script->scripts = after; });
+                    }
+                    refresh();
+                });
+            auto& input = section.children().add<bgui::inputbox>(
+                entries[index]->file, "Drop a Lua script or enter its path", 0.27f);
+            configure_property_input(input);
+            input.style.layout.require_width(bgui::mode::match_parent);
+            auto assign = [this, id, index](const std::filesystem::path& path) {
+                std::string error;
+                if (attach_lua_script(m_context, id, path, error, index)) refresh();
+                else m_edit_status->set_buffer(error);
+            };
+            input.m_enter_func = [assign](const std::string& path) { assign(path); };
+            m_asset_targets.push_back({&input, assign});
+        }
     }
 
     void add_camera(

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <optional>
 
 namespace editor::ui {
 inline bool is_lua_script(const std::filesystem::path& path) {
@@ -51,7 +52,7 @@ inline bool create_lua_script(const std::filesystem::path& directory,
 }
 
 inline bool attach_lua_script(const std::shared_ptr<editor_context>& context,
-    editor_context::entity_id id, const std::filesystem::path& requested, std::string& error) {
+    editor_context::entity_id id, const std::filesystem::path& requested, std::string& error, std::optional<std::size_t> replace = std::nullopt) {
     error.clear();
     if (!context || !context->registry || !context->registry->is_alive(id) ||
         context->is_playing || context->locked_entities.contains(id) ||
@@ -88,6 +89,20 @@ inline bool attach_lua_script(const std::shared_ptr<editor_context>& context,
                 registry->mascaras[id] |= commons::code::mask;
             } else registry->remove<commons::code>(id);
         };
+        if (previous && replace == 0) {
+            next->scripts = previous->scripts;
+        } else if (previous) {
+            auto before = previous->scripts;
+            auto after = before;
+            if (replace) {
+                if (*replace > after.size()) { error = "Script no longer exists."; return false; }
+                after[*replace - 1] = next;
+            } else after.push_back(next);
+            previous->scripts = after;
+            context->record_action([previous, before]() { previous->scripts = before; },
+                [previous, after]() { previous->scripts = after; });
+            return true;
+        }
         apply(next);
         context->record_action([apply, previous]() { apply(previous); },
             [apply, next]() { apply(next); });

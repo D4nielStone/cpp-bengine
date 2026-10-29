@@ -86,3 +86,14 @@ TEST(LuaCompletion, MouseAcceptanceRestoresTypingFocus) {
     bgui::on_update();
     EXPECT_EQ(input.get_buffer(), "Debug.Log(");
 }
+
+TEST(LuaCompletion, InfersWritableComponentProperties) {
+    for (const auto& [type, property] : std::vector<std::pair<std::string, std::string>>{
+        {"Rigidbody", "mass"}, {"Camera", "fieldOfView"},
+        {"DirectionalLight", "direction"}, {"PointLight", "intensity"}}) {
+        const auto source = "local component = gameObject:GetComponent(\"" + type + "\")\ncomponent." + property;
+        const auto result = complete_lua(source, source.size());
+        ASSERT_TRUE(result) << source;
+        EXPECT_EQ(result->members, (std::vector<std::string>{property}));
+    }
+}

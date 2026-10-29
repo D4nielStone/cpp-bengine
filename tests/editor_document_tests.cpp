@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "files_view.hpp"
+#include "debug_view.hpp"
 
 namespace {
 template<class T, class Predicate>
@@ -50,6 +51,8 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
     EXPECT_EQ(editor->processed_y(), first->get_context().processed_y());
     EXPECT_EQ(editor->get_parent()->computed_style.layout.padding, bgui::vec4i{0});
     EXPECT_EQ(editor->computed_style.layout.padding, bgui::vec4i{0});
+    EXPECT_EQ(editor->processed_y() + editor->processed_height(),
+        first->get_context().processed_y() + first->get_context().processed_height());
     EXPECT_EQ(editor->get_label().computed_style.layout.margin, bgui::vec4i{0});
 
     editor->set_buffer("changed");
@@ -74,4 +77,36 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
     EXPECT_TRUE(std::any_of(config.tab_groups.begin(), config.tab_groups.end(), [](const auto& group) {
         return group.windows.size() == 2;
     }));
+}
+
+TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
+    bgui::scoped_interface interface;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    dock.add_window("Arquivos", bgui::dock_area::bottom, .3f);
+    editor::ui::debug_view debug;
+    auto& log = commons::script_log::instance();
+    log.clear();
+    debug.build(dock);
+    auto* window = find<bgui::window>(dock, [](auto& w) { return w.get_title().get_buffer() == "Debug"; });
+    ASSERT_NE(window, nullptr);
+    EXPECT_TRUE(window->has_class("editor-surface"));
+    auto config = dock.get_configuration();
+    ASSERT_EQ(config.tab_groups.size(), 1u);
+    EXPECT_EQ(config.tab_groups.front().windows, (std::vector<std::string>{"Arquivos", "Debug"}));
+    log.write(12, "script message");
+    debug.update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) {
+        return text.get_buffer().find("[lua][12] script message") != std::string::npos;
+    }), nullptr);
+    auto* clear = find<bgui::button>(dock, [](auto& button) {
+        return button.get_label().get_buffer() == "Limpar";
+    });
+    ASSERT_NE(clear, nullptr);
+    clear->on_released();
+    bgui::on_update();
+    debug.update();
+    EXPECT_TRUE(log.lines().empty());
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) {
+        return text.get_buffer() == "Nenhum log Lua.";
+    }), nullptr);
 }

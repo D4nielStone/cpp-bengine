@@ -2,6 +2,9 @@
 #include "components/transform.hpp"
 #include "components/renderer.hpp"
 #include "components/physics.hpp"
+#include "components/camera.hpp"
+#include "components/directional_light.hpp"
+#include "components/point_light.hpp"
 #include "core/ecs.hpp"
 
 namespace commons::api {
@@ -51,8 +54,30 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
         },
         "Rotate", &transform::rotate);
     lua.new_usertype<renderer>("Renderer", sol::no_constructor,
-        "enabled", &renderer::visible);
-    lua.new_usertype<physics>("Rigidbody", sol::no_constructor);
+        "enabled", &renderer::visible, "visible", &renderer::visible);
+    lua.new_usertype<physics>("Rigidbody", sol::no_constructor,
+        "mass", sol::property([](const physics& p) { return p.m_massa; }, &physics::setMass),
+        "friction", sol::property([](const physics& p) { return p.friction; }, &physics::setFriccao),
+        "restitution", sol::property([](const physics& p) { return p.restitution; }, &physics::setRestituicao),
+        "velocity", sol::property(&physics::getVelocidade, &physics::setVelocidade),
+        "AddForce", &physics::setForca,
+        "SetLinearFactor", &physics::setFatorLinear,
+        "SetAngularFactor", &physics::setFatorAngular);
+    lua.new_usertype<color>("Color", sol::call_constructor,
+        sol::constructors<color(), color(const float&, const float&, const float&, const float&)>(),
+        "r", &color::r, "g", &color::g, "b", &color::b, "a", &color::a);
+    lua.new_usertype<camera>("Camera", sol::no_constructor,
+        "fieldOfView", &camera::fov, "aspect", &camera::aspecto,
+        "nearClipPlane", &camera::corte_curto, "farClipPlane", &camera::corte_longo,
+        "orthographic", &camera::flag_orth, "orthographicSize", &camera::scale,
+        "backgroundColor", &camera::ceu, "useSkybox", &camera::m_use_skybox);
+    lua.new_usertype<directional_light>("DirectionalLight", sol::no_constructor,
+        "direction", &directional_light::direction, "ambient", &directional_light::ambient,
+        "color", &directional_light::color, "intensity", &directional_light::intensity);
+    lua.new_usertype<point_light>("PointLight", sol::no_constructor,
+        "position", &point_light::position, "color", &point_light::color,
+        "intensity", &point_light::intensity, "constant", &point_light::constant,
+        "linear", &point_light::linear, "quadratic", &point_light::quadratic);
     lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
         if (body && body->reg) body->reg->remove<physics>(body->my_object);
     });
@@ -64,6 +89,9 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
             if (!owner) return sol::make_object(state, sol::nil);
             if (name == "Transform") return sol::make_object(state, object.get_transform());
             if (name == "Renderer") return sol::make_object(state, owner->get<renderer>(object.id));
+            if (name == "Camera") return sol::make_object(state, owner->get<camera>(object.id));
+            if (name == "DirectionalLight") return sol::make_object(state, owner->get<directional_light>(object.id));
+            if (name == "PointLight") return sol::make_object(state, owner->get<point_light>(object.id));
             if (name == "Rigidbody") return sol::make_object(state, owner->get<physics>(object.id));
             return sol::make_object(state, sol::nil);
         });

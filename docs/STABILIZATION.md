@@ -398,7 +398,6 @@ TRS existente. O aviso preexistente de retorno ausente em `get_repository_root`
 apareceu no build novo e permanece fora do escopo.
 Não foram alterados os arquivos locais do projeto FPP.
 
-
 ## Visualização orbital e rotação FPP — 2026-10-28
 
 | Item | Status / evidência | Alteração e cobertura | Limites / riscos |

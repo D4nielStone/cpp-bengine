@@ -39,12 +39,16 @@ visual.background.normal = 0.10, 0.10, 0.10, 1.0
 
 [class.editor-section]
 layout.margin = 0, 4
+visual.visible = true
+visual.background.normal = 0.065, 0.065, 0.065, 1.0
+visual.border.normal = 0.18, 0.18, 0.18, 1.0
+visual.border.size = 1
 
 [class.editor-icon-button]
 layout.size = 22, 22
 layout.padding = 0
 layout.align = center, center
-visual.background.normal = 0.0
+visual.background.normal = 0.0, 0.0, 0.0, 0.0
 visual.background.hover = 0.17, 0.17, 0.17, 1.0
 visual.background.pressed = 0.19, 0.19, 0.19, 1.0
 visual.border.normal = 0.0
@@ -63,3 +67,8 @@ visual.border.normal = 0.0
 visual.border.size = 0
 visual.border.radius = 5
 layout.margin = 0
+
+[class.components-view]
+visual.visible = true
+visual.background.normal = 0.08, 0.08, 0.08, 1.0
+visual.border.size = 0

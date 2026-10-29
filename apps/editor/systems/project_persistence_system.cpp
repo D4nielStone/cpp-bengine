@@ -310,6 +310,10 @@ bool parse_component(
                 ? script_path
                 : project_directory / script_path
         ).lexically_normal().string();
+        for (auto& entry : script->scripts) {
+            const std::filesystem::path path(entry->file);
+            entry->arquivoCompleto = (path.is_absolute() ? path : project_directory / path).lexically_normal().string();
+        }
         return true;
     }
 
@@ -665,6 +669,13 @@ bool project_persistence_system::serialize_project(
                     static_cast<rapidjson::SizeType>(resolved_script_path.size()),
                     allocator
                 );
+                if (component_data.HasMember("scripts")) {
+                    for (auto& entry : component_data["scripts"].GetArray()) {
+                        const std::filesystem::path path(entry.GetString());
+                        const auto resolved = (path.is_absolute() ? path : m_asset_root / path).lexically_normal().string();
+                        entry.SetString(resolved.c_str(), static_cast<rapidjson::SizeType>(resolved.size()), allocator);
+                    }
+                }
             } else if (mask == commons::component::COMPONENTE_RENDER &&
                        !m_asset_root.empty()) {
                 const auto renderer =

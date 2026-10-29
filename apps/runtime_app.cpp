@@ -2,6 +2,7 @@
 #include "components/renderer.hpp"
 #include "os/window.hpp"
 #include "systems/code_system.hpp"
+#include "debugging/script_log.hpp"
 #include "systems/physics_system.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
@@ -128,10 +129,12 @@ private:
 
 int main(const int argc, char** argv) {
     std::string project_path;
-    if (argc == 3 && std::string(argv[1]) == "--project") {
+    if ((argc == 3 || argc == 5) && std::string(argv[1]) == "--project" &&
+        (argc == 3 || std::string(argv[3]) == "--script-log")) {
         project_path = argv[2];
+        if (argc == 5) commons::script_log::instance().set_output_file(argv[4]);
     } else if (argc != 1) {
-        std::cerr << "Usage: runtime_app [--project <project-file>]\n";
+        std::cerr << "Usage: runtime_app [--project <project-file> [--script-log <log-file>]]\n";
         return 2;
     }
 

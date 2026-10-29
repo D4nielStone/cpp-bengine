@@ -1,4 +1,5 @@
 #include "systems/code_system.hpp"
+#include "debugging/script_log.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -17,17 +18,23 @@ void code_system::setup(const std::shared_ptr<ecs>& registry) {
         return;
 
     registry->cada<code>([this, &registry](const std::uint32_t id) {
-        const auto script = registry->get<code>(id);
+        const auto component = registry->get<code>(id);
+        if (!component) return;
+        auto entries = component->scripts;
+        entries.insert(entries.begin(), component);
+        for (const auto& script : entries) {
         if (!script)
             return;
 
+        script->reg = registry;
+        script->my_object = id;
         m_initialized.insert(script.get());
         try {
             script->setup();
         } catch (const sol::error& error) {
             m_failed.insert(script.get());
-            std::cerr << "[lua] Could not initialize script for entity "
-                      << id << ": " << error.what() << '\n';
+            script_log::instance().write(id, std::string("Initialization failed: ") + error.what());
+        }
         }
     });
 }
@@ -49,9 +56,15 @@ void code_system::update(const std::shared_ptr<ecs>& registry) {
     std::unordered_set<const code*> present;
     registry->cada<code>(
         [this, &registry, &present, delta_time](const std::uint32_t id) {
-            const auto script = registry->get<code>(id);
+            const auto component = registry->get<code>(id);
+            if (!component) return;
+            auto entries = component->scripts;
+            entries.insert(entries.begin(), component);
+            for (const auto& script : entries) {
+            script->reg = registry;
+            script->my_object = id;
             if (!script)
-                return;
+                continue;
 
             present.insert(script.get());
             if (!m_initialized.contains(script.get())) {
@@ -60,14 +73,13 @@ void code_system::update(const std::shared_ptr<ecs>& registry) {
                     script->setup();
                 } catch (const sol::error& error) {
                     m_failed.insert(script.get());
-                    std::cerr << "[lua] Could not initialize script for entity "
-                              << id << ": " << error.what() << '\n';
-                    return;
+                    script_log::instance().write(id, std::string("Initialization failed: ") + error.what());
+                    continue;
                 }
             }
 
             if (m_failed.contains(script.get()))
-                return;
+                continue;
             try {
                 auto bubble = script->estado_lua["bubble"].get<sol::table>();
                 bubble["delta_time"] = delta_time;
@@ -77,8 +89,8 @@ void code_system::update(const std::shared_ptr<ecs>& registry) {
                 script->update();
             } catch (const sol::error& error) {
                 m_failed.insert(script.get());
-                std::cerr << "[lua] Script update failed for entity "
-                          << id << ": " << error.what() << '\n';
+                script_log::instance().write(id, std::string("Update failed: ") + error.what());
+            }
             }
         }
     );

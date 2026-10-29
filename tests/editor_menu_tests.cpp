@@ -113,6 +113,7 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
     dock.add_window("Scene", bgui::dock_area::left);
     dock.add_window("Hierarchy", bgui::dock_area::center);
     dock.add_window("Arquivos", bgui::dock_area::right);
+    dock.add_window("Debug", bgui::dock_area::right);
     click("Layout: Wide Scene");
     auto configuration = dock.get_configuration();
     EXPECT_FLOAT_EQ(configuration.left_ratio, .16f);
@@ -123,6 +124,8 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
         if (window.title == "Hierarchy") EXPECT_EQ(window.area, bgui::dock_area::left);
         if (window.title == "Arquivos") EXPECT_EQ(window.area, bgui::dock_area::bottom);
     }
+    ASSERT_EQ(configuration.tab_groups.size(), 1u);
+    EXPECT_EQ(configuration.tab_groups.front().windows, (std::vector<std::string>{"Arquivos", "Debug"}));
     click("Layout: Standard");
     EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .24f);
 }

@@ -68,3 +68,13 @@ TEST_F(EditorScriptTest, InvalidOrLockedDropPreservesExistingScriptAndHistory) {
     EXPECT_EQ(context->registry->get<commons::code>(entity.id), previous);
     EXPECT_EQ(context->undo_stack.size(), 1u);
 }
+
+TEST_F(EditorScriptTest, AttachingSecondScriptPreservesFirstAndUndoRestoresList) {
+    auto entity = context->registry->create();
+    std::ofstream(folder / "first.lua") << "function update() end";
+    std::ofstream(folder / "second.lua") << "function update() end";
+    std::string error;
+    ASSERT_TRUE(editor::ui::attach_lua_script(context, entity.id, "first.lua", error));
+    ASSERT_TRUE(editor::ui::attach_lua_script(context, entity.id, "second.lua", error));
+    EXPECT_EQ(context->registry->get<commons::code>(entity.id)->file, "first.lua");
+}

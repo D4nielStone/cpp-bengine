@@ -266,6 +266,10 @@ editor_ui::editor_ui(
             menu.add_separator();
             menu.add_button("Layout: Standard", [this]() { apply_layout(false); });
             menu.add_button("Layout: Wide Scene", [this]() { apply_layout(true); });
+            menu.add_button("Reset UI", [this]() {
+                reset_ui_scale();
+                apply_layout(false);
+            });
             menu.add_button("Save Layout", [ui_persistence_ptr]() {
                 std::string error;
                 const bool success = ui_persistence_ptr->save(ui_configuration_path, error);
@@ -1202,6 +1206,7 @@ void editor_ui::apply_layout(bool wide) {
     auto configuration = m_dock.get_configuration();
     configuration.splits.clear();
     configuration.tab_groups.clear();
+    configuration.top_ratio = .24f;
     configuration.left_ratio = wide ? .16f : .24f;
     configuration.right_ratio = wide ? .18f : .24f;
     configuration.bottom_ratio = wide ? .18f : .24f;
@@ -1212,11 +1217,12 @@ void editor_ui::apply_layout(bool wide) {
             window.area = bgui::dock_area::center;
         else if (window.title == "Hierarchy")
             window.area = bgui::dock_area::left;
-        else if (window.title == "Arquivos")
+        else if (window.title == "Arquivos" || window.title == "Debug")
             window.area = bgui::dock_area::bottom;
         else if (window.title == "Inspector" || window.title == "Editor Diagnostics")
             window.area = bgui::dock_area::right;
     }
+    configuration.tab_groups.push_back({"Arquivos", "Arquivos", {"Arquivos", "Debug"}});
     m_dock.apply_configuration(configuration);
 }
 

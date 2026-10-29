@@ -34,6 +34,7 @@ namespace COMMONS_NS {
     struct directional_light : public component
     {
         bgui::vec3 direction, ambient, color; float intensity = 1.f;
+        bgui::vec3 get_world_direction() const;
         directional_light() = default;
         explicit  directional_light(bgui::vec3 direction, bgui::vec3 ambient, bgui::vec3 color, float intensity) :
         direction(direction), ambient(ambient), color(color), intensity(intensity){}

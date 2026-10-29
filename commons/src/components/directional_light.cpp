@@ -1,4 +1,7 @@
 #include "components/directional_light.hpp"
+#include "components/transform.hpp"
+#include "core/ecs.hpp"
+#include <unordered_set>
 
 using namespace COMMONS_NS;
 
@@ -39,4 +42,24 @@ bool directional_light::serialize(rapidjson::Value& value, rapidjson::Document::
     value.AddMember("color", cor_v, allocator);
     value.AddMember("intensity", intensity, allocator);
     return true;
+}
+
+bgui::vec3 directional_light::get_world_direction() const {
+    if (!reg) return direction;
+    glm::quat orientation{1.f, 0.f, 0.f, 0.f};
+    std::unordered_set<std::uint32_t> visited;
+    auto id = my_object;
+    while (visited.insert(id).second) {
+        const auto tr = reg->get<transform>(id);
+        if (!tr) break;
+        const auto r = glm::radians(glm::vec3{tr->rotation.x, tr->rotation.y, tr->rotation.z});
+        const auto local = glm::angleAxis(r.x, glm::vec3{1, 0, 0}) *
+            glm::angleAxis(r.y, glm::vec3{0, 1, 0}) *
+            glm::angleAxis(r.z, glm::vec3{0, 0, 1});
+        orientation = local * orientation;
+        if (!tr->parent_id) break;
+        id = tr->parent_id;
+    }
+    const auto result = orientation * glm::vec3{direction.x, direction.y, direction.z};
+    return {result.x, result.y, result.z};
 }

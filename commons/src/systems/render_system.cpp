@@ -39,8 +39,10 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
     reg->cada<directional_light>([&](const uint32_t light_entity) {
         if (reg->has<camera>(light_entity))
             return;
-        if (auto light = reg->get<directional_light>(light_entity))
+        if (auto light = reg->get<directional_light>(light_entity)) {
             global_direction_light = *light;
+            global_direction_light.direction = light->get_world_direction();
+        }
     });
 
     std::vector<point_light> point_lights;
@@ -70,8 +72,10 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         const auto projection = camera_component->obtProjectionMatrix();
 
         auto direction_light = global_direction_light;
-        if (auto camera_light = reg->get<directional_light>(camera_component->my_object))
+        if (auto camera_light = reg->get<directional_light>(camera_component->my_object)) {
             direction_light = *camera_light;
+            direction_light.direction = camera_light->get_world_direction();
+        }
 
         for (const auto& [render_component, transform_component] : renderables) {
             if (!render_component || !transform_component || !render_component->m_modelo) {

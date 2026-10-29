@@ -1,4 +1,5 @@
 #include "components/code.hpp"
+#include "debugging/script_log.hpp"
 
 #include "api/lua.hpp"
 #include "api/mat.hpp"
@@ -22,6 +23,21 @@ using namespace COMMONS_NS;
 
 namespace {
 
+void bind_script_output(sol::state& lua, std::uint32_t id) {
+    lua.set_function("print", [id](sol::variadic_args args, sol::this_state state) {
+        sol::state_view view(state);
+        sol::function tostring = view["tostring"];
+        std::string message;
+        bool first = true;
+        for (auto argument : args) {
+            if (!first) message += '\t';
+            first = false;
+            message += tostring(argument).get<std::string>();
+        }
+        script_log::instance().write(id, message);
+    });
+}
+
 struct cursor_state {
     double x{0.0};
     double y{0.0};
@@ -37,15 +53,17 @@ code::code(const std::string& file) : file(file) {
 
     api::setClasses(estado_lua);
     api::setNamespaces(estado_lua);
+    bind_script_output(estado_lua, my_object);
 }
 
 void code::setup() {
+    bind_script_output(estado_lua, my_object);
     auto bubble = estado_lua["bubble"].get_or_create<sol::table>();
     bubble["meuID"] = my_object;
     bubble.set_function(
         "log",
-        [](const std::string& message) {
-            std::clog << "[lua] " << message << '\n';
+        [id = my_object](const std::string& message) {
+            script_log::instance().write(id, message);
         }
     );
 
@@ -242,8 +260,10 @@ void code::setup() {
     f_setup = estado_lua["setup"];
     f_update = estado_lua["update"];
 
-    if (f_setup.valid())
-        f_setup();
+    if (f_setup.valid()) {
+        const auto result = f_setup();
+        if (!result.valid()) throw sol::error(result);
+    }
 }
 
 bool code::analyze(const rapidjson::Value& value) {
@@ -253,6 +273,15 @@ bool code::analyze(const rapidjson::Value& value) {
         return false;
     }
 
+    std::vector<std::shared_ptr<code>> loaded;
+    if (value.HasMember("scripts")) {
+        if (!value["scripts"].IsArray()) return false;
+        for (const auto& entry : value["scripts"].GetArray()) {
+            if (!entry.IsString()) return false;
+            loaded.push_back(std::make_shared<code>(entry.GetString()));
+        }
+    }
+    scripts = std::move(loaded);
     file = value["directory"].GetString();
     arquivoCompleto = file;
 
@@ -260,6 +289,7 @@ bool code::analyze(const rapidjson::Value& value) {
 
     api::setClasses(estado_lua);
     api::setNamespaces(estado_lua);
+    bind_script_output(estado_lua, my_object);
 
     return true;
 }
@@ -276,12 +306,23 @@ bool code::serialize(
     );
 
     value.AddMember("directory", directory, allocator);
+    if (!scripts.empty()) {
+        rapidjson::Value entries(rapidjson::kArrayType);
+        for (const auto& script : scripts) {
+            rapidjson::Value entry;
+            entry.SetString(script->file.c_str(), static_cast<rapidjson::SizeType>(script->file.size()), allocator);
+            entries.PushBack(entry, allocator);
+        }
+        value.AddMember("scripts", entries, allocator);
+    }
     return true;
 }
 
 void code::update() {
-    if (f_update.valid())
-        f_update();
+    if (f_update.valid()) {
+        const auto result = f_update();
+        if (!result.valid()) throw sol::error(result);
+    }
 }
 
 code::~code() {

@@ -7,6 +7,8 @@
 
 #pragma once
 #include <string>
+#include <vector>
+#include <memory>
 #include <lua.hpp>
 #include <sol/sol.hpp>
 #include <rapidjson/rapidjson.h>
@@ -17,6 +19,8 @@ namespace COMMONS_NS {
 	struct code : component {
 		static constexpr mask mask = COMPONENTE_CODIGO;
 		std::string file;
+        // The first script keeps the legacy public fields; remaining entries own independent Lua states.
+        std::vector<std::shared_ptr<code>> scripts;
 
 		std::string arquivoCompleto;
         sol::state estado_lua;

@@ -57,3 +57,7 @@ build-scene-validation/*
 .vscode
 editor.cfg
 Cache/
+
+# Local editor workspace state
+.editor-session.cfg*
+.editor-ui.cfg*

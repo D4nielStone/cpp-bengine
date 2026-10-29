@@ -2,6 +2,7 @@
 
 #include "panel.hpp"
 #include "../systems/script_tools.hpp"
+#include "../systems/project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
 
 #include <bgui.hpp>
@@ -9,6 +10,7 @@
 #include <elem/image.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/text.hpp>
+#include <elem/tree.hpp>
 #include <elem/window.hpp>
 #include <os/asset_manager.hpp>
 #include <lay/dock.hpp>
@@ -23,6 +25,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iomanip>
 #include <memory>
 #include <map>
 #include <regex>
@@ -116,6 +119,14 @@ public:
     }
 
     void set_project_file(const std::filesystem::path& project_file) {
+        for (auto& [path, doc] : m_documents)
+            if (doc.window && m_dock) m_dock->remove_window(doc.window);
+        m_documents.clear();
+        m_active_document = nullptr;
+        m_document_window = nullptr;
+        m_document_body = nullptr;
+        m_document_status = nullptr;
+        m_active_content.clear();
         m_project_root = resolve_project_root(project_file);
         m_current_directory = m_project_root;
         m_selected_file.clear();
@@ -123,6 +134,59 @@ public:
         m_expanded_directories.clear();
         m_expanded_directories.insert(m_project_root);
         load_main_scene();
+        request_refresh();
+    }
+
+    // Documents must exist before BGUI restores their docking and active tabs.
+    bool save_session(const std::filesystem::path& path) {
+        update_document_editor();
+        std::ostringstream data;
+        data << "bengine-session-1\n" << bgui::get_global_scale() << '\n' << std::quoted(m_current_directory.string()) << '\n'
+             << std::quoted(m_active_document ? m_active_document->path.string() : "") << '\n';
+        for (const auto& [file, doc] : m_documents) {
+            if (!doc.window) continue;
+            const bool dirty = doc.buffer != doc.original;
+            data << std::quoted(file.string()) << ' ' << dirty << ' '
+                 << std::quoted(dirty ? doc.buffer : "") << '\n';
+        }
+        try {
+            project_files::stage({path, data.str()});
+            project_files::replace(path);
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    void restore_session(const std::filesystem::path& path) {
+        std::ifstream input(path, std::ios::binary);
+        std::string header, directory, active;
+        float scale = 1.f;
+        if (!std::getline(input, header) || header != "bengine-session-1" ||
+            !(input >> scale >> std::quoted(directory) >> std::quoted(active)) ||
+            !std::isfinite(scale) || scale < .5f || scale > 2.f) return;
+        struct entry { std::string file; bool dirty; std::string buffer; };
+        std::vector<entry> entries;
+        while (input >> std::ws && input.peek() != std::char_traits<char>::eof()) {
+            entry value;
+            if (!(input >> std::quoted(value.file) >> value.dirty >> std::quoted(value.buffer))) return;
+            entries.push_back(std::move(value));
+        }
+        bgui::set_global_scale(scale);
+        std::error_code error;
+        if (std::filesystem::is_directory(directory, error)) m_current_directory = directory;
+        for (const auto& value : entries) {
+            if (!std::filesystem::is_regular_file(value.file, error)) continue;
+            open_document(value.file);
+            auto found = m_documents.find(value.file);
+            if (found != m_documents.end() && value.dirty && found->second.editor) {
+                found->second.buffer = value.buffer;
+                found->second.editor->set_buffer(value.buffer);
+                found->second.window->set_title(found->second.path.filename().string() + "*");
+            }
+        }
+        if (auto found = m_documents.find(active); found != m_documents.end() && found->second.window)
+            activate_document(active);
         request_refresh();
     }
 
@@ -545,6 +609,7 @@ private:
     void set_document_status(const std::string& message, bool is_error) {
         if (!m_document_status)
             return;
+        m_document_status->get_parent()->set_enable(!message.empty());
         m_document_status->set_buffer(message);
         m_document_status->style.visual.text.normal = is_error
             ? bgui::color{0.95f, 0.45f, 0.40f, 1.f}
@@ -695,60 +760,26 @@ private:
         const std::filesystem::path& directory,
         const std::size_t depth
     ) {
-        const bool expanded = m_expanded_directories.contains(directory);
-        auto& row = m_folder_sidebar->add<bgui::button>(
-            "",
-            0.27f,
-            [this, directory]() {
-                if (m_expanded_directories.contains(directory))
-                    m_expanded_directories.erase(directory);
-                else
-                    m_expanded_directories.insert(directory);
-                m_current_directory = directory;
-                m_selected_file.clear();
-                request_refresh();
-            }
-        );
-        row.get_label().set_enable(false);
-        auto& icon = row.add<bgui::icon>(
-            directory == m_project_root
-                ? "home"
-                : (expanded ? "folder_open" : "folder"),
-            0.25f
-        );
-        icon.receives_input(false);
-        icon.style.layout.require_mode(
-            bgui::mode::wrap_content,
-            bgui::mode::wrap_content
-        );
-        icon.style.layout.padding = bgui::vec4i{3, 0, 5, 0};
-        auto& label = row.add<bgui::text>(
-            (expanded ? "v  " : ">  ") + directory_label(directory),
-            0.27f
-        );
-        label.receives_input(false);
-        label.style.layout.require_mode(
-            bgui::mode::stretch,
-            bgui::mode::wrap_content
-        );
-        label.style.layout.align = bgui::vec<2, bgui::alignment>{
-            bgui::alignment::start,
-            bgui::alignment::center
-        };
-        row.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        row.style.layout.padding = bgui::vec4i{
-            static_cast<int>(depth * 12 + 3), 3, 3, 3
-        };
-        row.style.visual.background.normal =
-            directory == m_current_directory
-                ? bgui::color{0.19f, 0.21f, 0.24f, 1.f}
-                : bgui::color{0.f, 0.f, 0.f, 0.f};
+        build_folder_node(directory, *m_folder_sidebar);
+    }
 
-        if (!m_expanded_directories.contains(directory))
-            return;
+    void build_folder_node(const std::filesystem::path& directory, bgui::linear& parent) {
+        const bool expanded = m_expanded_directories.contains(directory);
+        auto& node = parent.add<bgui::tree>(directory_label(directory), 0.27f, expanded);
+        node.set_icon(directory == m_project_root ? "home" : "folder", 0.24f);
+        node.header().set_function([this, directory]() {
+            m_current_directory = directory;
+            m_selected_file.clear();
+            request_refresh();
+        });
+        node.disclosure().set_function([this, directory, node = &node]() {
+            const bool expanded = !node->is_expanded();
+            node->set_expanded(expanded);
+            if (expanded) m_expanded_directories.insert(directory);
+            else m_expanded_directories.erase(directory);
+        });
+        node.header().style.visual.background.normal = directory == m_current_directory
+            ? bgui::color{0.19f, 0.21f, 0.24f, 1.f} : bgui::color{0.f, 0.f, 0.f, 0.f};
 
         std::error_code error;
         std::vector<std::filesystem::path> directories;
@@ -766,8 +797,9 @@ private:
         }
 
         std::sort(directories.begin(), directories.end());
+        node.set_leaf(directories.empty());
         for (const auto& child : directories)
-            build_folder_tree(child, depth + 1);
+            build_folder_node(child, node.children());
     }
 
     void build_file_list() {

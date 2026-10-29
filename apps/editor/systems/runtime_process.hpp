@@ -19,6 +19,7 @@ public:
         std::string& error
     );
     bool running(std::string& error);
+    void collect_script_logs();
     bool set_paused(bool paused, std::string& error);
     bool stop(std::string& error);
 
@@ -26,6 +27,8 @@ private:
     void cleanup_project_file();
 
     std::filesystem::path m_project_file;
+    std::filesystem::path m_log_file;
+    std::uintmax_t m_log_offset{0};
     bool m_is_paused{false};
 #ifdef _WIN32
     void* m_process_handle{nullptr};

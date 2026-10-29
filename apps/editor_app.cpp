@@ -14,6 +14,7 @@
 #include "editor/systems/project_creation_system.hpp"
 #include "editor/systems/project_preview.hpp"
 #include "editor/panels/files_view.hpp"
+#include "editor/panels/debug_view.hpp"
 #include "editor/panels/scene_view.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
 #include "editor/panels/entities_view.hpp"
@@ -442,6 +443,7 @@ int main(int argc, char** argv) {
         }
     );
     asset_browser = &files_panel;
+    editor.add_panel<editor::ui::debug_view>();
     auto render_system = window.add<commons::render_system>();
     auto& runtime_tools_panel =
         editor.add_panel<editor::ui::runtime_tools_view>(
@@ -510,8 +512,18 @@ int main(int argc, char** argv) {
             return runtime_process->set_paused(paused, error);
         }
     );
+    // Recreate file windows first so configuration can resolve their titles.
+    auto ui_state_root = std::filesystem::absolute(project_path).parent_path();
+    auto session_path = ui_state_root / ".editor-session.cfg";
+    auto layout_path = ui_state_root / ".editor-ui.cfg";
+    files_panel.restore_session(session_path);
+    std::string ui_error;
+    if (std::filesystem::exists(layout_path) && !ui_persistence.load(layout_path.string(), ui_error))
+        std::cerr << "[editor] " << ui_error << '\n';
+
     editor.set_project_loaded_callback(
-        [&entities_panel, &components_panel, &files_panel, editor_context](
+        [&entities_panel, &components_panel, &files_panel, &ui_persistence,
+         &ui_state_root, &session_path, &layout_path, editor_context](
             const std::string& loaded_project_path
         ) {
         editor_context->clear_history();
@@ -519,7 +531,18 @@ int main(int argc, char** argv) {
         editor_context->project_root = std::filesystem::absolute(loaded_project_path).parent_path();
         entities_panel.refresh();
         components_panel.refresh();
+        std::string error;
+        if (!files_panel.save_session(session_path))
+            std::cerr << "[editor] Could not save open documents.\n";
+        if (!ui_persistence.save(layout_path.string(), error))
+            std::cerr << "[editor] " << error << '\n';
         files_panel.set_project_file(loaded_project_path);
+        ui_state_root = std::filesystem::absolute(loaded_project_path).parent_path();
+        session_path = ui_state_root / ".editor-session.cfg";
+        layout_path = ui_state_root / ".editor-ui.cfg";
+        files_panel.restore_session(session_path);
+        if (std::filesystem::exists(layout_path) && !ui_persistence.load(layout_path.string(), error))
+            std::cerr << "[editor] " << error << '\n';
     });
 
     (void)scene;
@@ -531,6 +554,11 @@ int main(int argc, char** argv) {
     bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(editor_context);
 
     window.loop();
+
+    if (!files_panel.save_session(session_path))
+        std::cerr << "[editor] Could not save open documents.\n";
+    if (!ui_persistence.save(layout_path.string(), ui_error))
+        std::cerr << "[editor] " << ui_error << '\n';
 
     std::string preview_error;
     if (!editor::ui::save_project_preview(project_path, camera, preview_error))

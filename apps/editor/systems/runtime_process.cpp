@@ -1,4 +1,5 @@
 #include "runtime_process.hpp"
+#include "debugging/script_log.hpp"
 
 #include <iostream>
 
@@ -130,11 +131,13 @@ bool runtime_process::start(
         return false;
 
     m_project_file = project;
+    m_log_file = project.string() + ".lua-log";
+    m_log_offset = 0;
     m_is_paused = false;
 
 #ifdef _WIN32
     std::wstring command = L"\"" + executable.wstring() +
-        L"\" --project \"" + project.wstring() + L"\"";
+        L"\" --project \"" + project.wstring() + L"\" --script-log \"" + m_log_file.wstring() + L"\"";
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
     PROCESS_INFORMATION process_info{};
@@ -191,6 +194,8 @@ bool runtime_process::start(
             executable.c_str(),
             "--project",
             project.c_str(),
+            "--script-log",
+            m_log_file.c_str(),
             static_cast<char*>(nullptr)
         );
         const int exec_error = errno;
@@ -226,6 +231,7 @@ bool runtime_process::start(
 }
 
 bool runtime_process::running(std::string& error) {
+    collect_script_logs();
     error.clear();
 #ifdef _WIN32
     if (!m_process_handle)
@@ -354,7 +360,15 @@ bool runtime_process::stop(std::string& error) {
     return true;
 }
 
+void runtime_process::collect_script_logs() {
+    commons::read_script_log(m_log_file, m_log_offset);
+}
+
 void runtime_process::cleanup_project_file() {
+    collect_script_logs();
+    std::error_code log_error;
+    if (!m_log_file.empty()) std::filesystem::remove(m_log_file, log_error);
+    m_log_file.clear();
     if (m_project_file.empty())
         return;
 

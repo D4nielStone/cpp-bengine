@@ -67,6 +67,10 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
             else if (value.find("GetComponent") != std::string::npos &&
                 (value.find("\"Renderer\"") != std::string::npos || value.find("'Renderer'") != std::string::npos))
                 type = "renderer";
+            else if (value.find("GetComponent") != std::string::npos && value.find("Rigidbody") != std::string::npos) type = "rigidbody";
+            else if (value.find("GetComponent") != std::string::npos && value.find("DirectionalLight") != std::string::npos) type = "directionalLight";
+            else if (value.find("GetComponent") != std::string::npos && value.find("PointLight") != std::string::npos) type = "pointLight";
+            else if (value.find("GetComponent") != std::string::npos && value.find("Camera") != std::string::npos) type = "camera";
             else if (value.starts_with("gameObject.transform") || value == "transform") type = "transform";
             else if (value.starts_with("GameObject.Find(") || value == "gameObject") type = "gameObject";
             else type.clear();
@@ -79,8 +83,14 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
     } else if (type == "gameObject") {
         names = {"GetComponent"};
         if (!methods) names.insert(names.end(), {"id", "transform"});
+    } else if (type == "rigidbody") {
+        names = {"AddForce", "SetLinearFactor", "SetAngularFactor"};
+        if (!methods) names.insert(names.end(), {"mass", "friction", "restitution", "velocity"});
     } else if (!methods) {
-        if (type == "renderer") names = {"enabled"};
+        if (type == "camera") names = {"fieldOfView", "aspect", "nearClipPlane", "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox"};
+        else if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity"};
+        else if (type == "pointLight") names = {"position", "color", "intensity", "constant", "linear", "quadratic"};
+        else if (type == "renderer") names = {"enabled", "visible"};
         else if (type == "GameObject") names = {"Find"};
         else if (type == "Time") names = {"deltaTime", "time"};
         else if (type == "Input") names = {"GetAxis", "GetKey", "GetMouseDelta", "SetMouseCaptured"};
