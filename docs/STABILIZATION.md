@@ -703,3 +703,28 @@ reutilizado. Logs em `/home/d4nl/.cache/bengine-validation/fpp-20261029/validati
 `fpp-floor-original-red.log`, `fpp-overlay-baseline-test.log` e `fpp-runtime.log`.
 Uso e semântica dos campos em `docs/PHYSICS.md`. Os itens P0/P1/P2 do diagnóstico
 não foram reabertos nesta implementação. Demais alterações locais foram preservadas.
+
+## Corrupção de memória ao iniciar o runtime — artefatos incompatíveis (2026-10-29)
+
+| Item | Status / evidência | Ação / testes | Limites / revisão |
+|---|---|---|---|
+| Crash na abertura | CONFIRMADO: `out/apps/runtime_app --project projects/fpp_demo/project.bengine` interrompeu em `SIGSEGV` dentro de `unlink_chunk`/`malloc`, durante importação da parede pelo Assimp. Backtrace em `fpp-crash-gdb.log`. | Reproduzido antes de reconstruir os executáveis; comparado com build separado e coerente, que abre o mesmo projeto. | A mensagem do usuário foi `double free or corruption (out)`. A reprodução confirma corrupção do heap; não confirmou uma chamada duplicada de `delete`. |
+| Incompatibilidade de tamanho do componente | CONFIRMADO nos objetos de `out`: informação DWARF de `project_persistence_system.cpp.o` indicava `_Sp_counted_ptr_inplace<commons::physics,...>` de 136 bytes (16 de controle + 120 do componente), enquanto o construtor em `physics.cpp.o` usa componente de 128 bytes. A gravação excedia o espaço reservado. | Reconstrução completa com `cmake --build out --clean-first --parallel 2`, sem alterar fontes durante a compilação. Após reconstruir, o bloco compartilhado tem 144 bytes (16 + 128); evidência em `fpp-fixed-layout.log`. | O objeto antigo foi produzido durante mudanças na estrutura do componente. O build incremental considerava seu timestamp recente e não o recompilava. A validação anterior em diretório separado não detectava a inconsistência de `out`. Não foi necessária mudança na API nem na propriedade dos ponteiros Bullet. |
+| Runtime reconstruído | CONFIRMADO: o runtime em `out/apps` abriu o FPP, registrou setup do player e permaneceu vivo por 10 s com `MALLOC_CHECK_=3`; encerrado pelo teste com SIGTERM. | Também criado build separado com `ENABLE_SANITIZERS=ON` e Debug: runtime permaneceu ativo por 10 s sem diagnóstico ASan/UBSan; 30/30 testes de fundamentos passaram sob ASan/UBSan. | Detecção de vazamentos desativada (`ASAN_OPTIONS=detect_leaks=0`); estes resultados cobrem acessos inválidos/UB, sem atestar ausência de vazamentos. WASD e o botão Play do editor não foram exercitados manualmente. Editor já aberto deve ser reiniciado para carregar o binário novo. |
+| Verificação final de out | CONFIRMADO: build completo terminou com código 0; CTest em `out` passou em **217/217**, em 11,73 s. | Editor, runtime e alvos de teste reconstruídos do zero no diretório usado pelo usuário. Nenhum teste-fonte novo: a falha dependia da mistura de objetos incompatíveis, sem reprodução em builds coerentes do código atual. A regressão foi validada pela abertura que falhava antes e passou depois da reconstrução. | Windows não foi executado. Alterações locais de outros trabalhos preservadas. |
+
+Comandos desta fase (opções de sanitização verificadas no CMake; build/teste
+alinhados com o helper usado pelo workflow):
+
+```sh
+cmake --build out --clean-first --parallel 2
+ctest --test-dir out --output-on-failure -C Release
+cmake -S . -B /home/d4nl/.cache/bengine-validation/fpp-memory-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DENABLE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/.cache/bengine-validation/jpeg-20261029/_deps/googletest-src
+cmake --build /home/d4nl/.cache/bengine-validation/fpp-memory-20261029 --target runtime_app engine_foundations_tests --parallel 2
+```
+
+O cache existente de `out` usa Debug. Logs e evidências preservados em
+`/home/d4nl/.cache/bengine-validation/fpp-memory-20261029/validation/`:
+`fpp-crash-gdb.log`, `fpp-crash-layout.log`, `fpp-fixed-layout.log`,
+`fpp-out-clean-build.log`, `fpp-out-tests.log`, `fpp-out-startup-fixed.log`,
+`fpp-out-startup-result.json`, `fpp-asan-runtime.log` e `fpp-asan-foundations.log`.
