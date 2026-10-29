@@ -30,7 +30,6 @@
 namespace editor::ui {
 namespace {
 
-constexpr const char* ui_configuration_path = "editor-ui.cfg";
 constexpr const char* recent_projects_path = "editor-recent-projects.cfg";
 
 void remember_project(const std::string& path) {
@@ -267,17 +266,16 @@ editor_ui::editor_ui(
             menu.add_button("Layout: Standard", [this]() { apply_layout(false); });
             menu.add_button("Layout: Wide Scene", [this]() { apply_layout(true); });
             menu.add_button("Reset UI", [this]() {
-                reset_ui_scale();
-                apply_layout(false);
+                reset_ui();
             });
-            menu.add_button("Save Layout", [ui_persistence_ptr]() {
+            menu.add_button("Save Layout", [this, ui_persistence_ptr]() {
                 std::string error;
-                const bool success = ui_persistence_ptr->save(ui_configuration_path, error);
+                const bool success = ui_persistence_ptr->save((std::filesystem::absolute(m_project_path).parent_path() / ".editor-ui.cfg").string(), error);
                 report_result("Saving UI", success, error);
             });
-            menu.add_button("Load Layout", [ui_persistence_ptr]() {
+            menu.add_button("Load Layout", [this, ui_persistence_ptr]() {
                 std::string error;
-                const bool success = ui_persistence_ptr->load(ui_configuration_path, error);
+                const bool success = ui_persistence_ptr->load((std::filesystem::absolute(m_project_path).parent_path() / ".editor-ui.cfg").string(), error);
                 report_result("Loading UI", success, error);
             });
         }
@@ -1202,6 +1200,11 @@ void editor_ui::set_editor_context(std::shared_ptr<editor_context> context) {
     m_context = std::move(context);
 }
 
+void editor_ui::reset_ui() {
+    reset_ui_scale();
+    apply_layout(false);
+}
+
 void editor_ui::apply_layout(bool wide) {
     auto configuration = m_dock.get_configuration();
     configuration.splits.clear();
@@ -1221,6 +1224,8 @@ void editor_ui::apply_layout(bool wide) {
             window.area = bgui::dock_area::bottom;
         else if (window.title == "Inspector" || window.title == "Editor Diagnostics")
             window.area = bgui::dock_area::right;
+        else
+            window.area = bgui::dock_area::center;
     }
     configuration.tab_groups.push_back({"Arquivos", "Arquivos", {"Arquivos", "Debug"}});
     m_dock.apply_configuration(configuration);

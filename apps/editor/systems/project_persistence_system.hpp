@@ -28,7 +28,6 @@ public:
     void set_entity_names(entity_name_map* entity_names);
     const std::array<float, 3>& global_gravity() const noexcept;
     void set_global_gravity(const std::array<float, 3>& gravity) noexcept;
-    const std::filesystem::path& get_repository_root(const std::string& project_path) const;
 
     bool save(const std::string& path, std::string& error) const;
     bool load(const std::string& path, std::string& error) const;

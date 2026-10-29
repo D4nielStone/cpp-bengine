@@ -68,6 +68,7 @@ public:
     }
 
     void update();
+    void reset_ui();
 
 private:
     bgui::dock& m_dock;

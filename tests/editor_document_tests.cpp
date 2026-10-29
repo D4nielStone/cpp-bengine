@@ -110,3 +110,72 @@ TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
         return text.get_buffer() == "Nenhum log Lua.";
     }), nullptr);
 }
+
+TEST(EditorDocuments, SessionRestoresOpenFilesDirtyBuffersAndScale) {
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("bengine-session-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directory(directory);
+    struct cleanup {
+        std::filesystem::path path;
+        ~cleanup() { std::error_code error; std::filesystem::remove_all(path, error); }
+    } cleanup{directory};
+    const auto source = directory / "file with spaces.lua";
+    const auto session = directory / "session.cfg";
+    { std::ofstream(source) << "original"; }
+    {
+        bgui::scoped_interface interface;
+        bgui::get_context().m_input_map.clear();
+        bgui::get_context().m_size = {900, 600};
+        auto& dock = bgui::get_layout().add<bgui::dock>();
+        editor::ui::files_view files(directory);
+        files.build(dock);
+        auto* button = find<bgui::button>(dock, [&](auto& value) {
+            return find<bgui::text>(value, [&](auto& label) { return label.get_buffer() == source.filename().string(); });
+        });
+        ASSERT_NE(button, nullptr);
+        button->on_released();
+        bgui::on_update();
+        auto* editor = find<editor::ui::lua_inputbox>(dock, [](auto&) { return true; });
+        ASSERT_NE(editor, nullptr);
+        editor->set_buffer("changed\nprint(\"quoted\")");
+        bgui::set_global_scale(1.3f);
+        auto configuration = dock.get_configuration();
+        configuration.left_ratio = .35f;
+        configuration.windows.front().floating = true;
+        configuration.windows.front().rect = {40, 50, 420, 280};
+        dock.apply_configuration(configuration);
+        ASSERT_TRUE(files.save_session(session));
+        ASSERT_TRUE(bgui::save_configuration((directory / "layout.cfg").string()));
+        ASSERT_TRUE(files.save_session(session)); // Replacing an existing session must work too.
+    }
+    {
+        bgui::scoped_interface interface;
+        bgui::get_context().m_input_map.clear();
+        bgui::get_context().m_size = {900, 600};
+        bgui::set_global_scale(1.f);
+        auto& dock = bgui::get_layout().add<bgui::dock>();
+        editor::ui::files_view files(directory);
+        files.build(dock);
+        files.restore_session(session);
+        auto* editor = find<editor::ui::lua_inputbox>(dock, [](auto&) { return true; });
+        ASSERT_NE(editor, nullptr);
+        EXPECT_EQ(editor->get_buffer(), "changed\nprint(\"quoted\")");
+        EXPECT_FLOAT_EQ(bgui::get_global_scale(), 1.3f);
+        ASSERT_TRUE(bgui::load_configuration((directory / "layout.cfg").string()));
+        EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .35f);
+        const auto restored = dock.get_configuration();
+        const auto floating = std::find_if(restored.windows.begin(), restored.windows.end(),
+            [](const auto& window) { return window.title == "Arquivos"; });
+        ASSERT_NE(floating, restored.windows.end());
+        EXPECT_TRUE(floating->floating);
+        EXPECT_NE(find<bgui::window>(dock, [](auto& value) {
+            return value.get_title().get_buffer() == "file with spaces.lua*";
+        }), nullptr);
+        files.set_project_file(directory / "other.bengine");
+        EXPECT_EQ(find<editor::ui::lua_inputbox>(dock, [](auto&) { return true; }), nullptr);
+        std::filesystem::remove(source);
+        files.restore_session(session); // Missing files are ignored.
+        EXPECT_EQ(find<editor::ui::lua_inputbox>(dock, [](auto&) { return true; }), nullptr);
+        bgui::set_global_scale(1.f);
+    }
+}

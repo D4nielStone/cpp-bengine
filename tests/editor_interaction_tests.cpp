@@ -456,7 +456,7 @@ TEST_F(EditorInteractionTest, InspectorComponentsAreIndependentTreesAndAddButton
         return item.label().get_buffer() == "Transform";
     });
     auto* add = find_element<bgui::button>(dock, [](auto& item) {
-        return item.get_label().get_buffer() == "+ Add Component";
+        return item.get_label().get_buffer() == "Add Component";
     });
     ASSERT_NE(transform, nullptr);
     ASSERT_NE(add, nullptr);

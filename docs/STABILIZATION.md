@@ -415,3 +415,42 @@ encontrado). Os testes desta etapa e o teste Lua do FPP passaram. Log completo:
 `/tmp/orbit-clean-final.log`. Revisão visual/manual da navegação e compilação
 Windows não executadas nesta etapa. O aviso preexistente de retorno ausente em
 `get_repository_root` permanece fora do escopo.
+
+## Debug, propriedades Lua e luz direcional — 2026-10-28
+
+| Item | Status / evidência | Alteração e testes | Limites / riscos |
+|---|---|---|---|
+| Fundo do Debug | CONFIRMADO: teste `DebugSharesFilesTabAndDisplaysScriptHistory` falhou na ausência da classe de superfície escura. | Janela e conteúdo usam `editor-surface`, já definido no tema escuro. O teste cobre histórico, grupo de abas e botão Limpar (processando a fila de callbacks BGUI). Integração local de logs previamente em andamento foi preservada. | Cor validada pela configuração do tema/classe; revisão visual com GPU pendente. |
+| Erros ao iniciar o jogo | CONFIRMADO: `SyntaxAndSetupErrorsAppearAtGameStart` registrava erro de sintaxe, mas falhava para erro dentro de `setup()`. O resultado protegido da função Lua era descartado. | `code::setup()` e `code::update()` verificam o resultado e encaminham `sol::error` ao sistema de logs existente. Testes cobrem sintaxe, setup, update, desativação após falha e transporte de registros completos/multilinha entre runtime/editor. | Transporte testado por arquivo sem executar janela do runtime; revisão visual do fluxo Play e Windows pendentes. |
+| Direção da luz baseada no Transform | CONFIRMADO: teste de pai rotacionado falhou quando o cálculo retornava a direção local, como o render anterior. | `get_world_direction()` compõe rotações Rx·Ry·Rz do objeto e ancestrais. Render usa o resultado tanto na luz global quanto na luz da câmera. Dois testes cobrem hierarquia, múltiplos eixos, posição, escala não uniforme/zero e preservação da direção local/magnitude. | Decisão do usuário: girar a direção configurada, sem substituí-la por eixo frontal. Posição e escala não afetam a direção. Validação dos pixels iluminados pendente. |
+| Propriedades modificáveis por Lua | CONFIRMADO: `ComponentPropertiesAreWritable` falhou ao atribuir massa ao Rigidbody. | GetComponent e propriedades para Camera, DirectionalLight, PointLight; Rigidbody com massa, atrito, restituição, velocidade e métodos de força/fatores; Renderer mantém enabled e aceita visible. Teste verifica alterações nos componentes e no corpo Bullet; autocomplete e documentação atualizados. | Mantidas APIs existentes. Vetores do Transform continuam sendo cópias e exigem atribuição do vetor completo; recursos GPU/modelos não são ponteiros editáveis por Lua. |
+| Espaço extra no rodapé do texto | CONFIRMADO: teste de limite inferior do inputbox falhou antes da correção. A linha de status vazia reservava altura/padding. | Linha de status só fica habilitada quando há mensagem; `DockTabsPreserveBuffersAndSaveWithShortcut` verifica o editor ocupando o conteúdo até a borda inferior. | Mensagens reais, como confirmação de salvamento, continuam ocupando a linha de status. Sem alteração na BGUI. |
+
+Validação final do build limpo e CTest será registrada após a conclusão.
+Alterações locais alheias a esta etapa, incluindo cenas FPP e navegação da Scene,
+foram preservadas. O teste FPP acompanha a mudança local já existente de sinal do
+movimento/yaw; o script não foi alterado nesta etapa.
+
+## Persistência da interface e Reset UI — 2026-10-28
+
+| Item | Status / evidência | Alteração e testes | Limites / riscos |
+|---|---|---|---|
+| Restaurar a interface ao reabrir | CONFIRMADO por leitura: havia somente Save/Load Layout manuais, sem chamada no início/fim do editor e sem registro dos documentos abertos. | Layout em `.editor-ui.cfg` e sessão em `.editor-session.cfg`, na pasta do projeto. Recria documentos antes de restaurar docking, divisões, abas ativas e janelas flutuantes. Guarda diretório do navegador, zoom e rascunhos de texto, sem sobrescrever arquivos de origem. Salva também antes da troca de projeto. `SessionRestoresOpenFilesDirtyBuffersAndScale` cobre reabertura, rascunho multilinha, nomes com espaços, zoom, layout flutuante, substituição da sessão e arquivo removido. | Encerramento abrupto não salva a sessão; arquivos removidos são ignorados. Estado da janela nativa do sistema operacional e posição do cursor não fazem parte desta implementação. |
+| View > Reset UI | CONFIRMADO por leitura: ação ausente. | Restaura layout Standard e zoom 100%, preservando documentos e seus buffers. Save/Load Layout manuais usam o mesmo arquivo por projeto. `ResetUiRestoresStandardLayoutAndScaleWithoutClosingDocuments` cobre layout, zoom e preservação das janelas. | Revisão visual/manual e Windows pendentes. |
+
+Validação: compilação limpa de editor/runtime concluída em `build/ui-session-clean`
+pelo script do CI. Resultado final: **134/135 entradas CTest aprovadas**, incluindo
+os dois testes novos e os testes existentes de documentos/menus. A única falha é
+`InspectorComponentsAreIndependentTreesAndAddButtonIsLast`: procura o rótulo
+`+ Add Component`, enquanto a alteração local do Inspector usa `Add Component`.
+Nenhum desses dois trechos foi alterado nesta tarefa. Logs em
+`/tmp/bengine-ui-session-build.log` e `/tmp/bengine-ui-session-ctest.log`.
+Windows e revisão visual/manual não foram executados. Não foi criado commit:
+o índice já continha alterações simultâneas de outras tarefas nos mesmos arquivos;
+foi preservado para não incluir trabalho alheio.
+
+### Busca de objetos por nome em Lua
+
+| Item | Status / evidência | Alteração e testes | Limites / decisões |
+|---|---|---|---|
+| `GameObject.Find("nome")` | CONFIRMADO: `FindAcceptsObjectNamesAndKeepsNumericLookup` falhou com argumento string porque a função aceitava apenas ID numérico. | Overload por nome; metadados de nomes no ECS carregados junto à cena, preservados no save sem contexto de editor e removidos ao destruir entidade. Testes cobrem nome exato, distinção entre nome numérico e ID, ausência, duplicação, remoção/reuso de ID, metadados órfãos, uso do Transform encontrado, carregamento no runtime, busca durante setup e rollback em load inválido. | Decisão explícita do usuário: nomes duplicados retornam `nil`. Comparação diferencia maiúsculas/minúsculas e nome vazio retorna `nil`. Usa nomes atribuídos/salvos na cena; rótulos automáticos de exibição do editor não são nomes de busca. API por ID preservada. |

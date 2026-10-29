@@ -96,12 +96,19 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
             return sol::make_object(state, sol::nil);
         });
     const std::weak_ptr<ecs> weak_registry = registry;
-    lua["GameObject"]["Find"] = [weak_registry](std::uint32_t entity_id)
-        -> sol::optional<game_object> {
-        auto owner = weak_registry.lock();
-        if (!owner || !owner->is_alive(entity_id)) return sol::nullopt;
-        return game_object{owner, entity_id};
-    };
+    lua["GameObject"]["Find"] = sol::overload(
+        [weak_registry](std::uint32_t entity_id) -> sol::optional<game_object> {
+            auto owner = weak_registry.lock();
+            if (!owner || !owner->is_alive(entity_id)) return sol::nullopt;
+            return game_object{owner, entity_id};
+        },
+        [weak_registry](const std::string& name) -> sol::optional<game_object> {
+            auto owner = weak_registry.lock();
+            if (!owner) return sol::nullopt;
+            const auto found = owner->find_by_name(name);
+            if (!found) return sol::nullopt;
+            return game_object{owner, *found};
+        });
     lua["gameObject"] = game_object{registry, id};
     lua["transform"] = registry ? registry->get<transform>(id) : nullptr;
     auto bubble = lua["bubble"].get<sol::table>();

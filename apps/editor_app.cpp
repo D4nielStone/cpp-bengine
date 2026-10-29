@@ -523,7 +523,7 @@ int main(int argc, char** argv) {
 
     editor.set_project_loaded_callback(
         [&entities_panel, &components_panel, &files_panel, &ui_persistence,
-         &ui_state_root, &session_path, &layout_path, editor_context](
+         &ui_state_root, &session_path, &layout_path, &editor, editor_context](
             const std::string& loaded_project_path
         ) {
         editor_context->clear_history();
@@ -537,6 +537,7 @@ int main(int argc, char** argv) {
         if (!ui_persistence.save(layout_path.string(), error))
             std::cerr << "[editor] " << error << '\n';
         files_panel.set_project_file(loaded_project_path);
+        editor.reset_ui();
         ui_state_root = std::filesystem::absolute(loaded_project_path).parent_path();
         session_path = ui_state_root / ".editor-session.cfg";
         layout_path = ui_state_root / ".editor-ui.cfg";

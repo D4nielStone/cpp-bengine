@@ -23,8 +23,11 @@ end
   `"DirectionalLight"` e `"PointLight"`. Outros nomes retornam `nil`.
   `Destroy(body)` remove um Rigidbody do ECS; o sistema de física sincroniza
   a remoção na próxima atualização.
-- `GameObject.Find(id)`: procura por ID numérico e retorna um objeto ou `nil`.
-  A busca por nome ainda não está disponível.
+- `GameObject.Find(id)` ou `GameObject.Find("nome")`: procura por ID numérico
+  ou nome salvo na cena e retorna um objeto ou `nil`. Nomes são exatos e
+  diferenciam maiúsculas/minúsculas. Nome vazio, inexistente ou duplicado retorna
+  `nil`; objetos removidos não participam da busca. `Find("42")` busca o nome
+  "42", enquanto `Find(42)` busca o ID 42.
 - `Vector3(x, y, z)` / `Vector3()`: vetor com campos `x`, `y`, `z`.
 - Transform: `position` e `eulerAngles` em coordenadas globais;
   `localPosition`, `localEulerAngles` e `localScale` em coordenadas locais.

@@ -5,6 +5,8 @@
 #include <deque>
 #include <memory>
 #include <functional>
+#include <optional>
+#include <string>
 #include "commons_namespace.hpp"
 #include "entities/entity.hpp"
 
@@ -28,7 +30,10 @@ namespace COMMONS_NS {
 	    /// Armazena components da entity associada
 	    std::map<uint32_t, std::unordered_map<component::mask, std::shared_ptr<component>>> entities;
 
-	    bool is_alive(const uint32_t id) const noexcept;
+        // Scene names are also kept by the runtime, which has no editor context.
+        std::unordered_map<uint32_t, std::string> entity_names;
+        std::optional<uint32_t> find_by_name(const std::string& name) const;
+        bool is_alive(const uint32_t id) const noexcept;
 	    bool validate_invariants() const noexcept;
 
 	    /* Cria new entity */

@@ -203,3 +203,20 @@ TEST(EditorPreferencesTest, EveryNavigationValueRejectsNonFiniteAndOutOfRangeVal
         *field = previous;
     }
 }
+
+TEST_F(EditorMenuTest, ResetUiRestoresStandardLayoutAndScaleWithoutClosingDocuments) {
+    dock.add_window("Scene", bgui::dock_area::left);
+    dock.add_window("open.lua", bgui::dock_area::right);
+    click("Layout: Wide Scene");
+    click("Zoom In     Ctrl +");
+    click("Reset UI");
+    const auto configuration = dock.get_configuration();
+    EXPECT_FLOAT_EQ(bgui::get_global_scale(), 1.f);
+    EXPECT_FLOAT_EQ(configuration.left_ratio, .24f);
+    EXPECT_FLOAT_EQ(configuration.right_ratio, .24f);
+    ASSERT_EQ(configuration.windows.size(), 2u);
+    for (const auto& window : configuration.windows) {
+        EXPECT_FALSE(window.floating);
+        if (window.title == "Scene") EXPECT_EQ(window.area, bgui::dock_area::center);
+    }
+}

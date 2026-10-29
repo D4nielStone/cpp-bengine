@@ -256,6 +256,13 @@
             "locked": false,
             "name": "ArenaFloor",
             "components": {
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
                 "renderer": {
                     "model": "assets/models/floor.obj",
                     "materials": [
@@ -279,13 +286,6 @@
                         }
                     ],
                     "visible": true
-                },
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [
@@ -311,6 +311,13 @@
             "locked": false,
             "name": "NorthWall",
             "components": {
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
                 "renderer": {
                     "model": "assets/models/wall.obj",
                     "materials": [
@@ -334,13 +341,6 @@
                         }
                     ],
                     "visible": true
-                },
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [
@@ -369,6 +369,13 @@
                 "code": {
                     "directory": "scripts/fpp_game.lua"
                 },
+                "physics": {
+                    "shape": "sphere",
+                    "static": false,
+                    "mass": 1.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
                 "renderer": {
                     "model": "assets/models/pickup.obj",
                     "materials": [
@@ -392,13 +399,6 @@
                         }
                     ],
                     "visible": true
-                },
-                "physics": {
-                    "shape": "sphere",
-                    "static": false,
-                    "mass": 1.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [
@@ -424,6 +424,13 @@
             "locked": false,
             "name": "WestWall",
             "components": {
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
                 "renderer": {
                     "model": "assets/models/wall.obj",
                     "materials": [
@@ -447,13 +454,6 @@
                         }
                     ],
                     "visible": true
-                },
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [
@@ -479,6 +479,13 @@
             "locked": false,
             "name": "EastWall",
             "components": {
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
                 "renderer": {
                     "model": "assets/models/wall.obj",
                     "materials": [
@@ -502,13 +509,6 @@
                         }
                     ],
                     "visible": true
-                },
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [

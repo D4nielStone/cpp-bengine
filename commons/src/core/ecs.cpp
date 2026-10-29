@@ -70,4 +70,16 @@ void ecs::remove(const uint32_t& ent)
     }
     mascaras.erase(ent);
     live_entities.erase(ent);
+    entity_names.erase(ent);
+}
+
+std::optional<uint32_t> ecs::find_by_name(const std::string& name) const {
+    if (name.empty()) return std::nullopt;
+    std::optional<uint32_t> found;
+    for (const auto& [id, candidate] : entity_names) {
+        if (candidate != name || !is_alive(id)) continue;
+        if (found) return std::nullopt;
+        found = id;
+    }
+    return found;
 }

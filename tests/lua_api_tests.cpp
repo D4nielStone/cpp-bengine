@@ -368,3 +368,42 @@ TEST(LuaApi, DirectionalLightUsesRotationOnlyAndKeepsLocalMagnitude) {
     light.reg.reset();
     EXPECT_EQ(light.get_world_direction(), light.direction);
 }
+
+
+TEST(LuaApi, FindAcceptsObjectNamesAndKeepsNumericLookup) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create(42);
+    registry->entity_names[entity.id] = "Player";
+    registry->entity_names[9999] = "Player"; // Stale metadata is not a live match.
+    auto numeric_name = registry->create(50);
+    registry->entity_names[numeric_name.id] = "42";
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUnityApi(lua, registry, entity.id);
+    auto result = lua.safe_script(R"(
+        assert(GameObject.Find('Player').id == 42)
+        assert(GameObject.Find(42).id == 42)
+        assert(GameObject.Find('42').id == 50)
+        assert(GameObject.Find('Missing') == nil)
+        assert(GameObject.Find('player') == nil)
+        assert(GameObject.Find('') == nil)
+        GameObject.Find('Player').transform.localPosition = Vector3(1, 2, 3)
+    )", sol::script_pass_on_error);
+    ASSERT_TRUE(result.valid()) << sol::error(result).what();
+    EXPECT_FLOAT_EQ(registry->get<commons::transform>(42)->get_position().y, 2.f);
+    auto duplicate = registry->create(43);
+    registry->entity_names[duplicate.id] = "Player";
+    EXPECT_NO_THROW(lua.script("assert(GameObject.Find('Player') == nil)"));
+    registry->remove(duplicate.id);
+    EXPECT_NO_THROW(lua.script("assert(GameObject.Find('Player').id == 42)"));
+    registry->remove(entity.id);
+    registry->create(42);
+    EXPECT_NO_THROW(lua.script("assert(GameObject.Find('Player') == nil)"));
+    registry->remove(42);
+    registry->remove(50);
+    lua["transform"] = sol::nil;
+    registry.reset();
+    EXPECT_NO_THROW(lua.script("assert(GameObject.Find('42') == nil)"));
+}

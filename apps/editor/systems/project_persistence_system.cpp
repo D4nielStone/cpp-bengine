@@ -500,9 +500,6 @@ void project_persistence_system::set_global_gravity(
     m_global_gravity = gravity;
 }
 
-const std::filesystem::path& project_persistence_system::get_repository_root(const std::string& project_path) const {
-    // Implementation for getting repository root
-}
 
 bool project_persistence_system::save(
     const std::string& path,
@@ -626,9 +623,10 @@ bool project_persistence_system::serialize_project(
         if (transform && transform->parent_id)
             entity.AddMember("parent", transform->parent_id, allocator);
 
-        if (m_entity_names) {
-            const auto name_it = m_entity_names->find(id);
-            if (name_it != m_entity_names->end() && !name_it->second.empty()) {
+        {
+            const auto& names = m_entity_names ? *m_entity_names : m_registry->entity_names;
+            const auto name_it = names.find(id);
+            if (name_it != names.end() && !name_it->second.empty()) {
                 rapidjson::Value name_value;
                 name_value.SetString(name_it->second.c_str(), static_cast<rapidjson::SizeType>(name_it->second.size()), allocator);
                 entity.AddMember("name", name_value, allocator);
@@ -977,6 +975,8 @@ bool project_persistence_system::load(
         staged_entities.emplace(id, staged_registry->create(id));
     }
 
+    staged_registry->entity_names = staged_entity_names;
+
     // Build every local transform and parent link before loading scripts. Script
     // setup callbacks can then safely read their own and their parent's pose.
     for (const auto& entity_data : (*scene_data)["entities"].GetArray()) {
@@ -1060,6 +1060,7 @@ bool project_persistence_system::load(
     staged_registry_copy->entities = staged_registry->entities;
     staged_registry_copy->mascaras = staged_registry->mascaras;
     staged_registry_copy->live_entities = staged_registry->live_entities;
+    staged_registry_copy->entity_names = staged_registry->entity_names;
     for (auto& [id, components] : staged_registry_copy->entities) {
         for (auto& [mask, component] : components) {
             (void)mask;
@@ -1078,6 +1079,7 @@ bool project_persistence_system::load(
     m_registry->entities = std::move(staged_registry_copy->entities);
     m_registry->mascaras = std::move(staged_registry_copy->mascaras);
     m_registry->live_entities = std::move(staged_registry_copy->live_entities);
+    m_registry->entity_names = std::move(staged_registry_copy->entity_names);
     if (staged_editor_camera_transform)
         active_transform->analyze(*staged_editor_camera_transform);
     active_transform->parent_id = 0;

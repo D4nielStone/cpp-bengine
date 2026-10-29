@@ -4,6 +4,8 @@
 #include "components/camera.hpp"
 #include "components/point_light.hpp"
 #include "components/transform.hpp"
+#include "components/code.hpp"
+#include "systems/code_system.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <fstream>
@@ -352,4 +354,37 @@ TEST_F(PersistenceTransactionTest, JournalCannotRestoreAnUnrelatedFile) {
     EXPECT_TRUE(std::filesystem::exists(files::journal_path(project)));
 }
 
+}
+
+TEST_F(PersistenceTransactionTest, RuntimeLoadsAndResavesNamesWithoutEditorContext) {
+    auto runtime_registry = std::make_shared<commons::ecs>();
+    auto camera_entity = runtime_registry->create(17);
+    runtime_registry->add<commons::camera>(camera_entity);
+    Persistence runtime{runtime_registry, 17};
+    ASSERT_TRUE(runtime.load(project.string(), error)) << error;
+    ASSERT_EQ(runtime_registry->find_by_name("Original"), std::optional<std::uint32_t>{23});
+    EXPECT_FALSE(runtime_registry->find_by_name("Missing"));
+    const auto script_path = directory / "lookup.lua";
+    std::ofstream(script_path) << R"(function setup()
+        local object = GameObject.Find('Original')
+        assert(object ~= nil and object.id == 23)
+        object.transform.localPosition = Vector3(7, 8, 9)
+        found_at_startup = true
+    end)";
+    auto script_entity = runtime_registry->create(24);
+    runtime_registry->add<commons::code>(script_entity, script_path.string());
+    commons::code_system scripts;
+    scripts.setup(runtime_registry);
+    EXPECT_TRUE(runtime_registry->get<commons::code>(24)->estado_lua["found_at_startup"].get_or(false));
+    EXPECT_FLOAT_EQ(runtime_registry->get<commons::transform>(23)->get_position().x, 7.f);
+    const auto invalid = directory / "invalid-names.scene";
+    std::ofstream(invalid) << R"({"format":"bubble-engine-scene","version":1,"entities":[
+      {"id":24,"name":"Replacement","parent":17,"components":{"transform":{"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}}
+    ]})";
+    EXPECT_FALSE(runtime.load(invalid.string(), error));
+    EXPECT_EQ(runtime_registry->find_by_name("Original"), std::optional<std::uint32_t>{23});
+    EXPECT_FALSE(runtime_registry->find_by_name("Replacement"));
+    ASSERT_TRUE(runtime.save(project.string(), error)) << error;
+    EXPECT_NE(read(scene).find("Original"), std::string::npos);
+    EXPECT_TRUE(runtime_registry->validate_invariants());
 }
