@@ -83,8 +83,8 @@ public:
         m_camera->getViewMatrix();
         m_camera->obtProjectionMatrix();
         const auto ray = m_camera->point_to_ray({
-            static_cast<float>(mouse.x - x),
-            static_cast<float>(mouse.y - y)
+            static_cast<float>(mouse.x - x) * m_camera->viewportFBO.x / width,
+            static_cast<float>(mouse.y - y) * m_camera->viewportFBO.y / height
         });
         const glm::vec3 origin{ray.origem.x, ray.origem.y, ray.origem.z};
         const glm::vec3 direction{

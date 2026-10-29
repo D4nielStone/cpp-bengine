@@ -164,3 +164,12 @@ target_include_directories(editor_persistence_transaction_tests PRIVATE
 )
 target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(editor_persistence_transaction_tests)
+
+# Native window delivery is kept separate from the GPU-free asset workflow tests.
+add_executable(window_file_drop_tests window_file_drop_tests.cpp)
+target_link_libraries(window_file_drop_tests PRIVATE GTest::gtest_main commons)
+target_include_directories(window_file_drop_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
+)
+gtest_discover_tests(window_file_drop_tests)

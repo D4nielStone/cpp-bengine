@@ -454,3 +454,27 @@ foi preservado para não incluir trabalho alheio.
 | Item | Status / evidência | Alteração e testes | Limites / decisões |
 |---|---|---|---|
 | `GameObject.Find("nome")` | CONFIRMADO: `FindAcceptsObjectNamesAndKeepsNumericLookup` falhou com argumento string porque a função aceitava apenas ID numérico. | Overload por nome; metadados de nomes no ECS carregados junto à cena, preservados no save sem contexto de editor e removidos ao destruir entidade. Testes cobrem nome exato, distinção entre nome numérico e ID, ausência, duplicação, remoção/reuso de ID, metadados órfãos, uso do Transform encontrado, carregamento no runtime, busca durante setup e rollback em load inválido. | Decisão explícita do usuário: nomes duplicados retornam `nil`. Comparação diferencia maiúsculas/minúsculas e nome vazio retorna `nil`. Usa nomes atribuídos/salvos na cena; rótulos automáticos de exibição do editor não são nomes de busca. API por ID preservada. |
+
+
+## Importação por arrasto no editor (2026-10-29)
+
+| Item | Status e evidência | Mudança e testes | Limites e revisão |
+|---|---|---|---|
+| Arquivos externos no painel Arquivos | CONFIRMADO: `window` não registrava `glfwSetDropCallback`; o teste `ExternalFilesAreCopiedWithoutOverwritingAndAppearInBrowser` inicialmente não compilou pela ausência de `import_file`. | Entrega nativa em fila, cópia para `assets/`, seleção/atualização do painel, nomes com sufixo sem sobrescrever arquivos e reutilização de arquivos já presentes no projeto. Testes verificam conteúdo original/copiado, arquivo ausente e entrega de caminhos UTF-8/coordenadas. | Diretórios não são importados. A cópia para o projeto permanece após desfazer uma alteração da cena. |
+| Aviso “Arraste aqui” | PARCIAL quanto às plataformas: faltava feedback para arrasto externo. | Camada escura semitransparente, texto centralizado e sem captura de entrada; desaparece ao sair/soltar e durante execução/modal. Detecção externa por X11 e OLE no Windows; arrastos internos usam o mesmo aviso. Testes isolados de estado, emissão de desenho e leitura real do framebuffer. | Windows/OLE não compilado nem executado neste host. Wayland/macOS recebem a soltura por GLFW, mas ainda não têm notificação antecipada para o aviso externo. Arrasto real a partir de gerenciadores de arquivos distintos exige revisão manual. |
+| Modelos, imagens e scripts sob o cursor | CONFIRMADO por leitura: o modelo era criado na origem; imagem só tinha alvos no Inspector; script na cena vazia podia atingir a seleção anterior. | Modelo segue o raio do cursor até o chão `y=0`; se não houver interseção à frente, usa distância de 5 unidades no raio. Imagem muda o albedo dos materiais somente do objeto atingido, com desfazer/refazer. Script usa o objeto sob o cursor ou a linha da hierarquia, com compilação sem execução e caminho relativo ao projeto. Testes de projeção, limites do painel, imagem/alvo/bloqueio e script importado com desfazer/refazer. | Mantidos os formatos de imagem existentes: PNG no Linux; formatos WIC no Windows. Soltar uma imagem em área vazia somente importa o arquivo. |
+| Portabilidade dos materiais de modelos importados | CONFIRMADO: `ImportedModelUsesCopiedNestedTextures` falhou procurando `assets/color.png` em vez de `assets/model/textures/color.png`. | Importação acompanha `.mtl`, `.bin` e texturas externas descobertas pelo Assimp, preservando referências relativas e separando colisões em pastas próprias. `model::load_texture` conserva subpastas relativas ao modelo. Testes removem a origem e verificam leitura pelo Assimp e carregamento do modelo com OpenGL. | Referências absolutas são recusadas com mensagem para evitar dependência silenciosa da origem. Formatos/recursos não suportados pelo carregador existente, incluindo texturas embutidas, não foram ampliados. |
+| Alvo do arrasto durante redimensionamento | CONFIRMADO: `SceneDropFindsTheVisibleEntityWithoutChangingSelection` falhou ao usar framebuffer de 800×800 para painel de 200×200. | Conversão do cursor para o tamanho efetivo do framebuffer antes do raycast; o teste cobre entidade visível, bloqueada, oculta e ausência de mudança da seleção ao consultar o alvo. | Sem mudança da API de seleção ou da arquitetura de renderização. |
+
+Validação: build novo de editor/runtime em `/tmp/cpp-bengine-file-drop-20261029`
+e **151/151 entradas CTest passaram**, incluindo os testes OpenGL sem skips.
+Comandos derivados do CMake/CI: `cmake -S . -B /tmp/cpp-bengine-file-drop-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON`,
+`cmake --build /tmp/cpp-bengine-file-drop-20261029 --config Release --parallel 1`,
+`ctest --test-dir /tmp/cpp-bengine-file-drop-20261029 --output-on-failure -C Release`.
+A configuração de gerador único não define `CMAKE_BUILD_TYPE`, como o helper atual da CI;
+`--config Release` não implica otimização Release nesse gerador.
+Logs: `/tmp/bengine-file-drop-clean.log`, `/tmp/bengine-file-drop-final-build.log`
+e `/tmp/bengine-file-drop-final-tests.log`. O teste gráfico inicialmente revelou
+que o layout raiz reduzia o aviso a 15×15; a camada agora solicita explicitamente
+toda a área da janela e o teste verifica dimensão, escurecimento e remoção.
+As alterações locais preexistentes em iluminação, Inspector, Lua e projeto FPP foram preservadas.

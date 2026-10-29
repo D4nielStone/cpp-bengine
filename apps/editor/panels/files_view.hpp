@@ -1,6 +1,8 @@
 #pragma once
 
 #include "panel.hpp"
+#include "../systems/asset_import.hpp"
+#include "../systems/asset_drag_state.hpp"
 #include "../systems/script_tools.hpp"
 #include "../systems/project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
@@ -47,6 +49,19 @@ public:
 
     static bool supports_model(const std::filesystem::path& path) {
         return is_model_file(path);
+    }
+
+    static bool supports_image(const std::filesystem::path& path) {
+        return is_image_file(path);
+    }
+
+    std::filesystem::path import_file(const std::filesystem::path& source) {
+        const auto imported = import_asset(source, m_project_root, supports_model(source));
+        m_current_directory = imported.parent_path();
+        m_expanded_directories.insert(m_current_directory);
+        m_selected_file = imported;
+        request_refresh();
+        return imported;
     }
 
     explicit files_view(std::filesystem::path project_file, drop_callback on_drop = {})
@@ -217,6 +232,7 @@ private:
               m_on_drop(std::move(on_drop)) {}
 
         void on_pressed() override {
+            asset_drag_active = false;
             m_dragged = false;
             m_drag_distance = 0;
             bgui::button::on_pressed();
@@ -227,11 +243,14 @@ private:
             if (!m_on_drop)
                 return;
             m_drag_distance += std::abs(delta.x) + std::abs(delta.y);
-            if (m_drag_distance >= 5)
+            if (m_drag_distance >= 5) {
                 m_dragged = true;
+                asset_drag_active = true;
+            }
         }
 
         void on_released() override {
+            asset_drag_active = false;
             if (!m_dragged) {
                 bgui::button::on_released();
                 return;

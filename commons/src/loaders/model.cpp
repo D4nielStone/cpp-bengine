@@ -2,6 +2,7 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 #include "debugging/debug.hpp"
@@ -242,7 +243,9 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
         aiString str;
         mat->GetTexture(type, 0, &str);
 
-        tex.path = std::filesystem::path(directory).parent_path().string() + "/" + std::filesystem::path(str.C_Str()).filename().string();
+        auto reference = std::string(str.C_Str());
+        std::replace(reference.begin(), reference.end(), '\\', '/');
+        tex.path = (std::filesystem::path(directory) / reference).lexically_normal().string();
     }
     return tex;
 }

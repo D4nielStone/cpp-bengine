@@ -77,3 +77,14 @@ target_link_libraries(commons
         ${ASSIMP_LIBRARIES}
         ${LUA_LIBRARIES}
 )
+
+# Native hover notifications complement GLFW's portable file-drop callback.
+if(WIN32)
+    target_link_libraries(commons PRIVATE ole32 shell32 uuid)
+elseif(UNIX AND NOT APPLE)
+    find_package(X11 QUIET)
+    if(X11_FOUND)
+        target_compile_definitions(commons PRIVATE BENGINE_X11_FILE_DRAG)
+        target_link_libraries(commons PRIVATE X11::X11)
+    endif()
+endif()

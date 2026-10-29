@@ -14,6 +14,8 @@
 #include "editor/systems/project_creation_system.hpp"
 #include "editor/systems/project_preview.hpp"
 #include "editor/panels/files_view.hpp"
+#include "editor/panels/asset_drop_overlay.hpp"
+#include "editor/systems/scene_asset_drop.hpp"
 #include "editor/panels/debug_view.hpp"
 #include "editor/panels/scene_view.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
@@ -384,65 +386,89 @@ int main(int argc, char** argv) {
         editor_context
     );
     editor::ui::files_view* asset_browser = nullptr;
-    auto& files_panel = editor.add_panel<editor::ui::files_view>(
-        project_path,
-        [&scene, editor_context, &entities_panel, &components_panel, &asset_browser](
+    auto drop_asset = [&scene, camera, editor_context, &entities_panel, &components_panel, &asset_browser](
             const std::filesystem::path& asset,
             const bgui::vec2i& mouse_position
         ) {
             if (editor_context->is_playing || editor::ui::viewport_input_blocked_by_modal()) return;
-            if (editor::ui::is_lua_script(asset)) {
-                auto target = entities_panel.entity_at(mouse_position);
-                if (!target && scene.is_open()) {
-                    if (editor::ui::viewport_contains_drop(&scene.image(), mouse_position)) {
-                        target = scene.entity_at(mouse_position);
-                        if (!target) target = editor_context->selected_entity;
+            try {
+                if (editor::ui::is_lua_script(asset)) {
+                    auto target = entities_panel.entity_at(mouse_position);
+                    if (!target && scene.is_open()) {
+                        if (editor::ui::viewport_contains_drop(&scene.image(), mouse_position)) {
+                            target = scene.entity_at(mouse_position);
+                        }
                     }
+                    if (target) {
+                        std::string error;
+                        if (editor::ui::attach_lua_script(editor_context, *target, asset, error)) {
+                            editor_context->selected_entity = target;
+                            components_panel.refresh();
+                            if (asset_browser) asset_browser->set_asset_status("Script associado à entidade.");
+                        } else if (asset_browser) asset_browser->set_asset_status(error);
+                    } else if (!components_panel.drop_asset(asset, mouse_position) && asset_browser) {
+                        asset_browser->set_asset_status("Solte o script sobre um objeto na cena ou na lista de entidades.");
+                    }
+                    return;
                 }
-                if (target) {
+                if (editor::ui::files_view::supports_image(asset) && scene.is_open() &&
+                    editor::ui::viewport_contains_drop(&scene.image(), mouse_position)) {
+                    const auto target = scene.entity_at(mouse_position);
                     std::string error;
-                    if (editor::ui::attach_lua_script(editor_context, *target, asset, error)) {
+                    if (target && editor::ui::apply_dropped_albedo(editor_context, *target, asset, error)) {
                         editor_context->selected_entity = target;
                         components_panel.refresh();
-                        if (asset_browser) asset_browser->set_asset_status("Script associado à entidade.");
-                    } else if (asset_browser) asset_browser->set_asset_status(error);
-                } else if (!components_panel.drop_asset(asset, mouse_position) && asset_browser) {
-                    asset_browser->set_asset_status("Solte sobre uma entidade, ou selecione uma antes de soltar na Scene.");
+                        if (asset_browser) asset_browser->set_asset_status("Textura aplicada ao objeto.");
+                    } else if (asset_browser) {
+                        asset_browser->set_asset_status(error.empty() ? "Solte a imagem sobre um objeto." : error);
+                    }
+                    return;
                 }
-                return;
+                if (components_panel.drop_asset(asset, mouse_position))
+                    return;
+                if (!editor::ui::files_view::supports_model(asset))
+                    return;
+                if (!scene.is_open())
+                    return;
+
+                if (!editor::ui::viewport_contains_drop(&scene.image(), mouse_position))
+                    return;
+
+                const auto position = editor::ui::scene_drop_position(*camera, scene.image(), mouse_position);
+                if (!position) return;
+                auto model = std::make_unique<commons::model>(asset.string());
+                if (model->meshes.empty()) {
+                    if (asset_browser) asset_browser->set_asset_status("O arquivo não contém um modelo 3D válido.");
+                    return;
+                }
+                auto entity = editor_context->registry->create();
+                editor_context->registry->add<commons::renderer>(entity, model.release());
+                editor_context->registry->get<commons::transform>(entity.id)->set_position(*position);
+                editor_context->entity_names[entity.id] = asset.stem().string();
+                editor_context->record_entity_creation(entity.id);
+                editor_context->selected_entity = entity.id;
+                entities_panel.refresh();
+                components_panel.refresh();
+                if (asset_browser) asset_browser->set_asset_status("Modelo adicionado à cena.");
+            } catch (const std::exception& error) {
+                if (asset_browser) asset_browser->set_asset_status(error.what());
             }
-            if (components_panel.drop_asset(asset, mouse_position))
-                return;
-            if (!editor::ui::files_view::supports_model(asset))
-                return;
-            if (!scene.is_open())
-                return;
-
-            if (!editor::ui::viewport_contains_drop(&scene.image(), mouse_position))
-                return;
-
-            auto model_path = asset.string();
-            std::error_code error;
-            const auto current_directory = std::filesystem::current_path(error);
-            const auto relative_path = error
-                ? std::filesystem::path{}
-                : asset.lexically_relative(current_directory);
-            if (!relative_path.empty())
-                model_path = relative_path.string();
-
-            auto entity = editor_context->registry->create();
-            editor_context->registry->add<commons::renderer>(
-                entity,
-                model_path.c_str()
-            );
-            editor_context->entity_names[entity.id] = asset.stem().string();
-            editor_context->record_entity_creation(entity.id);
-            editor_context->selected_entity = entity.id;
-            entities_panel.refresh();
-            components_panel.refresh();
-        }
-    );
+        };
+    auto& files_panel = editor.add_panel<editor::ui::files_view>(project_path, drop_asset);
     asset_browser = &files_panel;
+    window.set_file_drop_callback([&files_panel, drop_asset, editor_context](const auto& paths, int x, int y) {
+        if (editor_context->is_playing || editor::ui::viewport_input_blocked_by_modal()) return;
+        for (const auto& path : paths) {
+            try {
+                const auto imported = files_panel.import_file(path);
+                files_panel.set_asset_status("Arquivo importado: " + imported.filename().string());
+                drop_asset(imported, {x, y});
+            } catch (const std::exception& error) {
+                files_panel.set_asset_status(error.what());
+            }
+        }
+    });
+    bgui::get_layout().add<editor::ui::asset_drop_overlay, bgui::layer::overlay>([&window]() { return window.file_drag_hovered(); }, editor_context);
     editor.add_panel<editor::ui::debug_view>();
     auto render_system = window.add<commons::render_system>();
     auto& runtime_tools_panel =
@@ -555,6 +581,7 @@ int main(int argc, char** argv) {
     bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(editor_context);
 
     window.loop();
+    window.set_file_drop_callback({});
 
     if (!files_panel.save_session(session_path))
         std::cerr << "[editor] Could not save open documents.\n";

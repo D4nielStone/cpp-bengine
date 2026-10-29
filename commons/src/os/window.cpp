@@ -1,4 +1,5 @@
 #include "os/window.hpp"
+#include "file_drop_bridge.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -90,6 +91,7 @@ namespace {
 window::window(const std::string& title, const int width, const int height)
     : m_ecs(std::make_shared<ecs>()) {
     m_window = bgui::set_up_glfw(width, height, title.c_str());
+    glfwSetWindowUserPointer(m_window, this);
     bgui::style_manager::get_instance().apply_theme(editor_theme());
 
     try {
@@ -105,6 +107,7 @@ window::window(const std::string& title, const int width, const int height)
 }
 
 window::~window() {
+    set_file_drop_callback({});
     bgui::get_context().m_refresh_func = {};
     m_systems.clear();
     m_interface.reset();
@@ -136,6 +139,11 @@ void window::refresh() {
     if (!m_window || glfwWindowShouldClose(m_window)) {
         return;
     }
+
+    auto drops = std::move(m_pending_drops);
+    m_pending_drops.clear();
+    for (const auto& drop : drops)
+        if (m_file_drop_callback) m_file_drop_callback(drop.paths, drop.x, drop.y);
 
     m_time.calculateDT();
 
@@ -219,4 +227,33 @@ void window::loop() {
 
     refresh_callback = previous_callback;
     m_looping = false;
+}
+
+void window::set_file_drop_callback(file_drop_callback callback) {
+    m_file_drop_bridge.reset();
+    m_file_drop_callback = std::move(callback);
+    m_pending_drops.clear();
+    if (!m_window) return;
+    glfwSetDropCallback(m_window, m_file_drop_callback ? drop_callback : nullptr);
+    if (m_file_drop_callback)
+        m_file_drop_bridge = detail::make_file_drop_bridge(m_window,
+            [this](std::vector<std::filesystem::path> paths, int x, int y) {
+                m_pending_drops.push_back({std::move(paths), x, y});
+            });
+}
+
+bool window::file_drag_hovered() const {
+    return m_file_drop_callback && m_file_drop_bridge && m_file_drop_bridge->hovered();
+}
+
+void window::drop_callback(GLFWwindow* native_window, int count, const char** paths) {
+    auto* instance = static_cast<window*>(glfwGetWindowUserPointer(native_window));
+    if (!instance || !instance->m_file_drop_callback) return;
+    pending_drop drop;
+    double x{}, y{};
+    glfwGetCursorPos(native_window, &x, &y);
+    drop.x = static_cast<int>(x);
+    drop.y = static_cast<int>(y);
+    for (int i = 0; i < count; ++i) drop.paths.push_back(std::filesystem::path(reinterpret_cast<const char8_t*>(paths[i])));
+    instance->m_pending_drops.push_back(std::move(drop));
 }
