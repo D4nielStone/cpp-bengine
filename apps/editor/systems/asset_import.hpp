@@ -28,16 +28,8 @@ public:
     }
 };
 
-inline std::filesystem::path import_asset(const std::filesystem::path& requested,
-    const std::filesystem::path& project, bool model) {
+inline std::set<std::filesystem::path> asset_dependencies(const std::filesystem::path& source, bool model) {
     namespace fs = std::filesystem;
-    const auto source = fs::canonical(requested);
-    const auto root = fs::canonical(project);
-    if (!fs::is_regular_file(source))
-        throw fs::filesystem_error("Solte um arquivo", source,
-            std::make_error_code(std::errc::invalid_argument));
-    if (path_inside(source, root)) return source;
-
     std::set<fs::path> files{source};
     if (model) {
         Assimp::Importer importer;
@@ -69,7 +61,24 @@ inline std::filesystem::path import_asset(const std::filesystem::path& requested
         }
     }
 
-    const auto assets = root / "assets";
+    return files;
+}
+
+inline std::filesystem::path import_asset(const std::filesystem::path& requested,
+    const std::filesystem::path& project, bool model, const std::filesystem::path& destination_folder = {}) {
+    namespace fs = std::filesystem;
+    const auto source = fs::canonical(requested);
+    const auto root = fs::canonical(project);
+    if (!fs::is_regular_file(source))
+        throw fs::filesystem_error("Solte um arquivo", source,
+            std::make_error_code(std::errc::invalid_argument));
+    if (path_inside(source, root)) return source;
+
+    const auto files = asset_dependencies(source, model);
+
+    const auto assets = destination_folder.empty() ? root / "assets" : fs::canonical(destination_folder);
+    if (!path_inside(assets, root))
+        throw std::runtime_error("Escolha uma pasta dentro do projeto.");
     fs::create_directories(assets);
     if (!path_inside(fs::canonical(assets), root))
         throw std::runtime_error("A pasta assets precisa estar dentro do projeto.");

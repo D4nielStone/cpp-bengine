@@ -49,6 +49,10 @@ namespace COMMONS_NS {
         void load_model(const std::string& path);
         std::string getDiretorio() const;
         const std::string& get_source_path() const noexcept { return source_path; }
+        void relocate_source_path(const std::filesystem::path& path) {
+            source_path = path.string();
+            directory = path.parent_path().string();
+        }
         std::vector<mesh> meshes;
 
         void process_node(aiNode* node, const aiScene* scene);

@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include "files_view.hpp"
 #include "scene_asset_drop.hpp"
+#include "scene_asset_paths.hpp"
 #include "asset_drop_overlay.hpp"
 #include "entities_view.hpp"
 #include "entity_picking_system.hpp"
@@ -322,4 +323,209 @@ TEST_F(EditorAssetWorkflowTest, ImportedScriptAttachesToTargetAndKeepsAProjectRe
     EXPECT_FALSE(registry->get<commons::code>(target.id));
     EXPECT_TRUE(context->redo());
     EXPECT_TRUE(registry->get<commons::code>(target.id));
+}
+
+TEST_F(EditorAssetWorkflowTest, AnyFileCanBeMovedByDroppingItOnAFolder) {
+    std::filesystem::create_directory(folder / "destination");
+    std::ofstream(folder / "notes.txt") << "notes";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+    bgui::on_update();
+    auto* destination = find<bgui::tree>(dock, [](auto& tree) { return tree.label().get_buffer() == "destination"; });
+    auto* source = find<bgui::button>(dock, [](auto& button) {
+        return find<bgui::text>(button, [](auto& text) { return text.get_buffer() == "notes.txt"; });
+    });
+    ASSERT_NE(destination, nullptr); ASSERT_NE(source, nullptr);
+    const auto rect = destination->header().processed_rect();
+    bgui::get_context().m_mouse_position = {rect.x + rect.z / 2, rect.y + rect.w / 2};
+    source->on_pressed();
+    source->set_drag({8, 1});
+    source->on_released();
+    bgui::on_update();
+    EXPECT_FALSE(std::filesystem::exists(folder / "notes.txt"));
+    EXPECT_TRUE(std::filesystem::exists(folder / "destination/notes.txt"));
+}
+
+TEST_F(EditorAssetWorkflowTest, DeletingAFileRequiresAnExplicitConfirmationAndSupportsCancel) {
+    const auto file = folder / "notes.txt";
+    std::ofstream(file) << "preserve until confirmed";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+    auto select = [&]() {
+        auto* item = find<bgui::button>(dock, [](auto& button) {
+            return find<bgui::text>(button, [](auto& text) { return text.get_buffer() == "notes.txt"; });
+        });
+        ASSERT_NE(item, nullptr);
+        item->on_released();
+        bgui::on_update();
+    };
+    select();
+    auto* remove = find<bgui::button>(dock, [](auto& button) { return button.has_class("delete-file-button"); });
+    ASSERT_NE(remove, nullptr);
+    remove->on_released();
+    bgui::on_update();
+    EXPECT_TRUE(std::filesystem::exists(file));
+    auto* cancel = find<bgui::button>(bgui::get_layout(), [](auto& button) { return button.has_class("cancel-file-delete"); });
+    ASSERT_NE(cancel, nullptr);
+    cancel->on_released();
+    bgui::on_update();
+    EXPECT_TRUE(std::filesystem::exists(file));
+    remove = find<bgui::button>(dock, [](auto& button) { return button.has_class("delete-file-button"); });
+    ASSERT_NE(remove, nullptr);
+    remove->on_released();
+    bgui::on_update();
+    auto* confirm = find<bgui::button>(bgui::get_layout(), [](auto& button) { return button.has_class("modal-confirm"); });
+    ASSERT_NE(confirm, nullptr);
+    confirm->on_released();
+    bgui::on_update();
+    EXPECT_FALSE(std::filesystem::exists(file));
+    EXPECT_EQ(find<bgui::window>(dock, [](auto& window) { return window.get_title().get_buffer() == "notes.txt"; }), nullptr);
+}
+
+TEST_F(EditorAssetWorkflowTest, MovingAnOpenDirtyDocumentPreservesItsBufferAndSavesToTheNewPath) {
+    std::filesystem::create_directory(folder / "scripts");
+    std::ofstream(folder / "notes.txt") << "original";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+    auto* item = find<bgui::button>(dock, [](auto& button) {
+        return find<bgui::text>(button, [](auto& text) { return text.get_buffer() == "notes.txt"; });
+    });
+    ASSERT_NE(item, nullptr);
+    item->on_released();
+    bgui::on_update();
+    auto* window = find<bgui::window>(dock, [](auto& window) { return window.get_title().get_buffer() == "notes.txt"; });
+    ASSERT_NE(window, nullptr);
+    auto* input = find<bgui::inputbox>(*window, [](auto&) { return true; });
+    ASSERT_NE(input, nullptr);
+    input->set_buffer("unsaved changes");
+    const auto moved = files.move_file(folder / "notes.txt", folder / "scripts");
+    EXPECT_EQ(moved, folder / "scripts/notes.txt");
+    EXPECT_EQ(input->get_buffer(), "unsaved changes");
+    EXPECT_EQ(window->get_title().get_buffer(), "notes.txt*");
+    input->set_focused(true);
+    auto& io = bgui::get_context();
+    io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::s] = bgui::input_action::press;
+    files.update();
+    io.m_input_map.clear();
+    EXPECT_EQ(editor::ui::project_files::read(moved), "unsaved changes");
+    EXPECT_FALSE(std::filesystem::exists(folder / "notes.txt"));
+}
+
+TEST_F(EditorAssetWorkflowTest, FileMovesRejectCollisionsOutsideFoldersAndPlayMode) {
+    std::filesystem::create_directory(folder / "destination");
+    std::ofstream(folder / "notes.txt") << "source";
+    std::ofstream(folder / "destination/notes.txt") << "destination";
+    editor::ui::files_view files(folder);
+    EXPECT_THROW(files.move_file(folder / "notes.txt", folder / "destination"), std::runtime_error);
+    EXPECT_EQ(editor::ui::project_files::read(folder / "notes.txt"), "source");
+    EXPECT_EQ(editor::ui::project_files::read(folder / "destination/notes.txt"), "destination");
+    EXPECT_THROW(files.move_file(folder / "notes.txt", folder.parent_path()), std::runtime_error);
+    EXPECT_EQ(files.move_file(folder / "notes.txt", folder), folder / "notes.txt");
+    files.set_file_operation_guard([]() { return false; });
+    EXPECT_THROW(files.move_file(folder / "notes.txt", folder / "destination"), std::runtime_error);
+    std::ofstream(folder / "project.bengine") << "{}";
+    EXPECT_THROW(editor::ui::asset_files::erase(folder / "project.bengine", folder), std::runtime_error);
+    EXPECT_TRUE(std::filesystem::exists(folder / "project.bengine"));
+}
+
+TEST_F(EditorAssetWorkflowTest, MovingScriptAndTextureUpdatesLiveAndSavedScenePaths) {
+    std::filesystem::create_directory(folder / "destination");
+    std::ofstream(folder / "Move.lua") << "function update() end";
+    write_test_png(folder / "color.png");
+    std::ofstream(folder / "main.scene") << R"({"name":"Move.lua","components":{"code":{"directory":"Move.lua","scripts":["Move.lua"]},"renderer":{"materials":[{"maps":{"tex_albedo":"color.png"}}]}}})";
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = folder;
+    auto entity = registry->create();
+    std::string error;
+    ASSERT_TRUE(editor::ui::attach_lua_script(context, entity.id, folder / "Move.lua", error));
+    registry->add<commons::renderer>(entity, new commons::model());
+    auto* model = registry->get<commons::renderer>(entity.id)->m_modelo;
+    commons::material material;
+    material.set_texture("tex_albedo", commons::texture{0, (folder / "color.png").string()});
+    model->meshes.emplace_back(std::vector<commons::vertex>{}, std::vector<unsigned>{}, material);
+    editor::ui::files_view files(folder);
+    files.set_file_moved_callback([context](const auto& from, const auto& to) { editor::ui::relocate_scene_asset(context, from, to); });
+    const auto script = files.move_file(folder / "Move.lua", folder / "destination");
+    EXPECT_EQ(registry->get<commons::code>(entity.id)->arquivoCompleto, script.string());
+    EXPECT_EQ(registry->get<commons::code>(entity.id)->file, "destination/Move.lua");
+    const auto image = files.move_file(folder / "color.png", folder / "destination");
+    EXPECT_EQ(model->meshes[0].getMaterial().getTextura("tex_albedo").path, image.string());
+    rapidjson::Document scene;
+    scene.Parse(editor::ui::project_files::read(folder / "main.scene").c_str());
+    ASSERT_FALSE(scene.HasParseError());
+    EXPECT_STREQ(scene["name"].GetString(), "Move.lua");
+    EXPECT_STREQ(scene["components"]["code"]["directory"].GetString(), "destination/Move.lua");
+    EXPECT_STREQ(scene["components"]["code"]["scripts"][0].GetString(), "destination/Move.lua");
+    EXPECT_STREQ(scene["components"]["renderer"]["materials"][0]["maps"]["tex_albedo"].GetString(), "destination/color.png");
+}
+
+TEST_F(EditorAssetWorkflowTest, MovingAModelCarriesItsDependenciesAndCanMoveBack) {
+    std::filesystem::create_directories(folder / "source/textures");
+    std::filesystem::create_directory(folder / "destination");
+    const auto source = folder / "source/model.obj";
+    std::ofstream(source) << "mtllib model.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl test\nf 1 2 3\n";
+    std::ofstream(folder / "source/model.mtl") << "newmtl test\nmap_Kd textures/color.png\n";
+    write_test_png(folder / "source/textures/color.png");
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = folder;
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, new commons::model());
+    auto* model = registry->get<commons::renderer>(entity.id)->m_modelo;
+    model->relocate_source_path(source);
+    commons::material material;
+    material.set_texture("tex_albedo", commons::texture{0, (folder / "source/textures/color.png").string()});
+    model->meshes.emplace_back(std::vector<commons::vertex>{}, std::vector<unsigned>{}, material);
+    editor::ui::files_view files(folder);
+    files.set_file_moved_callback([context](const auto& from, const auto& to) { editor::ui::relocate_scene_asset(context, from, to); });
+    const auto moved = files.move_file(source, folder / "destination");
+    EXPECT_FALSE(std::filesystem::exists(source));
+    EXPECT_TRUE(std::filesystem::exists(folder / "destination/model.mtl"));
+    EXPECT_TRUE(std::filesystem::exists(folder / "destination/textures/color.png"));
+    EXPECT_EQ(model->get_source_path(), moved.string());
+    EXPECT_EQ(model->meshes[0].getMaterial().getTextura("tex_albedo").path, (folder / "destination/textures/color.png").string());
+    EXPECT_EQ(files.move_file(moved, folder / "source"), source);
+    EXPECT_TRUE(std::filesystem::exists(source));
+}
+
+TEST_F(EditorAssetWorkflowTest, MovingTheMainSceneUpdatesProjectAndMarker) {
+    std::filesystem::create_directory(folder / "scenes");
+    std::ofstream(folder / "main.scene") << "{\"entities\":[]}";
+    std::ofstream(folder / "project.bengine") << "{\"scene\":\"main.scene\"}";
+    editor::ui::files_view files(folder);
+    files.move_file(folder / "main.scene", folder / "scenes");
+    rapidjson::Document project;
+    project.Parse(editor::ui::project_files::read(folder / "project.bengine").c_str());
+    ASSERT_FALSE(project.HasParseError());
+    EXPECT_STREQ(project["scene"].GetString(), "scenes/main.scene");
+    EXPECT_EQ(editor::ui::project_files::read(folder / ".bengine-main-scene"), "scenes/main.scene\n");
+}
+
+TEST_F(EditorAssetWorkflowTest, FailedReferenceStagingLeavesTheFileAndBlockingDirectoryUntouched) {
+    std::filesystem::create_directory(folder / "destination");
+    std::ofstream(folder / "Move.lua") << "function update() end";
+    std::ofstream(folder / "main.scene") << "{\"directory\":\"Move.lua\"}";
+    std::filesystem::create_directory(folder / "main.scene.tmp");
+    editor::ui::files_view files(folder);
+    EXPECT_THROW(files.move_file(folder / "Move.lua", folder / "destination"), std::runtime_error);
+    EXPECT_TRUE(std::filesystem::exists(folder / "Move.lua"));
+    EXPECT_FALSE(std::filesystem::exists(folder / "destination/Move.lua"));
+    EXPECT_TRUE(std::filesystem::is_directory(folder / "main.scene.tmp"));
+    EXPECT_EQ(editor::ui::project_files::read(folder / "main.scene"), "{\"directory\":\"Move.lua\"}");
+}
+
+TEST_F(EditorAssetWorkflowTest, ExternalFilesCanBeCopiedDirectlyIntoAProjectFolder) {
+    std::filesystem::create_directories(folder / "project/destination");
+    std::ofstream(folder / "notes.txt") << "source";
+    editor::ui::files_view files(folder / "project");
+    const auto imported = files.import_file(folder / "notes.txt", folder / "project/destination");
+    EXPECT_EQ(imported, folder / "project/destination/notes.txt");
+    EXPECT_EQ(editor::ui::project_files::read(imported), "source");
+    EXPECT_TRUE(std::filesystem::exists(folder / "notes.txt"));
+    EXPECT_THROW(files.import_file(folder / "notes.txt", folder), std::runtime_error);
 }

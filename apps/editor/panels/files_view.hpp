@@ -2,6 +2,8 @@
 
 #include "panel.hpp"
 #include "../systems/asset_import.hpp"
+#include "../systems/asset_file_operations.hpp"
+#include "../systems/viewport_input_state.hpp"
 #include "../systems/asset_drag_state.hpp"
 #include "../systems/script_tools.hpp"
 #include "../systems/project_file_transaction.hpp"
@@ -10,6 +12,7 @@
 #include <bgui.hpp>
 #include <elem/button.hpp>
 #include <elem/image.hpp>
+#include <elem/modal.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/text.hpp>
 #include <elem/tree.hpp>
@@ -55,13 +58,76 @@ public:
         return is_image_file(path);
     }
 
-    std::filesystem::path import_file(const std::filesystem::path& source) {
-        const auto imported = import_asset(source, m_project_root, supports_model(source));
+    std::filesystem::path import_file(const std::filesystem::path& source,
+        const std::filesystem::path& directory = {}) {
+        const auto imported = import_asset(source, m_project_root, supports_model(source), directory);
         m_current_directory = imported.parent_path();
         m_expanded_directories.insert(m_current_directory);
         m_selected_file = imported;
         request_refresh();
         return imported;
+    }
+
+    using file_moved_callback = std::function<void(const std::filesystem::path&, const std::filesystem::path&)>;
+    void set_file_moved_callback(file_moved_callback callback) { m_on_file_moved = std::move(callback); }
+    void set_file_operation_guard(std::function<bool()> guard) { m_can_modify_files = std::move(guard); }
+
+    std::filesystem::path move_file(const std::filesystem::path& requested, const std::filesystem::path& directory) {
+        if (m_can_modify_files && !m_can_modify_files())
+            throw std::runtime_error("Pare a execução antes de mover arquivos.");
+        update_document_editor();
+        const auto source = asset_files::editable_file(requested, m_project_root);
+        const auto target = std::filesystem::canonical(directory) / source.filename();
+        if (source == target) return source;
+        if (m_documents.contains(target))
+            throw std::runtime_error("Feche o documento aberto no caminho de destino antes de mover o arquivo.");
+        // Validate dirty scene documents before touching the filesystem.
+        for (const auto& [path, doc] : m_documents) {
+            if (!asset_files::scene_document(path)) continue;
+            (void)asset_files::rewrite_document(doc.original, m_project_root, source, target);
+            (void)asset_files::rewrite_document(doc.buffer, m_project_root, source, target);
+        }
+        const auto moved = asset_files::move(source, directory, m_project_root, supports_model(source));
+        for (auto& [path, doc] : m_documents) {
+            if (!asset_files::scene_document(path)) continue;
+            doc.original = asset_files::rewrite_document(doc.original, m_project_root, source, moved);
+            doc.buffer = asset_files::rewrite_document(doc.buffer, m_project_root, source, moved);
+            if (doc.editor) doc.editor->set_buffer(doc.buffer);
+        }
+        if (auto node = m_documents.extract(source); !node.empty()) {
+            auto* document = &node.mapped();
+            document->path = moved;
+            node.key() = moved;
+            m_documents.insert(std::move(node));
+        }
+        if (m_main_scene == source) m_main_scene = moved;
+        if (m_on_file_moved) m_on_file_moved(source, moved);
+        m_current_directory = moved.parent_path();
+        m_expanded_directories.insert(m_current_directory);
+        m_selected_file = moved;
+        m_asset_status = "Arquivo movido para " + moved.lexically_relative(m_project_root).generic_string();
+        update_document_editor();
+        request_refresh();
+        return moved;
+    }
+
+    std::optional<std::filesystem::path> folder_at(const bgui::vec2i& position) const {
+        if (viewport_input_blocked_by_modal()) return std::nullopt;
+        for (const auto& [bounds, directory] : m_folder_targets) {
+            bool visible = true;
+            for (auto* element = bounds; element; element = element->get_parent()) {
+                if (!element->is_enabled()) { visible = false; break; }
+                if (auto* layout = element->as_layout(); layout && layout->clips_children()) {
+                    const auto clip = layout->get_children_clip_rect();
+                    if (position.x < clip.x || position.x >= clip.x + clip.z ||
+                        position.y < clip.y || position.y >= clip.y + clip.w) { visible = false; break; }
+                }
+            }
+            const auto rect = bounds->processed_rect();
+            if (visible && position.x >= rect.x && position.x < rect.x + rect.z &&
+                position.y >= rect.y && position.y < rect.y + rect.w) return directory;
+        }
+        return std::nullopt;
     }
 
     explicit files_view(std::filesystem::path project_file, drop_callback on_drop = {})
@@ -70,6 +136,10 @@ public:
           m_current_directory(m_project_root) {
         m_expanded_directories.insert(m_project_root);
         load_main_scene();
+    }
+
+    ~files_view() override {
+        if (m_delete_modal) bgui::get_layout().remove(m_delete_modal);
     }
 
     files_view(const files_view&) = delete;
@@ -134,6 +204,7 @@ public:
     }
 
     void set_project_file(const std::filesystem::path& project_file) {
+        if (m_delete_modal) { bgui::get_layout().remove(m_delete_modal); m_delete_modal = nullptr; }
         for (auto& [path, doc] : m_documents)
             if (doc.window && m_dock) m_dock->remove_window(doc.window);
         m_documents.clear();
@@ -269,6 +340,10 @@ private:
 
     std::filesystem::path m_project_root;
     drop_callback m_on_drop;
+    file_moved_callback m_on_file_moved;
+    std::function<bool()> m_can_modify_files;
+    bgui::modal* m_delete_modal{nullptr};
+    std::vector<std::pair<bgui::element*, std::filesystem::path>> m_folder_targets;
     std::string m_asset_status;
     std::string m_new_script_name{"NewScript.lua"};
     std::filesystem::path m_current_directory;
@@ -758,6 +833,7 @@ private:
             return;
 
         m_refresh_requested = false;
+        m_folder_targets.clear();
         clear_layout(*m_folder_sidebar);
         clear_layout(*m_file_area);
         build_folder_tree(m_project_root, 0);
@@ -786,6 +862,7 @@ private:
         const bool expanded = m_expanded_directories.contains(directory);
         auto& node = parent.add<bgui::tree>(directory_label(directory), 0.27f, expanded);
         node.set_icon(directory == m_project_root ? "home" : "folder", 0.24f);
+        m_folder_targets.emplace_back(&node.header(), directory);
         node.header().set_function([this, directory]() {
             m_current_directory = directory;
             m_selected_file.clear();
@@ -852,6 +929,11 @@ private:
         filename.m_enter_func = [create](const std::string&) { create(); };
         filename.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
         create_row.add<bgui::button>("Novo script Lua", 0.27f, create).add_class("new-script-button");
+        if (!m_selected_file.empty()) {
+            create_row.add<bgui::button>("Excluir arquivo", .27f, [this, file = m_selected_file]() {
+                bgui::add_function([this, file]() { confirm_file_delete(file); });
+            }).add_class("delete-file-button");
+        }
         if (!m_asset_status.empty()) add_message(m_asset_status);
 
         if (!m_selected_file.empty() && is_scene_file(m_selected_file)) {
@@ -871,7 +953,7 @@ private:
         }
 
         std::error_code error;
-        std::vector<std::filesystem::path> files;
+        std::vector<std::filesystem::path> files, folders;
         for (std::filesystem::directory_iterator it(m_current_directory, error), end;
              !error && it != end; it.increment(error)) {
             const auto filename = it->path().filename().string();
@@ -883,6 +965,8 @@ private:
             type_error.clear();
             if (it->is_regular_file(type_error) && !type_error)
                 files.push_back(it->path());
+            else if (!type_error && it->is_directory(type_error) && !type_error)
+                folders.push_back(it->path());
         }
 
         if (error) {
@@ -890,8 +974,23 @@ private:
             return;
         }
 
+        std::sort(folders.begin(), folders.end());
+        for (const auto& directory : folders) {
+            auto& item = m_file_area->add<bgui::button>("", .28f, [this, directory]() {
+                m_current_directory = directory;
+                m_selected_file.clear();
+                request_refresh();
+            });
+            item.add_class("file-folder-target");
+            item.get_label().set_enable(false);
+            item.add<bgui::icon>("folder", .27f).receives_input(false);
+            item.add<bgui::text>(directory.filename().string(), .28f).receives_input(false);
+            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+            item.style.layout.padding = bgui::vec4i{5, 3, 5, 3};
+            m_folder_targets.emplace_back(&item, directory);
+        }
         std::sort(files.begin(), files.end());
-        if (files.empty()) {
+        if (files.empty() && folders.empty()) {
             add_message("Esta pasta não contém arquivos.");
             return;
         }
@@ -904,12 +1003,16 @@ private:
                     open_document(file);
                     request_refresh();
                 },
-                (is_model_file(file) || is_image_file(file) || is_lua_script(file))
-                    ? [this, file](const bgui::vec2i& position) {
-                          if (m_on_drop)
-                              m_on_drop(file, position);
-                      }
-                    : std::function<void(const bgui::vec2i&)>{}
+                [this, file](const bgui::vec2i& position) {
+                    if (const auto directory = folder_at(position)) {
+                        bgui::add_function([this, file, directory = *directory]() {
+                            try { move_file(file, directory); }
+                            catch (const std::exception& error) { set_asset_status(error.what()); }
+                        });
+                    } else if (m_on_drop && (is_model_file(file) || is_image_file(file) || is_lua_script(file))) {
+                        m_on_drop(file, position);
+                    }
+                }
             );
             item.get_label().set_enable(false);
             auto& icon = item.add<bgui::icon>(file_icon(file), 0.27f);
@@ -945,6 +1048,46 @@ private:
                 bgui::color{0.22f, 0.24f, 0.27f, 1.f};
             item.style.visual.border_radius = 3.f;
         }
+    }
+
+    void confirm_file_delete(const std::filesystem::path& file) {
+        if (m_delete_modal) return;
+        if (m_can_modify_files && !m_can_modify_files()) {
+            set_asset_status("Pare a execução antes de excluir arquivos.");
+            return;
+        }
+        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+        m_delete_modal = &modal;
+        modal.add<bgui::text>("Excluir definitivamente “" + file.lexically_relative(m_project_root).generic_string() + "”?", .32f);
+        modal.add<bgui::text>("Esta ação não pode ser desfeita. Alterações não salvas serão descartadas. Referências ao arquivo poderão ficar ausentes.", .27f);
+        modal.set_confirmation_text("Excluir definitivamente");
+        modal.set_on_confirm([this, file]() {
+            m_delete_modal = nullptr;
+            try {
+                if (m_can_modify_files && !m_can_modify_files())
+                    throw std::runtime_error("Pare a execução antes de excluir arquivos.");
+                asset_files::erase(file, m_project_root);
+                if (auto found = m_documents.find(file); found != m_documents.end()) {
+                    auto& doc = found->second;
+                    if (m_active_document == &doc) m_active_document = nullptr;
+                    if (m_document_window == doc.window) {
+                        m_document_window = nullptr;
+                        m_document_body = nullptr;
+                        m_document_status = nullptr;
+                    }
+                    if (doc.window && m_dock) m_dock->remove_window(doc.window);
+                    m_documents.erase(found);
+                    m_active_content.clear();
+                }
+                if (m_main_scene == file) m_main_scene.clear();
+                m_selected_file.clear();
+                set_asset_status("Arquivo excluído definitivamente.");
+            } catch (const std::exception& error) { set_asset_status(error.what()); }
+        });
+        modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
+            m_delete_modal = nullptr;
+            bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
+        }).add_class("cancel-file-delete");
     }
 
     void add_message(const std::string& message) {

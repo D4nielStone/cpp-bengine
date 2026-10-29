@@ -513,3 +513,31 @@ Como no helper da CI, o gerador único não recebeu `CMAKE_BUILD_TYPE`;
 Windows, sanitizadores, pacote relocável, outros drivers e revisão interativa
 não foram validados. Alterações locais anteriores foram preservadas e ficam fora
 do commit desta fase; a execução completa reflete o estado atual compartilhado.
+
+
+## Files view — mover e excluir arquivos (2026-10-29)
+
+Continuação da importação por arrasto: exclusão definitiva somente após confirmação,
+conforme escolha explícita do usuário. Escopo limitado ao navegador de arquivos;
+nenhuma reavaliação das demais hipóteses de estabilização.
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Arrastar arquivos para pastas | CONFIRMADO: `AnyFileCanBeMovedByDroppingItOnAFolder` falhou antes da implementação: o arquivo de texto permanecia na origem. | Arrasto de qualquer tipo de arquivo para pastas da árvore lateral ou da lista; importação externa também aceita a pasta sob o cursor. Testes de movimento, importação direcionada, colisões, destino externo e bloqueio durante execução. | Não move diretórios inteiros. Colisões recusadas; operações restritas ao projeto. |
+| Excluir com confirmação | CONFIRMADO: `DeletingAFileRequiresAnExplicitConfirmationAndSupportsCancel` falhou antes: não havia botão de exclusão. | Selecionar arquivo mostra “Excluir arquivo”; modal permite cancelar ou “Excluir definitivamente”. Teste verifica cancelamento, arquivo presente enquanto não confirmado e remoção somente após confirmar. | Arquivo do projeto e configuração oculta protegidos. Exclusão permanente não remove entidades nem corrige referências ausentes; o aviso informa esse efeito e o descarte de alterações não salvas. Salvar novamente uma cena ainda carregada pode recriar seu arquivo. |
+| Documentos e referências após movimento | CONFIRMADO pelos testes `MovingAnOpenDirtyDocumentPreservesItsBufferAndSavesToTheNewPath`, `MovingScriptAndTextureUpdatesLiveAndSavedScenePaths`, `MovingTheMainSceneUpdatesProjectAndMarker`. | Documento aberto conserva buffer e passa a salvar no destino; atualização dos caminhos registrados de scripts, modelos e texturas na cena ativa e nos JSONs de cena/projeto, incluindo marcador de cena principal. | Caminhos literais em código Lua e formatos externos, como MTL/glTF, não são reescritos ao mover uma dependência isolada. Histórico de edições anterior ao movimento pode restaurar caminhos antigos; movimentos/exclusões não são ações de Undo/Redo da cena. |
+| Dependências e falhas de gravação | CONFIRMADO pelos testes `MovingAModelCarriesItsDependenciesAndCanMoveBack` e `FailedReferenceStagingLeavesTheFileAndBlockingDirectoryUntouched`. | Modelos carregam cópias das dependências para o destino preservando referências relativas; originais ficam disponíveis para outros modelos. Dependência idêntica pode ser reutilizada; conteúdo diferente é recusado. Referências são preparadas antes de renomear; falhas tentam restaurar alterações. | Não há garantia transacional contra encerramento abrupto/queda de energia nem se a própria restauração falhar. Pastas vazias criadas para dependências podem permanecer após erro. |
+
+Validação desta fase: **build limpo de editor/runtime concluído; 185/185 entradas CTest passaram**, sem skips, incluindo os testes OpenGL. Os **20/20 testes do fluxo de arquivos também passaram sem display** (`env -u DISPLAY -u WAYLAND_DISPLAY /tmp/cpp-bengine-files-management-20261029/tests/editor_asset_workflow_tests`).
+Comandos derivados do CMake/CI:
+
+```sh
+cmake -S . -B /tmp/cpp-bengine-files-management-20261029 -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON
+cmake --build /tmp/cpp-bengine-files-management-20261029 --config Release --parallel 1
+ctest --test-dir /tmp/cpp-bengine-files-management-20261029 --output-on-failure -C Release
+```
+
+Logs: `/tmp/bengine-file-management-clean.log`, `/tmp/bengine-file-management-tests.log` e `/tmp/bengine-file-management-headless.log`. Como no helper da CI, o gerador único não recebeu `CMAKE_BUILD_TYPE`; `--config Release` não comprova execução otimizada Release. Não houve warning/error do compilador no log; permanece o aviso CMake de política CMP0135.
+Windows, outros gerenciadores de arquivos e revisão manual interativa ainda não validados.
+As limitações de formato de imagem e hover externo registradas na fase anterior permanecem.
+Alterações locais anteriores e o trabalho concorrente de cobertura das bases foram preservados.

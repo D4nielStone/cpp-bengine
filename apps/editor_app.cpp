@@ -16,6 +16,7 @@
 #include "editor/panels/files_view.hpp"
 #include "editor/panels/asset_drop_overlay.hpp"
 #include "editor/systems/scene_asset_drop.hpp"
+#include "editor/systems/scene_asset_paths.hpp"
 #include "editor/panels/debug_view.hpp"
 #include "editor/panels/scene_view.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
@@ -456,11 +457,17 @@ int main(int argc, char** argv) {
         };
     auto& files_panel = editor.add_panel<editor::ui::files_view>(project_path, drop_asset);
     asset_browser = &files_panel;
+    files_panel.set_file_operation_guard([editor_context]() { return !editor_context->is_playing; });
+    files_panel.set_file_moved_callback([editor_context, &components_panel](const auto& from, const auto& to) {
+        editor::ui::relocate_scene_asset(editor_context, from, to);
+        components_panel.refresh();
+    });
     window.set_file_drop_callback([&files_panel, drop_asset, editor_context](const auto& paths, int x, int y) {
         if (editor_context->is_playing || editor::ui::viewport_input_blocked_by_modal()) return;
+        const auto directory = files_panel.folder_at({x, y});
         for (const auto& path : paths) {
             try {
-                const auto imported = files_panel.import_file(path);
+                const auto imported = files_panel.import_file(path, directory.value_or(std::filesystem::path{}));
                 files_panel.set_asset_status("Arquivo importado: " + imported.filename().string());
                 drop_asset(imported, {x, y});
             } catch (const std::exception& error) {
