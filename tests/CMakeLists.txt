@@ -179,3 +179,9 @@ gtest_discover_tests(window_file_drop_tests)
 add_executable(engine_foundations_tests engine_foundations_tests.cpp)
 target_link_libraries(engine_foundations_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(engine_foundations_tests)
+
+# Drop hints must not intercept pointer events; no native window required.
+add_executable(editor_overlay_input_tests editor_overlay_input_tests.cpp)
+target_include_directories(editor_overlay_input_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
+target_link_libraries(editor_overlay_input_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editor_overlay_input_tests)

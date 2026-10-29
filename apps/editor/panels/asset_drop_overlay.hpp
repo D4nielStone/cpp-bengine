@@ -14,6 +14,7 @@ public:
           m_context(std::move(context)) {
         add_class("asset-drop-overlay");
         receives_input(false);
+        set_input_passthrough(true);
         set_flex(false);
         style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         style.visual.background.normal = bgui::color{.015f, .02f, .03f, .68f};

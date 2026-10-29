@@ -591,3 +591,25 @@ comprova otimização Release com gerador único. Windows, sanitizadores, falha 
 de disco/energia e liberação de recursos GPU não foram validados. A suíte completa
 reflete o estado compartilhado atual, incluindo alterações locais de outras tarefas;
 o commit desta fase contém somente testes/configuração/documentação próprios.
+
+## Cliques bloqueados pelo aviso de arraste (2026-10-29)
+
+| Item | Status / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Camada de arraste intercepta cliques mesmo oculta | CONFIRMADO: `asset_drop_overlay` permanece habilitado e ocupa toda a janela; `update_inputs` trata elementos com `receives_input(false)` como bloqueadores. Antes da correção, os dois testes dirigidos falharam: botões não recebiam cliques e o campo não ganhava foco (`/tmp/bengine-overlay-red.log`). | BGUI adiciona `set_input_passthrough`, opt-in que exclui o elemento e seus descendentes do teste de ponteiro sem interromper atualização ou desenho. Somente o aviso de arraste ativa a opção. A API existente e o bloqueio padrão são preservados. `editor_overlay_input_tests` cobre aviso oculto, arrasto nativo, arrasto interno, retorno ao estado oculto, foco/digitação, bloqueadores comuns e modais. | Os quatro testes de input passaram. O teste OpenGL `WindowFileDropTest.DropHintDarkensTheFramebufferAndDisappearsWithoutLeavingAnOverlay` também passou, preservando o aviso visual. Toque físico e interação manual em Windows não foram validados. Nenhum item P0/P1/P2 foi alterado nesta correção. |
+
+Validação em diretório novo: `bash scripts/build.sh /tmp/bengine-input-fix-build --test`.
+A compilação geral foi bloqueada por alteração local anterior em
+`tests/editor_asset_workflow_tests.cpp:554`: `ecs::add<renderer>(target.id, ...)`
+passa um ID onde a API exige `entity&`. O arquivo foi preservado.
+Todos os demais alvos foram compilados, incluindo editor, runtime, BGUI e o novo
+`editor_overlay_input_tests`. CTest executou 185 entradas, excluindo somente
+`editor_asset_workflow_tests_NOT_BUILT`: **184 passaram e uma falhou**.
+A falha é `GL3Tests`, especificamente o teste local de JPEG
+`GL3Test.DecodedJpegRendersAsAnImage` (pixel preto e `GL_INVALID_VALUE`);
+esse teste chama diretamente o desenho de imagem, sem executar o caminho de input.
+Não se afirma suíte geral verde nem build completo sem erros.
+Logs: `/tmp/bengine-overlay-red.log`, `/tmp/bengine-overlay-green.log`,
+`/tmp/bengine-input-fix-build.log`, `/tmp/bengine-input-remaining-build.log`
+e `/tmp/bengine-input-tests.log`. Como no helper da CI, `CMAKE_BUILD_TYPE`
+não foi definido; `--config Release` não implica otimização em gerador único.
