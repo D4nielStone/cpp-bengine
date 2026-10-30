@@ -38,7 +38,9 @@ inline bool rewrite_paths(rapidjson::Value& value, rapidjson::Document::Allocato
     } else if (value.IsObject()) {
         for (auto it = value.MemberBegin(); it != value.MemberEnd(); ++it) {
             const std::string_view key(it->name.GetString(), it->name.GetStringLength());
-            const bool is_path = path_value || key == "scene" || key == "model" ||
+            const bool image_value = key == "value" && value.HasMember("type") &&
+                value["type"].IsString() && std::string_view(value["type"].GetString()) == "image";
+            const bool is_path = image_value || path_value || key == "scene" || key == "model" ||
                 key == "directory" || key == "scripts" || key == "maps";
             changed |= rewrite_paths(it->value, allocator, root, from, to, is_path);
         }

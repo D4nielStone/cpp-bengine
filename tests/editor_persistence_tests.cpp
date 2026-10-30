@@ -659,3 +659,50 @@ TEST(ProjectPersistenceTest, RoundTripsCharacterAndColliderSettings) {
     remove_project_files(path);
     registry->remove(106); registry->remove(17);
 }
+
+TEST(ProjectPersistenceTest, LuaPropertyValuesAreSavedPerEntityAndPerScript) {
+    const auto path = temporary_project_path();
+    struct cleanup { std::filesystem::path path; ~cleanup() { remove_project_files(path); } } guard{path};
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    auto first = registry->create(), second = registry->create();
+    registry->add<commons::code>(first, "Properties.lua");
+    registry->add<commons::code>(second, "Properties.lua");
+    auto script = registry->get<commons::code>(first.id);
+    script->properties = {{"speed", "number", 12.5}, {"icon", "image", std::string("assets/icon.png")}};
+    auto child = std::make_shared<commons::code>("Second.lua");
+    child->properties = {{"speed", "number", 42.0}};
+    script->scripts.push_back(child);
+    registry->get<commons::code>(second.id)->properties = {{"speed", "number", 5.0}};
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    script->properties[0].value = 99.0;
+    EXPECT_TRUE(persistence.has_unsaved_changes(path.string()));
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    script = registry->get<commons::code>(first.id);
+    ASSERT_NE(script, nullptr);
+    ASSERT_EQ(script->properties.size(), 2u);
+    EXPECT_DOUBLE_EQ(std::get<double>(script->properties[0].value), 12.5);
+    EXPECT_EQ(std::get<std::string>(script->properties[1].value), "assets/icon.png");
+    EXPECT_EQ(script->asset_root, path.parent_path().string());
+    ASSERT_EQ(script->scripts.size(), 1u);
+    EXPECT_DOUBLE_EQ(std::get<double>(script->scripts[0]->properties[0].value), 42.0);
+    EXPECT_EQ(script->scripts[0]->asset_root, script->asset_root);
+    EXPECT_DOUBLE_EQ(std::get<double>(registry->get<commons::code>(second.id)->properties[0].value), 5.0);
+    // Play snapshots/exported scenes can live outside the project directory.
+    const auto export_folder = path.parent_path() / (path.stem().string() + "-snapshot");
+    std::filesystem::create_directory(export_folder);
+    struct cleanup_folder { std::filesystem::path path; ~cleanup_folder() {
+        std::error_code ec; std::filesystem::remove_all(path, ec);
+    } } export_guard{export_folder};
+    script->scripts[0]->properties.push_back({"icon", "image", std::string("assets/child.png")});
+    const auto snapshot = export_folder / "snapshot.scene";
+    ASSERT_TRUE(persistence.save(snapshot.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(snapshot.string(), error)) << error;
+    script = registry->get<commons::code>(first.id);
+    ASSERT_NE(script, nullptr);
+    EXPECT_EQ(std::get<std::string>(script->properties[1].value), (path.parent_path() / "assets/icon.png").string());
+    EXPECT_EQ(std::get<std::string>(script->scripts[0]->properties[1].value), (path.parent_path() / "assets/child.png").string());
+}

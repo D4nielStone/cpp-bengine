@@ -985,3 +985,51 @@ Os 13 testes de commons também passaram em `out/tests/commons_tests`.
 Logs: `/tmp/bengine-cube-before.log`, `/tmp/bengine-cube-clean.log`,
 `/tmp/bengine-cube-remaining.log`, `/tmp/bengine-cube-final-tests.log`.
 Revisão pendente: aparência do cubo no editor e bloqueios da suíte integral.
+
+## Propriedades Lua editáveis por entidade (2026-10-30)
+
+Escopo autorizado: propriedades explícitas com tipo e padrão; valores por entidade
+salvos na cena. Esta fase acrescenta um recurso e não reabre as hipóteses P0/P1/P2.
+A API pública anterior foi preservada.
+
+| Item | Status e evidência | Mudança / testes | Limites e decisões |
+|---|---|---|---|
+| Propriedades no Inspector | CONFIRMADO: o Inspector anterior expunha apenas o caminho do script. O teste `LuaPropertiesInspectorTest.InspectorLuaPropertiesSupportTypedFieldsAndUndo`, compilado com uma cópia do Inspector de HEAD anterior à mudança e a biblioteca atual, falhou em `speed == nullptr` (`baseline-test.log`). | Declarações `--@property` com JSON são lidas sem executar Lua. Campos de número, booleano, texto, cor RGBA e referência de imagem, com desfazer/refazer. Imagens aceitam caminho e drag-and-drop. Teste sem GPU cobre edição, transparência, validação, histórico, drop e proteção durante Play/entidade travada. | Declaração por comentário evita executar código durante edição. Identificadores únicos; erros informam arquivo e linha. A atualização das declarações ocorre ao reconstruir o Inspector ou iniciar a execução. |
+| Valores por entidade/script e persistência | CONFIRMADO: a serialização anterior guardava apenas `directory` e caminhos em `scripts`. | Propriedades tipadas são salvas por script, preservando o formato anterior dos caminhos. Testes `EditorScriptTest.*Properties*`, `EditorScriptTest.LegacyScenesStillLoadAndChangedDeclarationTypesUseNewDefaults` e `ProjectPersistenceTest.LuaPropertyValuesAreSavedPerEntityAndPerScript` cobrem isolamento, round-trip, cenas antigas, dados inválidos sem substituição parcial e cenas salvas fora da raiz. | Nome/tipo mantidos preservam o valor da entidade; declaração nova ou tipo alterado usa o padrão; remoção elimina a propriedade. Os valores do script promovido ao remover o primeiro também são preservados. |
+| Entrega ao Lua e imagens | CONFIRMADO: não havia tabela de propriedades na inicialização. | Tabela `properties` disponível antes do código de nível superior e de `setup()`. Cores usam `Color` da API existente. Referências de imagem são resolvidas na raiz do projeto e acompanham movimentações de arquivos, sem alterar propriedades de texto semelhantes. Testes cobrem início/update, múltiplos scripts, metadados inválidos e referências movidas. | Imagem é uma referência de caminho, sem carregar textura automaticamente. Alterações feitas pelo Lua na tabela não gravam a cena. Não há quebra da API de scripts existente. |
+
+Uso e contrato completos: [LUA_PROPERTIES.md](LUA_PROPERTIES.md).
+
+Validação final: compilação iniciada em pasta nova, incluindo editor, runtime e
+todos os testes, concluída sem erros. **12/12 testes focados passaram** (oito testes
+novos e quatro testes existentes de scripts). Suíte integral: **258/259 entradas
+CTest aprovadas**, sem testes ignorados ou ausentes. A única falha foi
+`Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`: lê somente
+transform/physics da cena local modificada, sem executar Lua; os resultados
+`minimum.y() = -24.641359329223633` e velocidade Y `-20.362541198730469` são idênticos
+aos já registrados em `/tmp/bengine-cube-final-tests.log` antes desta conclusão.
+Nenhum dado da cena foi alterado para contornar a falha.
+
+Pasta de validação limpa e independente de `out`:
+`/home/d4nl/.cache/bengine-validation/lua-properties-20261030/`.
+Logs: `config.log`, `build.log`, `resume-build.log`, `baseline-compile.log`,
+`baseline-link.log`, `baseline-test.log`, `focused-tests.log` e `tests.log`.
+A primeira compilação foi interrompida após gerar `commons`; a retomada usou a mesma
+pasta. Um erro de `const entity` nos testes novos foi corrigido antes da validação.
+A árvore também contém trabalho paralelo de importador, gizmo e cubo, além da cena
+local modificada; esses dados não foram editados por esta fase.
+
+Comandos derivados do CMake e do workflow de CI:
+
+```sh
+cmake -S . -B /home/d4nl/.cache/bengine-validation/lua-properties-20261030/build -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/repos/cpp-bengine/out/_deps/googletest-src
+cmake --build /home/d4nl/.cache/bengine-validation/lua-properties-20261030/build --parallel 2
+ctest --test-dir /home/d4nl/.cache/bengine-validation/lua-properties-20261030/build --output-on-failure -C Release
+```
+
+Limites: não foi feito teste visual manual do Inspector nem build no Windows.
+Os controles foram exercitados sem GPU; a suíte integral também executou os testes
+OpenGL existentes com o display disponível. Referências de imagem não carregam
+texturas automaticamente e mover um arquivo não reescreve os padrões no Lua.
+Nenhuma decisão de design obrigatória ficou pendente; o contrato confirmado pelo
+usuário está documentado. A falha física da cena local permanece fora desta fase.

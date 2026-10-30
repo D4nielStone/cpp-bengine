@@ -824,6 +824,8 @@ private:
                         if (!before.empty()) {
                             next = std::make_shared<commons::code>(before.front()->file);
                             next->arquivoCompleto = before.front()->arquivoCompleto;
+                            next->properties = before.front()->properties;
+                            next->asset_root = before.front()->asset_root;
                             next->reg = registry;
                             next->my_object = id;
                             next->scripts.assign(before.begin() + 1, before.end());
@@ -856,6 +858,94 @@ private:
             };
             input.m_enter_func = [assign](const std::string& path) { assign(path); };
             m_asset_targets.push_back({&input, assign});
+            auto entry = entries[index];
+            std::string error;
+            if (!entry->load_properties(error)) {
+                section.children().add<bgui::text>(error, 0.27f);
+                continue;
+            }
+            for (const auto& property : entry->properties)
+                add_script_property(section.children(), id, entry, property);
+        }
+    }
+
+    static bool is_script_image(const std::filesystem::path& path) {
+        auto extension = path.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+            extension == ".bmp" || extension == ".tga";
+    }
+
+    void add_script_property(bgui::linear& content, entity_id id,
+        const std::shared_ptr<commons::code>& script, const commons::script_property& property) {
+        using value_type = commons::script_property::value_type;
+        auto change = [this, id, script, name = property.name](const value_type& next) {
+            if (m_context->is_playing || m_context->locked_entities.contains(id)) return;
+            const auto it = std::find_if(script->properties.begin(), script->properties.end(),
+                [&](const auto& p) { return p.name == name; });
+            if (it == script->properties.end() || it->value == next) return;
+            const auto before = it->value;
+            if (!script->set_property(name, next)) return;
+            m_context->record_action([script, name, before]() { script->set_property(name, before); },
+                [script, name, next]() { script->set_property(name, next); });
+        };
+        if (property.type == "boolean") {
+            auto& checkbox = content.add<bgui::checkbox>(property.name, .29f, std::get<bool>(property.value));
+            checkbox.set_on_change([change](bool value) { change(value); });
+        } else if (property.type == "color") {
+            content.add<bgui::text>(property.name, .27f);
+            const auto color = std::get<std::array<float, 4>>(property.value);
+            auto& picker = content.add<bgui::color_picker>(bgui::color{color[0], color[1], color[2], color[3]});
+            picker.add_class("editor-input");
+            picker.style.layout.require_size(128.f, 92.f);
+            picker.set_on_change([change](const bgui::color& value) {
+                change(std::array<float, 4>{value.x, value.y, value.z, value.w});
+            });
+            auto& alpha = content.add<bgui::field>(property.name + " Alpha", std::to_string(color[3]), .27f,
+                [this, script, name = property.name, change](const std::string& text) {
+                    float value{};
+                    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+                    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() ||
+                        !std::isfinite(value) || value < 0 || value > 1) {
+                        m_edit_status->set_buffer("Alpha must be between 0 and 1."); return;
+                    }
+                    for (const auto& current : script->properties) {
+                        if (current.name != name || current.type != "color") continue;
+                        auto next = std::get<std::array<float, 4>>(current.value);
+                        next[3] = value;
+                        change(next);
+                        break;
+                    }
+                });
+            configure_property_field(alpha);
+        } else {
+            const auto buffer = property.type == "number" ? std::to_string(std::get<double>(property.value)) :
+                std::get<std::string>(property.value);
+            auto assign = [this, change, type = property.type](const std::string& text) {
+                if (type == "number") {
+                    double value{};
+                    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+                    if (result.ec != std::errc{} || result.ptr != text.data() + text.size() || !std::isfinite(value)) {
+                        m_edit_status->set_buffer("Invalid number."); return;
+                    }
+                    change(value);
+                } else if (type == "image" && !text.empty()) {
+                    const auto path = std::filesystem::absolute(std::filesystem::path(text).is_absolute()
+                        ? std::filesystem::path(text) : m_context->project_root / text).lexically_normal();
+                    std::error_code error;
+                    if (!std::filesystem::is_regular_file(path, error) || !is_script_image(path)) {
+                        m_edit_status->set_buffer("Choose an image file."); return;
+                    }
+                    const auto relative = path.lexically_relative(m_context->project_root);
+                    change(!relative.empty() && *relative.begin() != ".." ? relative.generic_string() : path.string());
+                } else change(text);
+            };
+            auto& field = content.add<bgui::field>(property.name, buffer, .27f, assign);
+            configure_property_field(field);
+            field.add_class("lua-property-" + property.type);
+            if (property.type == "image") m_asset_targets.push_back({&field.get_inputbox(),
+                [assign](const std::filesystem::path& path) { assign(path.string()); }});
         }
     }
 

@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -317,6 +318,7 @@ bool parse_component(
         auto script = registry.get<commons::code>(entity.id);
         if (!script->analyze(data))
             return false;
+        script->asset_root = project_directory.string();
         const std::filesystem::path script_path(script->file);
         script->arquivoCompleto = (
             script_path.is_absolute()
@@ -324,9 +326,15 @@ bool parse_component(
                 : project_directory / script_path
         ).lexically_normal().string();
         for (auto& entry : script->scripts) {
+            entry->asset_root = project_directory.string();
             const std::filesystem::path path(entry->file);
             entry->arquivoCompleto = (path.is_absolute() ? path : project_directory / path).lexically_normal().string();
         }
+        // Discover defaults without running user code. Missing/invalid scripts remain
+        // loadable; the Inspector and runtime report their errors when used.
+        std::string property_error;
+        script->load_properties(property_error);
+        for (auto& entry : script->scripts) entry->load_properties(property_error);
         return true;
     }
 
@@ -680,6 +688,18 @@ bool project_persistence_system::serialize_project(
                     static_cast<rapidjson::SizeType>(resolved_script_path.size()),
                     allocator
                 );
+                const auto resolve_images = [&](rapidjson::Value& properties) {
+                    for (auto& property : properties.GetArray()) {
+                        if (std::string_view(property["type"].GetString()) != "image") continue;
+                        auto& value = property["value"];
+                        if (!value.GetStringLength()) continue;
+                        const auto path = (m_asset_root / value.GetString()).lexically_normal().string();
+                        value.SetString(path.c_str(), static_cast<rapidjson::SizeType>(path.size()), allocator);
+                    }
+                };
+                if (component_data.HasMember("properties")) resolve_images(component_data["properties"]);
+                if (component_data.HasMember("script_properties"))
+                    for (auto& properties : component_data["script_properties"].GetArray()) resolve_images(properties);
                 if (component_data.HasMember("scripts")) {
                     for (auto& entry : component_data["scripts"].GetArray()) {
                         const std::filesystem::path path(entry.GetString());

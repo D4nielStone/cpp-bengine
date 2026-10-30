@@ -40,7 +40,9 @@ inline bool create_lua_script(const std::filesystem::path& directory,
         return false;
     }
     std::ofstream stream(path, std::ios::binary);
-    stream << "-- Called once when the scene starts.\nfunction setup()\nend\n\n"
+    stream << "-- Editable per entity in the Inspector; read with properties.speed.\n"
+              "--@property {\"name\":\"speed\",\"type\":\"number\",\"default\":5}\n\n"
+              "-- Called once when the scene starts.\nfunction setup()\nend\n\n"
               "-- Called every frame.\nfunction update()\nend\n";
     stream.close();
     if (!stream) {
@@ -74,10 +76,12 @@ inline bool attach_lua_script(const std::shared_ptr<editor_context>& context,
             error = sol::error(result).what();
             return false;
         }
+        if (!next->load_properties(error)) return false;
         const auto relative = path.lexically_relative(context->project_root);
         next->file = !relative.empty() && *relative.begin() != ".."
             ? relative.generic_string() : path.string();
         next->arquivoCompleto = path.string();
+        next->asset_root = context->project_root.string();
         next->reg = context->registry;
         next->my_object = id;
         auto registry = context->registry;

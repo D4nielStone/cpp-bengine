@@ -19,6 +19,13 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
             script->file = std::filesystem::path(script->file).is_absolute() ? to.string() :
                 to.lexically_relative(context->project_root).generic_string();
         }
+        for (auto& property : script->properties) {
+            if (property.type != "image") continue;
+            auto& value = std::get<std::string>(property.value);
+            if (absolute(value) == from)
+                value = std::filesystem::path(value).is_absolute() ? to.string() :
+                    to.lexically_relative(context->project_root).generic_string();
+        }
         for (const auto& child : script->scripts) update_script(child);
     };
     context->registry->cada<commons::code>([&](auto id) { update_script(context->registry->get<commons::code>(id)); });

@@ -18,10 +18,75 @@
 #include <iostream>
 #include <memory>
 #include <tuple>
+#include <fstream>
+#include <filesystem>
+#include <set>
+#include <stdexcept>
+#include <rapidjson/document.h>
 
 using namespace COMMONS_NS;
 
 namespace {
+
+bool read_property(const rapidjson::Value& entry, const char* value_key, script_property& result) {
+    if (!entry.IsObject() || !entry.HasMember("name") || !entry["name"].IsString() ||
+        !entry.HasMember("type") || !entry["type"].IsString() || !entry.HasMember(value_key)) return false;
+    result.name.assign(entry["name"].GetString(), entry["name"].GetStringLength());
+    result.type.assign(entry["type"].GetString(), entry["type"].GetStringLength());
+    if (result.name.empty() || !(std::isalpha(static_cast<unsigned char>(result.name[0])) || result.name[0] == '_')) return false;
+    for (unsigned char c : result.name) if (!std::isalnum(c) && c != '_') return false;
+    const auto& value = entry[value_key];
+    if (result.type == "number" && value.IsNumber() && std::isfinite(value.GetDouble()))
+        result.value = value.GetDouble();
+    else if (result.type == "boolean" && value.IsBool()) result.value = value.GetBool();
+    else if ((result.type == "text" || result.type == "image") && value.IsString())
+        result.value = std::string(value.GetString(), value.GetStringLength());
+    else if (result.type == "color" && value.IsArray() && value.Size() == 4) {
+        std::array<float, 4> color;
+        for (unsigned i = 0; i < 4; ++i) {
+            if (!value[i].IsNumber() || !std::isfinite(value[i].GetDouble()) ||
+                value[i].GetDouble() < 0 || value[i].GetDouble() > 1) return false;
+            color[i] = value[i].GetFloat();
+        }
+        result.value = color;
+    } else return false;
+    return true;
+}
+
+bool read_properties(const rapidjson::Value& entries, std::vector<script_property>& result) {
+    if (!entries.IsArray()) return false;
+    std::set<std::string> names;
+    for (const auto& entry : entries.GetArray()) {
+        script_property property;
+        if (!read_property(entry, "value", property) || !names.insert(property.name).second) return false;
+        result.push_back(std::move(property));
+    }
+    return true;
+}
+
+rapidjson::Value write_properties(const std::vector<script_property>& properties,
+    rapidjson::Document::AllocatorType& allocator) {
+    rapidjson::Value entries(rapidjson::kArrayType);
+    for (const auto& property : properties) {
+        rapidjson::Value entry(rapidjson::kObjectType), value;
+        entry.AddMember("name", rapidjson::Value(property.name.c_str(), allocator), allocator);
+        entry.AddMember("type", rapidjson::Value(property.type.c_str(), allocator), allocator);
+        std::visit([&](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, double>) value.SetDouble(v);
+            else if constexpr (std::is_same_v<T, bool>) value.SetBool(v);
+            else if constexpr (std::is_same_v<T, std::string>)
+                value.SetString(v.data(), static_cast<rapidjson::SizeType>(v.size()), allocator);
+            else {
+                value.SetArray();
+                for (float channel : v) value.PushBack(channel, allocator);
+            }
+        }, property.value);
+        entry.AddMember("value", value, allocator);
+        entries.PushBack(entry, allocator);
+    }
+    return entries;
+}
 
 void bind_script_output(sol::state& lua, std::uint32_t id) {
     lua.set_function("print", [id](sol::variadic_args args, sol::this_state state) {
@@ -255,6 +320,22 @@ void code::setup() {
     bubble["transform"] = transform_api;
 
     api::setUnityApi(estado_lua, reg, my_object);
+    std::string property_error;
+    if (!load_properties(property_error)) throw sol::error(property_error);
+    auto values = estado_lua.create_table();
+    for (const auto& property : properties) {
+        std::visit([&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, std::array<float, 4>>) {
+                values[property.name] = commons::color{value[0], value[1], value[2], value[3]};
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                if (property.type == "image" && !value.empty() && !asset_root.empty())
+                    values[property.name] = (std::filesystem::path(asset_root) / value).lexically_normal().string();
+                else values[property.name] = value;
+            } else values[property.name] = value;
+        }, property.value);
+    }
+    estado_lua["properties"] = values;
     estado_lua.script_file(arquivoCompleto);
 
     f_setup = estado_lua["setup"];
@@ -264,6 +345,47 @@ void code::setup() {
         const auto result = f_setup();
         if (!result.valid()) throw sol::error(result);
     }
+}
+
+bool code::load_properties(std::string& error) {
+    error.clear();
+    std::ifstream input(arquivoCompleto);
+    if (!input) { error = "Could not read script: " + arquivoCompleto; return false; }
+    std::vector<script_property> loaded;
+    std::set<std::string> names;
+    std::string line;
+    unsigned line_number = 0;
+    while (std::getline(input, line)) {
+        ++line_number;
+        const auto start = line.find_first_not_of(" \t\r");
+        if (start == std::string::npos || line.compare(start, 12, "--@property ") != 0) continue;
+        rapidjson::Document metadata;
+        metadata.Parse(line.c_str() + start + 12);
+        script_property property;
+        if (metadata.HasParseError() || !read_property(metadata, "default", property) ||
+            !names.insert(property.name).second) {
+            error = "Invalid Lua property at " + arquivoCompleto + ":" + std::to_string(line_number);
+            return false;
+        }
+        for (const auto& old : properties)
+            if (old.name == property.name && old.type == property.type) property.value = old.value;
+        loaded.push_back(std::move(property));
+    }
+    if (input.bad()) { error = "Could not read script: " + arquivoCompleto; return false; }
+    properties = std::move(loaded);
+    return true;
+}
+
+bool code::set_property(const std::string& name, const script_property::value_type& value) {
+    for (auto& property : properties) {
+        if (property.name != name || property.value.index() != value.index()) continue;
+        if (const auto* number = std::get_if<double>(&value); number && !std::isfinite(*number)) return false;
+        if (const auto* color = std::get_if<std::array<float, 4>>(&value))
+            for (float channel : *color) if (!std::isfinite(channel) || channel < 0 || channel > 1) return false;
+        property.value = value;
+        return true;
+    }
+    return false;
 }
 
 bool code::analyze(const rapidjson::Value& value) {
@@ -281,6 +403,15 @@ bool code::analyze(const rapidjson::Value& value) {
             loaded.push_back(std::make_shared<code>(entry.GetString()));
         }
     }
+    std::vector<script_property> loaded_properties;
+    if (value.HasMember("properties") && !read_properties(value["properties"], loaded_properties)) return false;
+    if (value.HasMember("script_properties")) {
+        const auto& entries = value["script_properties"];
+        if (!entries.IsArray() || entries.Size() != loaded.size()) return false;
+        for (rapidjson::SizeType i = 0; i < entries.Size(); ++i)
+            if (!read_properties(entries[i], loaded[i]->properties)) return false;
+    }
+    properties = std::move(loaded_properties);
     scripts = std::move(loaded);
     file = value["directory"].GetString();
     arquivoCompleto = file;
@@ -306,6 +437,7 @@ bool code::serialize(
     );
 
     value.AddMember("directory", directory, allocator);
+    if (!properties.empty()) value.AddMember("properties", write_properties(properties, allocator), allocator);
     if (!scripts.empty()) {
         rapidjson::Value entries(rapidjson::kArrayType);
         for (const auto& script : scripts) {
@@ -314,6 +446,10 @@ bool code::serialize(
             entries.PushBack(entry, allocator);
         }
         value.AddMember("scripts", entries, allocator);
+        rapidjson::Value property_entries(rapidjson::kArrayType);
+        for (const auto& script : scripts)
+            property_entries.PushBack(write_properties(script->properties, allocator), allocator);
+        value.AddMember("script_properties", property_entries, allocator);
     }
     return true;
 }
