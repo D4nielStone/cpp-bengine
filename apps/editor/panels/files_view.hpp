@@ -8,6 +8,7 @@
 #include "../systems/script_tools.hpp"
 #include "../systems/project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
+#include "model_import_dialog.hpp"
 
 #include <bgui.hpp>
 #include <elem/button.hpp>
@@ -68,6 +69,23 @@ public:
         return imported;
     }
 
+    void show_model_importer(const std::filesystem::path& source,
+        const std::filesystem::path& destination = {}, const std::string& diagnostic = {},
+        std::function<void(const std::filesystem::path&)> complete = {}) {
+        if (m_can_modify_files && !m_can_modify_files()) { set_asset_status("Pare a execução antes de importar."); return; }
+        m_model_importer.show(source, m_project_root, destination, diagnostic,
+            [this, complete](const auto& imported) {
+                m_current_directory = imported.parent_path(); m_selected_file = imported;
+                set_asset_status("Modelo importado: " + imported.filename().string());
+                request_refresh();
+                try { if (m_on_model_imported) m_on_model_imported(imported); if (complete) complete(imported); }
+                catch (const std::exception& e) { set_asset_status(e.what()); }
+            });
+    }
+
+    void set_model_imported_callback(std::function<void(const std::filesystem::path&)> callback) {
+        m_on_model_imported = std::move(callback);
+    }
     using file_moved_callback = std::function<void(const std::filesystem::path&, const std::filesystem::path&)>;
     void set_file_moved_callback(file_moved_callback callback) { m_on_file_moved = std::move(callback); }
     void set_file_operation_guard(std::function<bool()> guard) { m_can_modify_files = std::move(guard); }
@@ -213,6 +231,7 @@ public:
         m_document_body = nullptr;
         m_document_status = nullptr;
         m_active_content.clear();
+        m_model_importer.close();
         m_project_root = resolve_project_root(project_file);
         m_current_directory = m_project_root;
         m_selected_file.clear();
@@ -343,6 +362,8 @@ private:
     file_moved_callback m_on_file_moved;
     std::function<bool()> m_can_modify_files;
     bgui::modal* m_delete_modal{nullptr};
+    model_import_dialog m_model_importer;
+    std::function<void(const std::filesystem::path&)> m_on_model_imported;
     std::vector<std::pair<bgui::element*, std::filesystem::path>> m_folder_targets;
     std::string m_asset_status;
     std::string m_new_script_name{"NewScript.lua"};
@@ -784,18 +805,7 @@ private:
     }
 
     static bool is_model_file(const std::filesystem::path& path) {
-        auto extension = path.extension().string();
-        std::transform(
-            extension.begin(),
-            extension.end(),
-            extension.begin(),
-            [](const unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            }
-        );
-        return extension == ".obj" || extension == ".fbx" ||
-            extension == ".gltf" || extension == ".glb" ||
-            extension == ".dae" || extension == ".3ds";
+        return commons::supports_model_import(path);
     }
 
     static void clear_layout(bgui::linear& layout) {
@@ -933,6 +943,11 @@ private:
             create_row.add<bgui::button>("Excluir arquivo", .27f, [this, file = m_selected_file]() {
                 bgui::add_function([this, file]() { confirm_file_delete(file); });
             }).add_class("delete-file-button");
+        }
+        if (!m_selected_file.empty() && is_model_file(m_selected_file)) {
+            create_row.add<bgui::button>("Mostrar importador 3D", .27f, [this, file = m_selected_file]() {
+                bgui::add_function([this, file]() { show_model_importer(file); });
+            });
         }
         if (!m_asset_status.empty()) add_message(m_asset_status);
 

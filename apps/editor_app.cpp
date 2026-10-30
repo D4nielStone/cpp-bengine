@@ -425,6 +425,8 @@ int main(int argc, char** argv) {
                     }
                     return;
                 }
+                if (editor::ui::files_view::supports_model(asset))
+                    (void)editor::ui::asset_dependencies(std::filesystem::canonical(asset), true);
                 if (components_panel.drop_asset(asset, mouse_position))
                     return;
                 if (!editor::ui::files_view::supports_model(asset))
@@ -439,7 +441,7 @@ int main(int argc, char** argv) {
                 if (!position) return;
                 auto model = std::make_unique<commons::model>(asset.string());
                 if (model->meshes.empty()) {
-                    if (asset_browser) asset_browser->set_asset_status("O arquivo não contém um modelo 3D válido.");
+                    if (asset_browser) asset_browser->show_model_importer(asset, {}, "O carregador não conseguiu importar este modelo.");
                     return;
                 }
                 auto entity = editor_context->registry->create();
@@ -452,11 +454,25 @@ int main(int argc, char** argv) {
                 components_panel.refresh();
                 if (asset_browser) asset_browser->set_asset_status("Modelo adicionado à cena.");
             } catch (const std::exception& error) {
-                if (asset_browser) asset_browser->set_asset_status(error.what());
+                if (asset_browser) {
+                    asset_browser->set_asset_status(error.what());
+                    if (editor::ui::files_view::supports_model(asset)) asset_browser->show_model_importer(asset, {}, error.what());
+                }
             }
         };
     auto& files_panel = editor.add_panel<editor::ui::files_view>(project_path, drop_asset);
     asset_browser = &files_panel;
+    components_panel.set_model_import_error_callback([&files_panel](const auto& path, const auto& error) {
+        bgui::add_function([&files_panel, path, error]() { files_panel.show_model_importer(path, {}, error); });
+    });
+    files_panel.set_model_imported_callback([editor_context, &components_panel](const auto& path) {
+        editor_context->registry->cada<commons::renderer>([&](auto id) {
+            auto renderer = editor_context->registry->get<commons::renderer>(id);
+            if (renderer->m_modelo && std::filesystem::path(renderer->m_modelo->get_source_path()) == path)
+                renderer->m_modelo->load_model(path.string());
+        });
+        components_panel.refresh();
+    });
     files_panel.set_file_operation_guard([editor_context]() { return !editor_context->is_playing; });
     files_panel.set_file_moved_callback([editor_context, &components_panel](const auto& from, const auto& to) {
         editor::ui::relocate_scene_asset(editor_context, from, to);
@@ -472,6 +488,9 @@ int main(int argc, char** argv) {
                 drop_asset(imported, {x, y});
             } catch (const std::exception& error) {
                 files_panel.set_asset_status(error.what());
+                if (editor::ui::files_view::supports_model(path))
+                    files_panel.show_model_importer(path, directory.value_or(std::filesystem::path{}), error.what(),
+                        [drop_asset, x, y](const auto& imported) { drop_asset(imported, {x, y}); });
             }
         }
     });

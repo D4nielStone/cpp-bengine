@@ -185,3 +185,9 @@ add_executable(editor_overlay_input_tests editor_overlay_input_tests.cpp)
 target_include_directories(editor_overlay_input_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
 target_link_libraries(editor_overlay_input_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(editor_overlay_input_tests)
+
+# Import configuration/pose/UI tests are GPU-free; one upload test requires a display.
+add_executable(model_import_tests model_import_tests.cpp)
+target_link_libraries(model_import_tests PRIVATE GTest::gtest_main commons)
+target_include_directories(model_import_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
+gtest_discover_tests(model_import_tests)

@@ -7,6 +7,9 @@
 #include <stdexcept>
 #include "debugging/debug.hpp"
 #include "util/material.hpp"
+#include <os/asset_manager.hpp>
+#include <fstream>
+
 
 using namespace COMMONS_NS;
 
@@ -63,6 +66,8 @@ mesh& model::getMalha(size_t i) {
     return meshes.back();
 }
 void model::draw() {
+    if (m_pose && m_pose->options.animations && m_pose->scene->HasAnimations())
+        update_animation(std::chrono::duration<double>(std::chrono::steady_clock::now() - m_animation_start).count());
     for(auto& mesh : meshes)
         mesh.draw(m_shader);
 }
@@ -80,54 +85,66 @@ std::string model::getDiretorio() const {
 }
 
 void model::load_model(const std::string& path) {
+    model replacement;
+    replacement.load_model_data(path);
+    if (replacement.meshes.empty()) return;
+    meshes.swap(replacement.meshes);
+    m_pose.swap(replacement.m_pose);
+    directory.swap(replacement.directory);
+    source_path.swap(replacement.source_path);
+    m_animation_clip = replacement.m_animation_clip;
+    m_animation_start = replacement.m_animation_start;
+}
+
+void model::load_model_data(const std::string& path) {
     meshes.clear();
+    m_pose.reset();
     const auto resolved_path = resolve_model_path(path);
     source_path = resolved_path.string();
     const auto resolved_string = resolved_path.string();
-    Assimp::Importer importer;
-    auto flags = aiProcess_Triangulate | aiProcess_FlipUVs |
-        aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals;
-
-    // Carrega a cena sem colapsar ainda
-    const aiScene* scene = importer.ReadFile(resolved_string, flags);
-    if (!scene || !scene->HasMeshes() || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-        // erro de carregamento
-        debugging::emit(erro, importer.GetErrorString());
+    auto pose = std::make_shared<model_pose>();
+    pose->options = read_model_import_options(resolved_path);
+    pose->scene = pose->importer->ReadFile(resolved_string, pose->options.flags());
+    if (!pose->scene || !pose->scene->mRootNode || !pose->scene->HasMeshes() ||
+        (pose->scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) {
+        debugging::emit(erro, pose->importer->GetErrorString());
         return;
     }
-
-    // Verifica se é estático
-    bool is_static = true;
-
-    // Verifica se há animações ou bones
-    if (scene->HasAnimations())
-        is_static = false;
-
-    for (unsigned int i = 0; i < scene->mNumMeshes && is_static; ++i) {
-        if (scene->mMeshes[i]->HasBones()) {
-            is_static = false;
-            break;
-        }
-    }
-    if (is_static && resolved_path.extension() != ".dae") {
-        importer.FreeScene(); // limpa a cena anterior
-
-        flags |= aiProcess_PreTransformVertices;
-
-        scene = importer.ReadFile(resolved_string, flags);
-        if (!scene || !scene->HasMeshes() || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
-            // erro de carregamento
-            debugging::emit(erro, importer.GetErrorString());
-            return;
-        }
-    }
-
+    validate_model_selection(*pose->scene, pose->options);
+    pose->collect(pose->scene->mRootNode);
     directory = resolved_path.parent_path().string();
+    m_pose = std::move(pose);
+    m_animation_clip = 0;
+    while (m_animation_clip < m_pose->scene->mNumAnimations &&
+        m_pose->options.excluded_animations.contains(m_animation_clip)) ++m_animation_clip;
+    for (const auto& instance : m_pose->instances)
+        meshes.push_back(process_mesh(m_pose->scene->mMeshes[instance.mesh], m_pose->scene));
+    update_animation(0);
+    for (auto& mesh : meshes) mesh.load();
+    m_animation_start = std::chrono::steady_clock::now();
+}
 
-    /// Processa o no principal
-    process_node(scene->mRootNode, scene);
-    for(auto& m_ : meshes)
-        m_.load();
+void model::set_animation(unsigned clip) {
+    if (!m_pose || clip >= m_pose->scene->mNumAnimations || m_pose->options.excluded_animations.contains(clip))
+        throw std::out_of_range("Animation is not imported");
+    m_animation_clip = clip;
+    m_animation_start = std::chrono::steady_clock::now();
+    update_animation(0);
+}
+
+void model::update_animation(double seconds) {
+    if (!m_pose) return;
+    m_pose->evaluate(seconds, m_animation_clip);
+    for (size_t i = 0; i < std::min(meshes.size(), m_pose->instances.size()); ++i) {
+        auto vertices = meshes[i].getVertices();
+        const auto geometry = m_pose->vertices(m_pose->instances[i]);
+        for (size_t v = 0; v < std::min(vertices.size(), geometry.positions.size()); ++v) {
+            const auto p = geometry.positions[v], n = geometry.normals[v];
+            vertices[v].position = {p.x, p.y, p.z};
+            vertices[v].normal = {n.x, n.y, n.z};
+        }
+        meshes[i].set_vertices(vertices);
+    }
 }
 
 void model::process_node(aiNode* node, const aiScene* scene) {
@@ -191,7 +208,9 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
     aiMaterial* ai_material = scene->mMaterials[mesh->mMaterialIndex];
     commons::material bmat;
 
-    if(hasTextura(ai_material, aiTextureType_DIFFUSE))
+    if(hasTextura(ai_material, aiTextureType_BASE_COLOR))
+        bmat.set_texture("tex_albedo", load_texture(ai_material, aiTextureType_BASE_COLOR));
+    else if(hasTextura(ai_material, aiTextureType_DIFFUSE))
         bmat.set_texture("tex_albedo", load_texture(ai_material, aiTextureType_DIFFUSE));
 
     if(hasTextura(ai_material, aiTextureType_METALNESS))
@@ -245,6 +264,34 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
 
         auto reference = std::string(str.C_Str());
         std::replace(reference.begin(), reference.end(), '\\', '/');
+        if (m_pose) if (const auto* embedded = m_pose->scene->GetEmbeddedTexture(reference.c_str())) {
+            tex.embedded = std::make_shared<bgui::texture>();
+            tex.path = source_path + "#" + reference;
+            if (embedded->mHeight) {
+                tex.embedded->m_size = {float(embedded->mWidth), float(embedded->mHeight)};
+                tex.embedded->m_buffer.reserve(size_t(embedded->mWidth) * embedded->mHeight * 4);
+                for (size_t i = 0; i < size_t(embedded->mWidth) * embedded->mHeight; ++i) {
+                    const auto pixel = embedded->pcData[i];
+                    for (auto c : {pixel.r, pixel.g, pixel.b, pixel.a}) tex.embedded->m_buffer.push_back(c);
+                }
+                tex.embedded->m_has_alpha = true;
+            } else {
+                // Reuse BGUI's platform image decoder; it owns the decoded pixels.
+                static unsigned sequence = 0;
+                auto temporary = std::filesystem::temp_directory_path() / ("bengine-embedded-" +
+                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" + std::to_string(sequence++));
+                if (!std::filesystem::create_directory(temporary)) throw std::runtime_error("Cannot stage embedded image");
+                struct cleanup { std::filesystem::path p; ~cleanup() { std::error_code ec; std::filesystem::remove_all(p, ec); } } cleanup{temporary};
+                const auto image = temporary / "image";
+                std::ofstream output(image, std::ios::binary);
+                output.write(reinterpret_cast<const char*>(embedded->pcData), embedded->mWidth);
+                output.close();
+                if (!output) throw std::runtime_error("Cannot decode embedded image");
+                *tex.embedded = bgui::asset_manager::get_instance().load_texture(image.string());
+            }
+            tex.embedded->m_path = tex.path;
+            return tex;
+        }
         tex.path = (std::filesystem::path(directory) / reference).lexically_normal().string();
     }
     return tex;

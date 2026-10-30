@@ -9,6 +9,7 @@
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/scene.h>
+#include "loaders/model_import.hpp"
 
 namespace editor::ui {
 
@@ -32,6 +33,8 @@ inline std::set<std::filesystem::path> asset_dependencies(const std::filesystem:
     namespace fs = std::filesystem;
     std::set<fs::path> files{source};
     if (model) {
+        const auto settings = commons::model_import_settings_path(source);
+        if (fs::is_regular_file(settings)) files.insert(settings);
         Assimp::Importer importer;
         auto* tracker = new import_file_tracker();
         importer.SetIOHandler(tracker);

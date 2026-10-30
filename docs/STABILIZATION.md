@@ -919,3 +919,48 @@ Também não houve inspeção visual/manual da viewport nem build no Windows.
 Logs: `/tmp/bengine-direction-clean-build.log`,
 `/tmp/bengine-direction-rebuild.log`, `/tmp/bengine-direction-final-build.log`
 e `/tmp/bengine-direction-tests.log`.
+
+## Fase: importador 3D configurável — 2026-10-30
+
+Esta fase implementa a solicitação de importação de modelos. As hipóteses P0/P1/P2
+anteriores não foram reabertas. Alterações preexistentes em scripts, cenas,
+Inspector e testes Lua foram preservadas e não integram o commit desta fase.
+
+| Item | Diagnóstico / evidência | Mudança e testes | Limites / revisão |
+|---|---|---|---|
+| Janela e diagnóstico | CONFIRMADO: o fluxo anterior de `editor_app.cpp` só mostrava uma mensagem em falhas; `files_view.hpp` não tinha ação para inspecionar o modelo. | `model_import_dialog.hpp`, ação Mostrar importador 3D e abertura em erros de drop/Renderer. Testes `ImportDialogTest` exercitam confirmação, erro, nova tentativa e escala inválida. | Janela usa os widgets e o bloqueio modal da BGUI; não houve comparação visual manual com Godot. |
+| Estrutura / seleção | CONFIRMADO: `model::process_node` percorria todas as meshes sem seleção persistida. | Seleção de subárvores por caminho ordinal e de meshes por índice; opções de UVs, normais, união de vértices e escala. `ModelImport.FiltersMeshesAndNodeSubtrees` e `AppliesHierarchyAndScaleWithoutGpu`. | Nova ordem dos dados na origem exige revisar as seleções. A hierarquia é mantida no modelo, sem gerar uma entidade ECS para cada node. |
+| Skins / skeleton / animations | CONFIRMADO: o carregador anterior detectava ossos/animações apenas para evitar `PreTransformVertices`; não avaliava poses ou pesos. | Avaliação de hierarquia, interpolação de posição/escala/quaternion, pesos e offsets na CPU; opções separadas de skeleton, skins e clipes. Testes de interpolação/loop, exclusão e pesos/offsets. | Não inclui morph targets, retargeting, blending, editor de keyframes ou conversão de câmeras/luzes; estes limites aparecem no importador. Rigs com nomes duplicados e grandes cenas não receberam validação específica nem benchmark. |
+| Persistência / reimportação | CONFIRMADO: não havia arquivo de opções do modelo. | Arquivo `.import.json` com versão 1, escrita temporária e substituição; acompanha dependências. Editor/runtime usam o mesmo leitor. Reimportação atualiza Renderers ativos e prepara as novas malhas antes de substituir as anteriores. Testes de round-trip, corrupção, cópia e preservação do modelo em erro. | Substituição cobre falhas de processo/escrita comuns; não garante durabilidade em queda de energia. Materiais editados no Renderer são reconstruídos na reimportação. |
+| Formatos / texturas embutidas | PARCIAL: a lista anterior do navegador não incluía `.blend`; o carregador tratava referências embutidas como caminhos externos. | Reconhecimento dos formatos do Assimp e extensões comuns mesmo sem decodificador; GLB com imagem embutida usa o decodificador BGUI, incluindo pixels sem compressão. Teste gráfico gera/exporta GLB, carrega textura e animação, verifica upload e erro de reimportação. | Arquivos reais FBX e `.blend` de diferentes versões não foram validados; suporte depende do Assimp. Decodificação comprimida usa um arquivo transitório e o cache de imagens BGUI. |
+
+Validação final: editor e runtime compilados a partir de uma pasta nova.
+**11/11 testes novos passaram**, sem skips, incluindo upload OpenGL da textura
+embutida e avaliação de animação em um GLB gerado pelo teste. A execução CTest
+teve **202/206 entradas aprovadas**: três entradas `*_NOT_BUILT` correspondem
+aos testes Lua bloqueados na compilação; a outra falha foi
+`Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`.
+Esse teste também foi compilado isoladamente com as mesmas flags/bibliotecas,
+alterando apenas a localização da fonte e usando uma cópia da cena de HEAD:
+**passou**. A cena local modificada não foi substituída. Não houve teste manual
+da aparência da janela, build Windows, teste de arquivos reais FBX/Blender,
+benchmark ou validação de rigs com nomes duplicados. Assim, o build integral
+do diretório atual continua bloqueado pelos testes Lua preexistentes.
+
+Comandos encontrados em `CMakeLists.txt`, `tests/CMakeLists.txt` e
+`.github/workflows/build_and_test.yml`:
+
+```sh
+bash scripts/build.sh /tmp/bengine-import-clean --test
+cmake --build /tmp/bengine-import-clean --parallel 2 -- -k
+/tmp/bengine-import-clean/tests/model_import_tests
+ctest --test-dir /tmp/bengine-import-clean --output-on-failure -C Release
+```
+
+A primeira configuração partiu de uma pasta inexistente. O build integral
+identificou erros nas alterações Lua que já estavam no diretório: entidades
+`const` passadas para `ecs::add(entity&)` em `editor_persistence_tests.cpp`,
+`editor_lua_properties_tests.cpp` e `editor_script_tests.cpp`. Esses arquivos
+não foram corrigidos nesta fase. Logs preservados em `/home/d4nl/.cache/bengine-validation/importer-20261030/`
+(`build.log`, `tests.log`, `ctest.log` e `reference-test.log`).
+Detalhes de uso e limites: [MODEL_IMPORT.md](MODEL_IMPORT.md).

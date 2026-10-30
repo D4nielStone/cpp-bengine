@@ -1,4 +1,5 @@
 #pragma once
+#include "../systems/asset_import.hpp"
 
 #include "editor_context.hpp"
 #include "panel.hpp"
@@ -116,6 +117,10 @@ public:
         m_refresh_requested = true;
     }
 
+    void set_model_import_error_callback(std::function<void(const std::filesystem::path&, const std::string&)> callback) {
+        m_model_import_error = std::move(callback);
+    }
+
     bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
         if (!*m_surface_alive)
             return false;
@@ -137,6 +142,7 @@ public:
 
 private:
     using entity_id = editor_context::entity_id;
+    std::function<void(const std::filesystem::path&, const std::string&)> m_model_import_error;
 
     std::shared_ptr<editor_context> m_context;
     bgui::window* m_window{nullptr};
@@ -588,9 +594,12 @@ private:
         auto assign_model = [this, id, renderer](const std::filesystem::path& requested) {
             auto path = requested.is_absolute() ? requested : m_context->project_root / requested;
             try {
+                if (commons::supports_model_import(path) && std::filesystem::is_regular_file(path))
+                    (void)asset_dependencies(std::filesystem::canonical(path), true);
                 auto model = std::make_unique<commons::model>(path.string());
                 if (model->meshes.empty()) {
                     m_edit_status->set_buffer("Could not load model: " + requested.string());
+                    if (m_model_import_error) m_model_import_error(path, "Não foi possível carregar o modelo.");
                     return;
                 }
                 auto registry = m_context->registry;
@@ -610,6 +619,7 @@ private:
                 refresh();
             } catch (const std::exception& error) {
                 m_edit_status->set_buffer(error.what());
+                if (m_model_import_error) m_model_import_error(path, error.what());
             }
         };
         model_input->m_enter_func = [assign_model](const std::string& path) { assign_model(path); };

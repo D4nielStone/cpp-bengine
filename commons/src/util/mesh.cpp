@@ -43,6 +43,13 @@ unsigned int mesh::getVertexBuffer() const {
 
 void mesh::set_vertices(const std::vector<vertex>& v) {
     m_vertices = v;
+    if (m_loaded) {
+        GLint previous = 0;
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previous);
+        glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
+        glBufferData(GL_ARRAY_BUFFER, m_vertices.size() * sizeof(vertex), m_vertices.data(), GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, previous);
+    }
 }
 
 void mesh::setInstances(const std::vector<transform>& i) {

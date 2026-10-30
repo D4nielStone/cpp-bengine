@@ -26,12 +26,15 @@ SOFTWARE.
 
 #pragma once
 #include <string>
+#include <memory>
+namespace bgui { struct texture; }
 #include <glad.h>
 
 namespace COMMONS_NS {
     struct texture {
         unsigned int id{0};
         std::string path{""};
+        std::shared_ptr<bgui::texture> embedded;
 
         texture() = default;
         texture(unsigned int id, std::string path) : id(id), path(path) {}

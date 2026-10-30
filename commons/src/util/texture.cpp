@@ -5,6 +5,7 @@
 
 void commons::texture::bind(int slot) const {
     unsigned int texture_id = id;
+    if (!texture_id && embedded) texture_id = bgui::gl3_get_texture(*embedded);
     if (!texture_id && !path.empty()) {
         const auto& decoded = bgui::asset_manager::get_instance().load_texture(path);
         texture_id = bgui::gl3_get_texture(decoded);
