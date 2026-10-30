@@ -287,3 +287,31 @@ TEST(PrimitiveTextureTest, LegacyMaterialsDefaultToOriginalUvsAndOneRepeat) {
     for (const auto& factor : texture_factors)
         EXPECT_FLOAT_EQ(pbr_value(legacy, factor), factor.fallback);
 }
+
+TEST(PrimitiveMeshTest, CubeNormalsMatchEveryFace)
+{
+    Assimp::Importer importer;
+    const auto path = std::filesystem::path(BENGINE_SOURCE_DIR) / "commons/assets/models/cube.obj";
+    const auto* scene = importer.ReadFile(path.string(), aiProcess_Triangulate | aiProcess_JoinIdenticalVertices);
+    ASSERT_NE(scene, nullptr) << importer.GetErrorString();
+    unsigned faces = 0;
+    for (unsigned m = 0; m < scene->mNumMeshes; ++m) {
+        const auto* mesh = scene->mMeshes[m];
+        ASSERT_TRUE(mesh->HasNormals());
+        for (unsigned f = 0; f < mesh->mNumFaces; ++f) {
+            const auto& face = mesh->mFaces[f];
+            ASSERT_EQ(face.mNumIndices, 3u);
+            const auto a = mesh->mVertices[face.mIndices[0]];
+            const auto b = mesh->mVertices[face.mIndices[1]];
+            const auto c = mesh->mVertices[face.mIndices[2]];
+            auto geometric = (b - a) ^ (c - a);
+            geometric.Normalize();
+            EXPECT_GT(geometric * ((a + b + c) / 3.f), 0.f);
+            for (unsigned v = 0; v < 3; ++v)
+                EXPECT_NEAR(geometric * mesh->mNormals[face.mIndices[v]], 1.f, 1e-6f)
+                    << "face " << f << ", vertex " << v;
+            ++faces;
+        }
+    }
+    EXPECT_EQ(faces, 12u);
+}

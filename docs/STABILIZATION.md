@@ -964,3 +964,24 @@ identificou erros nas alterações Lua que já estavam no diretório: entidades
 não foram corrigidos nesta fase. Logs preservados em `/home/d4nl/.cache/bengine-validation/importer-20261030/`
 (`build.log`, `tests.log`, `ctest.log` e `reference-test.log`).
 Detalhes de uso e limites: [MODEL_IMPORT.md](MODEL_IMPORT.md).
+
+
+## Correção pontual: sombreamento do cubo (2026-10-30)
+
+| Item | Status e evidência | Mudança / teste | Limites e riscos |
+|---|---|---|---|
+| Normais do cubo | CONFIRMADO: `commons/assets/models/cube.obj` referenciava as normais 1 a 6 nas seis faces, mas as normais estão agrupadas em blocos de quatro. Cinco faces usavam direções incorretas. `PrimitiveMeshTest.CubeNormalsMatchEveryFace` falhou antes da correção. | Referências corrigidas para 1, 5, 9, 13, 17 e 21. Teste sem GPU importa o OBJ com Assimp e verifica normal geométrica, direção externa e as normais dos três vértices de todos os 12 triângulos; passou após a correção. | API e shaders preservados. Aparência manual no editor não validada; modelos externos não são alterados. |
+
+Validação: `bash scripts/build.sh /tmp/bengine-cube-clean --test` partiu de pasta nova;
+editor, runtime e commons compilaram. Build integral bloqueado por erros preexistentes
+nos testes Lua modificados (`editor_persistence_tests.cpp:668`,
+`editor_lua_properties_tests.cpp:43`, `editor_script_tests.cpp:204`): entidades const
+passadas a `ecs::add(entity&)`. `cmake --build /tmp/bengine-cube-clean --parallel 2 -- -k`
+compilou os demais alvos. `ctest --test-dir /tmp/bengine-cube-clean --output-on-failure -C Release`:
+203 de 207 entradas aprovadas, incluindo o novo teste e os testes gráficos de renderização;
+três suítes NOT_BUILT pelos erros acima e falha em
+`Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn` (não investigada nesta correção).
+Os 13 testes de commons também passaram em `out/tests/commons_tests`.
+Logs: `/tmp/bengine-cube-before.log`, `/tmp/bengine-cube-clean.log`,
+`/tmp/bengine-cube-remaining.log`, `/tmp/bengine-cube-final-tests.log`.
+Revisão pendente: aparência do cubo no editor e bloqueios da suíte integral.
