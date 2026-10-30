@@ -4,6 +4,7 @@
 #include <bgui.hpp>
 #include "camera_movement.hpp"
 #include "scene_navigation.hpp"
+#include "direction_gizmo.hpp"
 #include "entity_picking_system.hpp"
 #include "guizmo/transform_gizmo.hpp"
 #include "guizmo_system.hpp"
@@ -740,4 +741,49 @@ TEST_F(EditorInteractionTest, InspectorTextureMappingSupportsUndoAndRedo) {
     EXPECT_FALSE(commons::world_texture(renderer->m_modelo->meshes[0].getMaterial()));
     ASSERT_TRUE(context->redo());
     EXPECT_TRUE(commons::world_texture(renderer->m_modelo->meshes[0].getMaterial()));
+}
+
+TEST(DirectionGizmo, ProjectsWorldAxesUsingViewRotationOnly) {
+    const auto identity = editor::ui::direction_gizmo_axes(glm::mat4(1.f));
+    EXPECT_FLOAT_EQ(identity[0].x, 1.f);
+    EXPECT_FLOAT_EQ(identity[1].y, 1.f);
+    EXPECT_FLOAT_EQ(identity[2].z, 1.f);
+    auto view = glm::lookAt(glm::vec3(4, 0, 0), glm::vec3(0), glm::vec3(0, 1, 0));
+    const auto axes = editor::ui::direction_gizmo_axes(view);
+    EXPECT_NEAR(axes[0].z, 1.f, 0.0001f);
+    EXPECT_NEAR(axes[2].x, -1.f, 0.0001f);
+    view[3] = glm::vec4(100, 200, 300, 1);
+    const auto moved = editor::ui::direction_gizmo_axes(view);
+    EXPECT_EQ(axes, moved);
+}
+
+TEST(DirectionGizmo, FitsTopRightWithScalingAndSmallViewports) {
+    const auto rect = editor::ui::direction_gizmo_rect({20, 30, 800, 600}, 2.f);
+    EXPECT_EQ(rect.x, 596);
+    EXPECT_EQ(rect.y, 54);
+    EXPECT_EQ(rect.z, 200);
+    const auto small = editor::ui::direction_gizmo_rect({0, 0, 70, 60}, 1.f);
+    EXPECT_EQ(small.z, 36);
+    EXPECT_EQ(small.x + small.z, 58);
+    EXPECT_EQ(editor::ui::direction_gizmo_rect({0, 0, 0, 0}, 1.f).z, 0);
+}
+
+TEST_F(EditorInteractionTest, DirectionGizmoDrawsInsideViewportWithoutTakingInput) {
+    auto& root = bgui::get_layout();
+    auto& image = root.add<bgui::image>();
+    image.set_final_rect(20, 30, 800, 600);
+    auto camera = std::make_shared<commons::camera>();
+    auto& gizmo = root.add<editor::ui::direction_gizmo, bgui::layer::overlay>(camera, image);
+    gizmo.on_update();
+    bgui::draw_data data;
+    gizmo.get_requires(&data);
+    ASSERT_FALSE(data.m_draw_list.get_vertices().empty());
+    for (const auto& vertex : data.m_draw_list.get_vertices()) {
+        EXPECT_GE(vertex.m_position.x, 20);
+        EXPECT_LE(vertex.m_position.x, 820);
+        EXPECT_GE(vertex.m_position.y, 30);
+        EXPECT_LE(vertex.m_position.y, 630);
+    }
+    EXPECT_FALSE(gizmo.receives_input());
+    EXPECT_FALSE(gizmo.supports_render_cache());
 }

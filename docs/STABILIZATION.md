@@ -891,3 +891,31 @@ Logs: `/home/d4nl/.cache/bengine-validation/uv-20261029/`:
 `reference-test.log`. A cópia de referência foi compilada com as mesmas flags e
 bibliotecas do alvo CMake `engine_foundations_tests`; somente a localização do
 arquivo de teste e a cena lida por `__FILE__` mudam.
+
+## Gizmo de direção do Scene Editor (2026-10-30)
+
+| Item | Status e evidência | Mudança / testes | Limites e decisões |
+|---|---|---|---|
+| Indicador de direção no canto superior direito | CONFIRMADO: `scene_view::build` não adicionava indicador de orientação. Implementado em `apps/editor/tools/direction_gizmo.hpp` e integrado em `apps/editor/panels/scene_view.cpp`. | Eixos X/Y/Z coloridos e identificados, projetados pela rotação da view, com profundidade ordenada, tamanho adaptado à escala da interface e viewport. Não captura input. A prévia de câmera fica abaixo do gizmo. Três testes sem GPU verificam orientação/independência de translação, posição/escala/viewports pequenas e desenho sem captura de input. | Indicador visual, sem comandos de alinhamento por clique. API pública preservada; inventário P0/P1/P2 não reaberto. |
+
+Validação: `editor_app` compilou com a integração. Os **27 testes** do arquivo
+`editor_interaction_tests.cpp`, incluindo os três novos, passaram sem GPU.
+O executável de validação `/tmp/bengine-direction-interaction-tests` foi ligado
+com o objeto desse arquivo e as mesmas bibliotecas do `link.txt` do CMake,
+excluindo somente o objeto do novo arquivo concorrente
+`editor_lua_properties_tests.cpp`, cuja compilação falhou por passar entidade
+`const` a `ecs::add(entity&)` (linhas 43 e 101 na execução). Nenhum código desse
+outro trabalho foi alterado para contornar a falha.
+
+Comandos de build descobertos no CMake, workflow e `scripts/build.sh`:
+`cmake --build out --clean-first --parallel 2`, seguido de
+`cmake --build out --parallel 2` e
+`cmake --build out --target editor_app editor_interaction_tests --parallel 2`.
+A tentativa de build limpo não concluiu: `ar` encontrou `lua.cpp.o` ausente,
+em ambiente com outras compilações simultâneas usando `out`. A retomada compilou
+o editor, mas o alvo integrado de interação encontrou os erros concorrentes
+acima. Portanto **build limpo completo e suíte CTest completa não validados**.
+Também não houve inspeção visual/manual da viewport nem build no Windows.
+Logs: `/tmp/bengine-direction-clean-build.log`,
+`/tmp/bengine-direction-rebuild.log`, `/tmp/bengine-direction-final-build.log`
+e `/tmp/bengine-direction-tests.log`.

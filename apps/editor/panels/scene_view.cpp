@@ -2,6 +2,7 @@
 
 #include "camera_movement.hpp"
 #include "scene_navigation.hpp"
+#include "direction_gizmo.hpp"
 #include "entity_picking_system.hpp"
 #include "guizmo_system.hpp"
 #include "viewport_sync.hpp"
@@ -98,7 +99,8 @@ public:
         const int header = static_cast<int>(18.f * ui_scale);
         const auto& viewport = m_state->viewport;
         const float available_width = viewport.z - 2 * (margin + padding);
-        const float available_height = viewport.w - 2 * (margin + padding) - header;
+        const int top_offset = direction_gizmo_rect(viewport, ui_scale).w + margin;
+        const float available_height = viewport.w - top_offset - 2 * (margin + padding) - header;
         const float scale = std::min({1.f, available_width / (240.f * ui_scale),
             available_height / (150.f * ui_scale)});
         if (scale <= 0.f) {
@@ -130,7 +132,7 @@ public:
                 static_cast<float>(camera->viewportFBO.y)
             }
         );
-        m_frame->set_final_rect(preview_x, viewport.y + margin, frame_width, frame_height);
+        m_frame->set_final_rect(preview_x, viewport.y + margin + top_offset, frame_width, frame_height);
         m_image->set_size(preview_width / ui_scale, preview_height / ui_scale);
         m_frame->set_enable(true);
     }
@@ -295,6 +297,8 @@ void scene_view::build(bgui::dock& dock) {
         m_input_state,
         m_camera_preview
     );
+
+    scene_window.add<direction_gizmo, bgui::layer::overlay>(m_camera, image);
 
     auto& preview_frame = scene_window.add<preview_card, bgui::layer::overlay>();
     preview_frame.add_class("camera-preview-card");
