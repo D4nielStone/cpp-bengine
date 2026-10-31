@@ -168,7 +168,7 @@ function update() observed = observed + properties.speed end
     EXPECT_DOUBLE_EQ(restored.estado_lua["top_level"].get<double>(), 12.5);
     EXPECT_DOUBLE_EQ(restored.estado_lua["observed"].get<double>(), 12.5);
     const sol::table properties = restored.estado_lua["properties"];
-    EXPECT_EQ(properties["icon"].get<std::string>(), (folder / "assets/icon.png").string());
+    EXPECT_EQ(properties["icon"].get<std::string>(), (folder / "assets/icon.png").lexically_normal().string());
     restored.update();
     EXPECT_DOUBLE_EQ(restored.estado_lua["observed"].get<double>(), 25);
     restored.scripts[0]->setup();

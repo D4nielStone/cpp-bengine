@@ -2,6 +2,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
+#include "opengl_test_support.hpp"
 #include "os/window.hpp"
 #include "asset_import.hpp"
 #include "loaders/model.hpp"
@@ -13,7 +14,7 @@
 #include <fstream>
 
 TEST(WindowFileDropTest, QueuesOwnedUtf8PathsAndCursorCoordinatesUntilRefresh) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for native window verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for native window verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("File drop test", 100, 100);
     auto* native = glfwGetCurrentContext();
@@ -53,7 +54,7 @@ TEST(WindowFileDropTest, QueuesOwnedUtf8PathsAndCursorCoordinatesUntilRefresh) {
 }
 
 TEST(WindowFileDropTest, ImportedModelUsesCopiedNestedTextures) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for model upload verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for model upload verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("Imported model test", 100, 100);
     struct temporary_directory {
@@ -81,7 +82,7 @@ TEST(WindowFileDropTest, ImportedModelUsesCopiedNestedTextures) {
 }
 
 TEST(WindowFileDropTest, DropHintDarkensTheFramebufferAndDisappearsWithoutLeavingAnOverlay) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for overlay rendering verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for overlay rendering verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("Drop overlay test", 200, 200);
     window.add<commons::ui_system>();
@@ -118,7 +119,7 @@ TEST(WindowFileDropTest, DropHintDarkensTheFramebufferAndDisappearsWithoutLeavin
 }
 
 TEST(WindowFileDropTest, EngineTextureUploadsDecodedJpegPixels) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for JPEG texture verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for JPEG texture verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("JPEG texture test", 100, 100);
     const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() /
@@ -142,7 +143,7 @@ TEST(WindowFileDropTest, EngineTextureUploadsDecodedJpegPixels) {
 #include <glfw/bgui_backend_glfw_events.hpp>
 
 TEST(WindowFileDropTest, NativeEventObserverIsChainedAndRestoredWhenTheLoopEndsOrThrows) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for event observer verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for event observer verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("Event observer test", 100, 100);
     auto* native = glfwGetCurrentContext();
@@ -176,7 +177,7 @@ TEST(WindowFileDropTest, NativeEventObserverIsChainedAndRestoredWhenTheLoopEndsO
 
 
 TEST(WindowFileDropTest, NativeF3KeyIsDeliveredToTheSharedInputState) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for native key verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for native key verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("F3 input test", 100,100);
     auto* native = glfwGetCurrentContext(); ASSERT_NE(native,nullptr);
@@ -198,7 +199,7 @@ struct context_lifetime_probe final : commons::component {
 }
 
 TEST(WindowLifecycleTest, ReleasesSceneComponentsBeforeDestroyingOpenGLContext) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for window lifetime verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for window lifetime verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     bool destroyed_with_context = false;
     std::shared_ptr<commons::ecs> registry;

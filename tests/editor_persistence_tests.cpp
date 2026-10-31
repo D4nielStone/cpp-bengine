@@ -704,8 +704,8 @@ TEST(ProjectPersistenceTest, LuaPropertyValuesAreSavedPerEntityAndPerScript) {
     ASSERT_TRUE(persistence.load(snapshot.string(), error)) << error;
     script = registry->get<commons::code>(first.id);
     ASSERT_NE(script, nullptr);
-    EXPECT_EQ(std::get<std::string>(script->properties[1].value), (path.parent_path() / "assets/icon.png").string());
-    EXPECT_EQ(std::get<std::string>(script->scripts[0]->properties[1].value), (path.parent_path() / "assets/child.png").string());
+    EXPECT_EQ(std::get<std::string>(script->properties[1].value), (path.parent_path() / "assets/icon.png").lexically_normal().string());
+    EXPECT_EQ(std::get<std::string>(script->scripts[0]->properties[1].value), (path.parent_path() / "assets/child.png").lexically_normal().string());
 }
 
 TEST(ProjectPersistenceTest, InvalidLegacySceneDoesNotMigrateOrChangeRegistry) {

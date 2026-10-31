@@ -26,7 +26,7 @@ T* find(bgui::element& element, Predicate predicate) {
 class EditorAssetWorkflowTest : public testing::Test {
 protected:
     bgui::scoped_interface ui_scope;
-    std::filesystem::path folder = std::filesystem::temp_directory_path() /
+    std::filesystem::path folder = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) /
         ("bengine-workflow-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override {
         std::filesystem::create_directory(folder);
@@ -877,4 +877,25 @@ TEST_F(EditorAssetWorkflowTest, ProjectDeletionConfirmationRetiresWhenItsManager
     root.remove(&manager);
     bgui::on_update(); bgui::on_update();
     EXPECT_EQ(find<editor::ui::project_delete_confirmation>(root, [](auto&) { return true; }), nullptr);
+}
+
+TEST_F(EditorAssetWorkflowTest, SceneAssetRelocationResolvesProjectDirectoryAliases) {
+    const auto real = folder / "real";
+    const auto alias = folder / "alias";
+    std::filesystem::create_directories(real / "destination");
+    std::error_code error;
+    std::filesystem::create_directory_symlink(real, alias, error);
+    if (error) GTEST_SKIP() << "Directory aliases are not available: " << error.message();
+    std::ofstream(real / "destination/Move.lua") << "function update() end";
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = alias;
+    auto entity = registry->create();
+    registry->add<commons::code>(entity, "Move.lua");
+    auto script = registry->get<commons::code>(entity.id);
+    script->arquivoCompleto = (alias / "Move.lua").string();
+    editor::ui::relocate_scene_asset(context, real / "Move.lua", real / "destination/Move.lua");
+    EXPECT_EQ(script->file, "destination/Move.lua");
+    EXPECT_EQ(std::filesystem::path(script->arquivoCompleto), real / "destination/Move.lua");
+    registry->entities.clear();
 }

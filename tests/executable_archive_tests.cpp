@@ -16,7 +16,7 @@ void write(const fs::path& path,const std::string& text){fs::create_directories(
 class ExecutableArchiveTest:public testing::Test {
 protected:
     fs::path root=fs::temp_directory_path()/("bengine packed "+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::path data=root/"source", output=root/"moved/Game";
+    fs::path data=root/"source", output=root/"moved/Runner";
     void SetUp() override {
         write(root/"runtime",std::string("stub executable BENGINE_EMBED_REQUIRED_V1:0"));
         write(data/"game.json",R"({"format":"bubble-engine-game","version":1,"project":"game/project.bengine","executable":"Game","binary":"Game"})");
@@ -96,15 +96,20 @@ TEST_F(ExecutableArchiveTest, DecodesImageFromExecutableWithoutAFile) {
     EXPECT_FALSE(fs::exists(output.parent_path()/"game/assets/red.png"));
 }
 TEST_F(ExecutableArchiveTest, SinglePublicationHasOnlyExecutableAndCanReplaceAnOlderSingleExport) {
-    write(data/"Game","stub executable BENGINE_EMBED_REQUIRED_V1:0");
+#ifdef _WIN32
+    const auto executable = "Game.exe";
+#else
+    const auto executable = "Game";
+#endif
+    write(data/executable,"stub executable BENGINE_EMBED_REQUIRED_V1:0");
     const auto destination=root/"exports/linux";
     game_package::publish(data,destination,true);
     ASSERT_EQ(std::distance(fs::directory_iterator(destination),fs::directory_iterator{}),1);
-    EXPECT_TRUE(executable_archive::reader::open(destination/"Game")->contains("game/scripts/main.lua"));
+    EXPECT_TRUE(executable_archive::reader::open(destination/executable)->contains("game/scripts/main.lua"));
     EXPECT_NO_THROW(game_package::publish(data,destination,true));
     write(data/"lib/unexpected.so","library");
     EXPECT_THROW(game_package::publish(data,destination,true),std::runtime_error);
-    EXPECT_TRUE(fs::is_regular_file(destination/"Game"));
+    EXPECT_TRUE(fs::is_regular_file(destination/executable));
 }
 
 TEST_F(ExecutableArchiveTest, LuaLoadfileAndDofileReadEmbeddedScripts) {

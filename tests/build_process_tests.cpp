@@ -82,6 +82,7 @@ TEST_F(BuildProcessTest, GameExportKeepsLogsAndProgressOutsideOutputAndPassesPro
     std::ifstream log(process.log_path());
     const std::string contents{std::istreambuf_iterator<char>(log), {}};
     EXPECT_NE(contents.find(project.string()), std::string::npos);
+    log.close();
     std::filesystem::remove_all(process.log_path().parent_path());
 }
 

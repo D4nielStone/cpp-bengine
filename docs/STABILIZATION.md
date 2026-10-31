@@ -1262,3 +1262,21 @@ o CRT do MSVC ao triplet: estático para executável único e packager estático
 dinâmico para exportação em pasta. Os sete testes de orquestração passaram,
 incluindo verificação dos dois formatos por comandos simulados. A execução
 do jogo Windows de executável único não foi validada por esses testes simulados.
+
+Na execução efetiva dos testes MSVC, o runner não disponibilizou OpenGL 3.3.
+Os testes de janela/upload passam a consultar essa capacidade explicitamente;
+continuam executados com OpenGL por software no Linux. As fixtures de arquivos
+usam diretórios temporários canônicos e expectativas normalizadas para evitar
+comparações textuais entre aliases 8.3, caminhos longos e separadores distintos.
+O remapeamento de assets e a raiz do browser também normalizam identidades de
+caminhos; um teste com alias de diretório cobre a atualização do script movido.
+Streams de catálogo/log são fechados antes de substituir ou remover arquivos.
+O nome dos chunks Lua usa o prefixo de arquivo `@`, preservando o nome do script
+nos erros de caminhos longos. O MSVC compila os fontes UTF-8 explicitamente.
+
+Na BGUI, o teste de menu usa a fonte sintética que ele próprio define; o teste
+CMYK considera a conversão com perfil padrão do WIC, mantendo as verificações
+estritas de RGB, grayscale e alpha. O teste de macros de projeção foi registrado
+explicitamente no CTest. Após essas mudanças, a compilação local e os 326 testes
+CTest passaram com OpenGL por software e execução real do demo. As diferenças
+exclusivas do WIC e do Windows continuam sendo verificadas pelo Actions.

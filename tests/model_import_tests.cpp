@@ -1,6 +1,7 @@
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include <gtest/gtest.h>
+#include "opengl_test_support.hpp"
 #include "loaders/model_pose.hpp"
 #include "model_import_dialog.hpp"
 #include <chrono>
@@ -70,7 +71,7 @@ TEST(ModelImport, EvaluatesSkinWeightsAndBoneOffsets) {
     EXPECT_FLOAT_EQ(f.pose.vertices(f.pose.instances[0]).positions[0].x, 3);
 }
 TEST(ModelImport, SettingsRoundTripAndRejectCorruption) {
-    const auto dir = std::filesystem::temp_directory_path() / ("bengine-model-settings-" +
+    const auto dir = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) / ("bengine-model-settings-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(dir);
     struct cleanup { std::filesystem::path p; ~cleanup() { std::filesystem::remove_all(p); } } cleanup{dir};
@@ -109,7 +110,7 @@ T* find_import_element(bgui::element& root, Predicate predicate) {
 class ImportDialogTest : public testing::Test {
 protected:
     bgui::scoped_interface ui_scope;
-    std::filesystem::path folder = std::filesystem::temp_directory_path() / ("bengine-import-ui-" +
+    std::filesystem::path folder = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) / ("bengine-import-ui-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override { std::filesystem::create_directories(folder); bgui::get_context().m_size = {1200,800}; }
     void TearDown() override { std::filesystem::remove_all(folder); }
@@ -156,11 +157,11 @@ TEST_F(ImportDialogTest, InvalidScaleKeepsDialogOpenAndPreservesSettings) {
 #include "loaders/model.hpp"
 
 TEST(ModelImportGpuTest, LoadsEmbeddedGlbTextureAndAnimatesThroughExistingRenderer) {
-    const auto folder = std::filesystem::temp_directory_path() / ("bengine-glb-" +
+    const auto folder = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) / ("bengine-glb-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(folder);
     struct cleanup { std::filesystem::path p; ~cleanup() { std::filesystem::remove_all(p); } } cleanup{folder};
-    if (!glfwInit()) GTEST_SKIP() << "No display for GPU upload";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for GPU upload";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     commons::window window("Model import", 100, 100);
     fixture f;

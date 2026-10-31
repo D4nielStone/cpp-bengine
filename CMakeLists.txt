@@ -11,6 +11,9 @@ configure_file(cmake/engine_version.hpp.in ${CMAKE_BINARY_DIR}/generated/engine_
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 option(BENGINE_DISTRIBUTION_BUILD "Build relocatable release binaries for the installer" OFF)
 if(BENGINE_DISTRIBUTION_BUILD)

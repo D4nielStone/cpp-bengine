@@ -71,7 +71,7 @@ TEST_F(EditorMenuTest, SavedProjectExitsWithoutOpeningSaveConfirmation) {
     auto camera = registry->create();
     registry->add<commons::camera>(camera);
     editor::ui::project_persistence_system project(registry, camera.id);
-    const auto path = std::filesystem::temp_directory_path() /
+    const auto path = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) /
         ("bengine-exit-" + std::to_string(std::chrono::steady_clock::now()
             .time_since_epoch().count()) + ".bengine");
     std::string error;
@@ -240,7 +240,7 @@ TEST_F(EditorMenuTest, F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling
 
 TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) {
     bgui::scoped_interface ui_scope;
-    const auto temporary = std::filesystem::temp_directory_path() /
+    const auto temporary = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) /
         ("bengine menu export " + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(temporary);
     const auto output = temporary / "output";
@@ -252,7 +252,7 @@ TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) 
         "XDG_CACHE_HOME"
 #endif
     );
-    const auto cache_root = cache && *cache ? std::filesystem::path(cache) : std::filesystem::temp_directory_path();
+    const auto cache_root = cache && *cache ? std::filesystem::path(cache) : std::filesystem::weakly_canonical(std::filesystem::temp_directory_path());
     const auto key = std::string(BENGINE_REPOSITORY_ROOT) + "|" + project.string() + "|" + output.string() + "|linux";
     const auto workspace = cache_root / "cpp-bengine/game-builds" / std::to_string(std::hash<std::string>{}(key));
     std::filesystem::create_directories(workspace / "editor-build-linux.progress");
@@ -274,7 +274,7 @@ TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) 
     };
     click("Build"); click("Export Game");
     auto* input = find<bgui::inputbox>(bgui::get_layout(), [&](auto& item) {
-        return item.get_buffer() == (temporary / "build/exports").string();
+        return item.get_buffer() == (temporary / "build/exports").lexically_normal().string();
     });
     ASSERT_NE(input, nullptr);
     input->set_buffer(output.string()); input->m_enter_func(output.string());

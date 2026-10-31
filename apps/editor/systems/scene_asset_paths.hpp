@@ -6,10 +6,13 @@
 
 namespace editor::ui {
 inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
-    const std::filesystem::path& from, const std::filesystem::path& to) {
+    const std::filesystem::path& requested_from, const std::filesystem::path& requested_to) {
+    const auto root = std::filesystem::weakly_canonical(context->project_root);
+    const auto from = std::filesystem::weakly_canonical(requested_from);
+    const auto to = std::filesystem::weakly_canonical(requested_to);
     const auto absolute = [&](const std::string& text) {
         const std::filesystem::path path(text);
-        return text.empty() ? path : (path.is_absolute() ? path : context->project_root / path).lexically_normal();
+        return text.empty() ? path : std::filesystem::weakly_canonical(path.is_absolute() ? path : root / path);
     };
     std::function<void(const std::shared_ptr<commons::code>&)> update_script;
     update_script = [&](const auto& script) {
@@ -17,14 +20,14 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
         if (absolute(script->arquivoCompleto) == from || absolute(script->file) == from) {
             script->arquivoCompleto = to.string();
             script->file = std::filesystem::path(script->file).is_absolute() ? to.string() :
-                to.lexically_relative(context->project_root).generic_string();
+                to.lexically_relative(root).generic_string();
         }
         for (auto& property : script->properties) {
             if (property.type != "image") continue;
             auto& value = std::get<std::string>(property.value);
             if (absolute(value) == from)
                 value = std::filesystem::path(value).is_absolute() ? to.string() :
-                    to.lexically_relative(context->project_root).generic_string();
+                    to.lexically_relative(root).generic_string();
         }
         for (const auto& child : script->scripts) update_script(child);
     };

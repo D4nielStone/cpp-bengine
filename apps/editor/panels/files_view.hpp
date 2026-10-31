@@ -750,11 +750,11 @@ private:
         }
 
         if (std::filesystem::is_directory(absolute_path, error) && !error)
-            return absolute_path.lexically_normal();
+            return std::filesystem::weakly_canonical(absolute_path);
 
         const auto parent = absolute_path.parent_path();
-        return (parent.empty() ? std::filesystem::current_path() : parent)
-            .lexically_normal();
+        return std::filesystem::weakly_canonical(
+            parent.empty() ? std::filesystem::current_path() : parent);
     }
 
     static bool is_scene_file(const std::filesystem::path& path) {

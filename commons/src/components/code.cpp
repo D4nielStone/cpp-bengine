@@ -363,7 +363,7 @@ void code::setup() {
     }
     estado_lua["properties"] = values;
     const auto loaded = estado_lua.safe_script(
-        bgui::resource_files::text(arquivoCompleto), sol::script_pass_on_error, arquivoCompleto);
+        bgui::resource_files::text(arquivoCompleto), sol::script_pass_on_error, "@" + arquivoCompleto);
     if (!loaded.valid()) throw loaded.get<sol::error>();
 
     f_setup = estado_lua["setup"];
