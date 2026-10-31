@@ -10,6 +10,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(BENGINE_DISTRIBUTION_BUILD "Build relocatable release binaries for the installer" OFF)
+if(BENGINE_DISTRIBUTION_BUILD)
+    set(COMMONS_USE_RELATIVE_ASSET_PATHS ON CACHE BOOL "" FORCE)
+endif()
+
 include(CTest)
 find_package(ZLIB REQUIRED)
 
@@ -35,4 +40,15 @@ add_subdirectory(apps)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+if(BENGINE_DISTRIBUTION_BUILD AND UNIX AND NOT APPLE)
+    foreach(application editor_app runtime_app game_packager)
+        if(TARGET ${application})
+            set_target_properties(${application} PROPERTIES
+                BUILD_RPATH "$ORIGIN/lib" INSTALL_RPATH "$ORIGIN/lib"
+                BUILD_WITH_INSTALL_RPATH TRUE)
+            target_link_options(${application} PRIVATE "LINKER:--disable-new-dtags")
+        endif()
+    endforeach()
 endif()

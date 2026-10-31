@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <utility>
 #include <glm/glm.hpp>
 #include "commons_namespace.hpp"
 #include "material.hpp"
@@ -27,6 +28,7 @@ namespace COMMONS_NS {
         unsigned int                getVertexBuffer() const;
         void                        set_vertices(const std::vector<vertex>&);
         void                        setInstances(const std::vector<transform>&);
+        void                        setInstances(std::vector<transform>&& instances) { m_instances = std::move(instances); }
         void                        set_indices(const std::vector<unsigned int>&);
         void                        setMaterial(const material&);
         void                        setSobreposition(const bool);

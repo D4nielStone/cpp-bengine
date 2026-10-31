@@ -1,0 +1,96 @@
+name: Build Bubble Engine installers
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential python3-tk liblua5.3-dev libglm-dev libglfw3-dev libassimp-dev libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev zlib1g-dev
+      - name: Install Windows build dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install assimp:x64-windows bullet3:x64-windows freetype:x64-windows glfw3:x64-windows glm:x64-windows lua:x64-windows zlib:x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Configure Linux release
+        if: runner.os == 'Linux'
+        run: cmake -S . -B out -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON
+      - name: Configure Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B out -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build
+        run: cmake --build out --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir out --output-on-failure -C Release
+      - name: Configure relocatable Linux binaries
+        if: runner.os == 'Linux'
+        run: cmake -S . -B release-build -DCMAKE_BUILD_TYPE=Release -DBENGINE_DISTRIBUTION_BUILD=ON -DBUILD_TESTING=OFF -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON
+      - name: Configure relocatable Windows binaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B release-build -DBENGINE_DISTRIBUTION_BUILD=ON -DBUILD_TESTING=OFF -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build relocatable binaries
+        run: cmake --build release-build --config Release --parallel 2
+      - name: Freeze installer
+        run: |
+          python -m pip install -r tools/installer/requirements-build.txt
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name BubbleEngineSetup --distpath release --workpath out/installer --specpath out tools/installer/manager.py
+      - name: Package Linux engine
+        if: runner.os == 'Linux'
+        run: python tools/installer/package_release.py --build release-build --output release --version "$GITHUB_REF_NAME"
+      - name: Package Windows engine
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python tools/installer/package_release.py --build release-build --output release --version "$env:GITHUB_REF_NAME" --library-dir "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ runner.os }}
+          path: release/*
+          if-no-files-found: error
+
+  draft_release:
+    needs: package
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: release-artifacts
+      - name: Assemble checksums and draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir release
+          find release-artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
+          (cd release && sha256sum BubbleEngineSetup BubbleEngineSetup.exe bubble-engine-*.zip > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --draft --title "Bubble Engine $GITHUB_REF_NAME" --generate-notes

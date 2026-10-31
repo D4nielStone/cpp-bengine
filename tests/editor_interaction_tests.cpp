@@ -777,13 +777,69 @@ TEST_F(EditorInteractionTest, DirectionGizmoDrawsInsideViewportWithoutTakingInpu
     gizmo.on_update();
     bgui::draw_data data;
     gizmo.get_requires(&data);
-    ASSERT_FALSE(data.m_draw_list.get_vertices().empty());
-    for (const auto& vertex : data.m_draw_list.get_vertices()) {
-        EXPECT_GE(vertex.m_position.x, 20);
-        EXPECT_LE(vertex.m_position.x, 820);
-        EXPECT_GE(vertex.m_position.y, 30);
-        EXPECT_LE(vertex.m_position.y, 630);
-    }
+    // The global draw list is rendered after all windows, even modal windows.
+    EXPECT_TRUE(data.m_draw_list.get_vertices().empty());
+    ASSERT_EQ(data.m_quad_requires.size(), 1u);
+    const auto& call = data.m_quad_requires.front();
+    EXPECT_EQ(call.m_rect.x, gizmo.processed_x());
+    EXPECT_EQ(call.m_rect.y, gizmo.processed_y());
+    EXPECT_EQ(call.m_rect.z, gizmo.processed_width());
+    EXPECT_EQ(call.m_material.m_shader_tag, "ui::image");
+    EXPECT_TRUE(call.m_material.m_texture.m_has_alpha);
+    EXPECT_FALSE(call.m_material.m_texture.m_buffer.empty());
     EXPECT_FALSE(gizmo.receives_input());
     EXPECT_FALSE(gizmo.supports_render_cache());
+}
+
+TEST_F(EditorInteractionTest, DirectionGizmoStaysBeforeLaterWindowsAndModals) {
+    auto& root = bgui::get_layout();
+    auto& scene = root.add<bgui::window>("Scene", true);
+    auto& image = scene.add<bgui::image>();
+    image.set_final_rect(0, 0, 800, 600);
+    auto camera = std::make_shared<commons::camera>();
+    auto& gizmo = scene.add<editor::ui::direction_gizmo, bgui::layer::overlay>(camera, image);
+    gizmo.on_update();
+    auto& window = root.add<bgui::window>("Floating", true);
+    auto& modal = root.add<bgui::modal, bgui::layer::overlay>();
+    bgui::draw_data data;
+    data.m_clip_rect = {0, 0, 900, 600};
+    gizmo.get_requires(&data);
+    window.bgui::element::get_requires(&data);
+    modal.bgui::element::get_requires(&data);
+    EXPECT_TRUE(data.m_draw_list.get_vertices().empty());
+    ASSERT_EQ(data.m_quad_requires.size(), 3u);
+    EXPECT_EQ(data.m_quad_requires.front().m_material.m_shader_tag, "ui::image");
+    data.m_quad_requires.pop();
+    EXPECT_NE(data.m_quad_requires.front().m_material.m_shader_tag, "ui::image");
+    data.m_quad_requires.pop();
+    EXPECT_NE(data.m_quad_requires.front().m_material.m_shader_tag, "ui::image");
+}
+
+TEST_F(EditorInteractionTest, DirectionGizmoTextureTracksRotationAndScale) {
+    auto& root = bgui::get_layout();
+    auto& image = root.add<bgui::image>();
+    image.set_final_rect(0, 0, 800, 600);
+    auto camera = std::make_shared<commons::camera>();
+    camera->viewMatrix = glm::mat4(1.f);
+    auto& gizmo = root.add<editor::ui::direction_gizmo>(camera, image);
+    gizmo.on_update();
+    bgui::draw_data first;
+    gizmo.get_requires(&first);
+    const auto original = first.m_quad_requires.front().m_material.m_texture;
+    ASSERT_FALSE(original.m_buffer.empty());
+    EXPECT_EQ(original.m_buffer[3], 0); // Transparent outside the disk.
+    bgui::draw_data second;
+    gizmo.get_requires(&second);
+    EXPECT_EQ(second.m_quad_requires.front().m_material.m_texture.m_revision, original.m_revision);
+    camera->viewMatrix = glm::lookAt(glm::vec3(4, 0, 0), glm::vec3(0), glm::vec3(0, 1, 0));
+    bgui::draw_data rotated;
+    gizmo.get_requires(&rotated);
+    const auto changed = rotated.m_quad_requires.front().m_material.m_texture;
+    EXPECT_GT(changed.m_revision, original.m_revision);
+    EXPECT_NE(changed.m_buffer, original.m_buffer);
+    image.set_final_rect(0, 0, 70, 60);
+    gizmo.on_update();
+    bgui::draw_data resized;
+    gizmo.get_requires(&resized);
+    EXPECT_EQ(resized.m_quad_requires.front().m_material.m_texture.m_buffer.size(), 36u * 36u * 4u);
 }

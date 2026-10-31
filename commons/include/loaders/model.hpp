@@ -44,6 +44,9 @@ namespace COMMONS_NS {
         model(const char* directory);
         model(const std::string& directory);
 
+        // Independent CPU geometry and animation state; GPU buffers upload on first draw.
+        std::unique_ptr<model> clone() const;
+
         mesh& getMalha(size_t i);
         shader& getShader();
         void setShader(const shader&);

@@ -3,7 +3,7 @@ local collected = false
 local player
 
 function setup()
-    player = GameObject.Find(106) -- PlayerCapsule in main.scene
+    player = GameObject.Find("PlayerCapsule") -- PlayerCapsule in main.scene
     Debug.Log("FPP demo started.")
 end
 

@@ -300,3 +300,50 @@ TEST_F(EditorMenuTest, ExportModalOffersOptionalSingleExecutableAndRuntimeTempla
     auto* template_input=find<bgui::inputbox>(bgui::get_layout(),[](auto& item){return item.get_buffer().empty();});
     ASSERT_NE(template_input,nullptr);
 }
+
+TEST(EditorProjectManager, ContextMenuSeparatesRemovingFromListAndDeletingFolder) {
+    bgui::scoped_interface interface;
+    namespace fs = std::filesystem;
+    const auto folder = fs::temp_directory_path() / ("bengine-project-menu-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(folder / "Example");
+    struct cleanup {
+        fs::path previous, folder;
+        ~cleanup() { fs::current_path(previous); std::error_code error; fs::remove_all(folder, error); }
+    } cleanup{fs::current_path(), folder};
+    fs::current_path(folder);
+    const auto project = folder / "Example/project.bengine";
+    std::ofstream(project) << R"({"format":"bubble-engine-project","version":1})";
+    std::ofstream("editor-recent-projects.cfg") << project.string() << '\n';
+    auto registry = std::make_shared<commons::ecs>();
+    auto& root = bgui::get_layout();
+    auto& menu = root.add<bgui::menu_bar>(root);
+    auto& dock = root.add<bgui::dock>();
+    editor::ui::ui_persistence_system ui_persistence;
+    editor::ui::project_persistence_system persistence(registry, 0);
+    editor::ui::editor_ui editor(dock, menu, ui_persistence, persistence, registry, "other.bengine", folder);
+    auto* manager = find<bgui::modal>(root, [](auto& value) {
+        return find<bgui::text>(value, [](auto& text) { return text.get_buffer() == "Project Manager"; });
+    });
+    ASSERT_NE(manager, nullptr);
+    manager->set_enable(true);
+    auto* row = find<bgui::button>(*manager, [&](auto& value) {
+        return value.get_label().get_buffer().find(project.string()) != std::string::npos;
+    });
+    ASSERT_NE(row, nullptr);
+    bgui::get_context().m_size = {1200, 800};
+    bgui::on_update();
+    bgui::get_context().m_mouse_position = {row->processed_x() + 6, row->processed_y() + 6};
+    bgui::get_context().m_input_map[bgui::input_key::mouse_right] = bgui::input_action::press;
+    bgui::on_update(); bgui::on_update();
+    auto* popup = find<bgui::linear>(root, [](auto& value) { return value.has_class("editor-context-actions") && value.is_enabled(); });
+    ASSERT_NE(popup, nullptr);
+    auto* remove = find<bgui::button>(*popup, [](auto& value) { return value.get_label().get_buffer() == "Remover da lista"; });
+    auto* erase = find<bgui::button>(*popup, [](auto& value) { return value.get_label().get_buffer() == "Apagar pasta do disco..."; });
+    ASSERT_NE(remove, nullptr); ASSERT_NE(erase, nullptr);
+    remove->on_released(); bgui::get_context().m_input_map.clear(); bgui::on_update();
+    EXPECT_TRUE(fs::exists(project));
+    std::ifstream input("editor-recent-projects.cfg");
+    EXPECT_TRUE(std::string(std::istreambuf_iterator<char>(input), {}).empty());
+    EXPECT_FALSE(row->is_enabled());
+}

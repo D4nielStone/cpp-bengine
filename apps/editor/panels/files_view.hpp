@@ -9,6 +9,7 @@
 #include "../systems/project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
 #include "model_import_dialog.hpp"
+#include "context_action_button.hpp"
 
 #include <bgui.hpp>
 #include <elem/button.hpp>
@@ -61,7 +62,7 @@ public:
 
     std::filesystem::path import_file(const std::filesystem::path& source,
         const std::filesystem::path& directory = {}) {
-        const auto imported = import_asset(source, m_project_root, supports_model(source), directory);
+        const auto imported = import_asset(source, m_project_root, supports_model(source), directory, m_import_another_copy);
         m_current_directory = imported.parent_path();
         m_expanded_directories.insert(m_current_directory);
         m_selected_file = imported;
@@ -311,14 +312,14 @@ private:
         }
     };
 
-    class file_button final : public bgui::button {
+    class file_button final : public context_action_button {
     public:
         file_button(
             const std::string& label,
             std::function<void()> on_click,
             std::function<void(const bgui::vec2i&)> on_drop
         )
-            : bgui::button(label, 0.28f, on_click),
+            : context_action_button(label, 0.28f, on_click),
               m_on_drop(std::move(on_drop)) {}
 
         void on_pressed() override {
@@ -362,6 +363,7 @@ private:
     file_moved_callback m_on_file_moved;
     std::function<bool()> m_can_modify_files;
     bgui::modal* m_delete_modal{nullptr};
+    bool m_import_another_copy{false};
     model_import_dialog m_model_importer;
     std::function<void(const std::filesystem::path&)> m_on_model_imported;
     std::vector<std::pair<bgui::element*, std::filesystem::path>> m_folder_targets;
@@ -939,6 +941,7 @@ private:
         filename.m_enter_func = [create](const std::string&) { create(); };
         filename.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
         create_row.add<bgui::button>("Novo script Lua", 0.27f, create).add_class("new-script-button");
+        create_row.add<bgui::checkbox>(&m_import_another_copy, m_import_another_copy, "Importar outra cópia", .27f);
         if (!m_selected_file.empty()) {
             create_row.add<bgui::button>("Excluir arquivo", .27f, [this, file = m_selected_file]() {
                 bgui::add_function([this, file]() { confirm_file_delete(file); });
@@ -1029,6 +1032,21 @@ private:
                     }
                 }
             );
+            item.context_options = [this, file]() {
+                context_actions actions{
+                    {"Abrir / Editar", [this, file]() { m_selected_file = file; open_document(file); request_refresh(); }},
+                    {"Duplicar arquivo", [this, file]() {
+                        try {
+                            if (m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução antes de duplicar arquivos.");
+                            const auto copied = import_asset(file, m_project_root, is_model_file(file), file.parent_path(), true);
+                            m_selected_file = copied; request_refresh();
+                        } catch (const std::exception& e) { set_asset_status(e.what()); }
+                    }},
+                    {"Excluir arquivo...", [this, file]() { confirm_file_delete(file); }}
+                };
+                if (is_model_file(file)) actions.emplace_back("Configurar importação 3D...", [this, file]() { show_model_importer(file); });
+                return actions;
+            };
             item.get_label().set_enable(false);
             auto& icon = item.add<bgui::icon>(file_icon(file), 0.27f);
             icon.receives_input(false);

@@ -125,6 +125,12 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
 
         const auto view = camera_component->getViewMatrix();
         const auto projection = camera_component->obtProjectionMatrix();
+        if (!camera_component->m_skybox) camera_component->m_skybox = new skybox();
+        camera_component->m_skybox->draw_background(view, projection,
+            camera_component->skybox_faces, camera_component->skybox_asset_root,
+            camera_component->m_use_skybox,
+            {camera_component->ceu.r, camera_component->ceu.g, camera_component->ceu.b},
+            camera_component->atmosphere_zenith);
 
         auto direction_light = global_direction_light;
         if (auto camera_light = reg->get<directional_light>(camera_component->my_object)) {

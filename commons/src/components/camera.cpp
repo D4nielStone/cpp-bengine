@@ -91,12 +91,23 @@ bool camera::analyze(const rapidjson::Value& value)
 			_ceu[3].GetFloat() / 255,
 		};
 	}
-    m_use_skybox = !value.HasMember("skybox") || value["skybox"].GetBool();
-    if (m_use_skybox && !m_skybox)
-        m_skybox = new skybox();
-    else if (!m_use_skybox && m_skybox) {
-        delete m_skybox;
-        m_skybox = nullptr;
+    m_use_skybox = value.HasMember("skybox") && value["skybox"].GetBool();
+    skybox_faces = {};
+    if (value.HasMember("skybox_faces")) {
+        const auto& faces = value["skybox_faces"];
+        if (!faces.IsArray() || faces.Size() != 6) return false;
+        for (unsigned i = 0; i < 6; ++i) {
+            if (!faces[i].IsString()) return false;
+            skybox_faces[i] = faces[i].GetString();
+        }
+    }
+    if (value.HasMember("atmosphere_zenith")) {
+        const auto& c = value["atmosphere_zenith"];
+        if (!c.IsArray() || c.Size() != 3) return false;
+        for (unsigned i = 0; i < 3; ++i) {
+            if (!c[i].IsNumber()) return false;
+            atmosphere_zenith[i] = c[i].GetFloat();
+        }
     }
 
 	return true;
@@ -245,6 +256,13 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
     cor_ceu.PushBack(static_cast<int>(ceu.a * 255), allocator);
     value.AddMember("ceu", cor_ceu, allocator);
 
+    rapidjson::Value faces(rapidjson::kArrayType);
+    for (const auto& path : skybox_faces)
+        faces.PushBack(rapidjson::Value(path.c_str(), allocator), allocator);
+    value.AddMember("skybox_faces", faces, allocator);
+    rapidjson::Value zenith(rapidjson::kArrayType);
+    for (unsigned i = 0; i < 3; ++i) zenith.PushBack(atmosphere_zenith[i], allocator);
+    value.AddMember("atmosphere_zenith", zenith, allocator);
     // skybox (flag)
     value.AddMember("skybox", m_use_skybox, allocator);
 

@@ -1,7 +1,7 @@
 Bubble Engine
 ===
 
-![PREVIEW](image.jpg)
+![PREVIEW](preview.jpg)
 
 # About
 

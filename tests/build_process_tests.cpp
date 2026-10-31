@@ -84,3 +84,27 @@ TEST_F(BuildProcessTest, GameExportKeepsLogsAndProgressOutsideOutputAndPassesPro
     EXPECT_NE(contents.find(project.string()), std::string::npos);
     std::filesystem::remove_all(process.log_path().parent_path());
 }
+
+#include "../apps/editor/core/distribution_paths.hpp"
+
+TEST(DistributionPaths, InstalledPathsFollowTheManagerAndDevelopmentPathsStayIntact) {
+    const char* previous = std::getenv("BENGINE_HOME");
+    const std::string saved = previous ? previous : "";
+    const bool had_previous = previous != nullptr;
+    const auto set_home = [](const char* value) {
+#ifdef _WIN32
+        _putenv_s("BENGINE_HOME", value ? value : "");
+#else
+        if (value) setenv("BENGINE_HOME", value, 1);
+        else unsetenv("BENGINE_HOME");
+#endif
+    };
+    set_home(nullptr);
+    EXPECT_EQ(editor::distribution::path("source", "checkout"), std::filesystem::path("checkout"));
+    set_home("/installed/Bubble Engine/v1.0.0");
+    EXPECT_EQ(editor::distribution::path("source", "checkout"),
+        std::filesystem::path("/installed/Bubble Engine/v1.0.0/source"));
+    EXPECT_EQ(editor::distribution::path("game_packager", "old-build/game_packager"),
+        std::filesystem::path("/installed/Bubble Engine/v1.0.0/game_packager"));
+    set_home(had_previous ? saved.c_str() : nullptr);
+}

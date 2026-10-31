@@ -982,6 +982,48 @@ private:
             [camera](float value) { camera->scale = value; }
         );
 
+        add_shadow_toggle(content, "Enable Skybox", camera, &commons::camera::m_use_skybox);
+        const char* face_names[] = {"Right (+X)", "Left (-X)", "Top (+Y)", "Bottom (-Y)", "Front (+Z)", "Back (-Z)"};
+        for (unsigned i = 0; i < 6; ++i) {
+            auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
+            configure_property_row(row);
+            auto& label = row.add<bgui::text>(face_names[i], 0.27f);
+            configure_property_label(label);
+            auto& input = row.add<bgui::inputbox>(camera->skybox_faces[i], "Drop image or enter path", 0.26f);
+            configure_property_input(input);
+            auto assign = [this, camera, i](const std::filesystem::path& path) {
+                auto before = camera->skybox_faces[i];
+                auto after = path.generic_string();
+                if (path.is_absolute() && !m_context->project_root.empty()) {
+                    const auto relative = path.lexically_relative(m_context->project_root);
+                    if (!relative.empty() && *relative.begin() != "..") after = relative.generic_string();
+                }
+                camera->skybox_asset_root = m_context->project_root.string();
+                camera->skybox_faces[i] = after;
+                m_context->record_action(
+                    [camera, i, before]() { camera->skybox_faces[i] = before; },
+                    [camera, i, after]() { camera->skybox_faces[i] = after; });
+            };
+            input.m_enter_func = [assign](const std::string& path) { assign(path); };
+            m_asset_targets.push_back({&input, assign});
+        }
+        const char* channels[] = {"Atmosphere Zenith R", "Atmosphere Zenith G", "Atmosphere Zenith B"};
+        for (unsigned i = 0; i < 3; ++i) {
+            add_number_field(content, channels[i], camera->atmosphere_zenith[i],
+                [camera, i]() { return camera->atmosphere_zenith[i]; },
+                [camera, i](float v) { camera->atmosphere_zenith[i] = std::clamp(v, 0.f, 1.f); });
+        }
+
+        const char* horizon_labels[] = {"Atmosphere Horizon R", "Atmosphere Horizon G", "Atmosphere Horizon B"};
+        for (unsigned i = 0; i < 3; ++i) {
+            auto read = [camera, i]() { return i == 0 ? camera->ceu.r : i == 1 ? camera->ceu.g : camera->ceu.b; };
+            add_number_field(content, horizon_labels[i], read(), read,
+                [camera, i](float value) {
+                    float& channel = i == 0 ? camera->ceu.r : i == 1 ? camera->ceu.g : camera->ceu.b;
+                    channel = std::clamp(value, 0.f, 1.f);
+                });
+        }
+
         auto& orthographic = content.add<bgui::checkbox>(
             "Orthographic",
             0.29f,

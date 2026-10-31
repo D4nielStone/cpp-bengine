@@ -155,6 +155,12 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
     }
 
     if (name == "camera") {
+        if (value.HasMember("skybox_faces")) {
+            const auto& faces = value["skybox_faces"];
+            if (!faces.IsArray() || faces.Size() != 6) return false;
+            for (const auto& face : faces.GetArray()) if (!face.IsString()) return false;
+        }
+        if (value.HasMember("atmosphere_zenith") && !is_vector3(value["atmosphere_zenith"])) return false;
         if ((value.HasMember("fov") && !is_number(value["fov"])) ||
             (value.HasMember("zfar") && !is_number(value["zfar"])) ||
             (value.HasMember("scale") && !is_number(value["scale"])) ||
@@ -365,7 +371,9 @@ bool parse_component(
 
     if (name == "camera") {
         registry.add<commons::camera>(entity);
-        return registry.get<commons::camera>(entity.id)->analyze(data);
+        auto camera = registry.get<commons::camera>(entity.id);
+        camera->skybox_asset_root = project_directory.string();
+        return camera->analyze(data);
     }
 
     if (name == "directional_light") {

@@ -1,3 +1,6 @@
+#include "../core/distribution_paths.hpp"
+#include "context_action_button.hpp"
+#include "project_catalog.hpp"
 #include "editor_ui.hpp"
 #include "native_file_dialog.hpp"
 #include "project_creation_system.hpp"
@@ -204,7 +207,7 @@ editor_ui::editor_ui(
       m_registry(std::move(registry)),
       m_project_path(std::move(project_path)),
       m_build_directory(std::move(build_directory) / "exports"),
-      m_repository_root(BENGINE_REPOSITORY_ROOT),
+      m_repository_root(editor::distribution::path("source", BENGINE_REPOSITORY_ROOT)),
       m_build_process(std::make_unique<build_process>()) {
     create_project_modal(m_project_path, "");
 
@@ -999,7 +1002,7 @@ void editor_ui::create_project_modal(
             !std::filesystem::is_regular_file(recent, recent_error) || recent_error)
             continue;
         const auto recent_path = std::filesystem::path(recent);
-        auto& recent_button = m_project_modal->content().add<bgui::button>(
+        auto& recent_button = m_project_modal->content().add<context_action_button>(
             recent_path.parent_path().filename().string() + "  —  " + recent,
             0.28f,
             [this, recent]() {
@@ -1008,6 +1011,32 @@ void editor_ui::create_project_modal(
                 load_project_selection();
             }
         );
+        recent_button.context_options = [this, recent, row = &recent_button]() {
+            return context_actions{
+                {"Abrir projeto", [this, recent]() { m_project_directory_input->set_buffer(recent); load_project_selection(); }},
+                {"Remover da lista", [this, recent, row]() {
+                    try { forget_project(recent_projects_path, recent); row->set_enable(false); }
+                    catch (const std::exception& e) { m_project_picker_status->set_buffer(e.what()); }
+                }},
+                {"Apagar pasta do disco...", [this, recent, row]() {
+                    auto& confirmation = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+                    confirmation.add<bgui::text>("Apagar definitivamente a pasta do projeto?", .34f);
+                    confirmation.add<bgui::text>(std::filesystem::path(recent).parent_path().string(), .28f);
+                    confirmation.add<bgui::text>("Todos os arquivos da pasta serão apagados. Esta ação não pode ser desfeita.", .28f);
+                    confirmation.set_confirmation_text("Apagar pasta definitivamente");
+                    confirmation.set_on_confirm([this, recent, row]() {
+                        try {
+                            erase_project(recent, m_project_path);
+                            forget_project(recent_projects_path, recent);
+                            row->set_enable(false);
+                        } catch (const std::exception& e) { m_project_picker_status->set_buffer(e.what()); }
+                    });
+                    confirmation.add<bgui::button>("Cancelar", .3f, [surface = &confirmation]() {
+                        bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
+                    });
+                }}
+            };
+        };
         recent_button.style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::wrap_content

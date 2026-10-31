@@ -1,6 +1,6 @@
 -- The camera looks along local +X; parent yaw rotates around world +Y.
 local yaw = -90.0
-local move_speed = 2.5
+local move_speed = 5
 local body
 local rigidbody
 

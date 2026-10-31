@@ -23,6 +23,9 @@ namespace COMMONS_NS {
 
         skybox* m_skybox{nullptr};
         bool m_use_skybox { false };
+        std::array<std::string, 6> skybox_faces{};
+        std::string skybox_asset_root; // Resolved project directory, not serialized.
+        bgui::vec3 atmosphere_zenith{0.08f, 0.25f, 0.55f};
 		color ceu				{0.43F, 0.78F, 0.86F, 1.0F};
 
 		bgui::vec3 forward, right, up, position;

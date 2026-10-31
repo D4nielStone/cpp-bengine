@@ -1,49 +1,90 @@
-/** @copyright
-MIT License
-Copyright (c) 2025 Daniel Oliveira
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
-/**
- * @file skybox.cpp
- */
-
-#include "commons_namespace.hpp"
 #include "util/skybox.hpp"
+#include <os/asset_manager.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <filesystem>
 
 using namespace COMMONS_NS;
 
-void skybox::draw(glm::mat4 view, glm::mat4 proj)
-        {
-            glDepthFunc(GL_ALWAYS);
+skybox::~skybox() {
+    if (glad_glGetString && glGetString(GL_VERSION)) {
+        if (m_owned && id_skybox) glDeleteTextures(1, &id_skybox);
+        if (m_vao) glDeleteVertexArrays(1, &m_vao);
+    }
+}
 
-            glBindVertexArray(meshes.back().getVertexArray());
+void skybox::draw(glm::mat4 view, glm::mat4 proj) {
+    draw_background(view, proj, {}, {}, true, {0.43f, 0.78f, 0.86f}, {0.08f, 0.25f, 0.55f});
+}
 
-            glm::mat4 nview = glm::mat4(glm::mat3(view));
-            getShader().use();
-            getShader().setMat4("view", glm::value_ptr(nview));
-            getShader().setMat4("projection", glm::value_ptr(proj));
-
-            glBindTexture(GL_TEXTURE_CUBE_MAP, id_skybox);
-            glDrawElements(GL_TRIANGLES, meshes.back().getIndices().size(), GL_UNSIGNED_INT, 0);
-
-            glBindVertexArray(0);
-            glDepthFunc(GL_LESS);
-
+void skybox::draw_background(glm::mat4 view, glm::mat4 proj,
+    const std::array<std::string, 6>& faces, const std::string& root,
+    bool enabled, const bgui::vec3& horizon, const bgui::vec3& zenith) {
+    GLint vao, program, active, binding, unpack;
+    GLboolean depth_mask;
+    const bool depth = glIsEnabled(GL_DEPTH_TEST), cull = glIsEnabled(GL_CULL_FACE);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP, &binding);
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
+    if (!enabled && !m_valid) m_attempted = false;
+    if (enabled && (!m_attempted || m_faces != faces || m_root != root)) {
+        m_attempted = true; m_faces = faces; m_root = root; m_valid = false;
+        unsigned int candidate = 0;
+        try {
+            std::array<const bgui::texture*, 6> images{};
+            int size = 0;
+            for (unsigned i = 0; i < 6; ++i) {
+                if (faces[i].empty()) throw std::runtime_error("Missing cubemap face");
+                auto path = std::filesystem::path(faces[i]);
+                images[i] = &bgui::asset_manager::get_instance().load_texture(
+                    (path.is_absolute() ? path : std::filesystem::path(root) / path).string());
+                const auto& image = *images[i];
+                int width = static_cast<int>(image.m_size.x);
+                if (width <= 0 || image.m_size.y != width || (size && size != width) ||
+                    image.m_buffer.size() != static_cast<size_t>(width) * width * (image.m_has_alpha ? 4 : 3))
+                    throw std::runtime_error("Cubemap faces must be equally sized square RGB/RGBA images");
+                size = width;
+            }
+            GLint maximum; glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &maximum);
+            if (size > maximum) throw std::runtime_error("Cubemap exceeds GPU limit");
+            glGenTextures(1, &candidate);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, candidate);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            for (unsigned i = 0; i < 6; ++i) {
+                const auto& image = *images[i];
+                glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB8,
+                    size, size, 0, image.m_has_alpha ? GL_RGBA : GL_RGB,
+                    GL_UNSIGNED_BYTE, image.m_buffer.data());
+            }
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            for (auto axis : {GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_TEXTURE_WRAP_R})
+                glTexParameteri(GL_TEXTURE_CUBE_MAP, axis, GL_CLAMP_TO_EDGE);
+            if (m_owned && id_skybox) glDeleteTextures(1, &id_skybox);
+            id_skybox = candidate; m_owned = true; m_valid = true;
+        } catch (const std::exception&) {
+            if (candidate) glDeleteTextures(1, &candidate);
         }
+    }
+    if (!m_vao) glGenVertexArrays(1, &m_vao);
+    shader background("background.vert", "background.frag");
+    background.use();
+    const auto inverse = glm::inverse(glm::mat4(glm::mat3(view))) * glm::inverse(proj);
+    background.setMat4("inverseCamera", glm::value_ptr(inverse));
+    background.setVec3("horizon", horizon);
+    background.setVec3("zenith", zenith);
+    background.setBool("useCubemap", enabled && id_skybox && (!m_owned || m_valid));
+    background.setInt("sky", 0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, id_skybox);
+    glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE); glDepthMask(GL_FALSE);
+    glBindVertexArray(m_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(vao); glUseProgram(program); glDepthMask(depth_mask);
+    if (depth) glEnable(GL_DEPTH_TEST);
+    if (cull) glEnable(GL_CULL_FACE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, binding); glActiveTexture(active);
+}

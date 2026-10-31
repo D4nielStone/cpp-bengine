@@ -13,6 +13,7 @@
 #include "guizmo/grid_gizmo.hpp"
 #include "components/physics.hpp"
 #include <chrono>
+#include <fstream>
 #include <filesystem>
 #include <array>
 #include <glm/gtc/matrix_transform.hpp>
@@ -476,4 +477,97 @@ TEST_F(EditorRenderTest, TextureOffsetRepeatAndWorldProjectionChangePixelsAndRes
     EXPECT_EQ(wrap, GL_CLAMP_TO_EDGE); // BGUI texture state is preserved.
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
     glDeleteTextures(1, &texture);
+}
+
+TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
+    commons::camera camera;
+    EXPECT_FALSE(camera.m_use_skybox);
+    rapidjson::Document data(rapidjson::kObjectType);
+    camera.m_use_skybox = true;
+    camera.skybox_faces = {"right.png", "left.png", "top.png", "bottom.png", "front.png", "back.png"};
+    camera.atmosphere_zenith = {0.1f, 0.2f, 0.3f};
+    ASSERT_TRUE(camera.serialize(data, data.GetAllocator()));
+    commons::camera loaded;
+    ASSERT_TRUE(loaded.analyze(data));
+    EXPECT_TRUE(loaded.m_use_skybox);
+    EXPECT_EQ(loaded.skybox_faces, camera.skybox_faces);
+    EXPECT_FLOAT_EQ(loaded.atmosphere_zenith.y, 0.2f);
+    EXPECT_EQ(loaded.m_skybox, nullptr); // Loading never allocates GPU resources.
+    rapidjson::Document legacy(rapidjson::kObjectType);
+    ASSERT_TRUE(loaded.analyze(legacy));
+    EXPECT_FALSE(loaded.m_use_skybox);
+}
+
+TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create(1);
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->viewportFBO = {64, 64};
+    camera->createFB();
+    camera->viewMatrix = glm::lookAt(glm::vec3(0), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    commons::render_system render;
+    render.update(registry);
+    std::array<unsigned char, 3> top{}, bottom{}, fallback{};
+    glReadPixels(32, 60, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, top.data());
+    glReadPixels(32, 3, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, bottom.data());
+    EXPECT_NE(top, bottom);
+    float depth = 0.f;
+    glReadPixels(32, 32, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+    EXPECT_FLOAT_EQ(depth, 1.f);
+    camera->viewMatrix = glm::lookAt(glm::vec3(10, 20, 30), glm::vec3(10, 20, 29), glm::vec3(0, 1, 0));
+    render.update(registry);
+    glReadPixels(32, 60, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, fallback.data());
+    EXPECT_EQ(top, fallback); // Background depends on rotation, never position.
+    camera->m_use_skybox = true;
+    camera->skybox_faces.fill("/missing/cubemap.png");
+    render.update(registry);
+    glReadPixels(32, 60, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, fallback.data());
+    EXPECT_EQ(top, fallback);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST_F(EditorRenderTest, CubemapOverridesAtmosphereAndDisableRestoresIt) {
+    const std::vector<std::vector<unsigned char>> images = {
+        {137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,248,207,192,240,31,0,5,0,1,255,137,153,61,29,0,0,0,0,73,69,78,68,174,66,96,130},
+        {137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,96,248,207,240,31,0,4,1,1,255,113,235,71,229,0,0,0,0,73,69,78,68,174,66,96,130},
+        {137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,96,96,248,255,31,0,3,2,1,255,230,119,11,174,0,0,0,0,73,69,78,68,174,66,96,130},
+        {137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,248,255,159,225,63,0,7,253,2,254,166,148,197,180,0,0,0,0,73,69,78,68,174,66,96,130},
+        {137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,248,207,240,255,63,0,6,254,2,254,12,117,137,222,0,0,0,0,73,69,78,68,174,66,96,130},
+        {137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,96,248,255,255,63,0,5,255,2,254,94,14,59,173,0,0,0,0,73,69,78,68,174,66,96,130}
+    };
+    const auto folder = std::filesystem::temp_directory_path() /
+        ("bengine-sky-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directory(folder);
+    std::array<std::string, 6> paths;
+    for (unsigned i = 0; i < 6; ++i) {
+        paths[i] = (folder / (std::to_string(i) + ".png")).string();
+        std::ofstream output(paths[i], std::ios::binary);
+        output.write(reinterpret_cast<const char*>(images[i].data()), images[i].size());
+    }
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create(1);
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->viewportFBO = {64, 64};
+    camera->createFB();
+    camera->skybox_faces = paths;
+    camera->m_use_skybox = true;
+    commons::render_system render;
+    const glm::vec3 directions[] = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
+    const std::array<unsigned char, 3> colors[] = {{255,0,0}, {0,255,0}, {0,0,255}, {255,255,0}, {255,0,255}, {0,255,255}};
+    std::array<unsigned char, 4> pixel{};
+    for (unsigned i = 0; i < 6; ++i) {
+        const auto up = (i == 2 || i == 3) ? glm::vec3{0,0,1} : glm::vec3{0,1,0};
+        camera->viewMatrix = glm::lookAt(glm::vec3(0), directions[i], up);
+        render.update(registry);
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+        for (unsigned c = 0; c < 3; ++c) EXPECT_NEAR(pixel[c], colors[i][c], 2) << "Face " << i;
+    }
+    camera->m_use_skybox = false;
+    render.update(registry);
+    glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+    EXPECT_GT(pixel[1], 100);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    std::filesystem::remove_all(folder);
 }

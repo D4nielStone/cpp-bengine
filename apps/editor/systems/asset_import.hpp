@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <set>
 #include <string>
+#include <fstream>
+#include <array>
 #include <assimp/DefaultIOSystem.h>
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
@@ -67,21 +69,69 @@ inline std::set<std::filesystem::path> asset_dependencies(const std::filesystem:
     return files;
 }
 
+inline bool same_asset_bytes(const std::filesystem::path& a, const std::filesystem::path& b) {
+    namespace fs = std::filesystem;
+    if (!fs::is_regular_file(b) || fs::file_size(a) != fs::file_size(b)) return false;
+    std::ifstream left(a, std::ios::binary), right(b, std::ios::binary);
+    std::array<char, 8192> x{}, y{};
+    while (left && right) {
+        left.read(x.data(), x.size()); right.read(y.data(), y.size());
+        if (left.gcount() != right.gcount() ||
+            !std::equal(x.begin(), x.begin() + left.gcount(), y.begin())) return false;
+    }
+    return left.eof() && right.eof();
+}
+
+inline std::filesystem::path find_identical_asset(const std::filesystem::path& source,
+    const std::filesystem::path& root, bool model,
+    const std::set<std::filesystem::path>& files, const commons::model_import_options* options) {
+    namespace fs = std::filesystem;
+    const auto settings = commons::model_import_settings_path(source);
+    const auto desired = model ? commons::serialize_model_import_options(
+        options ? *options : commons::read_model_import_options(source)) : std::string{};
+    for (const auto& entry : fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied)) {
+        if (entry.is_symlink() || !entry.is_regular_file() || entry.path().extension() != source.extension()) continue;
+        const auto candidate = fs::canonical(entry.path());
+        if (!path_inside(candidate, root) || !same_asset_bytes(source, candidate)) continue;
+        if (!model) return candidate;
+        try {
+            if (commons::serialize_model_import_options(commons::read_model_import_options(candidate)) != desired) continue;
+            auto dependencies = asset_dependencies(candidate, true);
+            dependencies.erase(commons::model_import_settings_path(candidate));
+            if (dependencies.size() != files.size() - files.count(settings)) continue;
+            bool equal = true;
+            for (const auto& file : files) {
+                if (file == settings) continue;
+                const auto target = file == source ? candidate :
+                    (candidate.parent_path() / file.lexically_relative(source.parent_path())).lexically_normal();
+                if (!path_inside(fs::weakly_canonical(target), root) || !dependencies.contains(target) ||
+                    !same_asset_bytes(file, target)) { equal = false; break; }
+            }
+            if (equal) return candidate;
+        } catch (const std::exception&) { /* A broken existing bundle cannot be reused. */ }
+    }
+    return {};
+}
+
 inline std::filesystem::path import_asset(const std::filesystem::path& requested,
-    const std::filesystem::path& project, bool model, const std::filesystem::path& destination_folder = {}) {
+    const std::filesystem::path& project, bool model, const std::filesystem::path& destination_folder = {},
+    bool another_copy = false, const commons::model_import_options* options = nullptr) {
     namespace fs = std::filesystem;
     const auto source = fs::canonical(requested);
     const auto root = fs::canonical(project);
     if (!fs::is_regular_file(source))
         throw fs::filesystem_error("Solte um arquivo", source,
             std::make_error_code(std::errc::invalid_argument));
-    if (path_inside(source, root)) return source;
+    if (path_inside(source, root) && !another_copy) return source;
 
     const auto files = asset_dependencies(source, model);
-
     const auto assets = destination_folder.empty() ? root / "assets" : fs::canonical(destination_folder);
     if (!path_inside(assets, root))
         throw std::runtime_error("Escolha uma pasta dentro do projeto.");
+    if (!another_copy) {
+        const auto existing = find_identical_asset(source, root, model, files, options);
+        if (!existing.empty()) return existing;
+    }
     fs::create_directories(assets);
     if (!path_inside(fs::canonical(assets), root))
         throw std::runtime_error("A pasta assets precisa estar dentro do projeto.");

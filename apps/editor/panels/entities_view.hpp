@@ -9,6 +9,8 @@
 #include "editor_context.hpp"
 #include "panel.hpp"
 #include "viewport_input_state.hpp"
+#include "context_action_button.hpp"
+#include "primitive_entities.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -633,6 +635,24 @@ public:
         add_entity.add_class("entities-add-button");
         configure_icon_button(add_entity, 18);
         add_button_icon(add_entity, "plus", 0.26f);
+
+        auto& primitives = m_toolbar->add<context_action_button>("Primitiva...", .27f, []() {});
+        primitives.add_class("entities-primitives-button");
+        primitives.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
+        primitives.context_options = [this]() {
+            context_actions actions;
+            for (size_t i = 0; i < primitive_entities.size(); ++i) {
+                actions.emplace_back(primitive_entities[i].name, [this, i]() {
+                    try { if (const auto id = create_primitive_entity(m_context, i)) { select(*id); refresh(); } }
+                    catch (const std::exception& e) {
+                        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+                        modal.add<bgui::text>(e.what(), .3f);
+                    }
+                });
+            }
+            return actions;
+        };
+        primitives.set_function([button = &primitives]() { button->open_context(); });
 
         auto& remove_entity = m_toolbar->add<bgui::button>(
             "",

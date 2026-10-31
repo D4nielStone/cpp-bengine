@@ -16,6 +16,7 @@ class model_import_dialog {
     bgui::modal* m_modal = nullptr;
     std::shared_ptr<Assimp::Importer> m_importer;
     commons::model_import_options m_options;
+    bool m_another_copy{false};
 public:
     ~model_import_dialog() { close(); }
     void close() {
@@ -29,6 +30,7 @@ public:
         std::function<void(const std::filesystem::path&)> complete = {}) {
         close();
         m_options = {};
+        m_another_copy = false;
         try { m_options = commons::read_model_import_options(source); }
         catch (const std::exception& e) { diagnostic += std::string("\n") + e.what(); }
         m_importer = std::make_shared<Assimp::Importer>();
@@ -55,6 +57,7 @@ public:
         const auto check = [&](const std::string& label, bool& value) {
             modal.add<bgui::checkbox>(&value, value, label, .28f);
         };
+        check("Importar outra cópia", m_another_copy);
         modal.add<bgui::text>("Configurações de malha", .32f);
         check("Inverter UVs", m_options.flip_uvs);
         check("Gerar normais suaves quando ausentes", m_options.smooth_normals);
@@ -114,7 +117,7 @@ public:
                 if (!checked || !checked->mRootNode) throw std::runtime_error(validation.GetErrorString());
                 commons::validate_model_selection(*checked, m_options);
                 (void)asset_dependencies(std::filesystem::canonical(source), true);
-                const auto imported = import_asset(source, project, true, destination);
+                const auto imported = import_asset(source, project, true, destination, m_another_copy, &m_options);
                 const auto path = commons::model_import_settings_path(imported);
                 project_files::stage({path, commons::serialize_model_import_options(m_options)});
                 project_files::replace(path);

@@ -1034,6 +1034,53 @@ texturas automaticamente e mover um arquivo não reescreve os padrões no Lua.
 Nenhuma decisão de design obrigatória ficou pendente; o contrato confirmado pelo
 usuário está documentado. A falha física da cena local permanece fora desta fase.
 
+## Skybox cubemap e atmosfera — 2026-10-30
+
+Escopo solicitado: cubemap de seis imagens por câmera; atmosfera gradiente por
+shader como padrão e substituta da skybox desabilitada. As hipóteses P0/P1/P2
+não foram reabertas nesta implementação.
+
+| Item | Status | Evidência / mudança |
+|---|---|---|
+| Fundo sem atmosfera | CONFIRMADO | `camera::drawFB` apenas limpava a cor e `render_system::update` não desenhava fundo. Adicionado passe de fundo antes dos objetos, com shader `background.vert/frag`. |
+| Cubemap configurável | CONFIRMADO | `skybox` só expunha um ID OpenGL. Agora carrega seis faces quadradas de mesmo tamanho, com filtros lineares e clamp; Inspector da câmera aceita caminhos e arrastar imagens, com undo/redo. |
+| Atmosfera inicial e fallback | CONFIRMADO | `m_use_skybox` inicia falso; cenas antigas sem o campo também ficam com atmosfera. Cubemap incompleto/inválido usa gradiente. Cores do horizonte (`ceu`) e zênite são editáveis. |
+| Persistência | CONFIRMADO | `camera::serialize/analyze` gravam faces e zênite; validação de cena verifica tipos e tamanhos antes da aplicação. Caminhos relativos são resolvidos pela raiz do projeto no editor/runtime; imagens internas arrastadas são gravadas com caminho relativo. |
+
+Ordem das faces: direita (+X), esquerda (-X), topo (+Y), base (-Y), frente (+Z),
+fundo (-Z). O fundo acompanha a rotação da câmera e ignora a translação; não
+escreve profundidade. Recursos de GPU são criados apenas durante renderização.
+A API existente `skybox::draw`, `id_skybox` e `camera::m_use_skybox` foi mantida.
+
+Testes adicionados em `tests/editor_render_tests.cpp`: round-trip sem GPU e cena
+antiga; gradiente e fallback de imagem ausente; independência de translação e
+preservação da profundidade; cubemap com imagem PNG e retorno à atmosfera.
+
+Validação: em andamento; resultados e limites registrados abaixo antes do commit.
+
+## Auditoria de custo das janelas BGUI — 2026-10-31
+
+Escopo: procurar desperdícios, especialmente após destacar janelas de tabs,
+sem alterar funcionalidade. Nenhum código de produção foi modificado.
+
+| Item | Status | Evidência | Mudança / decisão |
+|---|---|---|---|
+| Alvos de encaixe ocultos invalidam o layout novamente | CONFIRMADO | `dock.cpp:767-777`: `mark_style_dirty()` incondicional nos cinco alvos e no preview; chamado no fim de `arrange()` (`:1485`). Teste `WindowAudit.AfterDetachIdleArrangeShouldKeepLayoutClean` falha: dock continua dirty após arrange sem interação. | Apenas diagnóstico; candidato a evitar invalidação quando o estado não muda. |
+| Indicadores de tabs invalidam layout em repouso | CONFIRMADO | `dock.cpp:1102-1104`: visibilidade reatribuída e estilo invalidado em toda atualização. Teste `WindowAudit.IdleTabsShouldKeepLayoutClean` falha sem interação. | Apenas diagnóstico; candidato a invalidar somente na transição de estado. |
+| Destacar uma tab reativa todas as antigas integrantes | CONFIRMADO (comportamento); PARCIAL (impacto de desempenho) | `dock.cpp:497-514` desfaz o grupo e habilita seus membros; teste `WindowAudit.DetachEnablesPreviouslyHiddenWindows` passa com três janelas. `layout::on_update()` atualiza filhos habilitados. | Preservado: manter as demais tabs agrupadas seria mudança funcional e exige decisão separada. Custo depende do conteúdo das janelas. |
+
+Validação: `cmake --build out --target all_tests -j 2` concluído; CTest
+`ElementTests`, `LinearTests`, `DockTests`, `DrawTests`, `ProfilingTests`: 5/5
+aprovados. Diagnósticos temporários em `/tmp/bgui_window_audit.cpp`, compilados
+contra as bibliotecas atuais: duas expectativas de layout limpo falham e um
+teste de caracterização passa. Log: `/tmp/bgui_window_audit.log`.
+
+Limites: build incremental do alvo BGUI; não houve build limpo integral,
+medição de FPS/tempo de GPU, teste visual manual nem simulação completa do gesto
+físico de destacar tab. O teste de pós-destaque usa `set_floating(true)` e o
+fluxo real de sincronização/arrange. Nenhuma correção ou commit foi feito nesta
+auditoria; alterações anteriores da árvore de trabalho foram preservadas.
+
 ## Otimização de invalidações do dock BGUI — 2026-10-31
 
 Escopo: melhorias da auditoria de janelas, sem alterar API ou comportamento de

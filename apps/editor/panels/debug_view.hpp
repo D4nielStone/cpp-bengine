@@ -19,7 +19,7 @@ public:
         auto& content = window.add<bgui::linear>(bgui::orientation::vertical);
         content.add_class("editor-surface");
         content.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-        content.add<bgui::button>("Limpar", .30f, [] { commons::script_log::instance().clear(); });
+        content.add<bgui::button>("Limpar", .30f, [] { commons::script_log::instance().clear(); }).add_class("editor-button");
         auto& scroll = content.add<bgui::linear>(bgui::orientation::vertical);
         scroll.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
         scroll.set_scrollable(true);

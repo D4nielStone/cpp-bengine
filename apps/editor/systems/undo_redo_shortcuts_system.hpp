@@ -1,6 +1,8 @@
 #pragma once
 
 #include "editor_context.hpp"
+#include "entity_clipboard.hpp"
+#include "viewport_input_state.hpp"
 
 #include <os/os.hpp>
 #include <bgui.hpp>
@@ -43,12 +45,30 @@ public:
         if (!editing_text && m_context && y_down && !m_y_was_down)
             m_context->redo();
 
+        const bool copy_down = control_down && bgui::get_pressed(bgui::input_key::c);
+        const bool paste_down = control_down && bgui::get_pressed(bgui::input_key::v);
+        if (!editing_text && m_context && !m_context->is_playing && !viewport_input_blocked_by_modal()) {
+            std::string error;
+            if (copy_down && !m_c_was_down) m_clipboard.copy(m_context, error);
+            if (paste_down && !m_v_was_down) m_clipboard.paste(m_context, error);
+            if (!error.empty()) {
+                bgui::add_function([error]() {
+                    auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+                    modal.add<bgui::text>(error, .3f);
+                    modal.set_confirmation_text("Fechar");
+                });
+            }
+        }
+        m_c_was_down = copy_down;
+        m_v_was_down = paste_down;
         m_z_was_down = z_down;
         m_y_was_down = y_down;
     }
 
 private:
     std::shared_ptr<editor_context> m_context;
+    entity_clipboard m_clipboard;
+    bool m_c_was_down{false}, m_v_was_down{false};
     bool m_z_was_down{false};
     bool m_y_was_down{false};
 };

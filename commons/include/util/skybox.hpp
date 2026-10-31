@@ -29,16 +29,24 @@ SOFTWARE.
 #include "loaders/shader.hpp"
 #include "loaders/model.hpp"
 #include <glm/glm.hpp>
+#include <array>
 
 namespace COMMONS_NS {
     class skybox : protected model
     {
         public:
         unsigned int id_skybox = 0;
-        skybox() : model("cube") {
-            setShader(shader("skybox.vs", "skybox.fs"));
-            meshes.back().load();
-        }
+        skybox() = default;
+        ~skybox();
+        // Faces: +X, -X, +Y, -Y, +Z, -Z. Empty/invalid sets use atmosphere.
         void draw(glm::mat4 view, glm::mat4 proj);
+        void draw_background(glm::mat4 view, glm::mat4 proj,
+            const std::array<std::string, 6>& faces, const std::string& root,
+            bool enabled, const bgui::vec3& horizon, const bgui::vec3& zenith);
+    private:
+        unsigned int m_vao{0};
+        bool m_owned{false}, m_attempted{false}, m_valid{false};
+        std::array<std::string, 6> m_faces{};
+        std::string m_root;
     };
-} // bubble
+}

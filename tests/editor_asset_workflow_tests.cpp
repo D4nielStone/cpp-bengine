@@ -8,6 +8,9 @@
 #include "entities_view.hpp"
 #include "entity_picking_system.hpp"
 #include "undo_redo_shortcuts_system.hpp"
+#include "project_catalog.hpp"
+#include "entity_clipboard.hpp"
+#include "primitive_entities.hpp"
 
 namespace {
 template<class T, class Predicate>
@@ -181,7 +184,7 @@ TEST_F(EditorAssetWorkflowTest, ModelImportKeepsMaterialsAndRelativeTexturesAfte
     EXPECT_TRUE(std::filesystem::exists(imported.parent_path() / "model.mtl"));
     EXPECT_TRUE(std::filesystem::exists(imported.parent_path() / "textures/color.png"));
     const auto second = files.import_file(source / "model.obj");
-    EXPECT_NE(imported.parent_path(), second.parent_path());
+    EXPECT_EQ(imported, second);
     std::filesystem::remove_all(source);
     Assimp::Importer importer;
     const auto* scene = importer.ReadFile(imported.string(), 0);
@@ -568,4 +571,291 @@ TEST_F(EditorAssetWorkflowTest, JpegImportsPreviewsAndAppliesToTheTargetObject) 
     ASSERT_TRUE(editor::ui::apply_dropped_albedo(context, target.id, imported, error)) << error;
     EXPECT_EQ(model->meshes[0].getMaterial().getTextura("tex_albedo").path, imported.string());
     EXPECT_FALSE(editor::ui::apply_dropped_albedo(context, 0, imported, error));
+}
+
+TEST_F(EditorAssetWorkflowTest, IdenticalImagesAreReusedAcrossNamesAndFolders) {
+    namespace fs = std::filesystem;
+    fs::create_directory(folder / "project");
+    fs::create_directory(folder / "project" / "other");
+    std::ofstream(folder / "image.png") << "same pixels";
+    std::ofstream(folder / "renamed.png") << "same pixels";
+    const auto first = editor::ui::import_asset(folder / "image.png", folder / "project", false);
+    EXPECT_EQ(editor::ui::import_asset(folder / "renamed.png", folder / "project", false,
+        folder / "project" / "other"), first);
+    EXPECT_TRUE(fs::is_empty(folder / "project" / "other"));
+    const auto copy = editor::ui::import_asset(folder / "image.png", folder / "project", false, {}, true);
+    EXPECT_NE(copy, first);
+    EXPECT_TRUE(editor::ui::same_asset_bytes(copy, first));
+    std::ofstream(folder / "image.png") << "new pixels";
+    EXPECT_NE(editor::ui::import_asset(folder / "image.png", folder / "project", false), first);
+}
+
+TEST_F(EditorAssetWorkflowTest, IdenticalModelsRequireMatchingDependenciesAndImportOptions) {
+    namespace fs = std::filesystem;
+    fs::create_directory(folder / "project");
+    std::ofstream(folder / "mesh.obj") << "mtllib mesh.mtl\no triangle\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl surface\nf 1 2 3\n";
+    std::ofstream(folder / "mesh.mtl") << "newmtl surface\nKd 1 0 0\n";
+    const auto first = editor::ui::import_asset(folder / "mesh.obj", folder / "project", true);
+    EXPECT_EQ(editor::ui::import_asset(folder / "mesh.obj", folder / "project", true), first);
+    auto options = commons::model_import_options{};
+    options.scale = 2;
+    const auto changed_options = editor::ui::import_asset(folder / "mesh.obj", folder / "project", true, {}, false, &options);
+    EXPECT_NE(changed_options, first);
+    std::ofstream(commons::model_import_settings_path(changed_options)) << commons::serialize_model_import_options(options);
+    EXPECT_EQ(editor::ui::import_asset(folder / "mesh.obj", folder / "project", true, {}, false, &options), changed_options);
+    std::ofstream(folder / "mesh.mtl") << "newmtl surface\nKd 0 1 0\n";
+    EXPECT_NE(editor::ui::import_asset(folder / "mesh.obj", folder / "project", true), first);
+}
+
+TEST_F(EditorAssetWorkflowTest, RightClickFileOffersEditingAndConfirmedDeletion) {
+    std::ofstream(folder / "Context.lua") << "-- keep until confirmed";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+    bgui::on_update();
+    auto* row = find<bgui::button>(dock, [](auto& value) {
+        return find<bgui::text>(value, [](auto& text) { return text.get_buffer() == "Context.lua"; });
+    });
+    ASSERT_NE(row, nullptr);
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {row->processed_x() + 8, row->processed_y() + 8};
+    io.m_input_map[bgui::input_key::mouse_right] = bgui::input_action::press;
+    bgui::on_update(); bgui::on_update();
+    auto* popup = find<bgui::linear>(bgui::get_layout(), [](auto& value) { return value.has_class("editor-context-actions") && value.is_enabled(); });
+    ASSERT_NE(popup, nullptr);
+    EXPECT_NE(find<bgui::button>(*popup, [](auto& value) { return value.get_label().get_buffer() == "Abrir / Editar"; }), nullptr);
+    auto* remove = find<bgui::button>(*popup, [](auto& value) { return value.get_label().get_buffer() == "Excluir arquivo..."; });
+    ASSERT_NE(remove, nullptr);
+    remove->on_released();
+    io.m_input_map.clear();
+    bgui::on_update();
+    EXPECT_TRUE(std::filesystem::exists(folder / "Context.lua"));
+    auto* modal = find<bgui::modal>(bgui::get_layout(), [](auto& value) { return value.is_enabled(); });
+    ASSERT_NE(modal, nullptr);
+    auto* confirm = find<bgui::button>(*modal, [](auto& value) { return value.get_label().get_buffer() == "Excluir definitivamente"; });
+    ASSERT_NE(confirm, nullptr);
+    confirm->on_released(); bgui::on_update();
+    EXPECT_FALSE(std::filesystem::exists(folder / "Context.lua"));
+}
+
+TEST_F(EditorAssetWorkflowTest, ClipboardCopiesAnIndependentHierarchyAndUndoesAsOneAction) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto parent = registry->create(500);
+    auto root = registry->create(300);
+    auto child = registry->create(100);
+    auto grandchild = registry->create(200);
+    registry->get<commons::transform>(root.id)->parent_id = parent.id;
+    registry->get<commons::transform>(child.id)->parent_id = root.id;
+    registry->get<commons::transform>(grandchild.id)->parent_id = child.id;
+    registry->get<commons::transform>(child.id)->set_position({1, 2, 3});
+    registry->add<commons::renderer>(child, new commons::model());
+    auto renderer = registry->get<commons::renderer>(child.id);
+    commons::material material;
+    float roughness = .3f;
+    material.set_uniform("material.roughness", &roughness);
+    renderer->m_modelo->meshes.emplace_back(std::vector<commons::vertex>{{{1, 2, 3}, {0, 1, 0}, {0, 0}}}, std::vector<unsigned>{0}, material);
+    registry->add<commons::physics>(child);
+    registry->add<commons::camera>(root);
+    context->entity_names[root.id] = "Root";
+    context->entity_names[child.id] = "Child";
+    context->entity_names[grandchild.id] = "Grandchild";
+    context->hidden_entities.insert(child.id);
+    context->selected_entity = root.id;
+    editor::ui::entity_clipboard clipboard;
+    std::string error;
+    ASSERT_TRUE(clipboard.copy(context, error)) << error;
+    // Copy captures state at Ctrl+C, independently of subsequent source edits.
+    roughness = .9f;
+    registry->get<commons::transform>(child.id)->set_position({9, 9, 9});
+    ASSERT_TRUE(clipboard.paste(context, error)) << error;
+    const auto pasted_root = *context->selected_entity;
+    EXPECT_NE(pasted_root, root.id);
+    EXPECT_EQ(registry->entities.size(), 7u);
+    EXPECT_EQ(context->undo_stack.size(), 1u);
+    uint32_t pasted_child = 0, pasted_grandchild = 0;
+    for (const auto& [id, name] : context->entity_names) {
+        if (name == "Child (cópia)") pasted_child = id;
+        if (name == "Grandchild (cópia)") pasted_grandchild = id;
+    }
+    ASSERT_NE(pasted_child, 0u); ASSERT_NE(pasted_grandchild, 0u);
+    EXPECT_EQ(registry->get<commons::transform>(pasted_root)->parent_id, parent.id);
+    EXPECT_EQ(registry->get<commons::transform>(pasted_child)->parent_id, pasted_root);
+    EXPECT_EQ(registry->get<commons::transform>(pasted_grandchild)->parent_id, pasted_child);
+    EXPECT_EQ(registry->get<commons::transform>(pasted_child)->get_position(), (bgui::vec3{1, 2, 3}));
+    auto copied_renderer = registry->get<commons::renderer>(pasted_child);
+    ASSERT_NE(copied_renderer->m_modelo, renderer->m_modelo);
+    EXPECT_FLOAT_EQ(copied_renderer->m_modelo->meshes.front().getMaterial().getUniforme("material.roughness").valor.f, .3f);
+    EXPECT_NE(registry->get<commons::physics>(pasted_child)->m_rigid_body, registry->get<commons::physics>(child.id)->m_rigid_body);
+    EXPECT_EQ(registry->get<commons::camera>(pasted_root)->m_transform, registry->get<commons::transform>(pasted_root).get());
+    EXPECT_TRUE(context->hidden_entities.contains(pasted_child));
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(registry->entities.size(), 4u);
+    EXPECT_EQ(context->selected_entity, root.id);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(registry->entities.size(), 7u);
+    EXPECT_EQ(context->selected_entity, pasted_root);
+    ASSERT_TRUE(clipboard.paste(context, error));
+    EXPECT_EQ(registry->entities.size(), 10u);
+}
+
+TEST_F(EditorAssetWorkflowTest, CtrlCCtrlVCopiesObjectsAndRespectsTextModalAndPlayMode) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto root = registry->create();
+    context->selected_entity = root.id;
+    editor::ui::undo_redo_shortcuts_system shortcuts(context);
+    auto& io = bgui::get_context();
+    io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::c] = bgui::input_action::press;
+    shortcuts.on_update();
+    io.m_input_map.erase(bgui::input_key::c);
+    shortcuts.on_update();
+    io.m_input_map[bgui::input_key::v] = bgui::input_action::press;
+    shortcuts.on_update(); shortcuts.on_update();
+    EXPECT_EQ(registry->entities.size(), 2u); // Held key cannot paste every frame.
+    auto& input = bgui::get_layout().add<bgui::inputbox>("Text", "", .3f);
+    bgui::focus_keyboard(input);
+    io.m_input_map.erase(bgui::input_key::v); shortcuts.on_update();
+    io.m_input_map[bgui::input_key::v] = bgui::input_action::press; shortcuts.on_update();
+    EXPECT_EQ(registry->entities.size(), 2u);
+    bgui::clear_keyboard_focus();
+    auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+    io.m_input_map.erase(bgui::input_key::v); shortcuts.on_update();
+    io.m_input_map[bgui::input_key::v] = bgui::input_action::press; shortcuts.on_update();
+    EXPECT_EQ(registry->entities.size(), 2u);
+    modal.set_enable(false); context->is_playing = true;
+    io.m_input_map.erase(bgui::input_key::v); shortcuts.on_update();
+    io.m_input_map[bgui::input_key::v] = bgui::input_action::press; shortcuts.on_update();
+    EXPECT_EQ(registry->entities.size(), 2u);
+}
+
+TEST_F(EditorAssetWorkflowTest, ProjectRemovalSeparatesRecentListFromDiskAndProtectsActiveProject) {
+    namespace fs = std::filesystem;
+    fs::create_directories(folder / "project/assets");
+    const auto project = folder / "project/project.bengine";
+    std::ofstream(project) << R"({"format":"bubble-engine-project","version":1})";
+    std::ofstream(folder / "project/assets/keep.txt") << "asset";
+    const auto catalog = folder / "recent.cfg";
+    const auto other = folder / "other/project.bengine";
+    std::ofstream(catalog) << project.string() << '\n' << other.string() << '\n';
+    editor::ui::forget_project(catalog, project);
+    EXPECT_TRUE(fs::exists(project));
+    EXPECT_TRUE(fs::exists(folder / "project/assets/keep.txt"));
+    EXPECT_EQ(editor::ui::project_files::read(catalog), other.string() + "\n");
+    EXPECT_THROW(editor::ui::erase_project(project, project), std::runtime_error);
+    EXPECT_TRUE(fs::exists(project));
+    editor::ui::erase_project(project, other);
+    EXPECT_FALSE(fs::exists(folder / "project"));
+}
+
+TEST_F(EditorAssetWorkflowTest, PrimitivesHaveValidGeometryAndCreationSupportsUndoAndPlayGuard) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    for (size_t i = 0; i < editor::ui::primitive_entities.size(); ++i) {
+        const auto path = std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / editor::ui::primitive_entities[i].asset;
+        Assimp::Importer importer;
+        const auto* scene = importer.ReadFile(path.string(), aiProcess_Triangulate | aiProcess_GenSmoothNormals);
+        ASSERT_NE(scene, nullptr) << importer.GetErrorString();
+        ASSERT_TRUE(scene->HasMeshes());
+        auto loader = [scene](const auto& path) {
+            auto model = std::make_unique<commons::model>();
+            model->relocate_source_path(path);
+            std::vector<commons::vertex> vertices;
+            const auto* mesh = scene->mMeshes[0];
+            for (unsigned j = 0; j < mesh->mNumVertices; ++j)
+                vertices.emplace_back(bgui::vec3{mesh->mVertices[j].x, mesh->mVertices[j].y, mesh->mVertices[j].z},
+                    bgui::vec3{mesh->mNormals[j].x, mesh->mNormals[j].y, mesh->mNormals[j].z}, bgui::vec2{0, 0});
+            std::vector<unsigned> indices;
+            for (unsigned j = 0; j < mesh->mNumFaces; ++j)
+                for (unsigned k = 0; k < mesh->mFaces[j].mNumIndices; ++k) indices.push_back(mesh->mFaces[j].mIndices[k]);
+            model->meshes.emplace_back(vertices, indices, commons::material{});
+            return model;
+        };
+        const auto id = editor::ui::create_primitive_entity(context, i, loader);
+        ASSERT_TRUE(id.has_value());
+        EXPECT_EQ(context->selected_entity, id);
+        EXPECT_EQ(context->entity_names.at(*id), editor::ui::primitive_entities[i].name);
+        const auto renderer = registry->get<commons::renderer>(*id);
+        ASSERT_NE(renderer, nullptr);
+        EXPECT_FALSE(renderer->m_modelo->meshes.front().getVertices().empty());
+        EXPECT_FALSE(renderer->m_modelo->meshes.front().getIndices().empty());
+        EXPECT_EQ(renderer->m_modelo->get_source_path(), path.string());
+        ASSERT_TRUE(context->undo()); EXPECT_FALSE(registry->is_alive(*id));
+        ASSERT_TRUE(context->redo()); EXPECT_TRUE(registry->is_alive(*id));
+    }
+    const auto count = registry->entities.size();
+    context->is_playing = true;
+    EXPECT_FALSE(editor::ui::create_primitive_entity(context, 0));
+    EXPECT_EQ(registry->entities.size(), count);
+}
+
+TEST_F(EditorAssetWorkflowTest, PrimitiveMenuIsAvailableFromHierarchyToolbar) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::entities_view entities(context);
+    entities.build(dock);
+    auto* button = find<bgui::button>(dock, [](auto& value) { return value.has_class("entities-primitives-button"); });
+    ASSERT_NE(button, nullptr);
+    button->on_released(); bgui::on_update();
+    auto* popup = find<bgui::linear>(bgui::get_layout(), [](auto& value) { return value.has_class("editor-context-actions") && value.is_enabled(); });
+    ASSERT_NE(popup, nullptr);
+    for (const auto& primitive : editor::ui::primitive_entities)
+        EXPECT_NE(find<bgui::button>(*popup, [&](auto& value) { return value.get_label().get_buffer() == primitive.name; }), nullptr);
+}
+
+TEST_F(EditorAssetWorkflowTest, ClipboardSurvivesSourceRemovalAndPreservesScriptsAndInstances) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = folder;
+    auto root = registry->create();
+    registry->add<commons::code>(root, "Movement.lua");
+    auto code = registry->get<commons::code>(root.id);
+    code->asset_root = folder.string();
+    code->properties.push_back({"speed", "number", 3.0});
+    registry->add<commons::renderer>(root, new commons::model());
+    auto original_renderer = registry->get<commons::renderer>(root.id);
+    auto geometry = original_renderer->m_modelo;
+    geometry->meshes.emplace_back(std::vector<commons::vertex>{}, std::vector<unsigned>{}, commons::material{});
+    std::vector<commons::transform> instances(2);
+    instances[0].set_position({2, 3, 4});
+    geometry->meshes[0].setInstances(std::move(instances));
+    context->selected_entity = root.id;
+    editor::ui::entity_clipboard clipboard;
+    std::string error;
+    ASSERT_TRUE(clipboard.copy(context, error)) << error;
+    registry->remove(root.id);
+    ASSERT_TRUE(clipboard.paste(context, error)) << error;
+    const auto copied = *context->selected_entity;
+    auto copied_code = registry->get<commons::code>(copied);
+    ASSERT_NE(copied_code, nullptr);
+    EXPECT_NE(copied_code.get(), code.get());
+    EXPECT_EQ(copied_code->file, "Movement.lua");
+    EXPECT_EQ(copied_code->arquivoCompleto, (folder / "Movement.lua").string());
+    EXPECT_EQ(copied_code->properties, code->properties);
+    EXPECT_EQ(copied_code->my_object, copied);
+    const auto& copied_instances = registry->get<commons::renderer>(copied)->m_modelo->meshes[0].instances();
+    ASSERT_EQ(copied_instances.size(), 2u);
+    EXPECT_EQ(copied_instances[0].get_position(), (bgui::vec3{2, 3, 4}));
+    EXPECT_NE(copied_instances[0].target, geometry->meshes[0].instances()[0].target);
+}
+
+TEST_F(EditorAssetWorkflowTest, PastingAfterParentDeletionDoesNotReparentToAReusedId) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto parent = registry->create(1);
+    auto root = registry->create(2);
+    registry->get<commons::transform>(parent.id)->set_position({10, 0, 0});
+    registry->get<commons::transform>(root.id)->set_position({2, 0, 0});
+    registry->get<commons::transform>(root.id)->parent_id = parent.id;
+    context->selected_entity = root.id;
+    editor::ui::entity_clipboard clipboard;
+    std::string error;
+    ASSERT_TRUE(clipboard.copy(context, error));
+    registry->remove(parent.id); registry->remove(root.id);
+    ASSERT_TRUE(clipboard.paste(context, error)) << error;
+    const auto transform = registry->get<commons::transform>(*context->selected_entity);
+    EXPECT_EQ(transform->parent_id, 0u);
+    EXPECT_EQ(transform->get_world_position(), (bgui::vec3{12, 0, 0}));
 }
