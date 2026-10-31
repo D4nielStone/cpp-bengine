@@ -1,0 +1,56 @@
+#include <gtest/gtest.h>
+#include "build_process.hpp"
+
+#include <chrono>
+#include <fstream>
+#include <iterator>
+#include <thread>
+
+namespace {
+class BuildProcessTest : public testing::Test {
+protected:
+    std::filesystem::path root = std::filesystem::temp_directory_path() /
+        ("bengine build process " + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    void SetUp() override { std::filesystem::create_directories(root / "scripts"); }
+    void TearDown() override { std::filesystem::remove_all(root); }
+};
+}
+
+TEST_F(BuildProcessTest, MissingHostScriptIsReportedWithoutStarting) {
+    editor::ui::build_process process;
+    std::string error;
+    EXPECT_FALSE(process.start(root, root / "output", editor::ui::build_target::linux, error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_FALSE(process.running(error));
+}
+
+TEST_F(BuildProcessTest, HostScriptReceivesPathsAndReportsProgressAndExitCode) {
+#ifdef _WIN32
+    std::ofstream(root / "scripts/platform_build.ps1") <<
+        "param($Target, $RepositoryRoot, $BuildDirectory, $ProgressFile)\n"
+        "Write-Output $RepositoryRoot\n"
+        "[System.IO.File]::WriteAllText($ProgressFile, \"100|done`n\")\n"
+        "exit 7\n";
+#else
+    std::ofstream(root / "scripts/platform_build.sh") <<
+        "printf '%s\\n' \"$2\"\n"
+        "printf '100|done\\n' > \"$4\"\n"
+        "exit 7\n";
+#endif
+    editor::ui::build_process process;
+    std::string error;
+    ASSERT_TRUE(process.start(root, root / "output with spaces",
+        editor::ui::build_target::windows, error)) << error;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (process.running(error) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_FALSE(process.running(error)) << error;
+    EXPECT_EQ(process.exit_code(), 7);
+    std::string status;
+    EXPECT_FLOAT_EQ(process.progress(status), 100.f);
+    EXPECT_EQ(status, "done");
+    std::ifstream log(process.log_path());
+    const std::string contents{std::istreambuf_iterator<char>(log), {}};
+    EXPECT_NE(contents.find(root.string()), std::string::npos);
+}

@@ -95,28 +95,38 @@ Pass a build directory to use another location. Add `--test` on Linux or
 `-RunTests` on Windows to also build and run the test suite.
 
 Once the editor is open, select **Build > Build Runtime** to open the platform
-build modal. Choose **Linux x64** or **Windows x64**; the first use downloads
-the Zig cross-compiler when needed and prepares target libraries through
-vcpkg. The modal displays download/build progress and the result. Detailed
-output is saved as `editor-build-linux.log` or `editor-build-windows.log` in
-the selected build directory. Enter a path directly or use **Browse** to pick
-an existing folder; artifacts are placed under
-`<directory>/platform-builds/<target>/apps`. Stop Play mode before building.
+build modal. Choose **Linux x64** or **Windows x64**. The modal displays
+progress and saves detailed output as `editor-build-linux.log` or
+`editor-build-windows.log` in the selected output directory. Artifacts are
+placed under `<directory>/platform-builds/<target>/apps`. Stop Play before
+building. These builds compile the runtime and bundle engine assets; pass
+`--project <project.bengine>` to run a game project (project files/assets must
+also accompany the runtime).
 
-Linux builds use the host's Linux toolchain and require CMake, a C++ compiler,
-pkg-config, and the OpenGL/GLFW/X11 development packages used by the engine.
-Building from Windows uses the default WSL2 distribution for both targets;
-install a WSL2 distribution first. On Ubuntu/WSL2, install Linux target
-requirements with:
+| Host | Linux x64 target | Windows x64 target |
+|---|---|---|
+| Linux x64 | Native host compiler and installed libraries | Zig/MinGW cross compilation with vcpkg |
+| Windows x64 | Native Linux build inside the default WSL2 distribution | Native MSVC (Visual Studio 2022 C++ tools) and vcpkg; no WSL required |
+
+Android is not supported in this phase. Native Windows builds require CMake,
+Git, Visual Studio 2022 with Desktop development with C++, and the Windows SDK.
+`VCPKG_ROOT` may point to an installed vcpkg checkout; otherwise the Windows
+helper prepares it under `%LOCALAPPDATA%/cpp-bengine/toolchains`.
+Runtime DLLs are copied alongside the Windows executable.
+Choose a new output directory when changing compiler/toolchain; CMake caches
+are specific to the compiler that created them.
+
+Linux native builds do not download Zig or vcpkg. Install requirements in
+Linux (or inside the default WSL2 distribution for Windows → Linux):
 ```sh
 sudo apt-get update
 sudo apt-get install -y cmake build-essential pkg-config libgl1-mesa-dev \
-  libglfw3-dev xorg-dev libxinerama-dev libxcursor-dev libxrandr-dev libxi-dev \
+  libglfw3-dev libglm-dev xorg-dev libxinerama-dev libxcursor-dev libxrandr-dev libxi-dev \
   libglu1-mesa-dev libassimp-dev libbullet-dev libfreetype6-dev \
   liblua5.3-dev libpng-dev
 ```
 
-The platform build downloads pinned Zig and PowerShell host tools as needed,
+The Linux → Windows cross build downloads pinned Zig and PowerShell host tools as needed,
 plus a pinned vcpkg release into the user cache to prepare target dependencies.
 Windows cross-builds on Linux also download the MinGW-w64 resource compiler
 with `apt-get download` (no root access); Debian/Ubuntu-based hosts need

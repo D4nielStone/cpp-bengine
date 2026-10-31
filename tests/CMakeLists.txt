@@ -128,6 +128,7 @@ target_include_directories(editor_menu_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
 target_link_libraries(editor_menu_tests PRIVATE GTest::gtest_main commons bgui)
+target_compile_definitions(editor_menu_tests PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
 if(WIN32)
     target_link_libraries(editor_menu_tests PRIVATE ole32 shell32 uuid)
 endif()
@@ -191,3 +192,16 @@ add_executable(model_import_tests model_import_tests.cpp)
 target_link_libraries(model_import_tests PRIVATE GTest::gtest_main commons)
 target_include_directories(model_import_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
 gtest_discover_tests(model_import_tests)
+
+# Shell/PowerShell orchestration contracts; no graphics context required.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND AND UNIX)
+    add_test(NAME platform_build_scripts
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/platform_build_tests.py)
+endif()
+
+add_executable(build_process_tests build_process_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/build_process.cpp)
+target_include_directories(build_process_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(build_process_tests PRIVATE GTest::gtest_main)
+gtest_discover_tests(build_process_tests)

@@ -8,11 +8,12 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <glad.h>
+#include <bgui.hpp>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #include <oleidl.h>
 #include <shellapi.h>
-#include <bgui.hpp>
 #elif defined(BENGINE_X11_FILE_DRAG)
 #include <X11/Xatom.h>
 #define GLFW_EXPOSE_NATIVE_X11

@@ -11,9 +11,63 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Windows targets compile on Windows; WSL is used only for Linux targets.
+if ($Target -eq "windows") {
+    function Write-ProgressFile([int]$Percent, [string]$Status) {
+        $temporary = "$ProgressFile.tmp"
+        [System.IO.File]::WriteAllText($temporary, "$Percent|$Status`n")
+        Move-Item -Force $temporary $ProgressFile
+    }
+    function Invoke-Checked([string]$Program, [string[]]$Arguments) {
+        & $Program @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$Program failed with exit code $LASTEXITCODE."
+        }
+    }
+    New-Item -ItemType Directory -Force $BuildDirectory | Out-Null
+    $vcpkgRoot = $env:VCPKG_ROOT
+    if (-not $vcpkgRoot) {
+        $vcpkgRoot = Join-Path $env:LOCALAPPDATA "cpp-bengine/toolchains/vcpkg"
+        if (-not (Test-Path (Join-Path $vcpkgRoot "vcpkg.exe"))) {
+            Write-ProgressFile 5 "Preparing vcpkg for native Windows..."
+            if (-not (Test-Path (Join-Path $vcpkgRoot ".git"))) {
+                Invoke-Checked "git" @("clone", "--depth", "1", "--branch", "2024.11.16",
+                    "https://github.com/microsoft/vcpkg.git", $vcpkgRoot)
+            }
+            Invoke-Checked (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") @("-disableMetrics")
+        }
+    }
+    $vcpkg = Join-Path $vcpkgRoot "vcpkg.exe"
+    if (-not (Test-Path $vcpkg)) {
+        throw "VCPKG_ROOT must contain vcpkg.exe: $vcpkgRoot"
+    }
+    Write-ProgressFile 15 "Preparing native Windows dependencies..."
+    Invoke-Checked $vcpkg @("install", "assimp:x64-windows", "bullet3:x64-windows",
+        "freetype:x64-windows", "glfw3:x64-windows", "glm:x64-windows", "lua:x64-windows")
+    $targetBuild = Join-Path $BuildDirectory "platform-builds/windows"
+    Write-ProgressFile 60 "Configuring native Windows runtime..."
+    Invoke-Checked "cmake" @("-S", $RepositoryRoot, "-B", $targetBuild,
+        "-G", "Visual Studio 17 2022", "-A", "x64",
+        "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
+        "-DVCPKG_TARGET_TRIPLET=x64-windows", "-DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON",
+        "-DBUILD_TESTING=OFF", "-DBUILD_RUNTIME=ON", "-DBUILD_EDITOR=OFF")
+    Write-ProgressFile 80 "Compiling native Windows runtime..."
+    Invoke-Checked "cmake" @("--build", $targetBuild, "--target", "runtime_app",
+        "--config", "Release", "--parallel", "2")
+    # vcpkg's app-local deployment copies DLLs beside the executable.
+    # Keep the same public output folder as Linux/cross builds.
+    $apps = Join-Path $targetBuild "apps"
+    Copy-Item -Force (Join-Path $apps "Release/*") $apps
+    $assets = Join-Path $apps "assets"
+    New-Item -ItemType Directory -Force $assets | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $RepositoryRoot "commons/assets/*") $assets
+    Write-ProgressFile 100 "Build completed: $apps/runtime_app.exe"
+    exit 0
+}
+
 $wsl = Get-Command "wsl.exe" -ErrorAction SilentlyContinue
 if (-not $wsl) {
-    throw "WSL2 is required to build Linux/Windows targets from Windows. Install WSL2 and a Linux distribution first."
+    throw "WSL2 is required to build Linux targets from Windows. Install WSL2 and a Linux distribution first."
 }
 $kernelVersion = & $wsl.Source --exec uname -r 2>&1
 if ($LASTEXITCODE -ne 0 -or $kernelVersion -notmatch "microsoft-standard-WSL2") {

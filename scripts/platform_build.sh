@@ -88,6 +88,38 @@ require_command() {
     fi
 }
 
+host_architecture=$(uname -m)
+if [ "$host_architecture" != "x86_64" ]; then
+    printf 'The current toolchains support x64 hosts only (found %s).\n' \
+        "$host_architecture" >&2
+    exit 3
+fi
+
+
+# Native Linux builds use installed host dependencies, without cross tools.
+if [ "$target" = linux ]; then
+    require_command cmake
+    require_command c++
+    require_command pkg-config
+    if ! pkg-config --exists gl glfw3 x11 xrandr xinerama xcursor xi; then
+        printf '%s\n' 'Linux development packages are missing; see README.md (Building).' >&2
+        exit 3
+    fi
+    target_build="${build_root}/platform-builds/linux"
+    mkdir -p "$target_build"
+    write_progress 10 "Configuring native Linux runtime..."
+    cmake -S "$repository_root" -B "$target_build" \
+        -DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON \
+        -DBUILD_TESTING=OFF -DBUILD_RUNTIME=ON -DBUILD_EDITOR=OFF \
+        -DCMAKE_BUILD_TYPE=Release
+    write_progress 50 "Compiling native Linux runtime..."
+    cmake --build "$target_build" --target runtime_app --config Release --parallel 2
+    mkdir -p "${target_build}/apps/assets"
+    cp -R "${repository_root}/commons/assets/." "${target_build}/apps/assets/"
+    write_progress 100 "Build completed: ${target_build}/apps/runtime_app"
+    exit 0
+fi
+
 require_command cmake
 require_command c++
 require_command curl
@@ -98,12 +130,6 @@ require_command sha256sum
 require_command tail
 require_command tar
 
-host_architecture=$(uname -m)
-if [ "$host_architecture" != "x86_64" ]; then
-    printf 'The current toolchains support x64 hosts only (found %s).\n' \
-        "$host_architecture" >&2
-    exit 3
-fi
 
 if [ "$target" = linux ]; then
     if ! pkg-config --exists gl glfw3 x11 xrandr xinerama xcursor xi; then

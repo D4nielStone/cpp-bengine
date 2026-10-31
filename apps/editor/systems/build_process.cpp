@@ -75,58 +75,25 @@ bool build_process::start(
     }
 
     if (running(error)) {
+        if (error.empty())
+            error = "A build is already running.";
         std::cout << "[Build] Rejected: another build is running: " << error << std::endl;
         return false;
     }
 
+#ifdef _WIN32
+    const auto script = repository_root / "scripts" / "platform_build.ps1";
+#else
     const auto script = repository_root / "scripts" / "platform_build.sh";
-
-    std::cout << "[Build] Build script: '" << script.string() << "'" << std::endl;
-
-    if (!std::filesystem::exists(script)) {
-        error = "Platform build script not found: " + script.string();
-        std::cout << "[Build] " << error << std::endl   ;
-        return false;
-    }
-
-    std::error_code ec;
-    std::filesystem::create_directories(build_directory, ec);
-
-    if (ec) {
-        error = "Failed to create build directory: " + ec.message();
-        std::cout << "[Build] Cannot create output directory '{}': {}",
-            build_directory.string(),
-            ec.message();
-        return false;
-    }
-
-    std::cout << "[Build] Output directory validated" << std::endl;
-
-    error.clear();
-    if (running(error)) {
-        error = "A build is already running.";
-        return false;
-    }
-    if (!error.empty())
-        return false;
-
+#endif
     std::error_code filesystem_error;
-    if (!std::filesystem::is_regular_file(
-            repository_root / "scripts" / "platform_build.sh",
-            filesystem_error
-        )) {
-        error = filesystem_error
-            ? "Could not inspect the platform build script: " +
-                filesystem_error.message()
-            : "The platform build script was not found under '" +
-                repository_root.string() + "'.";
+    if (!std::filesystem::is_regular_file(script, filesystem_error)) {
+        error = "Platform build script not found: " + script.string();
         return false;
     }
-
     std::filesystem::create_directories(build_directory, filesystem_error);
     if (filesystem_error) {
-        error = "Could not create build directory '" +
-            build_directory.string() + "': " + filesystem_error.message();
+        error = "Could not create build directory: " + filesystem_error.message();
         return false;
     }
 

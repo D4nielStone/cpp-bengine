@@ -53,6 +53,23 @@ jobs:
         ./scripts/build.ps1 -BuildDirectory out -RunTests
       if: runner.os == 'Windows'
 
+    - name: Package native Windows runtime without WSL
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+        ./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory "$PWD/game-build" -ProgressFile "$PWD/game-build.progress"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if (-not (Test-Path game-build/platform-builds/windows/apps/runtime_app.exe)) { throw "Runtime missing" }
+
+    - name: Upload native Windows runtime package
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-runtime-native
+        path: game-build/platform-builds/windows/apps
+        if-no-files-found: error
+
     - name: Upload executables
       uses: actions/upload-artifact@v4
       with:
@@ -62,4 +79,25 @@ jobs:
           out/apps/runtime_app
           out/apps/Release/editor_app.exe
           out/apps/Release/runtime_app.exe
+        if-no-files-found: error
+
+  cross_windows:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Install cross-build host tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential curl git pkg-config zip unzip ninja-build binutils-mingw-w64-x86-64
+    - name: Cross-compile Windows runtime on Linux
+      run: |
+        mkdir -p game-build
+        sh scripts/platform_build.sh windows "$PWD" "$PWD/game-build" "$PWD/game-build.progress"
+        file game-build/platform-builds/windows/apps/runtime_app.exe | grep 'PE32+'
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-runtime-from-linux
+        path: game-build/platform-builds/windows/apps
         if-no-files-found: error

@@ -12,30 +12,36 @@ set(EDITOR_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/editor/tools
 )
 
-add_executable(runtime_app runtime_app.cpp)
-target_sources(runtime_app PRIVATE editor/systems/project_persistence_system.cpp)
-target_include_directories(runtime_app PRIVATE ${EDITOR_INCLUDE_DIRS})
-target_link_libraries(runtime_app PRIVATE commons)
+if(BUILD_RUNTIME)
+    add_executable(runtime_app runtime_app.cpp)
+    target_sources(runtime_app PRIVATE editor/systems/project_persistence_system.cpp)
+    target_include_directories(runtime_app PRIVATE ${EDITOR_INCLUDE_DIRS})
+    target_link_libraries(runtime_app PRIVATE commons)
+endif()
 
-add_executable(
-    editor_app
-    editor_app.cpp
-    editor/systems/native_file_dialog.cpp
-    editor/panels/editor_ui.cpp
-    editor/systems/build_process.cpp
-    editor/systems/project_creation_system.cpp
-    editor/systems/project_persistence_system.cpp
-    editor/systems/project_preview.cpp
-    editor/systems/runtime_process.cpp
-    editor/panels/runtime_tools_view.cpp
-    editor/panels/scene_view.cpp
-    editor/systems/ui_persistence_system.cpp
-)
-target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
-target_link_libraries(editor_app PRIVATE commons)
-if(WIN32)
-    target_link_libraries(editor_app PRIVATE windowscodecs ole32 shell32 uuid)
-else()
-    find_package(PNG REQUIRED)
-    target_link_libraries(editor_app PRIVATE PNG::PNG)
+if(BUILD_EDITOR)
+    add_executable(
+        editor_app
+        editor_app.cpp
+        editor/systems/native_file_dialog.cpp
+        editor/panels/editor_ui.cpp
+        editor/systems/build_process.cpp
+        editor/systems/project_creation_system.cpp
+        editor/systems/project_persistence_system.cpp
+        editor/systems/project_preview.cpp
+        editor/systems/runtime_process.cpp
+        editor/panels/runtime_tools_view.cpp
+        editor/panels/scene_view.cpp
+        editor/systems/ui_persistence_system.cpp
+    )
+    target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
+    target_link_libraries(editor_app PRIVATE commons)
+    target_compile_definitions(editor_app PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
+    if(WIN32)
+        target_link_libraries(editor_app PRIVATE windowscodecs ole32 shell32 uuid)
+    else()
+        find_package(PNG REQUIRED)
+        target_link_libraries(editor_app PRIVATE PNG::PNG)
+    endif()
+
 endif()

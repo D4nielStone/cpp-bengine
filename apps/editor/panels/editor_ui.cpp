@@ -204,7 +204,7 @@ editor_ui::editor_ui(
       m_registry(std::move(registry)),
       m_project_path(std::move(project_path)),
       m_build_directory(std::move(build_directory)),
-      m_repository_root(m_build_directory.parent_path()),
+      m_repository_root(BENGINE_REPOSITORY_ROOT),
       m_build_process(std::make_unique<build_process>()) {
     create_project_modal(m_project_path, "");
 
@@ -427,8 +427,8 @@ void editor_ui::create_build_modal() {
         bgui::layer::overlay
     >();
     m_build_modal->content().add<bgui::text>(
-        "Choose Linux or Windows x64. Downloads the Zig compiler on first use "
-        "and prepares target libraries with vcpkg. Windows hosts require WSL2.",
+        "Choose Linux or Windows x64. Native builds use the host compiler. "
+        "Windows hosts require WSL2 only for Linux.",
         0.3f
     );
     m_build_modal->content().add<bgui::text>(
@@ -442,7 +442,6 @@ void editor_ui::create_build_modal() {
     );
     m_build_directory_input->m_enter_func = [this](const std::string& buffer) {
         m_build_directory = buffer;
-        m_repository_root = m_build_directory.parent_path();
     };
     auto& directory_actions = m_build_modal->content().add<bgui::linear>(
         bgui::orientation::horizontal
@@ -456,7 +455,6 @@ void editor_ui::create_build_modal() {
         0.28f,
         [this]() {
             create_build_directory_modal();
-            m_repository_root = m_build_directory.parent_path();
         }
     );
     m_build_modal->content().add<bgui::text>(
@@ -484,8 +482,8 @@ void editor_ui::create_build_modal() {
         row.add<bgui::text>(label, 0.3f);
         row.add<bgui::button>(
             target == build_target::windows
-                ? "Download Windows Toolchain & Build"
-                : "Download Linux Toolchain & Build",
+                ? "Build Windows"
+                : "Build Linux",
             0.28f,
             [this, target]() { start_platform_build(target); }
         );
@@ -499,8 +497,8 @@ void editor_ui::create_build_modal() {
     );
     add_target(
         "windows",
-        "Windows x64 (Zig/MinGW)",
-        "Downloads Zig, PowerShell, and MinGW windres; vcpkg prepares libraries. Linux hosts need apt-get/dpkg-deb.",
+        "Windows x64",
+        "Windows: native MSVC and vcpkg. Linux: Zig/MinGW cross build (see README).",
         build_target::windows
     );
     m_build_status = &m_build_modal->content().add<bgui::text>(

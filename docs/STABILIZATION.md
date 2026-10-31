@@ -1079,3 +1079,49 @@ medição de FPS/GPU ou teste no Windows. A transição de destaque nos testes u
 `set_floating(true)`; os testes existentes cobrem arraste, encaixe e divisórias.
 Não há mudança de design pendente nesta correção. A reativação das demais
 janelas continua sendo comportamento existente, sem otimização funcional.
+
+## Build de jogos Linux / Windows — 2026-10-31
+
+Escopo: Linux x64 gera Linux nativo e Windows; Windows x64 gera Windows nativo
+e Linux pela distribuição WSL2 padrão, conforme decisão explícita do usuário.
+Android fica para outra fase. API pública e arquitetura de renderização preservadas.
+As demais hipóteses P0/P1/P2 não foram reabertas.
+
+| Item | Status / evidência | Mudança e testes | Limites / riscos |
+|---|---|---|---|
+| Linux nativo dependia de ferramentas cruzadas | CONFIRMADO: o teste nativo falhou no script original com saída 3, exigindo vcpkg mesmo com bibliotecas do sistema disponíveis. | `platform_build.sh` usa compilador/bibliotecas do host para Linux, sem baixar Zig/vcpkg. Teste simula comandos e verifica flags, assets e progresso; exportação real Linux concluída. | Pacote Linux continua dependendo das bibliotecas compartilhadas do sistema; não é AppImage nem pacote universal. Hosts/alvos desta fase são x64. |
+| Windows nativo passava pelo WSL | CONFIRMADO: wrapper original exigia WSL incondicionalmente; o novo teste de Windows nativo falhou contra essa versão. | `platform_build.ps1` usa MSVC/Visual Studio 2022 e vcpkg para Windows, copia DLLs/assets e propaga erros. WSL2 fica exclusivo do alvo Linux. Testes PowerShell com comandos simulados cobrem ambos os caminhos, espaços e falha do CMake. | Compilação MSVC e execução WSL2 em host Windows real NÃO validadas neste ambiente Linux. CI ganhou empacotamento Windows nativo e build cruzado Linux → Windows; workflow remoto ainda não executado. |
+| Opções de aplicações ignoradas | CONFIRMADO: configuração original com `BUILD_EDITOR=OFF` e PNG desabilitado falhou; `apps/CMakeLists.txt` criava os dois executáveis incondicionalmente. | Opções `BUILD_RUNTIME`/`BUILD_EDITOR` passam a controlar os alvos e dependências. Teste configura/compila runtime sem fontes do editor e configura ambos desligados sem fontes do runtime. | Editor e runtime com opções ligadas compilaram na validação integral. Nenhuma quebra de API. |
+| Pasta de saída alterava a raiz da engine | CONFIRMADO: `EditorMenuTest.BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory` falhou com `editor_ui.cpp` original ligado isoladamente, procurando `/tmp/scripts/platform_build.sh`; passou com a correção. | Raiz fornecida pelo CMake, independente da pasta de build/saída. Teste do menu troca diretório e impede o processo antes de iniciar compilador. `build_process` valida o script do host; dois testes sem GPU verificam script ausente, argumentos, log, progresso e retorno. | Editor ainda precisa do checkout da engine para compilar runtimes. Não houve inspeção manual da janela de build. |
+| Bloqueios reais na compilação Windows | CONFIRMADO: build cruzado falhou no GLM experimental em `transform_gizmo.cpp` e depois em tipos OpenGL/macros Windows em `file_drop_bridge.cpp`. Logs `bengine-cross.log` e `bengine-cross-retry.log`. | Apenas ordem dos includes corrigida: configuração GLM existente antes de GTX; GLAD/BGUI antes dos headers nativos Windows. Runtime Windows compilado e empacotado depois das correções. | Dependências/ferramentas cruzadas reutilizaram o cache existente; download/bootstrap a frio não foi exercitado. Smoke de argumentos via Wine não valida gameplay ou OpenGL Windows. |
+
+Validação final:
+
+- Build integral iniciado em pasta nova `/tmp/bengine-platform-clean`, incluindo editor, runtime e testes, concluído após reconfiguração/retomada. A primeira tentativa usou flags anteriores à definição da raiz; a versão final compilou sem erros.
+- **264/266 entradas CTest aprovadas**, sem skips. Passaram os sete casos novos: quatro testes Python de scripts/CMake, dois testes de processo e um teste do menu (quatro entradas CTest).
+- Falhas fora do escopo: `EditorRenderTest.CubemapOverridesAtmosphereAndDisableRestoresIt` (cores de faces, `editor_render_tests.cpp:565`) e `Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn` (altura -24.641359 e velocidade Y -20.362541). O código/teste de cubemap e a cena FPP já estavam modificados localmente antes desta fase; não foram corrigidos ou substituídos aqui. A causa da falha de cubemap não foi investigada nesta fase.
+- Exportações reais Linux nativa e Linux → Windows concluídas com progresso 100, assets copiados e formatos ELF x64 / PE32+ x64 verificados. `ldd` do runtime Linux não mostrou bibliotecas ausentes. Ambos responderam ao argumento inválido com a mensagem de uso e saída 2; Windows executado via Wine com prefixo isolado.
+- Regressões contra scripts/CMake originais: três falhas esperadas; caminho WSL já existente continuou passando. Regressão isolada do menu também falhou na versão original e passou na atual.
+- Alterações locais de skybox, cena, assets e submódulo BGUI foram preservadas e não integram o commit desta fase. A validação usa a árvore de trabalho atual, incluindo essas alterações preexistentes/concomitantes.
+
+Comandos derivados do CMake, workflow e helpers existentes:
+
+```sh
+cmake -S . -B /tmp/bengine-platform-clean -DBUILD_TESTING=ON -DBUILD_RUNTIME=ON -DBUILD_EDITOR=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/out/_deps/googletest-src"
+cmake --build /tmp/bengine-platform-clean --parallel 2
+ctest --test-dir /tmp/bengine-platform-clean --output-on-failure -C Release
+python3 tests/platform_build_tests.py
+sh scripts/platform_build.sh linux "$PWD" /tmp/bengine-native-export /tmp/bengine-native-export/progress
+sh scripts/platform_build.sh windows "$PWD" /tmp/bengine-cross-validate /tmp/bengine-cross-progress
+```
+
+Logs finais: `/tmp/bengine-platform-build-final.log`,
+`/tmp/bengine-platform-final-check.log`, `/tmp/bengine-platform-ctest-final.log`,
+`/tmp/bengine-platform-script-tests.log`, `/tmp/bengine-platform-script-baseline.log`,
+`/tmp/bengine-platform-ui-baseline-test.log`, `/tmp/bengine-platform-menu-test.log`,
+`/tmp/bengine-native-export.log`, `/tmp/bengine-cross-verified.log` e
+`/tmp/bengine-platform-wine.log`. Pacotes em
+`/tmp/bengine-native-export/platform-builds/linux/apps` e
+`/tmp/bengine-cross-validate/platform-builds/windows/apps`.
+Os helpers continuam gerando runtime e assets da engine; arquivos/assets do jogo
+acompanham separadamente e são abertos com `--project`, conforme README.

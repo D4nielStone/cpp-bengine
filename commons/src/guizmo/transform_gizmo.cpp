@@ -4,10 +4,10 @@
 #include <array>
 #include <cmath>
 #include <vector>
-#include <glm/gtx/euler_angles.hpp>
 
 #include "components/camera.hpp"
 #include "components/transform.hpp"
+#include <glm/gtx/euler_angles.hpp>
 #include "core/ecs.hpp"
 
 #include <bgui.hpp>

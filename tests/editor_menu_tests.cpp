@@ -235,3 +235,32 @@ TEST_F(EditorMenuTest, F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling
     bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::press;
     editor.update(); EXPECT_TRUE(context->show_colliders);
 }
+
+TEST_F(EditorMenuTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) {
+    const auto output = std::filesystem::temp_directory_path() /
+        ("bengine menu build " + std::to_string(std::chrono::steady_clock::now()
+            .time_since_epoch().count()));
+    // Fail before spawning a compiler, after validating the engine source path.
+    std::filesystem::create_directories(output / "editor-build-linux.progress");
+    click("Build");
+    click("Build Runtime");
+    auto* input = find<bgui::inputbox>(bgui::get_layout(), [](auto& item) {
+        return item.get_buffer() == "/tmp/bengine-build";
+    });
+    ASSERT_NE(input, nullptr);
+    input->set_buffer(output.string());
+    input->m_enter_func(output.string());
+    auto* build = find<bgui::button>(bgui::get_layout(), [](auto& item) {
+        const auto label = item.get_label().get_buffer();
+        return label == "Build Linux" || label == "Download Linux Toolchain & Build";
+    });
+    ASSERT_NE(build, nullptr);
+    build->on_pressed();
+    build->on_released();
+    bgui::on_update();
+    auto* status = find<bgui::text>(bgui::get_layout(), [](auto& item) {
+        return item.get_buffer().find("Could not create build progress file") != std::string::npos;
+    });
+    EXPECT_NE(status, nullptr);
+    std::filesystem::remove_all(output);
+}
