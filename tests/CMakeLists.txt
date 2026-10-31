@@ -229,3 +229,19 @@ add_executable(version_migration_tests version_migration_tests.cpp)
 target_include_directories(version_migration_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(version_migration_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(version_migration_tests)
+
+add_executable(runtime_process_helper runtime_process_helper.cpp)
+add_executable(runtime_process_tests runtime_process_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/runtime_process.cpp)
+target_include_directories(runtime_process_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(runtime_process_tests PRIVATE GTest::gtest_main commons)
+target_compile_definitions(runtime_process_tests PRIVATE
+    RUNTIME_PROCESS_HELPER="$<TARGET_FILE:runtime_process_helper>"
+    BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_dependencies(runtime_process_tests runtime_process_helper)
+if(TARGET runtime_app)
+    target_compile_definitions(runtime_process_tests PRIVATE
+        BENGINE_RUNTIME_EXECUTABLE="$<TARGET_FILE:runtime_app>")
+    add_dependencies(runtime_process_tests runtime_app)
+endif()
+gtest_discover_tests(runtime_process_tests)

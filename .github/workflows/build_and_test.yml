@@ -30,12 +30,26 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          cmake build-essential \
+          cmake build-essential xvfb xauth \
           liblua5.3-0 liblua5.3-dev libglm-dev libglfw3-dev \
           libassimp-dev libfreeimage-dev rapidjson-dev \
           libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev libcurl4-openssl-dev zlib1g-dev
       if: runner.os == 'Linux'
 
+    - name: Check out supported Windows dependencies
+      if: runner.os == 'Windows'
+      uses: actions/checkout@v4
+      with:
+        repository: microsoft/vcpkg
+        ref: 2024.11.16
+        path: .vcpkg
+    - name: Prepare supported vcpkg
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        & "$PWD/.vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        "VCPKG_INSTALLATION_ROOT=$PWD/.vcpkg" >> $env:GITHUB_ENV
     - name: Install dependencies (Windows)
       shell: pwsh
       run: |
@@ -55,6 +69,10 @@ jobs:
         $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
         ./scripts/build.ps1 -BuildDirectory out -RunTests
       if: runner.os == 'Windows'
+
+    - name: Exercise editor runtime with the real demo (Linux)
+      if: runner.os == 'Linux'
+      run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure -R RuntimeProcessTest
 
     - name: Export Linux game and single executable
       if: runner.os == 'Linux'

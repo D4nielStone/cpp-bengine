@@ -91,6 +91,9 @@ class PlatformBuildTests(unittest.TestCase):
                 'if [ "$1" = --build ] && [ "${4:-}" = runtime_app ]; then exit 0; fi\n'
                 'exec "$GAME_TEST_CMAKE" "$@"\n')
             cmake.chmod(0o755)
+            pkg_config = commands / "pkg-config"
+            pkg_config.write_text("#!/bin/sh\nexit 0\n")
+            pkg_config.chmod(0o755)
             output = root / "export"
             progress = root / "progress"
             workspace = root / "workspace"

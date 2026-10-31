@@ -33,7 +33,21 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential python3-tk liblua5.3-dev libglm-dev libglfw3-dev libassimp-dev libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev zlib1g-dev libcurl4-openssl-dev
+          sudo apt-get install -y cmake build-essential xvfb xauth python3-tk liblua5.3-dev libglm-dev libglfw3-dev libassimp-dev libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev zlib1g-dev libcurl4-openssl-dev
+      - name: Check out supported Windows dependencies
+        if: runner.os == 'Windows'
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 2024.11.16
+          path: .vcpkg
+      - name: Prepare supported vcpkg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$PWD/.vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_INSTALLATION_ROOT=$PWD/.vcpkg" >> $env:GITHUB_ENV
       - name: Install Windows build dependencies
         if: runner.os == 'Windows'
         shell: pwsh
@@ -53,6 +67,9 @@ jobs:
         run: cmake --build out --config Release --parallel 2
       - name: Test
         run: ctest --test-dir out --output-on-failure -C Release
+      - name: Exercise editor runtime with the real demo
+        if: runner.os == 'Linux'
+        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure -R RuntimeProcessTest
       - name: Configure relocatable Linux binaries
         if: runner.os == 'Linux'
         run: cmake -S . -B release-build -DCMAKE_BUILD_TYPE=Release -DBENGINE_DISTRIBUTION_BUILD=ON -DBUILD_TESTING=OFF -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON

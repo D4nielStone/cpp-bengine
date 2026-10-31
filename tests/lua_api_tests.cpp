@@ -100,6 +100,7 @@ TEST(LuaApi, TransformSeparatesWorldAndLocalPosition) {
 TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     auto registry = std::make_shared<commons::ecs>();
     auto player = registry->create(106);
+    registry->entity_names[player.id] = "PlayerCapsule";
     auto camera = registry->create(100);
     auto pickup = registry->create(103);
     registry->get<commons::transform>(player.id)->set_rotation({0.f, -90.f, 0.f});
@@ -127,7 +128,7 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     auto moved = body->f_update();
     ASSERT_TRUE(moved.valid()) << sol::error(moved).what();
     auto player_transform = registry->get<commons::transform>(player.id);
-    EXPECT_NEAR(physical->getVelocidade().z, 2.5f, 0.0001f);
+    EXPECT_NEAR(physical->getVelocidade().z, 5.f, 0.0001f);
     EXPECT_FLOAT_EQ(physical->getVelocidade().y, -3.f);
     EXPECT_NEAR(player_transform->get_rotation().y, -91.2f, 0.0001f);
 
