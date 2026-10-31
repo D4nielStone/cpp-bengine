@@ -203,7 +203,7 @@ editor_ui::editor_ui(
       m_project_persistence(project_persistence),
       m_registry(std::move(registry)),
       m_project_path(std::move(project_path)),
-      m_build_directory(std::move(build_directory)),
+      m_build_directory(std::move(build_directory) / "exports"),
       m_repository_root(BENGINE_REPOSITORY_ROOT),
       m_build_process(std::make_unique<build_process>()) {
     create_project_modal(m_project_path, "");
@@ -237,7 +237,7 @@ editor_ui::editor_ui(
         0.3f,
         [this](bgui::context_menu& menu) {
             menu.add_button(
-                "Build Runtime",
+                "Export Game",
                     [this]() { open_build_modal(); }
             );
         }
@@ -432,12 +432,12 @@ void editor_ui::create_build_modal() {
         0.3f
     );
     m_build_modal->content().add<bgui::text>(
-        "Build output directory",
+        "Game export directory",
         0.3f
     );
     m_build_directory_input = &m_build_modal->content().add<bgui::inputbox>(
         m_build_directory.string(),
-        "Choose a build directory...",
+        "Choose an export directory...",
         0.28f
     );
     m_build_directory_input->m_enter_func = [this](const std::string& buffer) {
@@ -458,7 +458,7 @@ void editor_ui::create_build_modal() {
         }
     );
     m_build_modal->content().add<bgui::text>(
-        "Artifacts are written under <directory>/platform-builds/<target>/apps.",
+        "Game files are exported to <directory>/<target>. Build files stay in the cache.",
         0.25f
     );
     const auto add_target = [this](const char* icon_name,
@@ -589,11 +589,15 @@ void editor_ui::start_platform_build(const build_target target) {
         (m_build_directory.empty() || m_repository_root.empty())) {
         error = "Could not locate the source or build directory.";
     }
+    if (error.empty() && !m_project_persistence.save(m_project_path, error)) {
+        error = "Could not save the game before export: " + error;
+    }
     if (!error.empty() ||
         !m_build_process->start(
             m_repository_root,
             m_build_directory,
             target,
+            std::filesystem::absolute(m_project_path),
             error
         )) {
         if (error.empty())

@@ -8,6 +8,8 @@
 #include <components/camera.hpp>
 #include <components/transform.hpp>
 #include <chrono>
+#include <cstdlib>
+#include <functional>
 
 namespace {
 template<class T, class Predicate>
@@ -236,31 +238,53 @@ TEST_F(EditorMenuTest, F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling
     editor.update(); EXPECT_TRUE(context->show_colliders);
 }
 
-TEST_F(EditorMenuTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) {
-    const auto output = std::filesystem::temp_directory_path() /
-        ("bengine menu build " + std::to_string(std::chrono::steady_clock::now()
-            .time_since_epoch().count()));
-    // Fail before spawning a compiler, after validating the engine source path.
-    std::filesystem::create_directories(output / "editor-build-linux.progress");
-    click("Build");
-    click("Build Runtime");
-    auto* input = find<bgui::inputbox>(bgui::get_layout(), [](auto& item) {
-        return item.get_buffer() == "/tmp/bengine-build";
+TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) {
+    bgui::scoped_interface interface;
+    const auto temporary = std::filesystem::temp_directory_path() /
+        ("bengine menu export " + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(temporary);
+    const auto output = temporary / "output";
+    const auto project = temporary / "project.bengine";
+    const char* cache = std::getenv(
+#ifdef _WIN32
+        "LOCALAPPDATA"
+#else
+        "XDG_CACHE_HOME"
+#endif
+    );
+    const auto cache_root = cache && *cache ? std::filesystem::path(cache) : std::filesystem::temp_directory_path();
+    const auto key = std::string(BENGINE_REPOSITORY_ROOT) + "|" + project.string() + "|" + output.string() + "|linux";
+    const auto workspace = cache_root / "cpp-bengine/game-builds" / std::to_string(std::hash<std::string>{}(key));
+    std::filesystem::create_directories(workspace / "editor-build-linux.progress");
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(); registry->add<commons::camera>(camera);
+    auto& root = bgui::get_layout().add<bgui::linear>();
+    auto& menu = root.add<bgui::menu_bar>(root);
+    auto& dock = root.add<bgui::dock>();
+    editor::ui::ui_persistence_system ui;
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    editor::ui::editor_ui editor(dock, menu, ui, persistence, registry,
+        project.string(), temporary / "build");
+    const auto click = [&](const std::string& label) {
+        auto* button = find<bgui::button>(bgui::get_layout(), [&](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(button, nullptr) << label;
+        button->on_pressed(); button->on_released(); bgui::on_update();
+    };
+    click("Build"); click("Export Game");
+    auto* input = find<bgui::inputbox>(bgui::get_layout(), [&](auto& item) {
+        return item.get_buffer() == (temporary / "build/exports").string();
     });
     ASSERT_NE(input, nullptr);
-    input->set_buffer(output.string());
-    input->m_enter_func(output.string());
-    auto* build = find<bgui::button>(bgui::get_layout(), [](auto& item) {
-        const auto label = item.get_label().get_buffer();
-        return label == "Build Linux" || label == "Download Linux Toolchain & Build";
-    });
-    ASSERT_NE(build, nullptr);
-    build->on_pressed();
-    build->on_released();
-    bgui::on_update();
+    input->set_buffer(output.string()); input->m_enter_func(output.string());
+    click("Build Linux");
     auto* status = find<bgui::text>(bgui::get_layout(), [](auto& item) {
         return item.get_buffer().find("Could not create build progress file") != std::string::npos;
     });
     EXPECT_NE(status, nullptr);
-    std::filesystem::remove_all(output);
+    EXPECT_TRUE(std::filesystem::is_regular_file(project)); // Current scene was saved.
+    EXPECT_FALSE(std::filesystem::exists(output)); // No logs/build files in the output.
+    std::filesystem::remove_all(workspace);
+    std::filesystem::remove_all(temporary);
 }

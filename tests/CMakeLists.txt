@@ -205,3 +205,10 @@ add_executable(build_process_tests build_process_tests.cpp
 target_include_directories(build_process_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(build_process_tests PRIVATE GTest::gtest_main)
 gtest_discover_tests(build_process_tests)
+
+# Game export and startup resolution are independent of ECS/OpenGL.
+add_executable(game_export_tests game_export_tests.cpp)
+target_include_directories(game_export_tests PRIVATE ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/external/rapidjson/include)
+target_link_libraries(game_export_tests PRIVATE GTest::gtest_main)
+gtest_discover_tests(game_export_tests)

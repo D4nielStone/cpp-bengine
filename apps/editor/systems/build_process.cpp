@@ -1,6 +1,8 @@
 #include "build_process.hpp"
 
 #include <fstream>
+#include <cstdlib>
+#include <functional>
 #include <string>
 #include <iostream>
 
@@ -63,6 +65,16 @@ bool build_process::start(
     const build_target target,
     std::string& error)
 {
+    return start(repository_root, build_directory, target, {}, error);
+}
+
+bool build_process::start(
+    const std::filesystem::path& repository_root,
+    const std::filesystem::path& build_directory,
+    const build_target target,
+    const std::filesystem::path& project_file,
+    std::string& error)
+{
     std::cout << "[Build] Starting platform build" << std::endl;
     std::cout << "[Build] Repository root: '" << repository_root.string() << "'" << std::endl;
     std::cout << "[Build] Output directory: '" << build_directory.string() << "'" << std::endl;
@@ -82,24 +94,39 @@ bool build_process::start(
     }
 
 #ifdef _WIN32
-    const auto script = repository_root / "scripts" / "platform_build.ps1";
+    const auto script = repository_root / "scripts" /
+        (project_file.empty() ? "compile_runtime.ps1" : "platform_build.ps1");
 #else
-    const auto script = repository_root / "scripts" / "platform_build.sh";
+    const auto script = repository_root / "scripts" /
+        (project_file.empty() ? "compile_runtime.sh" : "platform_build.sh");
 #endif
     std::error_code filesystem_error;
     if (!std::filesystem::is_regular_file(script, filesystem_error)) {
         error = "Platform build script not found: " + script.string();
         return false;
     }
-    std::filesystem::create_directories(build_directory, filesystem_error);
+    auto workspace = build_directory;
+    if (!project_file.empty()) {
+        const char* cache = std::getenv(
+#ifdef _WIN32
+            "LOCALAPPDATA"
+#else
+            "XDG_CACHE_HOME"
+#endif
+        );
+        auto cache_root = cache && *cache ? std::filesystem::path(cache) : std::filesystem::temp_directory_path();
+        const auto key = repository_root.string() + "|" + project_file.string() + "|" + build_directory.string() + "|" + target_name(target);
+        workspace = cache_root / "cpp-bengine" / "game-builds" / std::to_string(std::hash<std::string>{}(key));
+    }
+    std::filesystem::create_directories(workspace, filesystem_error);
     if (filesystem_error) {
         error = "Could not create build directory: " + filesystem_error.message();
         return false;
     }
 
     const std::string name = target_name(target);
-    m_log_path = build_directory / ("editor-build-" + name + ".log");
-    m_progress_path = build_directory / ("editor-build-" + name + ".progress");
+    m_log_path = workspace / ("editor-build-" + name + ".log");
+    m_progress_path = workspace / ("editor-build-" + name + ".progress");
     {
         std::ofstream progress_file(m_progress_path, std::ios::trunc);
         if (!progress_file) {
@@ -134,7 +161,7 @@ bool build_process::start(
         return false;
     }
 
-    const auto wrapper = repository_root / "scripts" / "platform_build.ps1";
+    const auto& wrapper = script;
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
     startup_info.dwFlags = STARTF_USESTDHANDLES;
@@ -149,7 +176,9 @@ bool build_process::start(
         L" -Target " + std::wstring(name.begin(), name.end()) +
         L" -RepositoryRoot " + quote_argument(repository_root.wstring()) +
         L" -BuildDirectory " + quote_argument(build_directory.wstring()) +
-        L" -ProgressFile " + quote_argument(m_progress_path.wstring());
+        L" -ProgressFile " + quote_argument(m_progress_path.wstring()) +
+        (project_file.empty() ? L"" : L" -ProjectFile " + quote_argument(project_file.wstring()) +
+            L" -Workspace " + quote_argument(workspace.wstring()));
     const BOOL started = CreateProcessW(
         nullptr,
         command.data(),
@@ -158,7 +187,7 @@ bool build_process::start(
         TRUE,
         CREATE_NO_WINDOW,
         nullptr,
-        build_directory.c_str(),
+        workspace.c_str(),
         &startup_info,
         &process_info
     );
@@ -198,18 +227,19 @@ bool build_process::start(
             _exit(127);
         }
         close(log_file);
-        const auto script =
-            (repository_root / "scripts" / "platform_build.sh").string();
+        const auto script_path = script.string();
         const auto build_path = build_directory.string();
         const auto progress_path = m_progress_path.string();
         execl(
             "/bin/sh",
             "sh",
-            script.c_str(),
+            script_path.c_str(),
             name.c_str(),
             repository_root.c_str(),
             build_path.c_str(),
             progress_path.c_str(),
+            project_file.c_str(),
+            workspace.c_str(),
             static_cast<char*>(nullptr)
         );
         dprintf(STDERR_FILENO, "Could not start platform build: %s\n",

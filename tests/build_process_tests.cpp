@@ -27,13 +27,13 @@ TEST_F(BuildProcessTest, MissingHostScriptIsReportedWithoutStarting) {
 
 TEST_F(BuildProcessTest, HostScriptReceivesPathsAndReportsProgressAndExitCode) {
 #ifdef _WIN32
-    std::ofstream(root / "scripts/platform_build.ps1") <<
+    std::ofstream(root / "scripts/compile_runtime.ps1") <<
         "param($Target, $RepositoryRoot, $BuildDirectory, $ProgressFile)\n"
         "Write-Output $RepositoryRoot\n"
         "[System.IO.File]::WriteAllText($ProgressFile, \"100|done`n\")\n"
         "exit 7\n";
 #else
-    std::ofstream(root / "scripts/platform_build.sh") <<
+    std::ofstream(root / "scripts/compile_runtime.sh") <<
         "printf '%s\\n' \"$2\"\n"
         "printf '100|done\\n' > \"$4\"\n"
         "exit 7\n";
@@ -53,4 +53,34 @@ TEST_F(BuildProcessTest, HostScriptReceivesPathsAndReportsProgressAndExitCode) {
     std::ifstream log(process.log_path());
     const std::string contents{std::istreambuf_iterator<char>(log), {}};
     EXPECT_NE(contents.find(root.string()), std::string::npos);
+}
+
+TEST_F(BuildProcessTest, GameExportKeepsLogsAndProgressOutsideOutputAndPassesProject) {
+#ifdef _WIN32
+    std::ofstream(root / "scripts/platform_build.ps1") <<
+        "param($Target, $RepositoryRoot, $BuildDirectory, $ProgressFile, $ProjectFile, $Workspace)\n"
+        "Write-Output $ProjectFile\n"
+        "[System.IO.File]::WriteAllText($ProgressFile, \"100|exported`n\")\n"
+        "exit 0\n";
+#else
+    std::ofstream(root / "scripts/platform_build.sh") <<
+        "printf '%s\\n' \"$5\"\n"
+        "printf '100|exported\\n' > \"$4\"\n";
+#endif
+    const auto output = root / "clean output";
+    const auto project = root / "game/project.bengine";
+    editor::ui::build_process process;
+    std::string error;
+    ASSERT_TRUE(process.start(root, output, editor::ui::build_target::linux, project, error)) << error;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (process.running(error) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_FALSE(process.running(error)) << error;
+    EXPECT_EQ(process.exit_code(), 0);
+    EXPECT_FALSE(std::filesystem::exists(output));
+    EXPECT_NE(process.log_path().parent_path(), output);
+    std::ifstream log(process.log_path());
+    const std::string contents{std::istreambuf_iterator<char>(log), {}};
+    EXPECT_NE(contents.find(project.string()), std::string::npos);
+    std::filesystem::remove_all(process.log_path().parent_path());
 }

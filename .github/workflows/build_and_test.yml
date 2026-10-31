@@ -53,21 +53,21 @@ jobs:
         ./scripts/build.ps1 -BuildDirectory out -RunTests
       if: runner.os == 'Windows'
 
-    - name: Package native Windows runtime without WSL
+    - name: Export native Windows game without WSL
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
-        ./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory "$PWD/game-build" -ProgressFile "$PWD/game-build.progress"
+        ./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory "$PWD/game-build" -ProgressFile "$PWD/game-build.progress" -ProjectFile "$PWD/projects/fpp_demo/project.bengine"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        if (-not (Test-Path game-build/platform-builds/windows/apps/runtime_app.exe)) { throw "Runtime missing" }
+        if (-not (Test-Path game-build/windows/fpp_demo.exe)) { throw "Game executable missing" }
 
-    - name: Upload native Windows runtime package
+    - name: Upload native Windows game package
       if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
       with:
-        name: windows-runtime-native
-        path: game-build/platform-builds/windows/apps
+        name: windows-game-native
+        path: game-build/windows
         if-no-files-found: error
 
     - name: Upload executables
@@ -91,13 +91,13 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential curl git pkg-config zip unzip ninja-build binutils-mingw-w64-x86-64
-    - name: Cross-compile Windows runtime on Linux
+    - name: Export Windows game on Linux
       run: |
         mkdir -p game-build
-        sh scripts/platform_build.sh windows "$PWD" "$PWD/game-build" "$PWD/game-build.progress"
-        file game-build/platform-builds/windows/apps/runtime_app.exe | grep 'PE32+'
+        sh scripts/platform_build.sh windows "$PWD" "$PWD/game-build" "$PWD/game-build.progress" "$PWD/projects/fpp_demo/project.bengine"
+        file game-build/windows/fpp_demo.exe | grep 'PE32+'
     - uses: actions/upload-artifact@v4
       with:
-        name: windows-runtime-from-linux
-        path: game-build/platform-builds/windows/apps
+        name: windows-game-from-linux
+        path: game-build/windows
         if-no-files-found: error

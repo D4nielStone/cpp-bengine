@@ -1125,3 +1125,65 @@ Logs finais: `/tmp/bengine-platform-build-final.log`,
 `/tmp/bengine-cross-validate/platform-builds/windows/apps`.
 Os helpers continuam gerando runtime e assets da engine; arquivos/assets do jogo
 acompanham separadamente e são abertos com `--project`, conforme README.
+
+## Exportação do jogo completo e saída limpa — 2026-10-31
+
+Esta fase corrige o escopo da fase anterior: o usuário pediu o jogo com seus
+assets, e não somente um runtime. Decisão confirmada: referências externas devem
+ser importadas para o projeto antes da exportação; assets internos da engine são
+incluídos automaticamente. Android permanece fora do escopo.
+
+| Item | Status / evidência | Mudança / testes | Limites / revisão |
+|---|---|---|---|
+| Projeto ausente no build anterior | CONFIRMADO: `PlatformBuildTests.test_game_export_has_clean_output_and_project_assets` falhou antes da implementação, pois não existia `game.json` nem projeto no output (`/tmp/bengine-game-baseline.log`). | `Build > Export Game` salva o projeto/cena atuais e envia o projeto ao exportador. Host tool C++20 independente de OpenGL prepara cenas, scripts, assets, sidecars e manifesto; nome do executável deriva da pasta do projeto. | A exportação inclui recursos não usados também; não há redução de assets nem arquivo binário `.pak`. Dados ficam em pastas portáteis. Projetos precisam estar válidos para carregar no runtime. |
+| Output misturava CMake/logs/binários | CONFIRMADO: helpers anteriores compilavam dentro do diretório escolhido e `build_process` gravava log/progresso nele. | Cache separado para ferramenta host, compilação, snapshot, logs e progresso. Output contém somente `linux/` e/ou `windows/`, com executável, `game.json`, `game/`, `assets/`, bibliotecas Linux em `lib/` ou DLLs Windows. Layout, preview, VCS, fontes de desenvolvimento e resíduos de build são excluídos. Testes verificam ausência de CMakeCache, objetos, logs e PDBs. | Diretório com arquivos alheios é recusado, nunca apagado. Exportação anterior identificada pelo manifesto é substituída por staging/rename com backup após completar o novo pacote; não se promete durabilidade contra queda de energia. |
+| Caminhos e dependências de assets | CONFIRMADO: a cena local contém caminhos absolutos de modelos internos da engine. | Caminhos reconhecidos de cena/projeto, modelos, mapas PBR, scripts, imagens de propriedades e skybox tornam-se relativos. Preserva texto comum. Inclui OBJ/MTL, buffers/imagens glTF e `.import.json`, valida sidecars, normaliza barras Windows e URIs com espaços. Assets externos/ausentes e links para fora falham antes de publicar; links de diretório exigem importação. | Literais/dinâmica em Lua não são inferidos: código deve usar referências portáteis. Formatos binários de modelos devem ter sido importados com dependências relativas/embutidas; não há reescrita geral de FBX/BLEND. O fallback de primitivos já existente no carregador foi preservado para cenas salvas em outro checkout. |
+| Resources BGUI faltavam no pacote | CONFIRMADO: rastreamento inicial abriu tema/fonte em `external/cpp-bgui/assets` do checkout; teste de cópia falhou para `3270NerdFont-Regular.ttf` e `dark.theme` (`bengine-game-gui-baseline.log`). | Recursos BGUI agora acompanham os assets da engine. Rastreamento final do jogo movido não acessou qualquer caminho do checkout nem o projeto fonte de referência. | Não houve alteração no submódulo. Inicialização atual da BGUI ainda exige uma fonte do sistema antes de selecionar a fonte empacotada; o prefixo Wine isolado precisou receber uma fonte para o smoke. |
+| Abrir o jogo sem argumentos | CONFIRMADO: runtime anterior sem argumentos criava o cubo de demonstração. | Bootstrap encontra `game.json` ao lado do executável, valida formato/versão/entrada, muda cwd para o pacote e carrega a cena inicial. Mantidos `--project`, `--script-log` e demo de desenvolvimento quando não há manifesto. Testes sem GPU cobrem mudança de pasta, relocação, manifesto inválido, arquivo ausente e escape da entrada. | Execução Linux real comprovou carregamento dos scripts do pacote; smoke Windows via Wine chegou à interface, mas não comprova gameplay nem comportamento no Windows nativo. |
+| Dependências e plataformas | PARCIAL: builds reais Linux nativo e Linux → Windows concluídos em workspaces inicialmente novos; ELF/PE x64 e arquivos finais verificados. | Linux inclui dependências compartilhadas transitivas com `DT_RPATH=$ORIGIN/lib`; `ldd` resolveu bibliotecas empacotadas. Windows copia somente executável/DLLs, sem PDBs ou arquivos do compilador. CI passou a exportar o jogo FPP com assets. | Linux continua exigindo glibc compatível, stack gráfica/driver do host e fonte do sistema. MSVC/WSL2 em Windows real e workflow remoto não executados aqui; caminhos PowerShell/WSL foram testados com comandos simulados. Cache vcpkg/toolchains foi reutilizado, sem teste de bootstrap/download a frio. |
+
+API preservada: a assinatura anterior de `build_process::start` continua chamando
+os helpers internos `compile_runtime.*`; a nova sobrecarga recebe o projeto e é
+usada pelo editor para exportar o jogo. `platform_build.*` agora são os pontos de
+entrada da exportação e exigem o arquivo do projeto. Nenhuma mudança de ECS,
+renderização, multithreading ou API Lua; hipóteses P0/P1/P2 não reabertas.
+
+Validação final: editor, runtime e testes compilaram. Os builds de jogo Linux e
+Windows recompilaram engine/BGUI/runtime em diretórios inicialmente novos.
+**280/282 entradas CTest aprovadas**, incluindo os 15 testes `GameExportTest`,
+três testes de processo, teste do menu e seis casos Python (uma entrada CTest).
+As duas falhas são as mesmas registradas antes desta fase:
+`EditorRenderTest.CubemapOverridesAtmosphereAndDisableRestoresIt` e
+`Foundations.FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn`.
+
+A cena FPP local também falhou no Renderer da entidade 5, tanto no pacote quanto
+abrindo diretamente o projeto fonte com o mesmo executável. Causa não investigada
+nesta fase; cena, materiais, scripts e modelos locais não foram corrigidos ou
+substituídos. Para isolar o exportador, foi extraída uma cópia do projeto FPP
+versionado de HEAD em `/tmp/bengine-game-reference/projects/fpp_demo`.
+Essa cópia foi exportada para Linux e Windows; o jogo Linux movido para outra
+pasta iniciou sem argumentos, executou os scripts FPP e foi encerrado pelo teste
+após cinco segundos. `strace` não registrou acesso ao checkout inteiro nem ao
+projeto fonte. No Wine isolado, após adicionar uma fonte ao prefixo, o pacote
+Windows carregou a cena e inicializou UI; interrompido após dez segundos.
+Não houve avaliação manual de gameplay/qualidade visual nem execução MSVC/WSL2
+real. As modificações preexistentes de skybox e FPP permanecem fora deste commit.
+
+Comandos derivados de CMake/CI/helpers e usados nesta fase:
+
+```sh
+cmake --build /tmp/bengine-platform-clean --target editor_app runtime_app editor_menu_tests game_export_tests build_process_tests --parallel 2
+ctest --test-dir /tmp/bengine-platform-clean -C Release --output-on-failure
+sh scripts/platform_build.sh linux "$PWD" /tmp/bengine-game-export /tmp/bengine-game-native-work/progress "$PWD/projects/fpp_demo/project.bengine" /tmp/bengine-game-native-work
+sh scripts/platform_build.sh windows "$PWD" /tmp/bengine-game-export /tmp/bengine-game-windows-work/progress "$PWD/projects/fpp_demo/project.bengine" /tmp/bengine-game-windows-work
+```
+
+Logs finais: `/tmp/bengine-game-final-build.log`,
+`/tmp/bengine-game-ctest-final.log`, `/tmp/bengine-game-unit-final.log`,
+`/tmp/bengine-game-current-linux-final.log`,
+`/tmp/bengine-game-current-windows-final.log`,
+`/tmp/bengine-game-source-load.log` e
+`/tmp/bengine-game-reference-smoke/linux-final.log`, `linux-files-final.log`,
+`windows-with-font.log`. Pacotes do projeto local: `/tmp/bengine-game-export`;
+pacotes do exemplo versionado: `/tmp/bengine-game-reference-export`.
+Uso, conteúdo e requisitos atualizados no README.

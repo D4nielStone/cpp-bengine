@@ -1,0 +1,19 @@
+#include "game_package.hpp"
+#include <iostream>
+
+int main(int argc, char** argv) {
+    try {
+        const std::string action = argc > 1 ? argv[1] : "";
+        if (action == "prepare" && argc == 6)
+            game_package::prepare(argv[2], argv[3], argv[4], argv[5]);
+        else if (action == "stage" && argc == 5)
+            game_package::stage_binary(argv[2], argv[3], std::string(argv[4]) == "windows");
+        else if (action == "publish" && argc == 4)
+            game_package::publish(argv[2], argv[3]);
+        else throw std::runtime_error("Usage: game_packager prepare <repo> <project> <staging> <output> | stage <binary> <staging> <target> | publish <staging> <output>");
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "Game export failed: " << error.what() << '\n';
+        return 1;
+    }
+}

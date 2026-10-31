@@ -94,14 +94,32 @@ Both helpers configure and build the editor and runtime in `build/` by default.
 Pass a build directory to use another location. Add `--test` on Linux or
 `-RunTests` on Windows to also build and run the test suite.
 
-Once the editor is open, select **Build > Build Runtime** to open the platform
-build modal. Choose **Linux x64** or **Windows x64**. The modal displays
-progress and saves detailed output as `editor-build-linux.log` or
-`editor-build-windows.log` in the selected output directory. Artifacts are
-placed under `<directory>/platform-builds/<target>/apps`. Stop Play before
-building. These builds compile the runtime and bundle engine assets; pass
-`--project <project.bengine>` to run a game project (project files/assets must
-also accompany the runtime).
+Once the editor is open, select **Build > Export Game**. Export saves the
+current project/scene and produces a ready-to-run game for the selected target.
+Choose a dedicated empty output directory; it will contain only `linux/` and/or
+`windows/` game folders. An existing exported game is replaced only after the new
+package is complete. Unrelated files are never deleted to make room for a build.
+
+Each game folder contains the executable (named after the project folder),
+`game.json`, `game/` with the project, scenes, Lua scripts and assets, and `assets/`
+with the engine's bundled resources. Windows DLLs accompany the executable;
+Linux shared dependencies are bundled in `lib/`. Launch the executable directly,
+from any working directory: it locates `game.json` and opens the main scene.
+No `--project` argument or source checkout is required for the exported game.
+
+CMake files, object files, dependency downloads, logs and progress stay in the
+build cache, outside the output directory. The editor reports the log path.
+The default output is `<editor-build-directory>/exports`.
+
+All project resources are included, with their directory structure and model
+sidecars (MTL, glTF buffers/textures and import settings). Editor layout,
+previews, version control, development sources and build artifacts are excluded.
+Absolute project paths become package-relative paths; built-in primitive assets
+are included automatically. External assets and linked directories must be
+imported into the project first. Lua code must use portable project-relative
+resource references; dynamically constructed external paths cannot be inferred
+by the exporter. Non-text model formats should be imported with relative/embedded
+dependencies before export.
 
 | Host | Linux x64 target | Windows x64 target |
 |---|---|---|
@@ -113,8 +131,6 @@ Git, Visual Studio 2022 with Desktop development with C++, and the Windows SDK.
 `VCPKG_ROOT` may point to an installed vcpkg checkout; otherwise the Windows
 helper prepares it under `%LOCALAPPDATA%/cpp-bengine/toolchains`.
 Runtime DLLs are copied alongside the Windows executable.
-Choose a new output directory when changing compiler/toolchain; CMake caches
-are specific to the compiler that created them.
 
 Linux native builds do not download Zig or vcpkg. Install requirements in
 Linux (or inside the default WSL2 distribution for Windows → Linux):
@@ -135,12 +151,20 @@ with `apt-get download` (no root access); Debian/Ubuntu-based hosts need
 package and ensure it is on `PATH`. Set `VCPKG_ROOT` to an existing vcpkg
 checkout to reuse it instead.
 
-The GitHub Actions workflow builds and tests natively on Linux and Windows and
-publishes the editor and runtime executables as per-platform workflow
-artifacts. Platform builds from the editor generate the runtime under
-`build/platform-builds/<target>/apps` (or the selected build directory's
-corresponding folder). Run the executable with that `apps` folder as the
-working directory so its bundled assets resolve correctly.
+The GitHub Actions workflow builds/tests the engine natively and exports a
+Windows game both on Windows and from Linux. The remote workflow must run to
+validate those platforms. Linux packages require a compatible glibc system and
+the host's graphics drivers/OpenGL stack; this is a folder export, not an AppImage.
+
+For command-line game export (compilation intermediates stay in the cache):
+```sh
+sh scripts/platform_build.sh linux "$PWD" /path/to/export /tmp/game-build.progress /path/to/project.bengine
+sh scripts/platform_build.sh windows "$PWD" /path/to/export /tmp/game-build.progress /path/to/project.bengine
+```
+```powershell
+./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory C:/Games/Export -ProgressFile "$env:TEMP/game-build.progress" -ProjectFile C:/Projects/MyGame/project.bengine
+```
+The `compile_runtime.*` helpers are internal compilation steps, not game exports.
 
 Run either application with:
 

@@ -28,7 +28,7 @@ class PlatformBuildTests(unittest.TestCase):
                 script.chmod(0o755)
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                        BUILD_TEST_LOG=str(log), VCPKG_ROOT=str(root / "missing-vcpkg"))
-            result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"),
+            result = subprocess.run(["sh", str(REPO / "scripts/compile_runtime.sh"),
                                      "linux", str(REPO), str(output), str(output / "progress")],
                                     env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -65,6 +65,54 @@ class PlatformBuildTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_game_export_has_clean_output_and_project_assets(self):
+        import json
+        with tempfile.TemporaryDirectory(prefix="bengine game export ") as directory:
+            root = Path(directory)
+            project = root / "My Game"
+            (project / "assets").mkdir(parents=True)
+            (project / "scripts").mkdir()
+            (project / "assets/texture.png").write_bytes(b"texture")
+            (project / "scripts/play.lua").write_text("function setup() end")
+            (project / "project.bengine").write_text(json.dumps({
+                "format": "bubble-engine-project", "version": 1, "scene": "main.scene"}))
+            (project / "main.scene").write_text(json.dumps({
+                "format": "bubble-engine-scene", "version": 1, "entities": []}))
+            (project / "editor-ui.cfg").write_text("editor only")
+            (project / "build").mkdir()
+            (project / "build/CMakeCache.txt").write_text("not game data")
+            commands = root / "commands"
+            commands.mkdir()
+            real_cmake = shutil.which("cmake")
+            cmake = commands / "cmake"
+            cmake.write_text('#!/bin/sh\n'
+                'if [ "$1" = -S ] && [ "$2" = "$GAME_TEST_REPO" ]; then\n'
+                ' mkdir -p "$4/apps"; cp /bin/true "$4/apps/runtime_app"; exit 0; fi\n'
+                'if [ "$1" = --build ] && [ "${4:-}" = runtime_app ]; then exit 0; fi\n'
+                'exec "$GAME_TEST_CMAKE" "$@"\n')
+            cmake.chmod(0o755)
+            output = root / "export"
+            progress = root / "progress"
+            workspace = root / "workspace"
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                       GAME_TEST_CMAKE=real_cmake, GAME_TEST_REPO=str(REPO))
+            result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"), "linux",
+                                     str(REPO), str(output), str(progress),
+                                     str(project / "project.bengine"), str(workspace)],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            game = output / "linux"
+            self.assertTrue((game / "game.json").is_file())
+            manifest = json.loads((game / "game.json").read_text())
+            self.assertTrue((game / manifest["project"]).is_file())
+            self.assertTrue((game / "game/assets/texture.png").is_file())
+            self.assertTrue((game / "game/scripts/play.lua").is_file())
+            self.assertFalse((game / "game/editor-ui.cfg").exists())
+            self.assertFalse((game / "game/build").exists())
+            self.assertFalse(list(output.rglob("CMakeCache.txt")))
+            self.assertFalse(list(output.rglob("*.log")))
+            self.assertEqual({p.name for p in output.iterdir()}, {"linux"})
+
     def powershell(self):
         pwsh = shutil.which("pwsh")
         if not pwsh:
@@ -98,7 +146,7 @@ class PlatformBuildTests(unittest.TestCase):
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                        VCPKG_ROOT=str(commands), BUILD_TEST_LOG=str(log))
             args = [pwsh, "-NoLogo", "-NoProfile", "-File",
-                    str(REPO / "scripts/platform_build.ps1"), "-Target", "windows",
+                    str(REPO / "scripts/compile_runtime.ps1"), "-Target", "windows",
                     "-RepositoryRoot", str(REPO), "-BuildDirectory", str(output),
                     "-ProgressFile", str(output / "progress")]
             result = subprocess.run(args, env=env, capture_output=True, text=True)
@@ -112,6 +160,56 @@ class PlatformBuildTests(unittest.TestCase):
             result = subprocess.run(args, env=env, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((output / "progress").read_text().startswith("100|"))
+
+    def test_windows_game_wrapper_exports_clean_game_with_dlls(self):
+        import json
+        pwsh = self.powershell()
+        with tempfile.TemporaryDirectory(prefix="bengine windows game ") as directory:
+            root = Path(directory)
+            native = root / "native-tool"
+            subprocess.run(["cmake", "-S", str(REPO / "tools/game_packager"), "-B", str(native)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run(["cmake", "--build", str(native), "--parallel", "2"],
+                           check=True, capture_output=True, text=True)
+            project = root / "My Game"
+            project.mkdir()
+            (project / "project.bengine").write_text(json.dumps({
+                "format": "bubble-engine-project", "version": 1, "scene": "main.scene"}))
+            (project / "main.scene").write_text(json.dumps({
+                "format": "bubble-engine-scene", "version": 1, "entities": []}))
+            commands = root / "commands"
+            commands.mkdir()
+            for name in ("cmake", "vcpkg.exe"):
+                script = commands / name
+                script.write_text("#!/bin/sh\nexit 0\n")
+                script.chmod(0o755)
+            workspace = root / "cache"
+            packager = workspace / "packager/Release/game_packager.exe"
+            packager.parent.mkdir(parents=True)
+            packager.write_text('#!/bin/sh\nexec "' + str(native / "game_packager") + '" "$@"\n')
+            packager.chmod(0o755)
+            release = workspace / "runtime/platform-builds/windows/apps/Release"
+            release.mkdir(parents=True)
+            (release / "runtime_app.exe").write_text("test executable")
+            (release / "assimp.dll").write_text("test dll")
+            (release / "runtime_app.pdb").write_text("debug")
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                       VCPKG_ROOT=str(commands))
+            output = root / "export"
+            result = subprocess.run([pwsh, "-NoLogo", "-NoProfile", "-File",
+                str(REPO / "scripts/platform_build.ps1"), "-Target", "windows",
+                "-RepositoryRoot", str(REPO), "-BuildDirectory", str(output),
+                "-ProgressFile", str(workspace / "progress"),
+                "-ProjectFile", str(project / "project.bengine"), "-Workspace", str(workspace)],
+                env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((output / "windows/My_Game.exe").is_file())
+            self.assertTrue((output / "windows/assimp.dll").is_file())
+            self.assertTrue((output / "windows/game.json").is_file())
+            self.assertFalse(list(output.rglob("*.pdb")))
+            self.assertFalse(list(output.rglob("*.log")))
+            self.assertFalse(list(output.rglob("CMakeCache.txt")))
+            self.assertTrue((workspace / "progress").read_text().startswith("100|"))
 
     def test_windows_linux_target_uses_wsl_and_propagates_exit_code(self):
         pwsh = self.powershell()
@@ -131,13 +229,16 @@ class PlatformBuildTests(unittest.TestCase):
                                      str(REPO / "scripts/platform_build.ps1"),
                                      "-Target", "linux", "-RepositoryRoot", str(REPO),
                                      "-BuildDirectory", str(root / "output with spaces"),
-                                     "-ProgressFile", str(root / "progress")],
+                                     "-ProgressFile", str(root / "progress"),
+                                     "-ProjectFile", str(root / "project.bengine"),
+                                     "-Workspace", str(root / "workspace")],
                                     env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
             args = log.read_text().splitlines()
             self.assertEqual(args[:3], ["--exec", "bash", str(REPO / "scripts/platform_build.sh")])
             self.assertEqual(args[3:], ["linux", str(REPO), str(root / "output with spaces"),
-                                       str(root / "progress")])
+                                       str(root / "progress"), str(root / "project.bengine"),
+                                       str(root / "workspace")])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(BubbleGamePackager LANGUAGES CXX)
+add_executable(game_packager main.cpp)
+target_compile_features(game_packager PRIVATE cxx_std_20)
+target_include_directories(game_packager PRIVATE ../../external/rapidjson/include)

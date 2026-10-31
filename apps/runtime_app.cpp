@@ -24,6 +24,8 @@
 #include <string>
 #include <utility>
 
+#include "runtime/game_bootstrap.hpp"
+
 namespace {
 
 class runtime_viewport_sync_system final : public commons::system {
@@ -155,6 +157,20 @@ int main(const int argc, char** argv) {
     } else if (argc != 1) {
         std::cerr << "Usage: runtime_app [--project <project-file> [--script-log <log-file>]]\n";
         return 2;
+    }
+
+    if (argc == 1) {
+        try {
+            const auto directory = game_bootstrap::executable_directory(argv[0]);
+            if (std::filesystem::exists(directory / "game.json")) {
+                const auto launch = game_bootstrap::resolve(directory);
+                std::filesystem::current_path(launch.directory);
+                project_path = launch.project.string();
+            }
+        } catch (const std::exception& error) {
+            std::cerr << "[game] " << error.what() << '\n';
+            return 1;
+        }
     }
 
     commons::window window("Bubble Engine - Runtime");

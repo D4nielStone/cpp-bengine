@@ -17,6 +17,12 @@ if(BUILD_RUNTIME)
     target_sources(runtime_app PRIVATE editor/systems/project_persistence_system.cpp)
     target_include_directories(runtime_app PRIVATE ${EDITOR_INCLUDE_DIRS})
     target_link_libraries(runtime_app PRIVATE commons)
+    if(COMMONS_USE_RELATIVE_ASSET_PATHS AND UNIX)
+        set_target_properties(runtime_app PROPERTIES BUILD_RPATH "$ORIGIN/lib"
+            INSTALL_RPATH "$ORIGIN/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+        # DT_RPATH also resolves bundled transitive dependencies.
+        target_link_options(runtime_app PRIVATE "LINKER:--disable-new-dtags")
+    endif()
 endif()
 
 if(BUILD_EDITOR)
