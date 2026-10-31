@@ -1255,3 +1255,10 @@ real do demo por snapshots temporários, com Play/Pause/Stop e reinício.
 A recompilação completa e a rodada MSVC dos ajustes de compatibilidade são
 registradas nos resultados do Actions; execução gráfica Windows depende da
 disponibilidade de contexto OpenGL 3.3 no ambiente.
+
+A recompilação Linux após os ajustes acima passou nos 324 testes CTest, com
+OpenGL por software e o demo real. Os helpers PowerShell também alinham agora
+o CRT do MSVC ao triplet: estático para executável único e packager estático,
+dinâmico para exportação em pasta. Os sete testes de orquestração passaram,
+incluindo verificação dos dois formatos por comandos simulados. A execução
+do jogo Windows de executável único não foi validada por esses testes simulados.

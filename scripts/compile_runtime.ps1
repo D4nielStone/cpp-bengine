@@ -47,12 +47,13 @@ if ($Target -eq "windows") {
     Write-ProgressFile 15 "Preparing native Windows dependencies..."
     Invoke-Checked $vcpkg @("install", "--overlay-ports=$RepositoryRoot/cmake/vcpkg-ports", "assimp:$triplet", "bullet3:$triplet",
         "freetype:$triplet", "glfw3:$triplet", "glm:$triplet", "lua:$triplet")
+    $crt = if ($Format -eq "single") { 'MultiThreaded$<$<CONFIG:Debug>:Debug>' } else { 'MultiThreaded$<$<CONFIG:Debug>:Debug>DLL' }
     $targetBuild = Join-Path $BuildDirectory "platform-builds/windows"
     Write-ProgressFile 60 "Configuring native Windows runtime..."
     Invoke-Checked "cmake" @("-S", $RepositoryRoot, "-B", $targetBuild,
         "-G", "Visual Studio 17 2022", "-A", "x64",
         "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
-        "-DVCPKG_TARGET_TRIPLET=$triplet", "-DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON",
+        "-DVCPKG_TARGET_TRIPLET=$triplet", "-DCMAKE_MSVC_RUNTIME_LIBRARY=$crt", "-DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON",
         "-DBUILD_TESTING=OFF", "-DBUILD_RUNTIME=ON", "-DBUILD_EDITOR=OFF")
     Write-ProgressFile 80 "Compiling native Windows runtime..."
     Invoke-Checked "cmake" @("--build", $targetBuild, "--target", "runtime_app",

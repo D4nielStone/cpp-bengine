@@ -61,6 +61,7 @@ if (-not $Packager) {
     Invoke-Checked (Join-Path $vcpkgRoot "vcpkg.exe") @("install", "zlib:x64-windows-static")
     $configure += "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake"
     $configure += "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
+    $configure += '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>'
     Invoke-Checked "cmake" $configure
     Invoke-Checked "cmake" @("--build", $hostBuild, "--config", "Release", "--parallel", "2")
     $Packager = Join-Path $hostBuild "Release/game_packager.exe"
