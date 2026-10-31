@@ -5,6 +5,9 @@ on:
     branches: [ "main" ]
   push:
     branches: [ "main" ]
+env:
+  BENGINE_TEMPLATE_CACHE: ${{ github.workspace }}/export-template-cache
+
 jobs:
   build_and_test:
     strategy:
@@ -30,7 +33,7 @@ jobs:
           cmake build-essential \
           liblua5.3-0 liblua5.3-dev libglm-dev libglfw3-dev \
           libassimp-dev libfreeimage-dev rapidjson-dev \
-          libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev
+          libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev libcurl4-openssl-dev zlib1g-dev
       if: runner.os == 'Linux'
 
     - name: Install dependencies (Windows)
@@ -38,7 +41,7 @@ jobs:
       run: |
         & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install `
           assimp:x64-windows bullet3:x64-windows freetype:x64-windows `
-          glfw3:x64-windows glm:x64-windows lua:x64-windows
+          glfw3:x64-windows glm:x64-windows lua:x64-windows curl:x64-windows zlib:x64-windows
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       if: runner.os == 'Windows'
 
@@ -53,12 +56,18 @@ jobs:
         ./scripts/build.ps1 -BuildDirectory out -RunTests
       if: runner.os == 'Windows'
 
+    - name: Export Linux game and single executable
+      if: runner.os == 'Linux'
+      run: |
+        sh scripts/platform_build.sh linux "$PWD" "$PWD/game-build" "$PWD/game-build.progress" "$PWD/projects/fpp_demo/project.bengine" "$PWD/game-work" folder "" "$PWD/out/apps/game_packager"
+        sh scripts/platform_build.sh linux "$PWD" "$PWD/game-single" "$PWD/game-single.progress" "$PWD/projects/fpp_demo/project.bengine" "$PWD/game-single-work" single "" "$PWD/out/apps/game_packager"
+
     - name: Export native Windows game without WSL
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
         $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
-        ./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory "$PWD/game-build" -ProgressFile "$PWD/game-build.progress" -ProjectFile "$PWD/projects/fpp_demo/project.bengine"
+        ./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory "$PWD/game-build" -ProgressFile "$PWD/game-build.progress" -ProjectFile "$PWD/projects/fpp_demo/project.bengine" -Packager "$PWD/out/apps/Release/game_packager.exe"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         if (-not (Test-Path game-build/windows/fpp_demo.exe)) { throw "Game executable missing" }
 
@@ -70,6 +79,13 @@ jobs:
         path: game-build/windows
         if-no-files-found: error
 
+    - name: Upload precompiled runtime templates
+      uses: actions/upload-artifact@v4
+      with:
+        name: export-templates-${{ matrix.os }}
+        path: export-template-cache
+        if-no-files-found: error
+
     - name: Upload executables
       uses: actions/upload-artifact@v4
       with:
@@ -77,8 +93,10 @@ jobs:
         path: |
           out/apps/editor_app
           out/apps/runtime_app
+          out/apps/game_packager
           out/apps/Release/editor_app.exe
           out/apps/Release/runtime_app.exe
+          out/apps/Release/game_packager.exe
         if-no-files-found: error
 
   cross_windows:
@@ -90,12 +108,17 @@ jobs:
     - name: Install cross-build host tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential curl git pkg-config zip unzip ninja-build binutils-mingw-w64-x86-64
+        sudo apt-get install -y cmake build-essential curl git pkg-config zip unzip ninja-build binutils-mingw-w64-x86-64 zlib1g-dev
     - name: Export Windows game on Linux
       run: |
         mkdir -p game-build
         sh scripts/platform_build.sh windows "$PWD" "$PWD/game-build" "$PWD/game-build.progress" "$PWD/projects/fpp_demo/project.bengine"
         file game-build/windows/fpp_demo.exe | grep 'PE32+'
+    - uses: actions/upload-artifact@v4
+      with:
+        name: export-templates-windows-from-linux
+        path: export-template-cache
+        if-no-files-found: error
     - uses: actions/upload-artifact@v4
       with:
         name: windows-game-from-linux

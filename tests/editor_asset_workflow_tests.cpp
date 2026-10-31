@@ -9,6 +9,7 @@
 #include "entity_picking_system.hpp"
 #include "undo_redo_shortcuts_system.hpp"
 #include "project_catalog.hpp"
+#include "project_context_menu.hpp"
 #include "entity_clipboard.hpp"
 #include "primitive_entities.hpp"
 
@@ -858,4 +859,22 @@ TEST_F(EditorAssetWorkflowTest, PastingAfterParentDeletionDoesNotReparentToAReus
     const auto transform = registry->get<commons::transform>(*context->selected_entity);
     EXPECT_EQ(transform->parent_id, 0u);
     EXPECT_EQ(transform->get_world_position(), (bgui::vec3{12, 0, 0}));
+}
+
+TEST_F(EditorAssetWorkflowTest, ProjectDeletionConfirmationRetiresWhenItsManagerIsDestroyed) {
+    auto& root = bgui::get_layout();
+    auto& manager = root.add<bgui::linear>(bgui::orientation::vertical);
+    auto& button = manager.add<editor::ui::context_action_button>("Project", .3f, []() {});
+    editor::ui::configure_project_context_menu(button, folder / "project.bengine",
+        []() { return std::filesystem::path{}; }, []() {}, []() {}, [](const auto&) {});
+    button.open_context(); bgui::on_update();
+    auto* popup = find<bgui::linear>(root, [](auto& value) { return value.has_class("editor-context-actions") && value.is_enabled(); });
+    ASSERT_NE(popup, nullptr);
+    auto* erase = find<bgui::button>(*popup, [](auto& value) { return value.get_label().get_buffer() == "Apagar pasta do disco..."; });
+    ASSERT_NE(erase, nullptr);
+    erase->on_released(); bgui::on_update();
+    ASSERT_NE(find<editor::ui::project_delete_confirmation>(root, [](auto&) { return true; }), nullptr);
+    root.remove(&manager);
+    bgui::on_update(); bgui::on_update();
+    EXPECT_EQ(find<editor::ui::project_delete_confirmation>(root, [](auto&) { return true; }), nullptr);
 }

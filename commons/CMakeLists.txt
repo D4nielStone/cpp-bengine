@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(commons VERSION 0.1.0 LANGUAGES CXX)
+project(commons LANGUAGES CXX)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -33,6 +33,7 @@ target_compile_definitions(commons
 target_include_directories(commons
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_BINARY_DIR}/generated
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/external
         ${CMAKE_SOURCE_DIR}/external/glad

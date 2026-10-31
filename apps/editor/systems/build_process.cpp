@@ -86,7 +86,7 @@ bool build_process::start(const std::filesystem::path& repository_root,
 {
     const std::string format = options.single_executable ? "single" : "folder";
 #ifdef BENGINE_PACKAGER_PATH
-    const std::filesystem::path packager = editor::distribution::path(
+    std::filesystem::path packager = editor::distribution::path(
 #ifdef _WIN32
         "game_packager.exe",
 #else

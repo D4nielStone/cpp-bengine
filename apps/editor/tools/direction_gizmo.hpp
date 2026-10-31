@@ -43,38 +43,41 @@ public:
     void get_requires(bgui::draw_data* data) override {
         const auto rect = processed_rect();
         if (rect.z < 24 || !m_camera) return;
-        // Submit through the regular image queue so later windows cover the gizmo.
-        // The global draw list is intentionally reserved for screen-wide overlays.
-        bgui::draw_list draw;
-        const auto color = draw.get_color();
-        const float unit = rect.z / 100.f;
-        const bgui::vec2 center{rect.x + rect.z * .5f, rect.y + rect.w * .5f};
-        draw.set_color({.08f, .09f, .12f, .72f});
-        draw.add_circle_filled(center, 49 * unit);
-        const auto axes = direction_gizmo_axes(m_camera->viewMatrix);
-        std::array<int, 3> order{0, 1, 2};
-        std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
-            return axes[a].z < axes[b].z;
-        });
-        const std::array<bgui::vec4, 3> colors{{{.95f, .25f, .28f, 1},
-            {.35f, .85f, .35f, 1}, {.3f, .55f, 1.f, 1}}};
-        for (const int axis : order) {
-            const bgui::vec2 end{center.x + axes[axis].x * 32 * unit,
-                center.y - axes[axis].y * 32 * unit};
-            draw.set_color(colors[axis]);
-            draw.add_line(center, end, 2 * unit);
-            draw.add_circle_filled(end, 9 * unit);
-            draw.set_color({.06f, .07f, .09f, 1});
-            auto stroke = [&](float x1, float y1, float x2, float y2) {
-                draw.add_line({end.x + x1 * unit, end.y + y1 * unit},
-                    {end.x + x2 * unit, end.y + y2 * unit}, 1.5f * unit);
-            };
-            if (axis == 0) { stroke(-3,-4,3,4); stroke(-3,4,3,-4); }
-            if (axis == 1) { stroke(-3,-4,0,0); stroke(3,-4,0,0); stroke(0,0,0,4); }
-            if (axis == 2) { stroke(-3,-4,3,-4); stroke(3,-4,-3,4); stroke(-3,4,3,4); }
+        if (m_material.m_texture.m_buffer.empty() || m_last_size != rect.z ||
+            m_last_axes != direction_gizmo_axes(m_camera->viewMatrix)) {
+            // Submit through the regular image queue so later windows cover the gizmo.
+            // The global draw list is intentionally reserved for screen-wide overlays.
+            bgui::draw_list draw;
+            const auto color = draw.get_color();
+            const float unit = rect.z / 100.f;
+            const bgui::vec2 center{rect.x + rect.z * .5f, rect.y + rect.w * .5f};
+            draw.set_color({.08f, .09f, .12f, .72f});
+            draw.add_circle_filled(center, 49 * unit);
+            const auto axes = direction_gizmo_axes(m_camera->viewMatrix);
+            std::array<int, 3> order{0, 1, 2};
+            std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+                return axes[a].z < axes[b].z;
+            });
+            const std::array<bgui::vec4, 3> colors{{{.95f, .25f, .28f, 1},
+                {.35f, .85f, .35f, 1}, {.3f, .55f, 1.f, 1}}};
+            for (const int axis : order) {
+                const bgui::vec2 end{center.x + axes[axis].x * 32 * unit,
+                    center.y - axes[axis].y * 32 * unit};
+                draw.set_color(colors[axis]);
+                draw.add_line(center, end, 2 * unit);
+                draw.add_circle_filled(end, 9 * unit);
+                draw.set_color({.06f, .07f, .09f, 1});
+                auto stroke = [&](float x1, float y1, float x2, float y2) {
+                    draw.add_line({end.x + x1 * unit, end.y + y1 * unit},
+                        {end.x + x2 * unit, end.y + y2 * unit}, 1.5f * unit);
+                };
+                if (axis == 0) { stroke(-3,-4,3,4); stroke(-3,4,3,-4); }
+                if (axis == 1) { stroke(-3,-4,0,0); stroke(3,-4,0,0); stroke(0,0,0,4); }
+                if (axis == 2) { stroke(-3,-4,3,-4); stroke(3,-4,-3,4); stroke(-3,4,3,4); }
+            }
+            draw.set_color(color);
+            update_texture(draw, rect);
         }
-        draw.set_color(color);
-        update_texture(draw, rect);
         m_material.m_use_tex = true;
         m_material.m_shader_tag = "ui::image";
         m_material.set("border_radius", 0.f);
@@ -124,6 +127,7 @@ private:
             }
         }
     }
+    // Cache keys remain unique even when a destroyed widget's address is reused.
     inline static std::uint64_t s_next_texture_id{0};
     const std::uint64_t m_texture_id{++s_next_texture_id};
     std::array<glm::vec3, 3> m_last_axes{};

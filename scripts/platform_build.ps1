@@ -47,9 +47,20 @@ if (-not $Packager) {
     $hostBuild = Join-Path $Workspace "packager"
     $configure = @("-S", "$RepositoryRoot/tools/game_packager", "-B", $hostBuild,
         "-G", "Visual Studio 17 2022", "-A", "x64")
-    if ($env:VCPKG_ROOT) {
-        $configure += "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+    $vcpkgRoot = $env:VCPKG_ROOT
+    if (-not $vcpkgRoot) {
+        $vcpkgRoot = Join-Path $env:LOCALAPPDATA "cpp-bengine/toolchains/vcpkg"
+        if (-not (Test-Path (Join-Path $vcpkgRoot "vcpkg.exe"))) {
+            if (-not (Test-Path (Join-Path $vcpkgRoot ".git"))) {
+                Invoke-Checked "git" @("clone", "--depth", "1", "--branch", "2024.11.16",
+                    "https://github.com/microsoft/vcpkg.git", $vcpkgRoot)
+            }
+            Invoke-Checked (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") @("-disableMetrics")
+        }
     }
+    Invoke-Checked (Join-Path $vcpkgRoot "vcpkg.exe") @("install", "zlib:x64-windows-static")
+    $configure += "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake"
+    $configure += "-DVCPKG_TARGET_TRIPLET=x64-windows-static"
     Invoke-Checked "cmake" $configure
     Invoke-Checked "cmake" @("--build", $hostBuild, "--config", "Release", "--parallel", "2")
     $Packager = Join-Path $hostBuild "Release/game_packager.exe"

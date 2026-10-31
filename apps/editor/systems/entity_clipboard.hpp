@@ -158,7 +158,17 @@ public:
                 auto transform = registry->get<commons::transform>(id);
                 if (created.contains(value.parent)) transform->parent_id = created.at(value.parent).id;
                 else if (value.parent && previously_alive.contains(value.parent) && registry->get<commons::transform>(value.parent)) transform->parent_id = value.parent;
-                else if (value.parent) transform->set_model_matrix(value.world);
+                else if (value.parent) {
+                    glm::vec3 scale, position, skew;
+                    glm::vec4 perspective;
+                    glm::quat rotation;
+                    if (!glm::decompose(value.world, scale, rotation, position, skew, perspective))
+                        throw std::runtime_error("Não foi possível restaurar a transformação mundial.");
+                    const auto angles = glm::degrees(glm::eulerAngles(rotation));
+                    transform->set_position({position.x, position.y, position.z});
+                    transform->set_rotation({angles.x, angles.y, angles.z});
+                    transform->set_scale({scale.x, scale.y, scale.z});
+                }
                 if (auto camera = registry->get<commons::camera>(id)) {
                     camera->m_transform = transform.get(); camera->skybox_asset_root = context->project_root.string();
                 }
@@ -194,7 +204,8 @@ public:
                     context->registry->remove(id); context->entity_names.erase(id);
                     context->hidden_entities.erase(id); context->locked_entities.erase(id);
                 }
-                context->selected_entity = previous_selection;
+                context->selected_entity = previous_selection && context->registry->is_alive(*previous_selection)
+                    ? previous_selection : std::nullopt;
             }
         }, [weak, saved, names, hidden, locked, selected]() {
             if (auto context = weak.lock()) {

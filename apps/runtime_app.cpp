@@ -200,6 +200,7 @@ int main(const int argc, char** argv) {
             registry,
             camera_entity.id
         );
+        project.set_migration_writes_enabled(false);
         std::string error;
         if (!project.load(project_path, error)) {
             std::cerr << "[runtime] Could not load project: " << error << '\n';

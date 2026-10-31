@@ -1,6 +1,6 @@
 {
     "format": "bubble-engine-project",
-    "version": 1,
+    "version": 2,
     "settings": {
         "gravity": [
             0.0,
@@ -9,9 +9,9 @@
         ],
         "editor_camera_transform": {
             "position": [
-                -27.130807876586914,
+                -27.13080787658691,
                 15.254517555236816,
-                14.863249778747559
+                14.86324977874756
             ],
             "rotation": [
                 -15.354181289672852,
@@ -25,5 +25,8 @@
             ]
         }
     },
-    "scene": "main.scene"
+    "scene": "main.scene",
+    "engine_version": "0.1.0",
+    "minimum_engine_version": "0.1.0",
+    "project_version": "0.1.0"
 }

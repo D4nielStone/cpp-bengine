@@ -6,6 +6,8 @@ project(
     LANGUAGES C CXX
 )
 
+configure_file(cmake/engine_version.hpp.in ${CMAKE_BINARY_DIR}/generated/engine_version.hpp @ONLY)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

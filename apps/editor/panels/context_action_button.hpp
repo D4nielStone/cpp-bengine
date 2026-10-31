@@ -62,6 +62,7 @@ class context_action_button : public bgui::button {
 public:
     using bgui::button::button;
     std::function<context_actions()> context_options;
+    std::weak_ptr<bool> lifetime() const { return m_alive; }
     void open_context() {
         if (!context_options) return;
         auto options = context_options();

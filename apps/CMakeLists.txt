@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(apps VERSION 0.1.0 LANGUAGES CXX)
+project(apps LANGUAGES CXX)
 
 include_directories(${CMAKE_SOURCE_DIR}/commons/include)
 
@@ -34,6 +34,7 @@ if(BUILD_EDITOR)
     add_executable(
         editor_app
         editor_app.cpp
+        editor/systems/release_check.cpp
         editor/systems/native_file_dialog.cpp
         editor/panels/editor_ui.cpp
         editor/systems/build_process.cpp
@@ -46,7 +47,8 @@ if(BUILD_EDITOR)
         editor/systems/ui_persistence_system.cpp
     )
     target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
-    target_link_libraries(editor_app PRIVATE commons)
+    find_package(CURL REQUIRED)
+    target_link_libraries(editor_app PRIVATE commons CURL::libcurl)
     add_dependencies(editor_app game_packager)
     target_compile_definitions(editor_app PRIVATE BENGINE_PACKAGER_PATH="$<TARGET_FILE:game_packager>")
     target_compile_definitions(editor_app PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")

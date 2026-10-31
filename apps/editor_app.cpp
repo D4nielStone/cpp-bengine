@@ -1,3 +1,4 @@
+#include "editor/systems/release_indicator.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
@@ -8,6 +9,7 @@
 #include "systems/ui_system.hpp"
 
 #include "editor/panels/editor_ui.hpp"
+#include "editor/panels/project_context_menu.hpp"
 #include "editor/systems/native_file_dialog.hpp"
 #include "editor/core/editor_context.hpp"
 #include "editor/systems/project_persistence_system.hpp"
@@ -77,7 +79,8 @@ struct project_choice {
 
 project_choice show_project_manager(
     commons::window& window,
-    bgui::linear*& manager_root
+    bgui::linear*& manager_root,
+    const std::shared_future<std::string>& release_check
 ) {
     project_choice choice;
     const auto resolve_project_path = [](std::filesystem::path selected) {
@@ -101,8 +104,9 @@ project_choice show_project_manager(
     header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     header.style.layout.padding = bgui::vec4i{24, 16, 24, 12};
     header.add_class("project-manager-header");
-    auto& title = header.add<bgui::text>("Bubble Engine", 0.68f);
+    auto& title = header.add<bgui::text>("Bubble Engine " BUBBLE_VERSION_COMPLETA_STR, 0.68f);
     title.style.layout.set_margin(0, 3);
+    header.add<editor::ui::release_indicator>(release_check);
     auto& subtitle = header.add<bgui::text>("PROJECT MANAGER  /  Choose a workspace or start something new", 0.3f);
     subtitle.add_class("project-manager-muted");
 
@@ -117,6 +121,7 @@ project_choice show_project_manager(
     auto& recent_title = recent.add<bgui::text>("Your workspaces", 0.42f);
     recent_title.style.layout.set_margin(0, 8);
 
+    bgui::text* status = nullptr;
     std::vector<std::string> recent_projects;
     std::ifstream recent_file("editor-recent-projects.cfg");
     for (std::string line; std::getline(recent_file, line);) {
@@ -154,11 +159,16 @@ project_choice show_project_manager(
         auto& details = card.add<bgui::linear>(bgui::orientation::vertical);
         details.style.layout.require_width(bgui::mode::stretch);
         details.style.layout.require_height(bgui::mode::match_parent);
-        auto& button = details.add<bgui::button>(
+        auto& button = details.add<editor::ui::context_action_button>(
             project_label,
             0.34f,
             [&, path]() { choice = {path, false}; window.close(); }
         );
+        editor::ui::configure_project_context_menu(button, path,
+            []() { return std::filesystem::path{}; },
+            [&, path]() { choice = {path, false}; window.close(); },
+            [surface = &card]() { surface->set_enable(false); },
+            [&status](const auto& error) { if (status) status->set_buffer(error); });
         button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         button.style.layout.set_padding(5, 3);
         details.add<bgui::text>(folder_name.empty() ? path : folder_name, 0.26f)
@@ -175,7 +185,6 @@ project_choice show_project_manager(
     auto& path_input = path_row.add<bgui::inputbox>("", "Project file or project folder", 0.36f);
     path_input.style.layout.require_width(bgui::mode::stretch);
     path_input.style.layout.require_height(bgui::mode::wrap_content);
-    bgui::text* status = nullptr;
 
     auto& open_button = actions.add<bgui::button>("Open Project", 0.36f, [&]() {
         if (path_input.get_buffer().empty()) {
@@ -280,13 +289,14 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    commons::window window("Bubble Engine - Editor", argc == 1 ? 980 : 1200, 600);
+    auto release_check = std::async(std::launch::async, editor::ui::check_latest_release).share();
+    commons::window window("Bubble Engine " BUBBLE_VERSION_COMPLETA_STR " - Editor", argc == 1 ? 980 : 1200, 600);
     window.add<commons::ui_system>();
     bgui::get_layout().add<editor::ui::ui_scale_system>();
 
     if (argc == 1) {
         bgui::linear* manager_root = nullptr;
-        const auto choice = show_project_manager(window, manager_root);
+        const auto choice = show_project_manager(window, manager_root, release_check);
         if (choice.path.empty())
             return 0;
         project_path = choice.path;
@@ -320,6 +330,7 @@ int main(int argc, char** argv) {
         bgui::mode::match_parent,
         bgui::mode::match_parent
     );
+    editor_root.add<editor::ui::release_indicator>(release_check);
     auto& menu_bar = editor_root.add<bgui::menu_bar>(editor_root);
     auto& dock = editor_root.add<bgui::dock>();
     dock.style.layout.require_mode(

@@ -1,3 +1,4 @@
+#include "project_migration_manager.hpp"
 #include <os/resource_files.hpp>
 #include "project_persistence_system.hpp"
 #include "project_file_transaction.hpp"
@@ -459,11 +460,13 @@ bool validate_project(const rapidjson::Document& document, std::string& error) {
         std::string(document["format"].GetString()) != "bubble-engine-project" ||
         !document.HasMember("version") ||
         !document["version"].IsUint() ||
-        document["version"].GetUint() != 1 ||
+        document["version"].GetUint() != project_migration_manager::current_format ||
         (!document.HasMember("scene") && !document.HasMember("entities"))) {
         error = "The file is not a supported Bubble Engine project.";
         return false;
     }
+
+    if (!project_migration_manager::compatible(document, error)) return false;
 
     if (document.HasMember("settings") &&
         (!document["settings"].IsObject() ||
@@ -823,7 +826,8 @@ bool project_persistence_system::serialize_project(
     rapidjson::Value project_format;
     project_format.SetString("bubble-engine-project", project_allocator);
     project_document.AddMember("format", project_format, project_allocator);
-    project_document.AddMember("version", 1, project_allocator);
+    project_document.AddMember("version", project_migration_manager::current_format, project_allocator);
+    project_migration_manager::add_manifest(project_document, m_project_version);
 
     rapidjson::Value settings(rapidjson::kObjectType);
     rapidjson::Value gravity(rapidjson::kArrayType);
@@ -920,7 +924,9 @@ bool project_persistence_system::load(
         document.HasMember("format") &&
         document["format"].IsString() &&
         std::string(document["format"].GetString()) == "bubble-engine-project";
+    bool migration_required = false;
     if (is_project_document) {
+        if (!project_migration_manager::convert(document, migration_required, error)) return false;
         if (!validate_project(document, error))
             return false;
 
@@ -1125,6 +1131,10 @@ bool project_persistence_system::load(
     const auto staged_project_path = is_project_document
         ? absolute_project_path
         : std::filesystem::path{};
+
+    if (migration_required && m_migration_writes_enabled && !bgui::resource_files::embedded() &&
+        !project_migration_manager::commit(absolute_project_path, document, error, &contents)) return false;
+    m_project_version = is_project_document ? document["project_version"].GetString() : "0.1.0";
 
     m_registry->entities = std::move(staged_registry_copy->entities);
     m_registry->mascaras = std::move(staged_registry_copy->mascaras);

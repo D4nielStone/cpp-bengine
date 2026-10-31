@@ -70,7 +70,7 @@ inline bool excluded(const fs::path& relative) {
         const auto name = part.string();
         if (name == ".git" || name == ".github" || name == ".codex" || name == ".idea" || name == ".vscode" ||
             name == "build" || name == "out" || name == "CMakeFiles" || name == "platform-builds" ||
-            name == "__pycache__" || name == "node_modules" || name.starts_with("cmake-build-")) return true;
+            name.find(".migration-backup-") != std::string::npos || name == "__pycache__" || name == "node_modules" || name.starts_with("cmake-build-")) return true;
     }
     const auto name = relative.filename().string();
     const bool asset_tree = *relative.begin() == "assets";

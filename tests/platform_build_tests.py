@@ -190,9 +190,10 @@ class PlatformBuildTests(unittest.TestCase):
                 "format": "bubble-engine-scene", "version": 1, "entities": []}))
             commands = root / "commands"
             commands.mkdir()
+            host_log = root / "host-tools.log"
             for name in ("cmake", "vcpkg.exe"):
                 script = commands / name
-                script.write_text("#!/bin/sh\nexit 0\n")
+                script.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$BUILD_TEST_LOG"\nexit 0\n')
                 script.chmod(0o755)
             workspace = root / "cache"
             packager = workspace / "packager/Release/game_packager.exe"
@@ -206,7 +207,8 @@ class PlatformBuildTests(unittest.TestCase):
             (release / "assimp.dll").write_text("test dll")
             (release / "runtime_app.pdb").write_text("debug")
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-                       VCPKG_ROOT=str(commands), BENGINE_TEMPLATE_CACHE=str(root / "templates"))
+                       VCPKG_ROOT=str(commands), BENGINE_TEMPLATE_CACHE=str(root / "templates"),
+                       BUILD_TEST_LOG=str(host_log))
             output = root / "export"
             result = subprocess.run([pwsh, "-NoLogo", "-NoProfile", "-File",
                 str(REPO / "scripts/platform_build.ps1"), "-Target", "windows",
@@ -215,6 +217,8 @@ class PlatformBuildTests(unittest.TestCase):
                 "-ProjectFile", str(project / "project.bengine"), "-Workspace", str(workspace)],
                 env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("zlib:x64-windows-static", host_log.read_text())
+            self.assertIn("-DVCPKG_TARGET_TRIPLET=x64-windows-static", host_log.read_text())
             self.assertTrue((output / "windows/My_Game.exe").is_file())
             self.assertTrue((output / "windows/assimp.dll").is_file())
             self.assertTrue((output / "windows/game.json").is_file())

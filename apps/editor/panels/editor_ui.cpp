@@ -1,6 +1,5 @@
 #include "../core/distribution_paths.hpp"
-#include "context_action_button.hpp"
-#include "project_catalog.hpp"
+#include "project_context_menu.hpp"
 #include "editor_ui.hpp"
 #include "native_file_dialog.hpp"
 #include "project_creation_system.hpp"
@@ -1011,32 +1010,11 @@ void editor_ui::create_project_modal(
                 load_project_selection();
             }
         );
-        recent_button.context_options = [this, recent, row = &recent_button]() {
-            return context_actions{
-                {"Abrir projeto", [this, recent]() { m_project_directory_input->set_buffer(recent); load_project_selection(); }},
-                {"Remover da lista", [this, recent, row]() {
-                    try { forget_project(recent_projects_path, recent); row->set_enable(false); }
-                    catch (const std::exception& e) { m_project_picker_status->set_buffer(e.what()); }
-                }},
-                {"Apagar pasta do disco...", [this, recent, row]() {
-                    auto& confirmation = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
-                    confirmation.add<bgui::text>("Apagar definitivamente a pasta do projeto?", .34f);
-                    confirmation.add<bgui::text>(std::filesystem::path(recent).parent_path().string(), .28f);
-                    confirmation.add<bgui::text>("Todos os arquivos da pasta serão apagados. Esta ação não pode ser desfeita.", .28f);
-                    confirmation.set_confirmation_text("Apagar pasta definitivamente");
-                    confirmation.set_on_confirm([this, recent, row]() {
-                        try {
-                            erase_project(recent, m_project_path);
-                            forget_project(recent_projects_path, recent);
-                            row->set_enable(false);
-                        } catch (const std::exception& e) { m_project_picker_status->set_buffer(e.what()); }
-                    });
-                    confirmation.add<bgui::button>("Cancelar", .3f, [surface = &confirmation]() {
-                        bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
-                    });
-                }}
-            };
-        };
+        configure_project_context_menu(recent_button, recent,
+            [this]() { return std::filesystem::path(m_project_path); },
+            [this, recent]() { m_project_directory_input->set_buffer(recent); load_project_selection(); },
+            [row = &recent_button]() { row->set_enable(false); },
+            [this](const auto& error) { m_project_picker_status->set_buffer(error); });
         recent_button.style.layout.require_mode(
             bgui::mode::match_parent,
             bgui::mode::wrap_content

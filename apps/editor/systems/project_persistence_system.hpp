@@ -31,6 +31,7 @@ public:
 
     bool save(const std::string& path, std::string& error) const;
     bool load(const std::string& path, std::string& error) const;
+    void set_migration_writes_enabled(bool enabled) noexcept { m_migration_writes_enabled = enabled; }
     bool has_unsaved_changes(const std::string& path) const;
 
 private:
@@ -46,6 +47,8 @@ private:
     entity_name_map* m_entity_names;
     entity_state_set* m_hidden_entities;
     entity_state_set* m_locked_entities;
+    bool m_migration_writes_enabled{true};
+    mutable std::string m_project_version{"0.1.0"};
     mutable std::filesystem::path m_asset_root;
     mutable std::filesystem::path m_project_path;
     mutable std::filesystem::path m_scene_path;

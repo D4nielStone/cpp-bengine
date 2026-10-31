@@ -107,6 +107,36 @@ Linux shared dependencies are bundled in `lib/`. Launch the executable directly,
 from any working directory: it locates `game.json` and opens the main scene.
 No `--project` argument or source checkout is required for the exported game.
 
+Enable **Single executable** in the export dialog to put compressed game assets
+inside the executable. Scenes, Lua scripts, models, images, fonts and shaders are
+read directly from it and decompressed in memory; no temporary game files are
+extracted. This format requires a runtime with static game dependencies. Linux
+still uses the host's graphics drivers, display libraries and compatible glibc.
+Exported games hide profiling and collision debug overlays in both formats;
+the development runtime retains them. Packaging discourages casual editing but
+is not encryption or protection against a determined person extracting assets.
+
+Exports first reuse a compatible precompiled runtime template. The editor ships
+its host packager beside its executables. Templates are keyed by runtime sources,
+platform and format, and cached outside the output folder. If none matches, the
+runtime is compiled once and cached for subsequent projects. Supply an optional
+**Runtime template** folder in the dialog to require a specific template; an
+incompatible template fails instead of silently rebuilding. Distribute templates
+under `export_templates/<linux|windows>/<folder|single>/<key>/` beside the engine
+sources, or set `BENGINE_EXPORT_TEMPLATES`; override the writable cache with
+`BENGINE_TEMPLATE_CACHE`.
+
+For single-file CLI exports, append workspace, format, optional template and host
+packager arguments to the shell command, for example:
+
+```sh
+sh scripts/platform_build.sh linux "$PWD" /path/to/export /tmp/game.progress /path/to/project.bengine /tmp/game-work single "" /path/to/game_packager
+```
+
+PowerShell accepts `-Format single`, `-RuntimeTemplate` and `-Packager`.
+`BENGINE_PACKAGER` can also select the precompiled host packager. Without one,
+the CLI builds that small tool first (including its zlib dependency).
+
 CMake files, object files, dependency downloads, logs and progress stay in the
 build cache, outside the output directory. The editor reports the log path.
 The default output is `<editor-build-directory>/exports`.

@@ -196,8 +196,8 @@ gtest_discover_tests(model_import_tests)
 # Shell/PowerShell orchestration contracts; no graphics context required.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
-    add_test(NAME installer_transactions
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/installer_tests.py)
+    add_test(NAME release_packaging
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_tests.py)
 endif()
 if(Python3_Interpreter_FOUND AND UNIX)
     add_test(NAME platform_build_scripts
@@ -224,3 +224,8 @@ target_include_directories(executable_archive_tests PRIVATE ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(executable_archive_tests PRIVATE GTest::gtest_main commons)
 gtest_discover_tests(executable_archive_tests)
+
+add_executable(version_migration_tests version_migration_tests.cpp)
+target_include_directories(version_migration_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(version_migration_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(version_migration_tests)

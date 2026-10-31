@@ -1,3 +1,4 @@
+#include "project_file_transaction.hpp"
 #include "project_persistence_system.hpp"
 #include "project_creation_system.hpp"
 #include "project_preview.hpp"
@@ -705,4 +706,56 @@ TEST(ProjectPersistenceTest, LuaPropertyValuesAreSavedPerEntityAndPerScript) {
     ASSERT_NE(script, nullptr);
     EXPECT_EQ(std::get<std::string>(script->properties[1].value), (path.parent_path() / "assets/icon.png").string());
     EXPECT_EQ(std::get<std::string>(script->scripts[0]->properties[1].value), (path.parent_path() / "assets/child.png").string());
+}
+
+TEST(ProjectPersistenceTest, InvalidLegacySceneDoesNotMigrateOrChangeRegistry) {
+    const auto path = temporary_project_path();
+    const std::string original = R"({"format":"bubble-engine-project","version":1,"entities":[{"id":23,"components":{"transform":{"position":"invalid"}}}]})";
+    { std::ofstream output(path); output << original; }
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(17);
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    std::string error;
+    EXPECT_FALSE(persistence.load(path.string(), error));
+    EXPECT_EQ(read_file(path), original);
+    EXPECT_FALSE(std::filesystem::exists(path.string() + ".migration-backup-0"));
+    EXPECT_EQ(registry->live_entities.size(), 1u);
+    std::filesystem::remove(path);
+}
+
+TEST(ProjectPersistenceTest, FutureEngineCannotOpenProjectOrChangeRegistry) {
+    const auto path = temporary_project_path();
+    const std::string original = R"({"format":"bubble-engine-project","version":2,"engine_version":"99.0.0","minimum_engine_version":"99.0.0","project_version":"1.0.0","entities":[]})";
+    { std::ofstream output(path); output << original; }
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(17);
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    std::string error;
+    EXPECT_FALSE(persistence.load(path.string(), error));
+    EXPECT_EQ(read_file(path), original);
+    EXPECT_EQ(registry->live_entities.size(), 1u);
+    std::filesystem::remove(path);
+}
+
+TEST(ProjectPersistenceTest, PreservesIndependentProjectVersionAcrossSave) {
+    const auto path = temporary_project_path();
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(17);
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    auto content = read_file(path);
+    rapidjson::Document doc;
+    doc.Parse(content.c_str());
+    doc["project_version"].SetString("3.4.5", doc.GetAllocator());
+    { std::ofstream output(path); output << editor::ui::project_files::encode(doc); }
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    content = read_file(path);
+    doc.Parse(content.c_str());
+    EXPECT_STREQ(doc["project_version"].GetString(), "3.4.5");
+    remove_project_files(path);
 }
