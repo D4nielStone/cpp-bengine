@@ -1033,3 +1033,49 @@ OpenGL existentes com o display disponível. Referências de imagem não carrega
 texturas automaticamente e mover um arquivo não reescreve os padrões no Lua.
 Nenhuma decisão de design obrigatória ficou pendente; o contrato confirmado pelo
 usuário está documentado. A falha física da cena local permanece fora desta fase.
+
+## Otimização de invalidações do dock BGUI — 2026-10-31
+
+Escopo: melhorias da auditoria de janelas, sem alterar API ou comportamento de
+agrupamento, destaque, encaixe, seleção de tabs e redimensionamento.
+
+| Item | Status / evidência | Correção e cobertura |
+|---|---|---|
+| Tabs em repouso invalidavam layout | CONFIRMADO: `DockTest.IdleTabsShouldKeepLayoutClean` falhou antes da correção. | Indicador só invalida estilo quando sua visibilidade muda; teste cobre três atualizações consecutivas. |
+| Alvos de encaixe já ocultos invalidavam layout após destaque | CONFIRMADO: `DockTest.AfterDetachIdleArrangeShouldKeepLayoutClean` falhou antes da correção. | Alvos e preview só invalidam ao mudar a visibilidade para `false`; comparação considera `std::optional<bool>`. Teste cobre três passes após destaque. |
+| Divisórias dependiam da invalidação contínua | CONFIRMADO durante validação: `DockTest.RightSideSplitResizesInDragDirection` falhou após retirar as invalidações em repouso. | Arraste de divisória solicita layout explicitamente. Suíte DockTests cobre divisórias e encaixe. |
+| Reativação das antigas integrantes do grupo | CONFIRMADO; comportamento preservado. | `DockTest.DetachEnablesPreviouslyHiddenWindows` caracteriza o destaque em grupo de três janelas. Nenhuma mudança no desagrupamento. |
+
+Os três testes adicionados estão em `external/cpp-bgui/tests/dock_tests.cpp`.
+As alterações de produção ficam em `core/source/lay/dock.cpp` da BGUI.
+
+Validação integrada: `cmake --build out --target all_tests -j 2` e
+`ctest --test-dir out -R '^(DockTests|ElementTests|LinearTests|DrawTests|ProfilingTests)$' --output-on-failure`:
+5/5 suítes aprovadas, incluindo os três testes novos.
+
+A execução direta de `all_tests` em processo único resulta em 120/123 testes
+aprovados. As três falhas de LinearTest (`WrapContentMeasuresMatchParentChildrenByIntrinsicSize`,
+`MeasuresNestedWrapContentBeforeSizingItsParent`, `MeasuresContentInsideNonFlexLayouts`)
+também ocorreram com `dock.cpp` original, recompilado e ligado aos mesmos objetos
+(117/120 testes antigos aprovados). A suíte LinearTests isolada passa. Esse
+problema preexistente de execução conjunta fica fora do escopo.
+
+O primeiro build standalone com extensões GNU encontrou colisão preexistente da
+macro `linux` em `icon_tests.cpp`. A configuração final usa
+`CMAKE_CXX_EXTENSIONS=OFF`, como o projeto raiz; nenhum arquivo alheio foi alterado.
+
+Build limpo BGUI em `/tmp/bgui-window-improvements-clean`, sem OpenGL/GLFW,
+com exemplos desabilitados e GoogleTest local:
+
+```sh
+cmake -S external/cpp-bgui -B /tmp/bgui-window-improvements-clean -DCMAKE_CXX_EXTENSIONS=OFF -DBGUI_USE_OPENGL=OFF -DBGUI_USE_GLFW=OFF -DBGUI_BUILD_EXAMPLES=OFF -DBGUI_TESTS=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/home/d4nl/repos/cpp-bengine/out/_deps/googletest-src
+cmake --build /tmp/bgui-window-improvements-clean -j 2
+ctest --test-dir /tmp/bgui-window-improvements-clean --output-on-failure
+```
+
+Resultado: build concluído e 18/18 suítes CTest aprovadas.
+Limites: não houve build limpo integral da engine/editor, validação visual manual,
+medição de FPS/GPU ou teste no Windows. A transição de destaque nos testes usa
+`set_floating(true)`; os testes existentes cobrem arraste, encaixe e divisórias.
+Não há mudança de design pendente nesta correção. A reativação das demais
+janelas continua sendo comportamento existente, sem otimização funcional.
