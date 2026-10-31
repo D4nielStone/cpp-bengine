@@ -142,7 +142,7 @@ if [ "$target" = linux ]; then
     fi
 fi
 
-toolchain_root="${HOME}/.cache/cpp-bengine/toolchains"
+toolchain_root=${BENGINE_TOOLCHAIN_ROOT:-"${HOME}/.cache/cpp-bengine/toolchains"}
 zig_root="${toolchain_root}/zig-0.14.1"
 pwsh_root="${toolchain_root}/powershell-7.6.8"
 vcpkg_root=${VCPKG_ROOT:-"${toolchain_root}/vcpkg-2026.10.16"}
@@ -286,6 +286,7 @@ set(CMAKE_CXX_COMPILER "${cxx_compiler_wrapper}")
 EOF
     cat > "$triplet_file" <<EOF
 set(VCPKG_TARGET_ARCHITECTURE x64)
+set(VCPKG_CMAKE_SYSTEM_NAME Linux)
 set(VCPKG_LIBRARY_LINKAGE static)
 set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${toolchain_file}")

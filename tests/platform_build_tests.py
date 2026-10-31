@@ -39,6 +39,41 @@ class PlatformBuildTests(unittest.TestCase):
             self.assertTrue((output / "platform-builds/linux/apps/assets/shaders").is_dir())
             self.assertTrue((output / "progress").read_text().startswith("100|"))
 
+    def test_single_linux_dependencies_are_configured_as_linux(self):
+        with tempfile.TemporaryDirectory(prefix="bengine single linux ") as directory:
+            root = Path(directory)
+            commands = root / "commands"
+            commands.mkdir()
+            toolchains = root / "toolchains"
+            zig = toolchains / "zig-0.14.1/zig"
+            zig.parent.mkdir(parents=True)
+            zig.write_text("#!/bin/sh\nexit 0\n")
+            zig.chmod(0o755)
+            log = root / "commands.log"
+            for name, body in {
+                "cmake": 'printf "%s\\n" "$*" >> "$BUILD_TEST_LOG"\n',
+                "vcpkg": 'printf "%s\\n" "$*" >> "$BUILD_TEST_LOG"\n',
+                "pkg-config": "exit 0\n",
+                "nasm": "exit 0\n",
+                "curl": "exit 91\n",
+                "git": "exit 92\n",
+            }.items():
+                command = commands / name
+                command.write_text("#!/bin/sh\n" + body)
+                command.chmod(0o755)
+            output = root / "output"
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                       BUILD_TEST_LOG=str(log), VCPKG_ROOT=str(commands),
+                       BENGINE_TOOLCHAIN_ROOT=str(toolchains))
+            result = subprocess.run(["sh", str(REPO / "scripts/compile_runtime.sh"),
+                                     "linux", str(REPO), str(output), str(output / "progress"),
+                                     "", "single"], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            triplet = toolchains / "triplets/x64-zig-linux.cmake"
+            self.assertIn("set(VCPKG_CMAKE_SYSTEM_NAME Linux)", triplet.read_text())
+            self.assertIn("-DBENGINE_SINGLE_FILE_RUNTIME=ON", log.read_text())
+            self.assertIn("--overlay-ports=" + str(REPO / "cmake/vcpkg-ports"), log.read_text())
+
     def test_cmake_runtime_only_does_not_require_editor_sources_or_png(self):
         with tempfile.TemporaryDirectory(prefix="bengine cmake ") as directory:
             root = Path(directory)
