@@ -1234,3 +1234,24 @@ Logs finais: `/tmp/bengine-game-final-build.log`,
 `windows-with-font.log`. Pacotes do projeto local: `/tmp/bengine-game-export`;
 pacotes do exemplo versionado: `/tmp/bengine-game-reference-export`.
 Uso, conteúdo e requisitos atualizados no README.
+
+## 2026-10-31 — CI de release e compatibilidade Windows
+
+A validação da primeira release expôs bloqueios antes encobertos pela seleção de
+Lua 5.5: conversões ambíguas de resultados sol2 no MSVC, tags `class`/`struct`
+divergentes na declaração antecipada de `ecs`, herança de `DefaultIOSystem`
+(agora `final` no Assimp), e colisões com macros Windows em testes e na BGUI.
+As chamadas Lua usam proteção explícita e extração tipada de erros; o tracker
+Assimp delega ao IO padrão por composição. Nomes de escopos dos testes evitam
+a macro `interface`, sem alterar seu comportamento.
+
+Na BGUI, somente os nomes dos parâmetros da projeção ortográfica foram
+alterados para `near_plane`/`far_plane`, mantendo sua assinatura. A reprodução
+com macros vazias `near` e `far` falhou antes da correção e compilou após ela.
+O novo teste `MatrixCompatibility.OrthographicAcceptsWindowsNearFarMacros`
+passou executado isoladamente com GoogleTest. A suíte Linux anterior a estes
+ajustes tinha 324 testes aprovados, incluindo OpenGL por software e execução
+real do demo por snapshots temporários, com Play/Pause/Stop e reinício.
+A recompilação completa e a rodada MSVC dos ajustes de compatibilidade são
+registradas nos resultados do Actions; execução gráfica Windows depende da
+disponibilidade de contexto OpenGL 3.3 no ambiente.

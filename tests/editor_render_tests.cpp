@@ -194,7 +194,7 @@ TEST_F(EditorRenderTest, NeutralNormalMapPreservesLightingOnAHorizontalSurface) 
 }
 
 TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextCameraPass) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     auto camera = std::make_shared<commons::camera>();
     camera->viewport({32, 24});
     camera->createFB();

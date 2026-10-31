@@ -115,7 +115,7 @@ TEST(EditorThemeTest, VerticallyCentersWindowTrafficLights)
     style_manager.apply_theme(theme);
 
     {
-        bgui::scoped_interface interface;
+        bgui::scoped_interface ui_scope;
         auto& dock = bgui::get_layout().add<bgui::dock>();
         auto& panel = dock.add<bgui::window>("Panel", true);
         panel.style.layout.require_size(280.f, 190.f);

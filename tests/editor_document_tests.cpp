@@ -15,7 +15,7 @@ T* find(bgui::element& root, Predicate predicate) {
 }
 
 TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     auto& io = bgui::get_context();
     io.m_input_map.clear();
     io.m_char_buffer.clear();
@@ -80,7 +80,7 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
 }
 
 TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     dock.add_window("Arquivos", bgui::dock_area::bottom, .3f);
     editor::ui::debug_view debug;
@@ -123,7 +123,7 @@ TEST(EditorDocuments, SessionRestoresOpenFilesDirtyBuffersAndScale) {
     const auto session = directory / "session.cfg";
     { std::ofstream(source) << "original"; }
     {
-        bgui::scoped_interface interface;
+        bgui::scoped_interface ui_scope;
         bgui::get_context().m_input_map.clear();
         bgui::get_context().m_size = {900, 600};
         auto& dock = bgui::get_layout().add<bgui::dock>();
@@ -149,7 +149,7 @@ TEST(EditorDocuments, SessionRestoresOpenFilesDirtyBuffersAndScale) {
         ASSERT_TRUE(files.save_session(session)); // Replacing an existing session must work too.
     }
     {
-        bgui::scoped_interface interface;
+        bgui::scoped_interface ui_scope;
         bgui::get_context().m_input_map.clear();
         bgui::get_context().m_size = {900, 600};
         bgui::set_global_scale(1.f);

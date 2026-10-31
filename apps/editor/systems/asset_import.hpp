@@ -21,11 +21,16 @@ inline bool path_inside(const std::filesystem::path& path, const std::filesystem
 }
 
 // Assimp opens sidecars such as .mtl and .bin without creating GPU resources.
-class import_file_tracker final : public Assimp::DefaultIOSystem {
+class import_file_tracker final : public Assimp::IOSystem {
+    Assimp::DefaultIOSystem filesystem;
 public:
     std::set<std::filesystem::path> files;
+    bool Exists(const char* path) const override { return filesystem.Exists(path); }
+    char getOsSeparator() const override { return filesystem.getOsSeparator(); }
+    void Close(Assimp::IOStream* stream) override { filesystem.Close(stream); }
+    bool ComparePaths(const char* left, const char* right) const override { return filesystem.ComparePaths(left, right); }
     Assimp::IOStream* Open(const char* path, const char* mode = "rb") override {
-        auto* stream = Assimp::DefaultIOSystem::Open(path, mode);
+        auto* stream = filesystem.Open(path, mode);
         if (stream) files.insert(std::filesystem::absolute(path).lexically_normal());
         return stream;
     }

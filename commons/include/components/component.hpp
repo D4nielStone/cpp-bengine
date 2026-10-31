@@ -10,7 +10,7 @@
 #include "commons_namespace.hpp"
 
 namespace COMMONS_NS {
-	class ecs;
+	struct ecs;
 	/**
 	* @struct component
 	* @brief base para as funcionalidades da engine

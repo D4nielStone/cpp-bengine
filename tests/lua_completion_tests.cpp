@@ -32,7 +32,7 @@ TEST(LuaCompletion, IgnoresUnknownObjectsCommentsAndStrings) {
 }
 
 TEST(LuaCompletion, KeyboardAcceptEscapeAndUndo) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     auto& io = bgui::get_context();
     io.m_input_map.clear();
     io.m_char_buffer.clear();
@@ -63,7 +63,7 @@ TEST(LuaCompletion, KeyboardAcceptEscapeAndUndo) {
 }
 
 TEST(LuaCompletion, MouseAcceptanceRestoresTypingFocus) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     auto& io = bgui::get_context();
     io.m_input_map.clear();
     io.m_char_buffer.clear();

@@ -25,7 +25,7 @@ T* find(bgui::element& element, Predicate predicate) {
 }
 class EditorAssetWorkflowTest : public testing::Test {
 protected:
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     std::filesystem::path folder = std::filesystem::temp_directory_path() /
         ("bengine-workflow-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override {

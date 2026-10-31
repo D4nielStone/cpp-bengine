@@ -4,7 +4,7 @@
 namespace {
 class UiScaleTest : public testing::Test {
 protected:
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     editor::ui::ui_scale_system shortcuts;
     void SetUp() override {
         bgui::get_context().m_input_map.clear();

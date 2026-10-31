@@ -26,7 +26,7 @@ T* find(bgui::element& root, Predicate predicate) {
 
 class EditorMenuTest : public testing::Test {
 protected:
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     std::shared_ptr<commons::ecs> registry = std::make_shared<commons::ecs>();
     std::shared_ptr<editor::ui::editor_context> context =
         std::make_shared<editor::ui::editor_context>(registry);
@@ -239,7 +239,7 @@ TEST_F(EditorMenuTest, F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling
 }
 
 TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     const auto temporary = std::filesystem::temp_directory_path() /
         ("bengine menu export " + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(temporary);
@@ -302,7 +302,7 @@ TEST_F(EditorMenuTest, ExportModalOffersOptionalSingleExecutableAndRuntimeTempla
 }
 
 TEST(EditorProjectManager, ContextMenuSeparatesRemovingFromListAndDeletingFolder) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     namespace fs = std::filesystem;
     const auto folder = fs::temp_directory_path() / ("bengine-project-menu-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));

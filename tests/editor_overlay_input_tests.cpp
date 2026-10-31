@@ -8,7 +8,7 @@
 namespace {
 class EditorOverlayInputTest : public testing::Test {
 protected:
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     std::shared_ptr<editor::ui::editor_context> context =
         std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
 

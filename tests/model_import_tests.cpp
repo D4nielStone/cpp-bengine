@@ -108,7 +108,7 @@ T* find_import_element(bgui::element& root, Predicate predicate) {
 }
 class ImportDialogTest : public testing::Test {
 protected:
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     std::filesystem::path folder = std::filesystem::temp_directory_path() / ("bengine-import-ui-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override { std::filesystem::create_directories(folder); bgui::get_context().m_size = {1200,800}; }

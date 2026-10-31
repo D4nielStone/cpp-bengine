@@ -73,7 +73,7 @@ inline bool attach_lua_script(const std::shared_ptr<editor_context>& context,
         auto next = std::make_shared<commons::code>(path.string());
         auto result = next->estado_lua.load_file(path.string());
         if (!result.valid()) {
-            error = sol::error(result).what();
+            error = result.get<sol::error>().what();
             return false;
         }
         if (!next->load_properties(error)) return false;

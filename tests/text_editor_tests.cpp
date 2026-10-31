@@ -5,7 +5,7 @@
 #include <os/asset_manager.hpp>
 
 TEST(TextEditor, MultilineCanScrollWithoutFocus) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     bgui::font font;
     font.ascent = 8.f;
     font.descent = 2.f;
@@ -39,7 +39,7 @@ TEST(TextEditor, MultilineCanScrollWithoutFocus) {
 }
 
 TEST(TextEditor, DockTabFollowsWindowTitle) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface ui_scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     auto& first = dock.add_window("file.lua");
     dock.add_window("Other");
