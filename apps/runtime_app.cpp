@@ -159,18 +159,21 @@ int main(const int argc, char** argv) {
         return 2;
     }
 
-    if (argc == 1) {
-        try {
-            const auto directory = game_bootstrap::executable_directory(argv[0]);
-            if (std::filesystem::exists(directory / "game.json")) {
-                const auto launch = game_bootstrap::resolve(directory);
-                std::filesystem::current_path(launch.directory);
-                project_path = launch.project.string();
-            }
-        } catch (const std::exception& error) {
-            std::cerr << "[game] " << error.what() << '\n';
-            return 1;
+    bool diagnostics = true;
+    try {
+        const auto executable = game_bootstrap::executable_path(argv[0]);
+        game_bootstrap::mount_executable(executable);
+        const auto directory = executable.parent_path();
+        diagnostics = game_bootstrap::diagnostics_enabled(directory);
+        if (!diagnostics) std::filesystem::current_path(directory);
+        if (argc == 1 && !diagnostics) {
+            const auto launch = game_bootstrap::resolve(directory);
+            std::filesystem::current_path(launch.directory);
+            project_path = launch.project.string();
         }
+    } catch (const std::exception& error) {
+        std::cerr << "[game] " << error.what() << '\n';
+        return 1;
     }
 
     commons::window window("Bubble Engine - Runtime");
@@ -225,6 +228,7 @@ int main(const int argc, char** argv) {
     );
 
     auto render_system = std::make_shared<commons::render_system>();
+    if (diagnostics) {
     auto& profiler = root.add<runtime_profiler_text>(
         window,
         render_system,
@@ -234,6 +238,7 @@ int main(const int argc, char** argv) {
         bgui::mode::wrap_content,
         bgui::mode::wrap_content
     );
+    }
     auto& game_view = root.add<bgui::image>();
     game_view.style.layout.require_mode(
         bgui::mode::match_parent,
@@ -252,7 +257,7 @@ int main(const int argc, char** argv) {
     physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
     window.add(physics_system);
     window.add(render_system);
-    window.add<runtime_collision_overlay>();
+    if (diagnostics) window.add<runtime_collision_overlay>();
     if (!game_camera->flag_fb) {
         std::cerr << "[runtime] Could not create the game camera framebuffer.\n";
         return 1;

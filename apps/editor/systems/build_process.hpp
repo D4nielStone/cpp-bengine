@@ -10,6 +10,11 @@ enum class build_target {
     windows
 };
 
+struct game_export_options {
+    bool single_executable{false};
+    std::filesystem::path runtime_template;
+};
+
 class build_process final {
 public:
     build_process() = default;
@@ -31,6 +36,10 @@ public:
         const std::filesystem::path& project_file,
         std::string& error
     );
+    bool start(const std::filesystem::path& repository_root,
+        const std::filesystem::path& output_directory, build_target target,
+        const std::filesystem::path& project_file, const game_export_options& options,
+        std::string& error);
     bool running(std::string& error);
     int exit_code() const noexcept;
     const std::filesystem::path& log_path() const noexcept;

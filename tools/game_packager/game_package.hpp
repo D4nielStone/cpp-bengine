@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rapidjson/document.h>
+#include <resources/executable_archive.hpp>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 #include <algorithm>
@@ -49,8 +50,20 @@ inline bool game_manifest(const rapidjson::Value& document) {
 }
 inline void validate_destination(const fs::path& output) {
     if (!fs::exists(output) || (fs::is_directory(output) && fs::is_empty(output))) return;
-    if (!fs::is_regular_file(output / "game.json") || !game_manifest(read_json(output / "game.json")))
-        throw std::runtime_error("Output is not an exported game; choose an empty directory: " + output.string());
+    if (fs::is_regular_file(output / "game.json") && game_manifest(read_json(output / "game.json"))) return;
+    if (fs::is_directory(output)) {
+        auto it=fs::directory_iterator(output);
+        const auto first=it->path();
+        if (++it==fs::directory_iterator{} && fs::is_regular_file(first)) {
+            const auto archive=executable_archive::reader::open(first);
+            if(archive && archive->contains("game.json")) {
+                const auto bytes=archive->read("game.json");rapidjson::Document manifest;
+                manifest.Parse(reinterpret_cast<const char*>(bytes.data()),bytes.size());
+                if(!manifest.HasParseError() && manifest.IsObject() && game_manifest(manifest))return;
+            }
+        }
+    }
+    throw std::runtime_error("Output is not an exported game; choose an empty directory: " + output.string());
 }
 inline bool excluded(const fs::path& relative) {
     for (const auto& part : relative) {
@@ -303,20 +316,32 @@ inline void stage_binary(const fs::path& binary, const fs::path& staging, bool w
     write_json(staging / "game.json", manifest);
 }
 
-inline void publish(const fs::path& staging, const fs::path& output) {
+inline void publish(const fs::path& staging, const fs::path& output, bool single = false) {
     auto manifest = read_json(staging / "game.json");
     if (!game_manifest(manifest) || !manifest.HasMember("binary") || !manifest["binary"].IsString())
         throw std::runtime_error("The game executable has not been staged.");
     const fs::path binary(manifest["binary"].GetString());
     if (binary.filename() != binary || !fs::is_regular_file(staging / binary))
         throw std::runtime_error("The game executable is missing.");
+    auto source = staging;
+    if (single) {
+        if (fs::exists(staging / "lib") && !fs::is_empty(staging / "lib"))
+            throw std::runtime_error("Single executable requires a static runtime template, without companion libraries.");
+        for(const auto& file:fs::directory_iterator(staging)) {
+            auto ext=file.path().extension().string();std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return std::tolower(c);});
+            if(ext==".dll")throw std::runtime_error("Single executable requires a static runtime template, without DLLs.");
+        }
+        source=staging.parent_path()/"single-executable";
+        fs::remove_all(source);fs::create_directories(source);
+        executable_archive::append(staging/binary,staging,binary.generic_string(),source/binary);
+    }
     validate_destination(output);
     fs::create_directories(output.parent_path());
     const auto token = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     const auto pending = output.parent_path() / (".bengine-package-" + token);
     const auto backup = output.parent_path() / (".bengine-previous-" + token);
     try {
-        fs::copy(staging, pending, fs::copy_options::recursive);
+        fs::copy(source, pending, fs::copy_options::recursive);
         if (fs::exists(output)) fs::rename(output, backup);
         try { fs::rename(pending, output); }
         catch (...) {

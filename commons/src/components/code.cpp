@@ -1,3 +1,5 @@
+#include <os/resource_files.hpp>
+#include <tuple>
 #include "components/code.hpp"
 #include "debugging/script_log.hpp"
 
@@ -115,6 +117,30 @@ code::code(const std::string& file) : file(file) {
     arquivoCompleto = file;
 
     estado_lua.open_libraries(sol::lib::base);
+    if (bgui::resource_files::embedded()) {
+        estado_lua.set_function("__bengine_resource_read", [](const std::string& path)
+            -> std::tuple<sol::optional<std::string>, sol::optional<std::string>> {
+            try { return {bgui::resource_files::text(path), sol::nullopt}; }
+            catch (const std::exception& error) { return {sol::nullopt, std::string(error.what())}; }
+        });
+        estado_lua.script(R"(
+            local read_resource, compile = __bengine_resource_read, load
+            function loadfile(filename, mode, environment)
+                if type(filename) ~= 'string' then return nil, 'Embedded loadfile requires a resource path' end
+                local source, message = read_resource(filename)
+                if not source then return nil, message end
+                if environment == nil then environment = _G end
+                return compile(source, '@' .. filename, mode or 'bt', environment)
+            end
+            function dofile(filename)
+                local fn, message = loadfile(filename)
+                if not fn then error(message, 2) end
+                return fn()
+            end
+            __bengine_resource_read = nil
+        )");
+    }
+
 
     api::setClasses(estado_lua);
     api::setNamespaces(estado_lua);
@@ -336,7 +362,7 @@ void code::setup() {
         }, property.value);
     }
     estado_lua["properties"] = values;
-    estado_lua.script_file(arquivoCompleto);
+    estado_lua.script(bgui::resource_files::text(arquivoCompleto), arquivoCompleto);
 
     f_setup = estado_lua["setup"];
     f_update = estado_lua["update"];
@@ -349,7 +375,8 @@ void code::setup() {
 
 bool code::load_properties(std::string& error) {
     error.clear();
-    std::ifstream input(arquivoCompleto);
+    if (!bgui::resource_files::exists(arquivoCompleto)) { error = "Could not read script: " + arquivoCompleto; return false; }
+    auto input = bgui::resource_files::stream(arquivoCompleto);
     if (!input) { error = "Could not read script: " + arquivoCompleto; return false; }
     std::vector<script_property> loaded;
     std::set<std::string> names;

@@ -461,6 +461,14 @@ void editor_ui::create_build_modal() {
         "Game files are exported to <directory>/<target>. Build files stay in the cache.",
         0.25f
     );
+    auto& compact = m_build_modal->content().add<bgui::checkbox>(
+        "Single executable (compressed assets, read directly without extraction)", 0.25f, m_single_executable);
+    m_single_executable_checkbox = &compact;
+    compact.set_on_change([this](bool value) { if (!m_build_running) m_single_executable = value; });
+    m_build_modal->content().add<bgui::text>("Precompiled runtime template (optional; empty = automatic)", 0.25f);
+    auto& runtime_template = m_build_modal->content().add<bgui::inputbox>(m_runtime_template.string(), "Template folder...", 0.25f);
+    m_runtime_template_input = &runtime_template;
+    runtime_template.m_enter_func = [this](const std::string& value) { if (!m_build_running) m_runtime_template = value; };
     const auto add_target = [this](const char* icon_name,
                                    const char* label,
                                    const char* requirements,
@@ -518,6 +526,8 @@ void editor_ui::create_build_modal() {
     m_build_modal->set_confirmation_text("Close");
     m_build_modal->set_on_confirm([this]() {
         m_build_modal = nullptr;
+        m_runtime_template_input = nullptr;
+        m_single_executable_checkbox = nullptr;
         m_build_status = nullptr;
         m_build_progress = nullptr;
         m_build_directory_input = nullptr;
@@ -525,6 +535,8 @@ void editor_ui::create_build_modal() {
     });
     if (m_build_running) {
         m_build_directory_input->set_enable(false);
+        if (m_runtime_template_input) m_runtime_template_input->set_enable(false);
+        if (m_single_executable_checkbox) m_single_executable_checkbox->set_enable(false);
         m_build_directory_browse_button->set_enable(false);
     }
 }
@@ -547,6 +559,7 @@ void editor_ui::start_platform_build(const build_target target) {
     }
 
     std::string error;
+    if (m_runtime_template_input) m_runtime_template = m_runtime_template_input->get_buffer();
     if (!m_build_directory_input ||
         m_build_directory_input->get_buffer().empty()) {
         error = "Choose a build output directory.";
@@ -598,6 +611,7 @@ void editor_ui::start_platform_build(const build_target target) {
             m_build_directory,
             target,
             std::filesystem::absolute(m_project_path),
+            game_export_options{m_single_executable, m_runtime_template},
             error
         )) {
         if (error.empty())
@@ -610,6 +624,8 @@ void editor_ui::start_platform_build(const build_target target) {
 
     m_build_running = true;
     m_build_directory_input->set_enable(false);
+        if (m_runtime_template_input) m_runtime_template_input->set_enable(false);
+        if (m_single_executable_checkbox) m_single_executable_checkbox->set_enable(false);
     m_build_directory_browse_button->set_enable(false);
     if (m_build_status)
         m_build_status->set_buffer(
@@ -645,6 +661,8 @@ void editor_ui::update_build_process() {
             m_build_running = false;
             if (m_build_directory_input)
                 m_build_directory_input->set_enable(true);
+            if (m_runtime_template_input) m_runtime_template_input->set_enable(true);
+            if (m_single_executable_checkbox) m_single_executable_checkbox->set_enable(true);
             if (m_build_directory_browse_button)
                 m_build_directory_browse_button->set_enable(true);
             if (m_build_status)
@@ -663,6 +681,8 @@ void editor_ui::update_build_process() {
     m_build_running = false;
     if (m_build_directory_input)
         m_build_directory_input->set_enable(true);
+            if (m_runtime_template_input) m_runtime_template_input->set_enable(true);
+            if (m_single_executable_checkbox) m_single_executable_checkbox->set_enable(true);
     if (m_build_directory_browse_button)
         m_build_directory_browse_button->set_enable(true);
     const bool succeeded = m_build_process->exit_code() == 0;

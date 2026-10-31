@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
+if(NOT CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT} AND CMAKE_HOST_WIN32)
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "")
+endif()
 project(BubbleGamePackager LANGUAGES CXX)
+find_package(ZLIB REQUIRED)
 add_executable(game_packager main.cpp)
 target_compile_features(game_packager PRIVATE cxx_std_20)
 target_include_directories(game_packager PRIVATE ../../external/rapidjson/include)
+
+target_include_directories(game_packager PRIVATE ../../commons/include)
+target_link_libraries(game_packager PRIVATE ZLIB::ZLIB)

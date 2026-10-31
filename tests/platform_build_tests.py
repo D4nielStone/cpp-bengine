@@ -87,7 +87,7 @@ class PlatformBuildTests(unittest.TestCase):
             cmake = commands / "cmake"
             cmake.write_text('#!/bin/sh\n'
                 'if [ "$1" = -S ] && [ "$2" = "$GAME_TEST_REPO" ]; then\n'
-                ' mkdir -p "$4/apps"; cp /bin/true "$4/apps/runtime_app"; exit 0; fi\n'
+                ' printf "runtime configure\\n" >> "$GAME_TEST_COUNT"; mkdir -p "$4/apps"; cp /bin/true "$4/apps/runtime_app"; exit 0; fi\n'
                 'if [ "$1" = --build ] && [ "${4:-}" = runtime_app ]; then exit 0; fi\n'
                 'exec "$GAME_TEST_CMAKE" "$@"\n')
             cmake.chmod(0o755)
@@ -95,7 +95,7 @@ class PlatformBuildTests(unittest.TestCase):
             progress = root / "progress"
             workspace = root / "workspace"
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-                       GAME_TEST_CMAKE=real_cmake, GAME_TEST_REPO=str(REPO))
+                       GAME_TEST_CMAKE=real_cmake, GAME_TEST_REPO=str(REPO), BENGINE_TEMPLATE_CACHE=str(root / "templates"), GAME_TEST_COUNT=str(root / "runtime-count"))
             result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"), "linux",
                                      str(REPO), str(output), str(progress),
                                      str(project / "project.bengine"), str(workspace)],
@@ -112,6 +112,17 @@ class PlatformBuildTests(unittest.TestCase):
             self.assertFalse(list(output.rglob("CMakeCache.txt")))
             self.assertFalse(list(output.rglob("*.log")))
             self.assertEqual({p.name for p in output.iterdir()}, {"linux"})
+            other_project = root / "Other Game"
+            shutil.copytree(project, other_project)
+            other_output = root / "another export"
+            result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"), "linux",
+                str(REPO), str(other_output), str(progress), str(other_project / "project.bengine"),
+                str(root / "second workspace"), "folder", "", str(workspace / "packager/game_packager")],
+                env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Using precompiled runtime template", result.stdout)
+            self.assertEqual((root / "runtime-count").read_text().count("runtime configure"), 1)
+            self.assertTrue((other_output / "linux/game.json").is_file())
 
     def powershell(self):
         pwsh = shutil.which("pwsh")
@@ -188,13 +199,14 @@ class PlatformBuildTests(unittest.TestCase):
             packager.parent.mkdir(parents=True)
             packager.write_text('#!/bin/sh\nexec "' + str(native / "game_packager") + '" "$@"\n')
             packager.chmod(0o755)
-            release = workspace / "runtime/platform-builds/windows/apps/Release"
+            key = subprocess.check_output([str(native / "game_packager"), "template-key", str(REPO), "windows", "folder"], text=True).strip()
+            release = workspace / ("runtime-folder-" + key) / "platform-builds/windows/apps/Release"
             release.mkdir(parents=True)
             (release / "runtime_app.exe").write_text("test executable")
             (release / "assimp.dll").write_text("test dll")
             (release / "runtime_app.pdb").write_text("debug")
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-                       VCPKG_ROOT=str(commands))
+                       VCPKG_ROOT=str(commands), BENGINE_TEMPLATE_CACHE=str(root / "templates"))
             output = root / "export"
             result = subprocess.run([pwsh, "-NoLogo", "-NoProfile", "-File",
                 str(REPO / "scripts/platform_build.ps1"), "-Target", "windows",
@@ -238,7 +250,7 @@ class PlatformBuildTests(unittest.TestCase):
             self.assertEqual(args[:3], ["--exec", "bash", str(REPO / "scripts/platform_build.sh")])
             self.assertEqual(args[3:], ["linux", str(REPO), str(root / "output with spaces"),
                                        str(root / "progress"), str(root / "project.bengine"),
-                                       str(root / "workspace")])
+                                       str(root / "workspace"), "folder", ""])
 
 
 if __name__ == "__main__":

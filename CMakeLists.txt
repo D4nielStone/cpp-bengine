@@ -11,7 +11,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
+find_package(ZLIB REQUIRED)
 
+option(BENGINE_SINGLE_FILE_RUNTIME "Link non-system runtime dependencies statically" OFF)
 option(BUILD_RUNTIME "Build the standalone runtime app" ON)
 option(BUILD_EDITOR "Build the editor app" ON)
 option(ENABLE_SANITIZERS "Enable ASan/UBSan for development builds when supported" OFF)

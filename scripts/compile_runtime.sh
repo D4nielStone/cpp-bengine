@@ -37,7 +37,7 @@ run_vcpkg_install() {
                 --overlay-triplets="$triplet_root"
         ) > "$vcpkg_log" 2>&1 &
     else
-        packages="assimp bullet3 freetype glfw3 glm lua libpng"
+        packages="assimp bullet3 freetype glfw3 glm lua libpng libjpeg-turbo"
         (
             cd "$vcpkg_root"
             ./vcpkg install \
@@ -99,7 +99,7 @@ fi
 
 
 # Native Linux builds use installed host dependencies, without cross tools.
-if [ "$target" = linux ]; then
+if [ "$target" = linux ] && [ "${6:-folder}" != single ]; then
     require_command cmake
     require_command c++
     require_command pkg-config
@@ -149,6 +149,19 @@ vcpkg_root=${VCPKG_ROOT:-"${toolchain_root}/vcpkg"}
 triplet_root="${toolchain_root}/triplets"
 target_build="${build_root}/platform-builds/${target}"
 mkdir -p "$toolchain_root" "$triplet_root" "$target_build"
+
+if [ "$target" = linux ] && [ "${6:-folder}" = single ] && ! command -v nasm >/dev/null 2>&1; then
+    nasm_root="${toolchain_root}/nasm"
+    if [ ! -x "${nasm_root}/usr/bin/nasm" ]; then
+        require_command apt-get
+        require_command dpkg-deb
+        mkdir -p "${nasm_root}/download"
+        (cd "${nasm_root}/download" && apt-get download nasm)
+        for package in "${nasm_root}/download"/nasm_*.deb; do dpkg-deb -x "$package" "$nasm_root"; done
+    fi
+    PATH="${nasm_root}/usr/bin:$PATH"
+    export PATH
+fi
 
 zig_binary="${zig_root}/zig"
 if [ ! -x "$zig_binary" ]; then
@@ -230,8 +243,10 @@ fi
 
 target_triplet="x64-zig-${target}"
 target_architecture=x86_64-linux-gnu
+system_includes="-idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu"
 if [ "$target" = windows ]; then
     target_architecture=x86_64-windows-gnu
+    system_includes=""
 fi
 
 toolchain_file="${triplet_root}/zig-${target}-toolchain.cmake"
@@ -240,11 +255,11 @@ c_compiler_wrapper="${toolchain_root}/zig-${target}-cc"
 cxx_compiler_wrapper="${toolchain_root}/zig-${target}-cxx"
 cat > "$c_compiler_wrapper" <<EOF
 #!/bin/sh
-exec "${zig_binary}" cc -target ${target_architecture} "\$@"
+exec "${zig_binary}" cc -target ${target_architecture} ${system_includes} "\$@"
 EOF
 cat > "$cxx_compiler_wrapper" <<EOF
 #!/bin/sh
-exec "${zig_binary}" c++ -target ${target_architecture} "\$@"
+exec "${zig_binary}" c++ -target ${target_architecture} ${system_includes} "\$@"
 EOF
 chmod +x "$c_compiler_wrapper" "$cxx_compiler_wrapper"
 if [ "$target" = windows ]; then
@@ -264,12 +279,15 @@ EOF
 else
     cat > "$toolchain_file" <<EOF
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_LIBRARY_ARCHITECTURE x86_64-linux-gnu)
+list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu)
 set(CMAKE_C_COMPILER "${c_compiler_wrapper}")
 set(CMAKE_CXX_COMPILER "${cxx_compiler_wrapper}")
 EOF
     cat > "$triplet_file" <<EOF
 set(VCPKG_TARGET_ARCHITECTURE x64)
 set(VCPKG_LIBRARY_LINKAGE static)
+set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${toolchain_file}")
 EOF
 fi
@@ -369,6 +387,8 @@ fi
 
 toolchain_file="${vcpkg_root}/scripts/buildsystems/vcpkg.cmake"
 host_triplet=x64-linux
+single_runtime=OFF
+if [ "${6:-folder}" = single ]; then single_runtime=ON; fi
 write_progress 80 "Configuring ${target} runtime..."
 if [ "$target" = windows ]; then
     cmake -S "$repository_root" -B "$target_build" \
@@ -377,7 +397,9 @@ if [ "$target" = windows ]; then
         -DVCPKG_TARGET_TRIPLET="$target_triplet" \
         -DVCPKG_HOST_TRIPLET="$host_triplet" \
         -DVCPKG_OVERLAY_TRIPLETS="$triplet_root" \
+        -U 'JPEG_*' \
         -DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON \
+        -DBENGINE_SINGLE_FILE_RUNTIME="$single_runtime" \
         -DBUILD_TESTING=OFF \
         -DBUILD_RUNTIME=ON \
         -DBUILD_EDITOR=OFF \
@@ -389,7 +411,9 @@ else
         -DVCPKG_TARGET_TRIPLET="$target_triplet" \
         -DVCPKG_HOST_TRIPLET="$host_triplet" \
         -DVCPKG_OVERLAY_TRIPLETS="$triplet_root" \
+        -U 'JPEG_*' \
         -DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON \
+        -DBENGINE_SINGLE_FILE_RUNTIME="$single_runtime" \
         -DBUILD_TESTING=OFF \
         -DBUILD_RUNTIME=ON \
         -DBUILD_EDITOR=OFF \

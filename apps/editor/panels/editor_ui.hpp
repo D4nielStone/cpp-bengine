@@ -22,6 +22,7 @@ class modal;
 class inputbox;
 class text;
 class progress_bar;
+class checkbox;
 }
 
 namespace editor::ui {
@@ -108,6 +109,10 @@ private:
     bgui::text* m_project_picker_status{nullptr};
     bool m_is_playing{false};
     bool m_is_paused{false};
+    bgui::inputbox* m_runtime_template_input{nullptr};
+    bgui::checkbox* m_single_executable_checkbox{nullptr};
+    bool m_single_executable{false};
+    std::filesystem::path m_runtime_template;
     bool m_build_running{false};
     std::filesystem::path m_build_directory;
     std::filesystem::path m_repository_root;

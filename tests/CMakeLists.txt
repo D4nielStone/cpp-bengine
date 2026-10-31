@@ -195,6 +195,10 @@ gtest_discover_tests(model_import_tests)
 
 # Shell/PowerShell orchestration contracts; no graphics context required.
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME installer_transactions
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/installer_tests.py)
+endif()
 if(Python3_Interpreter_FOUND AND UNIX)
     add_test(NAME platform_build_scripts
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/platform_build_tests.py)
@@ -208,7 +212,15 @@ gtest_discover_tests(build_process_tests)
 
 # Game export and startup resolution are independent of ECS/OpenGL.
 add_executable(game_export_tests game_export_tests.cpp)
-target_include_directories(game_export_tests PRIVATE ${CMAKE_SOURCE_DIR}
+target_include_directories(game_export_tests PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/commons/include
+    ${CMAKE_SOURCE_DIR}/external/cpp-bgui/core/include
     ${CMAKE_SOURCE_DIR}/external/rapidjson/include)
-target_link_libraries(game_export_tests PRIVATE GTest::gtest_main)
+target_link_libraries(game_export_tests PRIVATE GTest::gtest_main ZLIB::ZLIB)
 gtest_discover_tests(game_export_tests)
+
+add_executable(executable_archive_tests executable_archive_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
+target_include_directories(executable_archive_tests PRIVATE ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(executable_archive_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(executable_archive_tests)

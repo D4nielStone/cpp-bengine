@@ -1,3 +1,4 @@
+#include <os/resource_files.hpp>
 #pragma once
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -33,8 +34,8 @@ inline std::filesystem::path model_import_settings_path(const std::filesystem::p
 inline model_import_options read_model_import_options(const std::filesystem::path& p) {
     model_import_options o;
     const auto settings = model_import_settings_path(p);
-    if (!std::filesystem::exists(settings)) return o;
-    std::ifstream in(settings);
+    if (!bgui::resource_files::exists(settings)) return o;
+    auto in = bgui::resource_files::stream(settings);
     const std::string text((std::istreambuf_iterator<char>(in)), {});
     rapidjson::Document d;
     d.Parse(text.c_str());

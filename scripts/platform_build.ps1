@@ -4,7 +4,10 @@ param(
     [Parameter(Mandatory = $true)][string]$BuildDirectory,
     [Parameter(Mandatory = $true)][string]$ProgressFile,
     [Parameter(Mandatory = $true)][string]$ProjectFile,
-    [string]$Workspace
+    [string]$Workspace,
+    [ValidateSet("folder", "single")][string]$Format = "folder",
+    [string]$RuntimeTemplate,
+    [string]$Packager
 )
 $ErrorActionPreference = "Stop"
 if (-not $Workspace) {
@@ -30,7 +33,8 @@ if ($Target -eq "linux") {
     $progress = Convert-ToWslPath $ProgressFile
     $project = Convert-ToWslPath $ProjectFile
     $work = Convert-ToWslPath $Workspace
-    & $wsl.Source --exec bash "$repo/scripts/platform_build.sh" linux $repo $output $progress $project $work
+    $template = if ($RuntimeTemplate) { Convert-ToWslPath $RuntimeTemplate } else { "" }
+    & $wsl.Source --exec bash "$repo/scripts/platform_build.sh" linux $repo $output $progress $project $work $Format $template
     exit $LASTEXITCODE
 }
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
@@ -38,18 +42,52 @@ function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE." }
 }
 [System.IO.File]::WriteAllText($ProgressFile, "1|Preparing game export...`n")
-$hostBuild = Join-Path $Workspace "packager"
-Invoke-Checked "cmake" @("-S", "$RepositoryRoot/tools/game_packager", "-B", $hostBuild,
-    "-G", "Visual Studio 17 2022", "-A", "x64")
-Invoke-Checked "cmake" @("--build", $hostBuild, "--config", "Release", "--parallel", "2")
-$packager = Join-Path $hostBuild "Release/game_packager.exe"
+if (-not $Packager) { $Packager = $env:BENGINE_PACKAGER }
+if (-not $Packager) {
+    $hostBuild = Join-Path $Workspace "packager"
+    $configure = @("-S", "$RepositoryRoot/tools/game_packager", "-B", $hostBuild,
+        "-G", "Visual Studio 17 2022", "-A", "x64")
+    if ($env:VCPKG_ROOT) {
+        $configure += "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+    }
+    Invoke-Checked "cmake" $configure
+    Invoke-Checked "cmake" @("--build", $hostBuild, "--config", "Release", "--parallel", "2")
+    $Packager = Join-Path $hostBuild "Release/game_packager.exe"
+}
 $staging = Join-Path $Workspace "package"
 $output = Join-Path $BuildDirectory "windows"
-Invoke-Checked $packager @("prepare", $RepositoryRoot, $ProjectFile, $staging, $output)
-& "$PSScriptRoot/compile_runtime.ps1" -Target windows -RepositoryRoot $RepositoryRoot -BuildDirectory "$Workspace/runtime" -ProgressFile $ProgressFile -PackagingStep
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$binary = Join-Path $Workspace "runtime/platform-builds/windows/apps/runtime_app.exe"
+Invoke-Checked $Packager @("prepare", $RepositoryRoot, $ProjectFile, $staging, $output)
+$key = (& $Packager template-key $RepositoryRoot windows $Format | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Could not calculate runtime template compatibility." }
+$cache = $env:BENGINE_TEMPLATE_CACHE
+if (-not $cache) { $cache = Join-Path $env:LOCALAPPDATA "cpp-bengine/export-templates" }
+$template = Join-Path $cache "windows/$Format/$key"
+if ($RuntimeTemplate) {
+    $template = $RuntimeTemplate
+    Invoke-Checked $Packager @("template-validate", $template, $key, "windows", $Format)
+} else {
+    & $Packager template-check $template $key windows $Format
+    if ($LASTEXITCODE -ne 0) {
+        $shippedRoot = if ($env:BENGINE_EXPORT_TEMPLATES) { $env:BENGINE_EXPORT_TEMPLATES } else { "$RepositoryRoot/export_templates" }
+        $shipped = Join-Path $shippedRoot "windows/$Format"
+        if (Test-Path "$shipped/$key/template.json") { $shipped = "$shipped/$key" }
+        & $Packager template-check $shipped $key windows $Format
+        if ($LASTEXITCODE -eq 0) { $template = $shipped }
+        else {
+            Write-Output "No compatible precompiled template; building it once."
+            $runtimeRoot = "$Workspace/runtime-$Format-$key"
+            & "$PSScriptRoot/compile_runtime.ps1" -Target windows -RepositoryRoot $RepositoryRoot -BuildDirectory $runtimeRoot -ProgressFile $ProgressFile -PackagingStep -Format $Format
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $binary = Join-Path $runtimeRoot "platform-builds/windows/apps/runtime_app.exe"
+            $currentKey = (& $Packager template-key $RepositoryRoot windows $Format | Select-Object -Last 1).Trim()
+            if ($currentKey -ne $key) { throw "Engine sources changed during template build; retry export." }
+            Invoke-Checked $Packager @("template-create", $binary, $template, $key, "windows", $Format)
+        }
+    }
+}
+Write-Output "Using precompiled runtime template: $template"
+$binary = Join-Path $template "runtime_app.exe"
 [System.IO.File]::WriteAllText($ProgressFile, "96|Packaging game and dependencies...`n")
-Invoke-Checked $packager @("stage", $binary, $staging, "windows")
-Invoke-Checked $packager @("publish", $staging, $output)
+Invoke-Checked $Packager @("stage", $binary, $staging, "windows")
+Invoke-Checked $Packager @("publish", $staging, $output, $Format)
 [System.IO.File]::WriteAllText($ProgressFile, "100|Game exported: $output`n")

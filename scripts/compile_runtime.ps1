@@ -8,7 +8,8 @@ param(
     [string]$BuildDirectory,
     [Parameter(Mandatory = $true)]
     [string]$ProgressFile,
-    [switch]$PackagingStep
+    [switch]$PackagingStep,
+    [ValidateSet("folder", "single")][string]$Format = "folder"
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,15 +43,16 @@ if ($Target -eq "windows") {
     if (-not (Test-Path $vcpkg)) {
         throw "VCPKG_ROOT must contain vcpkg.exe: $vcpkgRoot"
     }
+    $triplet = if ($Format -eq "single") { "x64-windows-static" } else { "x64-windows" }
     Write-ProgressFile 15 "Preparing native Windows dependencies..."
-    Invoke-Checked $vcpkg @("install", "assimp:x64-windows", "bullet3:x64-windows",
-        "freetype:x64-windows", "glfw3:x64-windows", "glm:x64-windows", "lua:x64-windows")
+    Invoke-Checked $vcpkg @("install", "assimp:$triplet", "bullet3:$triplet",
+        "freetype:$triplet", "glfw3:$triplet", "glm:$triplet", "lua:$triplet")
     $targetBuild = Join-Path $BuildDirectory "platform-builds/windows"
     Write-ProgressFile 60 "Configuring native Windows runtime..."
     Invoke-Checked "cmake" @("-S", $RepositoryRoot, "-B", $targetBuild,
         "-G", "Visual Studio 17 2022", "-A", "x64",
         "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake",
-        "-DVCPKG_TARGET_TRIPLET=x64-windows", "-DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON",
+        "-DVCPKG_TARGET_TRIPLET=$triplet", "-DCOMMONS_USE_RELATIVE_ASSET_PATHS=ON",
         "-DBUILD_TESTING=OFF", "-DBUILD_RUNTIME=ON", "-DBUILD_EDITOR=OFF")
     Write-ProgressFile 80 "Compiling native Windows runtime..."
     Invoke-Checked "cmake" @("--build", $targetBuild, "--target", "runtime_app",

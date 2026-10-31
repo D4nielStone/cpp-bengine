@@ -288,3 +288,15 @@ TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) 
     std::filesystem::remove_all(workspace);
     std::filesystem::remove_all(temporary);
 }
+
+TEST_F(EditorMenuTest, ExportModalOffersOptionalSingleExecutableAndRuntimeTemplate) {
+    click("Build");click("Export Game");
+    auto* compact=find<bgui::checkbox>(bgui::get_layout(),[](auto& item){
+        return item.get_label().get_buffer().find("Single executable")!=std::string::npos;
+    });
+    ASSERT_NE(compact,nullptr);EXPECT_FALSE(compact->checked());
+    compact->on_pressed();compact->on_released();bgui::on_update();
+    EXPECT_TRUE(compact->checked());
+    auto* template_input=find<bgui::inputbox>(bgui::get_layout(),[](auto& item){return item.get_buffer().empty();});
+    ASSERT_NE(template_input,nullptr);
+}

@@ -1,3 +1,4 @@
+#include "../core/distribution_paths.hpp"
 #include "build_process.hpp"
 
 #include <fstream>
@@ -75,6 +76,44 @@ bool build_process::start(
     const std::filesystem::path& project_file,
     std::string& error)
 {
+    return start(repository_root, build_directory, target, project_file, {}, error);
+}
+
+bool build_process::start(const std::filesystem::path& repository_root,
+    const std::filesystem::path& build_directory, const build_target target,
+    const std::filesystem::path& project_file, const game_export_options& options,
+    std::string& error)
+{
+    const std::string format = options.single_executable ? "single" : "folder";
+#ifdef BENGINE_PACKAGER_PATH
+    const std::filesystem::path packager = editor::distribution::path(
+#ifdef _WIN32
+        "game_packager.exe",
+#else
+        "game_packager",
+#endif
+        BENGINE_PACKAGER_PATH);
+#else
+    std::filesystem::path packager;
+#endif
+    if (!packager.empty() && !std::filesystem::is_regular_file(packager)) packager.clear();
+    if (packager.empty()) {
+        std::filesystem::path executable;
+#ifdef _WIN32
+        std::wstring module(32768, L'\0');
+        const auto length = GetModuleFileNameW(nullptr, module.data(), static_cast<DWORD>(module.size()));
+        if (length && length < module.size()) { module.resize(length); executable = module; }
+        const char* tool_name = "game_packager.exe";
+#else
+        std::error_code lookup_error;
+        executable = std::filesystem::read_symlink("/proc/self/exe", lookup_error);
+        const char* tool_name = "game_packager";
+#endif
+        if (!executable.empty()) {
+            const auto candidate = executable.parent_path() / tool_name;
+            if (std::filesystem::is_regular_file(candidate)) packager = candidate;
+        }
+    }
     std::cout << "[Build] Starting platform build" << std::endl;
     std::cout << "[Build] Repository root: '" << repository_root.string() << "'" << std::endl;
     std::cout << "[Build] Output directory: '" << build_directory.string() << "'" << std::endl;
@@ -178,7 +217,10 @@ bool build_process::start(
         L" -BuildDirectory " + quote_argument(build_directory.wstring()) +
         L" -ProgressFile " + quote_argument(m_progress_path.wstring()) +
         (project_file.empty() ? L"" : L" -ProjectFile " + quote_argument(project_file.wstring()) +
-            L" -Workspace " + quote_argument(workspace.wstring()));
+            L" -Workspace " + quote_argument(workspace.wstring()) +
+            L" -Format " + std::wstring(format.begin(), format.end()) +
+            (options.runtime_template.empty() ? L"" : L" -RuntimeTemplate " + quote_argument(options.runtime_template.wstring())) +
+            (packager.empty() ? L"" : L" -Packager " + quote_argument(packager.wstring())));
     const BOOL started = CreateProcessW(
         nullptr,
         command.data(),
@@ -240,6 +282,9 @@ bool build_process::start(
             progress_path.c_str(),
             project_file.c_str(),
             workspace.c_str(),
+            format.c_str(),
+            options.runtime_template.c_str(),
+            packager.c_str(),
             static_cast<char*>(nullptr)
         );
         dprintf(STDERR_FILENO, "Could not start platform build: %s\n",

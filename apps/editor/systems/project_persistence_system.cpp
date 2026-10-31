@@ -1,3 +1,4 @@
+#include <os/resource_files.hpp>
 #include "project_persistence_system.hpp"
 #include "project_file_transaction.hpp"
 
@@ -526,6 +527,7 @@ bool project_persistence_system::save(
     const std::string& path,
     std::string& error
 ) const {
+    if (bgui::resource_files::embedded()) { error = "Embedded game resources are read-only."; return false; }
     std::string snapshot;
     if (!serialize_project(path, error, true, snapshot))
         return false;
@@ -609,7 +611,7 @@ bool project_persistence_system::serialize_project(
             scene_target = absolute_target.parent_path() /
                 (absolute_target.stem().string() + ".scene");
         }
-        if (!m_asset_root.empty() &&
+        if (!bgui::resource_files::embedded() && !m_asset_root.empty() &&
             absolute_target.parent_path() == m_asset_root) {
             std::ifstream marker(m_asset_root / ".bengine-main-scene");
             std::string marker_path;
@@ -866,9 +868,10 @@ bool project_persistence_system::load(
         return false;
     }
 
-    if (!project_files::recover(path, error))
+    if (!bgui::resource_files::embedded() && !project_files::recover(path, error))
         return false;
-    std::ifstream input(path, std::ios::binary);
+    if (!bgui::resource_files::exists(path)) { error = "Could not open project file: " + path; return false; }
+    auto input = bgui::resource_files::stream(path);
     if (!input) {
         error = "Could not open project file '" + path + "'.";
         return false;
@@ -922,7 +925,8 @@ bool project_persistence_system::load(
                     ? referenced_scene
                     : project_directory / referenced_scene
             ).lexically_normal();
-            std::ifstream scene_input(staged_scene_path, std::ios::binary);
+            if (!bgui::resource_files::exists(staged_scene_path)) { error = "Could not open scene file: " + staged_scene_path.string(); return false; }
+            auto scene_input = bgui::resource_files::stream(staged_scene_path);
             if (!scene_input) {
                 error = "Could not open scene file '" +
                     staged_scene_path.string() + "'.";

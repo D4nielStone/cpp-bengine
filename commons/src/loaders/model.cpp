@@ -1,3 +1,5 @@
+#include "resources/assimp_resource_io.hpp"
+#include <os/resource_files.hpp>
 #include "loaders/model.hpp"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -39,7 +41,7 @@ namespace {
         for (const auto& candidate : candidates) {
             std::error_code ec;
             const auto absolute_candidate = safe_absolute(candidate);
-            if (std::filesystem::is_regular_file(absolute_candidate, ec) || std::filesystem::is_regular_file(candidate, ec))
+            if (bgui::resource_files::exists(absolute_candidate) || bgui::resource_files::exists(candidate))
                 return absolute_candidate;
         }
 
@@ -104,6 +106,7 @@ void model::load_model_data(const std::string& path) {
     const auto resolved_string = resolved_path.string();
     auto pose = std::make_shared<model_pose>();
     pose->options = read_model_import_options(resolved_path);
+    if (bgui::resource_files::embedded()) pose->importer->SetIOHandler(new resource_io());
     pose->scene = pose->importer->ReadFile(resolved_string, pose->options.flags());
     if (!pose->scene || !pose->scene->mRootNode || !pose->scene->HasMeshes() ||
         (pose->scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) {
@@ -276,18 +279,8 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
                 }
                 tex.embedded->m_has_alpha = true;
             } else {
-                // Reuse BGUI's platform image decoder; it owns the decoded pixels.
-                static unsigned sequence = 0;
-                auto temporary = std::filesystem::temp_directory_path() / ("bengine-embedded-" +
-                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" + std::to_string(sequence++));
-                if (!std::filesystem::create_directory(temporary)) throw std::runtime_error("Cannot stage embedded image");
-                struct cleanup { std::filesystem::path p; ~cleanup() { std::error_code ec; std::filesystem::remove_all(p, ec); } } cleanup{temporary};
-                const auto image = temporary / "image";
-                std::ofstream output(image, std::ios::binary);
-                output.write(reinterpret_cast<const char*>(embedded->pcData), embedded->mWidth);
-                output.close();
-                if (!output) throw std::runtime_error("Cannot decode embedded image");
-                *tex.embedded = bgui::asset_manager::get_instance().load_texture(image.string());
+                const auto* first = reinterpret_cast<const unsigned char*>(embedded->pcData);
+                *tex.embedded = bgui::decode_texture_memory({first, first + embedded->mWidth}, tex.path);
             }
             tex.embedded->m_path = tex.path;
             return tex;

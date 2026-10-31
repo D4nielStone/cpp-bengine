@@ -1,3 +1,4 @@
+#include <os/resource_files.hpp>
 #include "glad.h"
 #include "loaders/shader.hpp"
 #include <filesystem>
@@ -43,7 +44,7 @@ namespace {
         for (const auto& candidate : candidates) {
             std::error_code ec;
             const auto absolute_candidate = safe_absolute(candidate);
-            if (std::filesystem::is_regular_file(absolute_candidate, ec) || std::filesystem::is_regular_file(candidate, ec))
+            if (bgui::resource_files::exists(absolute_candidate) || bgui::resource_files::exists(candidate))
                 return absolute_candidate;
         }
 
@@ -55,7 +56,7 @@ namespace {
 
     std::string read_shader_file(const std::filesystem::path& path)
     {
-        std::ifstream file(path);
+        auto file = bgui::resource_files::stream(path);
         if (!file)
             throw std::runtime_error("Failed to open shader file: " + path.string());
 

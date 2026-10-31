@@ -17,6 +17,9 @@ if(BUILD_RUNTIME)
     target_sources(runtime_app PRIVATE editor/systems/project_persistence_system.cpp)
     target_include_directories(runtime_app PRIVATE ${EDITOR_INCLUDE_DIRS})
     target_link_libraries(runtime_app PRIVATE commons)
+    if(BENGINE_SINGLE_FILE_RUNTIME AND UNIX)
+        target_link_options(runtime_app PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
     if(COMMONS_USE_RELATIVE_ASSET_PATHS AND UNIX)
         set_target_properties(runtime_app PROPERTIES BUILD_RPATH "$ORIGIN/lib"
             INSTALL_RPATH "$ORIGIN/lib" BUILD_WITH_INSTALL_RPATH TRUE)
@@ -26,6 +29,8 @@ if(BUILD_RUNTIME)
 endif()
 
 if(BUILD_EDITOR)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/tools/game_packager ${CMAKE_BINARY_DIR}/game_packager)
+    set_target_properties(game_packager PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/apps)
     add_executable(
         editor_app
         editor_app.cpp
@@ -42,6 +47,8 @@ if(BUILD_EDITOR)
     )
     target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
     target_link_libraries(editor_app PRIVATE commons)
+    add_dependencies(editor_app game_packager)
+    target_compile_definitions(editor_app PRIVATE BENGINE_PACKAGER_PATH="$<TARGET_FILE:game_packager>")
     target_compile_definitions(editor_app PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
     if(WIN32)
         target_link_libraries(editor_app PRIVATE windowscodecs ole32 shell32 uuid)

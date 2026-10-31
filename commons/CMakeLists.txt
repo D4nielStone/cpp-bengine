@@ -71,6 +71,7 @@ target_include_directories(commons
 
 target_link_libraries(commons
     PUBLIC
+        ZLIB::ZLIB
         OpenGL::GL
         glfw
         ${BULLET_LIBRARIES}
