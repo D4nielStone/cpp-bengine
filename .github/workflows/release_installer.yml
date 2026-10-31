@@ -69,7 +69,7 @@ jobs:
         run: ctest --test-dir out --output-on-failure -C Release
       - name: Exercise editor runtime with the real demo
         if: runner.os == 'Linux'
-        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure -R 'RuntimeProcessTest|WindowLifecycleTest'
+        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure
       - name: Configure relocatable Linux binaries
         if: runner.os == 'Linux'
         run: cmake -S . -B release-build -DCMAKE_BUILD_TYPE=Release -DBENGINE_DISTRIBUTION_BUILD=ON -DBUILD_TESTING=OFF -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON

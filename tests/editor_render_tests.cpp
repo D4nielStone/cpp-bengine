@@ -505,7 +505,7 @@ TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
     auto camera = registry->get<commons::camera>(entity.id);
     camera->viewportFBO = {64, 64};
     camera->createFB();
-    camera->viewMatrix = glm::lookAt(glm::vec3(0), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    registry->get<commons::transform>(entity.id)->set_rotation({0.f, -90.f, 0.f});
     commons::render_system render;
     render.update(registry);
     std::array<unsigned char, 3> top{}, bottom{}, fallback{};
@@ -515,7 +515,7 @@ TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
     float depth = 0.f;
     glReadPixels(32, 32, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
     EXPECT_FLOAT_EQ(depth, 1.f);
-    camera->viewMatrix = glm::lookAt(glm::vec3(10, 20, 30), glm::vec3(10, 20, 29), glm::vec3(0, 1, 0));
+    registry->get<commons::transform>(entity.id)->set_position({10.f, 20.f, 30.f});
     render.update(registry);
     glReadPixels(32, 60, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, fallback.data());
     EXPECT_EQ(top, fallback); // Background depends on rotation, never position.
@@ -554,12 +554,11 @@ TEST_F(EditorRenderTest, CubemapOverridesAtmosphereAndDisableRestoresIt) {
     camera->skybox_faces = paths;
     camera->m_use_skybox = true;
     commons::render_system render;
-    const glm::vec3 directions[] = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
+    const bgui::vec3 rotations[] = {{0,0,0}, {0,180,0}, {90,0,0}, {-90,0,0}, {0,90,0}, {0,-90,0}};
     const std::array<unsigned char, 3> colors[] = {{255,0,0}, {0,255,0}, {0,0,255}, {255,255,0}, {255,0,255}, {0,255,255}};
     std::array<unsigned char, 4> pixel{};
     for (unsigned i = 0; i < 6; ++i) {
-        const auto up = (i == 2 || i == 3) ? glm::vec3{0,0,1} : glm::vec3{0,1,0};
-        camera->viewMatrix = glm::lookAt(glm::vec3(0), directions[i], up);
+        registry->get<commons::transform>(entity.id)->set_rotation(rotations[i]);
         render.update(registry);
         glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
         for (unsigned c = 0; c < 3; ++c) EXPECT_NEAR(pixel[c], colors[i][c], 2) << "Face " << i;
