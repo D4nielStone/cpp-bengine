@@ -120,13 +120,13 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     physical->setVelocidade({0.f, -3.f, 0.f});
     auto body = load(player, "fpp_player.lua");
     auto setup = sol::protected_function(body->f_setup)();
-    ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
+    ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
     auto input = body->estado_lua["Input"].get<sol::table>();
     input.set_function("GetAxis", [](const std::string& axis) { return axis == "Vertical" ? 1.f : 0.f; });
     input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{10.f, 0.f}; });
     body->estado_lua["Time"]["deltaTime"] = 0.1f;
     auto moved = sol::protected_function(body->f_update)();
-    ASSERT_TRUE(moved.valid()) << sol::error(moved).what();
+    ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
     auto player_transform = registry->get<commons::transform>(player.id);
     EXPECT_NEAR(physical->getVelocidade().z, 5.f, 0.0001f);
     EXPECT_FLOAT_EQ(physical->getVelocidade().y, -3.f);
@@ -134,19 +134,19 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
 
     auto look = load(camera, "fpp_camera.lua");
     setup = sol::protected_function(look->f_setup)();
-    ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
+    ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
     auto camera_input = look->estado_lua["Input"].get<sol::table>();
     camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 10000.f}; });
     auto looked = sol::protected_function(look->f_update)();
-    ASSERT_TRUE(looked.valid()) << sol::error(looked).what();
+    ASSERT_TRUE(looked.valid()) << looked.get<sol::error>().what();
     EXPECT_FLOAT_EQ(registry->get<commons::transform>(camera.id)->get_rotation().x, -89.f);
 
     registry->get<commons::transform>(pickup.id)->set_position(player_transform->get_position());
     auto game = load(pickup, "fpp_game.lua");
     setup = sol::protected_function(game->f_setup)();
-    ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
+    ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
     auto collected = sol::protected_function(game->f_update)();
-    ASSERT_TRUE(collected.valid()) << sol::error(collected).what();
+    ASSERT_TRUE(collected.valid()) << collected.get<sol::error>().what();
     EXPECT_FALSE(registry->get<commons::renderer>(pickup.id)->visible);
     EXPECT_FALSE(registry->has<commons::physics>(pickup.id));
     auto repeated = sol::protected_function(game->f_update)();
@@ -165,7 +165,7 @@ TEST(LuaApi, TranslateUsesTheEngineRotationOrder) {
     lua["bubble"]["input"] = lua.create_table();
     commons::api::setUnityApi(lua, registry, entity.id);
     auto result = lua.safe_script("transform:Translate(Vector3(0, 0, 1))", sol::script_pass_on_error);
-    ASSERT_TRUE(result.valid()) << sol::error(result).what();
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     const auto position = transform->get_position();
     EXPECT_NEAR(position.x, direction.x, 0.0001f);
     EXPECT_NEAR(position.y, direction.y, 0.0001f);
@@ -270,7 +270,7 @@ TEST(LuaApi, ComponentPropertiesAreWritable) {
         light.color = Vector3(0.1, 0.2, 0.3)
         gameObject:GetComponent("PointLight").intensity = 8
     )", sol::script_pass_on_error);
-    ASSERT_TRUE(result.valid()) << sol::error(result).what();
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     auto body = registry->get<commons::physics>(entity.id);
     EXPECT_FLOAT_EQ(body->m_rigid_body->getInvMass(), .5f);
     EXPECT_FLOAT_EQ(body->m_rigid_body->getFriction(), .7f);
@@ -397,7 +397,7 @@ TEST(LuaApi, FindAcceptsObjectNamesAndKeepsNumericLookup) {
         assert(GameObject.Find('') == nil)
         GameObject.Find('Player').transform.localPosition = Vector3(1, 2, 3)
     )", sol::script_pass_on_error);
-    ASSERT_TRUE(result.valid()) << sol::error(result).what();
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     EXPECT_FLOAT_EQ(registry->get<commons::transform>(42)->get_position().y, 2.f);
     auto duplicate = registry->create(43);
     registry->entity_names[duplicate.id] = "Player";

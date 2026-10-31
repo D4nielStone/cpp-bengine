@@ -364,7 +364,7 @@ void code::setup() {
     estado_lua["properties"] = values;
     const auto loaded = estado_lua.safe_script(
         bgui::resource_files::text(arquivoCompleto), sol::script_pass_on_error, arquivoCompleto);
-    if (!loaded.valid()) throw sol::error(loaded);
+    if (!loaded.valid()) throw loaded.get<sol::error>();
 
     f_setup = estado_lua["setup"];
     f_update = estado_lua["update"];
@@ -372,7 +372,7 @@ void code::setup() {
     if (f_setup.valid()) {
         sol::protected_function callback = f_setup;
         const auto result = callback();
-        if (!result.valid()) throw sol::error(result);
+        if (!result.valid()) throw result.get<sol::error>();
     }
 }
 
@@ -488,7 +488,7 @@ void code::update() {
     if (f_update.valid()) {
         sol::protected_function callback = f_update;
         const auto result = callback();
-        if (!result.valid()) throw sol::error(result);
+        if (!result.valid()) throw result.get<sol::error>();
     }
 }
 

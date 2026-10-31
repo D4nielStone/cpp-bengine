@@ -48,12 +48,29 @@ jobs:
           & "$PWD/.vcpkg/bootstrap-vcpkg.bat" -disableMetrics
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "VCPKG_INSTALLATION_ROOT=$PWD/.vcpkg" >> $env:GITHUB_ENV
+          $env:VCPKG_DEFAULT_BINARY_CACHE = "$PWD/.vcpkg-cache"
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:VCPKG_DEFAULT_BINARY_CACHE" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+      - name: Restore Windows dependency cache
+        if: runner.os == 'Windows'
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-windows-2022-2026.10.16-${{ hashFiles('cmake/vcpkg-ports/**') }}
       - name: Install Windows build dependencies
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install "--overlay-ports=$PWD/cmake/vcpkg-ports" assimp:x64-windows bullet3:x64-windows freetype:x64-windows glfw3:x64-windows glm:x64-windows lua:x64-windows zlib:x64-windows curl:x64-windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Save Windows dependency cache
+        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
       - name: Configure Linux release
         if: runner.os == 'Linux'
         run: cmake -S . -B out -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON
