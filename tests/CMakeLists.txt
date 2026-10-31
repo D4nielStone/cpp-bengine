@@ -232,7 +232,8 @@ gtest_discover_tests(version_migration_tests)
 
 add_executable(runtime_process_helper runtime_process_helper.cpp)
 add_executable(runtime_process_tests runtime_process_tests.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/runtime_process.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/runtime_process.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
 target_include_directories(runtime_process_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(runtime_process_tests PRIVATE GTest::gtest_main commons)
 target_compile_definitions(runtime_process_tests PRIVATE

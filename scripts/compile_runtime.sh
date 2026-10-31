@@ -32,7 +32,7 @@ run_vcpkg_install() {
         packages="assimp bullet3 freetype glfw3 glm lua"
         (
             cd "$vcpkg_root"
-            ./vcpkg install \
+            ./vcpkg install "--overlay-ports=${repository_root}/cmake/vcpkg-ports" \
                 $packages --triplet="$target_triplet" \
                 --overlay-triplets="$triplet_root"
         ) > "$vcpkg_log" 2>&1 &
@@ -40,7 +40,7 @@ run_vcpkg_install() {
         packages="assimp bullet3 freetype glfw3 glm lua libpng libjpeg-turbo"
         (
             cd "$vcpkg_root"
-            ./vcpkg install \
+            ./vcpkg install "--overlay-ports=${repository_root}/cmake/vcpkg-ports" \
                 $packages --triplet="$target_triplet" \
                 --overlay-triplets="$triplet_root"
         ) > "$vcpkg_log" 2>&1 &
@@ -145,7 +145,7 @@ fi
 toolchain_root="${HOME}/.cache/cpp-bengine/toolchains"
 zig_root="${toolchain_root}/zig-0.14.1"
 pwsh_root="${toolchain_root}/powershell-7.6.8"
-vcpkg_root=${VCPKG_ROOT:-"${toolchain_root}/vcpkg"}
+vcpkg_root=${VCPKG_ROOT:-"${toolchain_root}/vcpkg-2026.10.16"}
 triplet_root="${toolchain_root}/triplets"
 target_build="${build_root}/platform-builds/${target}"
 mkdir -p "$toolchain_root" "$triplet_root" "$target_build"
@@ -357,7 +357,7 @@ if [ ! -x "${vcpkg_root}/vcpkg" ]; then
         write_progress 25 "Downloading vcpkg dependency manager..."
     fi
     if [ ! -d "$vcpkg_root/.git" ]; then
-        git clone --depth 1 --branch 2024.11.16 \
+        git clone --depth 1 --branch 2026.10.16 \
             https://github.com/microsoft/vcpkg.git "$vcpkg_root"
     fi
     if [ "$target" = windows ]; then

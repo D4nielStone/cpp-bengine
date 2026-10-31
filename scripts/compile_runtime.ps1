@@ -29,11 +29,11 @@ if ($Target -eq "windows") {
     New-Item -ItemType Directory -Force $BuildDirectory | Out-Null
     $vcpkgRoot = $env:VCPKG_ROOT
     if (-not $vcpkgRoot) {
-        $vcpkgRoot = Join-Path $env:LOCALAPPDATA "cpp-bengine/toolchains/vcpkg"
+        $vcpkgRoot = Join-Path $env:LOCALAPPDATA "cpp-bengine/toolchains/vcpkg-2026.10.16"
         if (-not (Test-Path (Join-Path $vcpkgRoot "vcpkg.exe"))) {
             Write-ProgressFile 5 "Preparing vcpkg for native Windows..."
             if (-not (Test-Path (Join-Path $vcpkgRoot ".git"))) {
-                Invoke-Checked "git" @("clone", "--depth", "1", "--branch", "2024.11.16",
+                Invoke-Checked "git" @("clone", "--depth", "1", "--branch", "2026.10.16",
                     "https://github.com/microsoft/vcpkg.git", $vcpkgRoot)
             }
             Invoke-Checked (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") @("-disableMetrics")
@@ -45,7 +45,7 @@ if ($Target -eq "windows") {
     }
     $triplet = if ($Format -eq "single") { "x64-windows-static" } else { "x64-windows" }
     Write-ProgressFile 15 "Preparing native Windows dependencies..."
-    Invoke-Checked $vcpkg @("install", "assimp:$triplet", "bullet3:$triplet",
+    Invoke-Checked $vcpkg @("install", "--overlay-ports=$RepositoryRoot/cmake/vcpkg-ports", "assimp:$triplet", "bullet3:$triplet",
         "freetype:$triplet", "glfw3:$triplet", "glm:$triplet", "lua:$triplet")
     $targetBuild = Join-Path $BuildDirectory "platform-builds/windows"
     Write-ProgressFile 60 "Configuring native Windows runtime..."

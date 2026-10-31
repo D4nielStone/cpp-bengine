@@ -112,6 +112,10 @@ window::~window() {
     bgui::get_context().m_refresh_func = {};
     m_systems.clear();
     m_interface.reset();
+    m_ecs->entities.clear();
+    m_ecs->mascaras.clear();
+    m_ecs->live_entities.clear();
+    m_ecs->entity_names.clear();
 
     if (m_window) {
         bgui::shutdown_glfw();

@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 #include "runtime_process.hpp"
+#include "project_persistence_system.hpp"
+#include "components/camera.hpp"
+#include "os/window.hpp"
 #include "debugging/script_log.hpp"
 
 #include <chrono>
@@ -103,12 +106,19 @@ TEST_F(RuntimeProcessTest, RealDemoStartsAndRestartsThroughEditorProcess) {
         fs::copy_options::recursive);
     const auto demo = root / "demo/project.bengine";
     const auto original = fs::file_size(fs::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine");
+    commons::window window("Editor runtime snapshot test", 100, 100);
+    auto registry = window.get_ecs();
+    auto editor_camera = registry->create();
+    registry->add<commons::camera>(editor_camera);
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    persistence.set_migration_writes_enabled(false);
     editor::ui::runtime_process process;
     std::string error;
+    ASSERT_TRUE(persistence.load(demo.string(), error)) << error;
     for (int run = 0; run < 2; ++run) {
-        if (run) fs::copy_file(fs::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine", demo);
+        ASSERT_TRUE(persistence.save(project.string(), error)) << error;
         commons::script_log::instance().clear();
-        ASSERT_TRUE(process.start(BENGINE_RUNTIME_EXECUTABLE, demo, error)) << error;
+        ASSERT_TRUE(process.start(BENGINE_RUNTIME_EXECUTABLE, project, error)) << error;
         ASSERT_TRUE(wait_for([&] {
             if (!process.running(error)) return true;
             for (const auto& line : commons::script_log::instance().lines())
@@ -119,13 +129,26 @@ TEST_F(RuntimeProcessTest, RealDemoStartsAndRestartsThroughEditorProcess) {
         bool ready = false;
         for (const auto& line : commons::script_log::instance().lines()) {
             ready |= line.find("FPP player body ready.") != std::string::npos;
-            EXPECT_EQ(line.find("[error]"), std::string::npos) << line;
+            EXPECT_EQ(line.find("Initialization failed:"), std::string::npos) << line;
+            EXPECT_EQ(line.find("Update failed:"), std::string::npos) << line;
         }
         ASSERT_TRUE(ready);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        while (std::chrono::steady_clock::now() < deadline) {
+            ASSERT_TRUE(process.running(error)) << error;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (const auto& line : commons::script_log::instance().lines()) {
+            EXPECT_EQ(line.find("Initialization failed:"), std::string::npos) << line;
+            EXPECT_EQ(line.find("Update failed:"), std::string::npos) << line;
+        }
         ASSERT_TRUE(process.set_paused(true, error)) << error;
         ASSERT_TRUE(process.set_paused(false, error)) << error;
         ASSERT_TRUE(process.stop(error)) << error;
+        expect_clean();
     }
+    EXPECT_TRUE(fs::exists(demo));
+    EXPECT_TRUE(fs::exists(root / "demo/main.scene"));
     EXPECT_EQ(fs::file_size(fs::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine"), original);
 }
 #endif

@@ -187,3 +187,29 @@ TEST(WindowFileDropTest, NativeF3KeyIsDeliveredToTheSharedInputState) {
     callback(native,GLFW_KEY_F3,0,GLFW_RELEASE,0);
     EXPECT_FALSE(bgui::get_pressed(bgui::input_key::f3));
 }
+
+namespace {
+struct context_lifetime_probe final : commons::component {
+    static constexpr auto mask = COMPONENTE_RENDER;
+    bool& destroyed_with_context;
+    explicit context_lifetime_probe(bool& result) : destroyed_with_context(result) {}
+    ~context_lifetime_probe() override { destroyed_with_context = glfwGetCurrentContext() != nullptr; }
+};
+}
+
+TEST(WindowLifecycleTest, ReleasesSceneComponentsBeforeDestroyingOpenGLContext) {
+    if (!glfwInit()) GTEST_SKIP() << "No display for window lifetime verification";
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    bool destroyed_with_context = false;
+    std::shared_ptr<commons::ecs> registry;
+    {
+        commons::window window("Window lifetime test", 100, 100);
+        registry = window.get_ecs();
+        auto entity = registry->create();
+        registry->add<context_lifetime_probe>(entity, destroyed_with_context);
+    }
+    EXPECT_TRUE(destroyed_with_context);
+    EXPECT_TRUE(registry->entities.empty());
+    EXPECT_TRUE(registry->live_entities.empty());
+    EXPECT_TRUE(registry->mascaras.empty());
+}

@@ -50,7 +50,7 @@ find_package(Bullet REQUIRED)
 find_package(assimp REQUIRED)
 find_package(Lua 5.3 REQUIRED)
 if(LUA_VERSION_STRING VERSION_GREATER_EQUAL "5.5")
-    message(FATAL_ERROR "The bundled sol2 requires Lua 5.3 or 5.4; use vcpkg 2024.11.16 on Windows.")
+    message(FATAL_ERROR "The bundled sol2 requires Lua 5.3 or 5.4; use the Lua overlay in cmake/vcpkg-ports with vcpkg.")
 endif()
 
 if(TARGET bgui_core)
