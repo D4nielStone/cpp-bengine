@@ -101,6 +101,7 @@ TEST_F(ExecutableArchiveTest, SinglePublicationHasOnlyExecutableAndCanReplaceAnO
 #else
     const auto executable = "Game";
 #endif
+    write(data/"game.json", std::string(R"({"format":"bubble-engine-game","version":1,"project":"game/project.bengine","executable":"Game","binary":")") + executable + "\"}");
     write(data/executable,"stub executable BENGINE_EMBED_REQUIRED_V1:0");
     const auto destination=root/"exports/linux";
     game_package::publish(data,destination,true);

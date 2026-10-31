@@ -98,6 +98,12 @@ jobs:
         sh scripts/platform_build.sh linux "$PWD" "$PWD/game-build" "$PWD/game-build.progress" "$PWD/projects/fpp_demo/project.bengine" "$PWD/game-work" folder "" "$PWD/out/apps/game_packager"
         sh scripts/platform_build.sh linux "$PWD" "$PWD/game-single" "$PWD/game-single.progress" "$PWD/projects/fpp_demo/project.bengine" "$PWD/game-single-work" single "" "$PWD/out/apps/game_packager"
 
+    - name: Run exported Linux games
+      if: runner.os == 'Linux'
+      run: |
+        xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python3 tests/export_runtime_smoke.py "$PWD/game-build/linux/fpp_demo"
+        xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python3 tests/export_runtime_smoke.py "$PWD/game-single/linux/fpp_demo"
+
     - name: Export native Windows game without WSL
       if: runner.os == 'Windows'
       shell: pwsh

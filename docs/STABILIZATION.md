@@ -1280,3 +1280,15 @@ estritas de RGB, grayscale e alpha. O teste de macros de projeção foi registra
 explicitamente no CTest. Após essas mudanças, a compilação local e os 326 testes
 CTest passaram com OpenGL por software e execução real do demo. As diferenças
 exclusivas do WIC e do Windows continuam sendo verificadas pelo Actions.
+
+O MSVC reduziu a suíte a três falhas: separador de caminho em uma expectativa,
+colisão entre o executável fictício `Game` e o diretório `game` no Windows, e
+medição de conteúdo ignorando os limites mínimos dos filhos na BGUI. A nova
+regressão `LinearTest.WrapContentMeasuresChildMinimumDimensions` reproduziu
+largura/altura zero antes da correção; após limitar a medida às restrições já
+aplicadas no arrange, `LinearTests` e `MenuBarTests` passaram via CTest. A fixture
+de publicação usa nome de binário consistente com o manifest e o sistema.
+
+A janela consulta o leitor de recursos existente para o tema, permitindo temas
+embutidos em jogos de executável único. O Actions passa a iniciar as duas
+exportações Linux em um diretório externo e verificar a inicialização Lua do FPP.

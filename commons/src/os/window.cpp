@@ -10,6 +10,7 @@
 #include <bgui_backend_glfw.hpp>
 #include <glfw/bgui_backend_glfw_events.hpp>
 #include <os/style_manager.hpp>
+#include <os/resource_files.hpp>
 
 namespace {
     template<typename T>
@@ -49,7 +50,7 @@ namespace {
         const auto override_path =
             std::filesystem::path(COMMONS_ASSET_DIR) /
             "themes/editor-dark.theme";
-        if (!std::filesystem::is_regular_file(override_path))
+        if (!bgui::resource_files::exists(override_path))
             throw std::runtime_error(
                 "[ui] Could not find editor theme overrides: " +
                 override_path.string()

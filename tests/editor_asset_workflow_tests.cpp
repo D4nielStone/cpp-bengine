@@ -494,7 +494,7 @@ TEST_F(EditorAssetWorkflowTest, MovingAModelCarriesItsDependenciesAndCanMoveBack
     EXPECT_TRUE(std::filesystem::exists(folder / "destination/model.mtl"));
     EXPECT_TRUE(std::filesystem::exists(folder / "destination/textures/color.png"));
     EXPECT_EQ(model->get_source_path(), moved.string());
-    EXPECT_EQ(model->meshes[0].getMaterial().getTextura("tex_albedo").path, (folder / "destination/textures/color.png").string());
+    EXPECT_EQ(model->meshes[0].getMaterial().getTextura("tex_albedo").path, (folder / "destination/textures/color.png").lexically_normal().string());
     EXPECT_EQ(files.move_file(moved, folder / "source"), source);
     EXPECT_TRUE(std::filesystem::exists(source));
 }
