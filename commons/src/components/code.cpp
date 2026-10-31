@@ -362,13 +362,16 @@ void code::setup() {
         }, property.value);
     }
     estado_lua["properties"] = values;
-    estado_lua.script(bgui::resource_files::text(arquivoCompleto), arquivoCompleto);
+    const auto loaded = estado_lua.safe_script(
+        bgui::resource_files::text(arquivoCompleto), sol::script_pass_on_error, arquivoCompleto);
+    if (!loaded.valid()) throw sol::error(loaded);
 
     f_setup = estado_lua["setup"];
     f_update = estado_lua["update"];
 
     if (f_setup.valid()) {
-        const auto result = f_setup();
+        sol::protected_function callback = f_setup;
+        const auto result = callback();
         if (!result.valid()) throw sol::error(result);
     }
 }
@@ -483,7 +486,8 @@ bool code::serialize(
 
 void code::update() {
     if (f_update.valid()) {
-        const auto result = f_update();
+        sol::protected_function callback = f_update;
+        const auto result = callback();
         if (!result.valid()) throw sol::error(result);
     }
 }

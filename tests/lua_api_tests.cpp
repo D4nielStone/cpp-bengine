@@ -119,13 +119,13 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     physical->set_body_type(commons::physics::body_type::character);
     physical->setVelocidade({0.f, -3.f, 0.f});
     auto body = load(player, "fpp_player.lua");
-    auto setup = body->f_setup();
+    auto setup = sol::protected_function(body->f_setup)();
     ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
     auto input = body->estado_lua["Input"].get<sol::table>();
     input.set_function("GetAxis", [](const std::string& axis) { return axis == "Vertical" ? 1.f : 0.f; });
     input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{10.f, 0.f}; });
     body->estado_lua["Time"]["deltaTime"] = 0.1f;
-    auto moved = body->f_update();
+    auto moved = sol::protected_function(body->f_update)();
     ASSERT_TRUE(moved.valid()) << sol::error(moved).what();
     auto player_transform = registry->get<commons::transform>(player.id);
     EXPECT_NEAR(physical->getVelocidade().z, 5.f, 0.0001f);
@@ -133,23 +133,23 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     EXPECT_NEAR(player_transform->get_rotation().y, -91.2f, 0.0001f);
 
     auto look = load(camera, "fpp_camera.lua");
-    setup = look->f_setup();
+    setup = sol::protected_function(look->f_setup)();
     ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
     auto camera_input = look->estado_lua["Input"].get<sol::table>();
     camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 10000.f}; });
-    auto looked = look->f_update();
+    auto looked = sol::protected_function(look->f_update)();
     ASSERT_TRUE(looked.valid()) << sol::error(looked).what();
     EXPECT_FLOAT_EQ(registry->get<commons::transform>(camera.id)->get_rotation().x, -89.f);
 
     registry->get<commons::transform>(pickup.id)->set_position(player_transform->get_position());
     auto game = load(pickup, "fpp_game.lua");
-    setup = game->f_setup();
+    setup = sol::protected_function(game->f_setup)();
     ASSERT_TRUE(setup.valid()) << sol::error(setup).what();
-    auto collected = game->f_update();
+    auto collected = sol::protected_function(game->f_update)();
     ASSERT_TRUE(collected.valid()) << sol::error(collected).what();
     EXPECT_FALSE(registry->get<commons::renderer>(pickup.id)->visible);
     EXPECT_FALSE(registry->has<commons::physics>(pickup.id));
-    auto repeated = game->f_update();
+    auto repeated = sol::protected_function(game->f_update)();
     EXPECT_TRUE(repeated.valid());
 }
 
@@ -456,4 +456,35 @@ TEST(LuaApi, ShadowControlsUpdateNativeComponentsAndSerialize) {
     EXPECT_FLOAT_EQ(legacy.shadow_distance, 50.f);
     data.AddMember("shadow_bias", "invalid", data.GetAllocator());
     EXPECT_FALSE(legacy.analyze(data));
+}
+
+TEST(LuaApi, SetupAndUpdateFailuresLeaveOtherScriptsRunning) {
+    const auto folder = std::filesystem::temp_directory_path() /
+        ("bengine-lua-isolation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directory(folder);
+    const auto failed = folder / "failed.lua";
+    const auto healthy = folder / "healthy.lua";
+    std::ofstream(healthy) << "updates = 0\nfunction setup() ready = true end\nfunction update() updates = updates + 1 end\n";
+    for (const auto* source : {"function setup() error('setup sentinel') end",
+                              "function update() error('update sentinel') end"}) {
+        std::ofstream(failed) << source;
+        commons::script_log::instance().clear();
+        auto registry = std::make_shared<commons::ecs>();
+        auto bad = registry->create();
+        auto good = registry->create();
+        registry->add<commons::code>(bad, failed.string());
+        registry->add<commons::code>(good, healthy.string());
+        commons::code_system system;
+        EXPECT_NO_THROW(system.setup(registry));
+        EXPECT_NO_THROW(system.update(registry));
+        EXPECT_NO_THROW(system.update(registry));
+        auto script = registry->get<commons::code>(good.id);
+        EXPECT_TRUE(script->estado_lua["ready"].get<bool>());
+        EXPECT_EQ(script->estado_lua["updates"].get<int>(), 2);
+        ASSERT_EQ(commons::script_log::instance().lines().size(), 1u);
+        EXPECT_NE(commons::script_log::instance().lines().back().find("sentinel"), std::string::npos);
+        registry->entities.clear();
+    }
+    commons::script_log::instance().clear();
+    std::filesystem::remove_all(folder);
 }
