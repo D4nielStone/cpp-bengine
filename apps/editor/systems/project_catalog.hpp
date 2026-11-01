@@ -8,14 +8,13 @@ inline void forget_project(const std::filesystem::path& catalog, const std::file
     std::ifstream input(catalog);
     if (!input && std::filesystem::exists(catalog))
         throw std::runtime_error("Não foi possível ler a lista de projetos.");
-    if (!input && std::filesystem::exists(catalog))
-        throw std::runtime_error("Não foi possível ler a lista de projetos.");
     std::string remaining;
     const auto requested = std::filesystem::absolute(project).lexically_normal();
     for (std::string line; std::getline(input, line);)
         if (!line.empty() && std::filesystem::absolute(line).lexically_normal() != requested)
             remaining += line + "\n";
     if (input.bad()) throw std::runtime_error("Leitura incompleta da lista de projetos.");
+    input.close();
     project_files::stage({catalog, remaining});
     project_files::replace(catalog);
 }

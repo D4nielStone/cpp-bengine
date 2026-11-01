@@ -1497,3 +1497,9 @@ BGUI combina o novo inputbox com as correções de MSVC, medidas e fixtures já
 validadas. A cena recém-editada referenciava GLB e script ausentes no repositório;
 ela foi preservada integralmente em main.experimental.scene.backup, mantendo main.scene
 como exemplo de release autocontido, sem descartar a edição.
+
+A matriz Windows da integração encontrou duas falhas de catálogo causadas pela
+remoção do fechamento do arquivo antes do replace: o fechamento foi restaurado,
+assim como a validação única de leitura. O novo teste de recursos externos usa
+a mesma sondagem OpenGL 3.3 dos demais testes de janela; o runner Windows sem
+esse contexto ignora apenas a verificação gráfica, executada no Linux/Xvfb.

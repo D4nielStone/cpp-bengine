@@ -192,7 +192,7 @@ TEST(WindowFileDropTest, NativeF3KeyIsDeliveredToTheSharedInputState) {
 }
 
 TEST(WindowLifetimeTest, ReleasesAttachedGraphicsBeforeContextEvenWithExternalOwners) {
-    if (!glfwInit()) GTEST_SKIP() << "No display for graphics shutdown verification";
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "OpenGL 3.3 unavailable for graphics shutdown verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     std::shared_ptr<commons::ecs> registry;
     std::shared_ptr<commons::camera> camera;
