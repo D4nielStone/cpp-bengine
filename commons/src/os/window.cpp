@@ -111,12 +111,18 @@ window::window(const std::string& title, const int width, const int height)
 window::~window() {
     set_file_drop_callback({});
     bgui::get_context().m_refresh_func = {};
+    if (m_window)
+        glfwMakeContextCurrent(m_window);
     m_systems.clear();
-    m_interface.reset();
+    for (const auto& [id, components] : m_ecs->entities)
+        for (const auto& [mask, component] : components)
+            if (component) component->release_graphics_resources();
     m_ecs->entities.clear();
     m_ecs->mascaras.clear();
     m_ecs->live_entities.clear();
     m_ecs->entity_names.clear();
+    m_ecs.reset();
+    m_interface.reset();
 
     if (m_window) {
         bgui::shutdown_glfw();

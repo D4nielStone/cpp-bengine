@@ -62,7 +62,12 @@ camera::~camera()
 {
     debugging::emit(debug, "camera", "descarregando");
 
-    if(m_skybox)delete m_skybox;
+    release_graphics_resources();
+}
+
+void camera::release_graphics_resources() {
+    delete m_skybox;
+    m_skybox = nullptr;
     deleteFB();
 }
 
@@ -285,8 +290,12 @@ void camera::deleteFB()
 }
 
 glm::mat4 camera::getViewMatrix() {
-    if (!m_transform && reg)
-        m_transform = reg->get<transform>(my_object).get();
+    const auto registry = reg.lock();
+    const auto owned_transform = registry ? registry->get<transform>(my_object) : nullptr;
+    // Preserve explicit transforms on standalone cameras, but discard expired ECS caches.
+    const std::weak_ptr<ecs> empty_registry;
+    if (reg.owner_before(empty_registry) || empty_registry.owner_before(reg))
+        m_transform = owned_transform.get();
     if (!m_transform)
         return viewMatrix;
 
@@ -301,8 +310,8 @@ glm::mat4 camera::getViewMatrix() {
     glm::quat inherited{1.f, 0.f, 0.f, 0.f};
     std::unordered_set<uint32_t> visited{m_transform->my_object};
     auto parent_id = m_transform->parent_id;
-    while (parent_id && reg && visited.insert(parent_id).second) {
-        auto parent = reg->get<transform>(parent_id);
+    while (parent_id && registry && visited.insert(parent_id).second) {
+        auto parent = registry->get<transform>(parent_id);
         if (!parent) break;
         const auto r = parent->get_rotation();
         const auto q = glm::angleAxis(glm::radians(r.x), glm::vec3(1, 0, 0)) *
@@ -423,8 +432,12 @@ bgui::vec2i camera::worldParaTela(const bgui::vec3 &worldPos)
 
 void camera::move(const bgui::vec3& pos)
 {
-    if (!m_transform && reg)
-        m_transform = reg->get<transform>(my_object).get();
+    const auto registry = reg.lock();
+    const auto owned_transform = registry ? registry->get<transform>(my_object) : nullptr;
+    // Preserve explicit transforms on standalone cameras, but discard expired ECS caches.
+    const std::weak_ptr<ecs> empty_registry;
+    if (reg.owner_before(empty_registry) || empty_registry.owner_before(reg))
+        m_transform = owned_transform.get();
     if (!m_transform)
         return;
 

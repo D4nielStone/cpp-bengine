@@ -41,6 +41,11 @@ namespace COMMONS_NS {
         };
 
 		renderer(const char* m_directory ) : m_modelo(new model(m_directory)) {};
+        void release_graphics_resources() override {
+            if (m_modelo)
+                for (auto& mesh : m_modelo->meshes)
+                    mesh.unload();
+        }
 		~renderer()
 		{
             if (m_modelo) {

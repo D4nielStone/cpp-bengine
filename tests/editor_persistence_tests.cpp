@@ -760,6 +760,22 @@ TEST(ProjectPersistenceTest, PreservesIndependentProjectVersionAcrossSave) {
     remove_project_files(path);
 }
 
+TEST(ProjectPersistenceTest, RuntimeCanLoadLegacyProjectWithoutModifyingItsFiles) {
+    const auto path = temporary_project_path();
+    const std::string original = R"({"format":"bubble-engine-project","version":1,"entities":[]})";
+    { std::ofstream output(path); output << original; }
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(17);
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    persistence.set_migration_writes_enabled(false);
+    std::string error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    EXPECT_EQ(read_file(path), original);
+    EXPECT_FALSE(std::filesystem::exists(path.string() + ".migration-backup-0"));
+    std::filesystem::remove(path);
+}
+
 TEST(ProjectPersistenceTest, CubemapCrossPathSurvivesTemporaryRuntimeSnapshot) {
     const auto directory = temporary_project_path();
     std::filesystem::create_directory(directory);

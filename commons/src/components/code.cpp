@@ -273,8 +273,8 @@ void code::setup() {
     bubble["input"] = input_api;
 
     std::weak_ptr<transform> weak_transform;
-    if (reg)
-        weak_transform = reg->get<transform>(my_object);
+    if (const auto registry = reg.lock())
+        weak_transform = registry->get<transform>(my_object);
     auto transform_api = estado_lua.create_table();
     transform_api.set_function(
         "get_position",
@@ -345,7 +345,7 @@ void code::setup() {
     );
     bubble["transform"] = transform_api;
 
-    api::setUnityApi(estado_lua, reg, my_object);
+    api::setUnityApi(estado_lua, reg.lock(), my_object);
     std::string property_error;
     if (!load_properties(property_error)) throw sol::error(property_error);
     auto values = estado_lua.create_table();

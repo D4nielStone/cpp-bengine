@@ -408,8 +408,8 @@ bool editor::transform_gizmo::update(
                 local[i] = glm::vec3(local_axes[i].x, local_axes[i].y, local_axes[i].z);
             m_rotation_start = glm::quat_cast(local);
             m_rotation_parent = glm::quat(1.f, 0.f, 0.f, 0.f);
-            if (target->parent_id && target->reg) {
-                if (const auto parent = target->reg->get<commons::transform>(target->parent_id))
+            if (const auto registry = target->reg.lock(); target->parent_id && registry) {
+                if (const auto parent = registry->get<commons::transform>(target->parent_id))
                     m_rotation_parent = orientation(parent->get_world_model_matrix());
             }
         }

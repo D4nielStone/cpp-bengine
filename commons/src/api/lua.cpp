@@ -82,7 +82,10 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
         "intensity", &point_light::intensity, "constant", &point_light::constant,
         "linear", &point_light::linear, "quadratic", &point_light::quadratic);
     lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
-        if (body && body->reg) body->reg->remove<physics>(body->my_object);
+        if (body) {
+            if (const auto registry = body->reg.lock())
+                registry->remove<physics>(body->my_object);
+        }
     });
     lua.new_usertype<game_object>("GameObject", sol::no_constructor,
         "id", sol::readonly(&game_object::id),

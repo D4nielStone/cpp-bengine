@@ -109,8 +109,8 @@ TEST_F(PersistenceTransactionTest, FailedStagingPreservesNamesAndActiveRegistry)
     EXPECT_EQ(persistence.global_gravity(), gravity);
     EXPECT_EQ(registry->get<commons::camera>(17), camera);
     EXPECT_EQ(registry->get<commons::transform>(17), transform);
-    EXPECT_EQ(camera->reg, registry);
-    EXPECT_EQ(transform->reg, registry);
+    EXPECT_EQ(camera->reg.lock(), registry);
+    EXPECT_EQ(transform->reg.lock(), registry);
 }
 TEST_F(PersistenceTransactionTest, InvalidInputsPreserveNamesAndActiveRegistry) {
     const auto entities = registry->entities;
@@ -154,7 +154,7 @@ TEST_F(PersistenceTransactionTest, SuccessfulLoadReplacesSceneAndRebindsComponen
         EXPECT_TRUE(registry->live_entities.contains(id));
         EXPECT_TRUE(registry->mascaras.contains(id));
         for (const auto& [mask, component] : components) {
-            EXPECT_EQ(component->reg, registry);
+            EXPECT_EQ(component->reg.lock(), registry);
             EXPECT_EQ(component->my_object, id);
         }
     }

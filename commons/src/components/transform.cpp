@@ -91,10 +91,11 @@ glm::mat4 world_matrix(
     std::unordered_set<uint32_t>& visited
 ) {
     const auto local = local_matrix(value);
-    if (!value.parent_id || !value.reg ||
+    const auto registry = value.reg.lock();
+    if (!value.parent_id || !registry ||
         !visited.insert(value.my_object).second)
         return local;
-    const auto parent = value.reg->get<transform>(value.parent_id);
+    const auto parent = registry->get<transform>(value.parent_id);
     if (!parent)
         return local;
     return world_matrix(*parent, visited) * local;
@@ -182,11 +183,12 @@ void  transform::set_position(const bgui::vec3& v) {
 }
 
 void transform::set_world_position(const bgui::vec3& value) {
-    if (!parent_id || !reg) {
+    const auto registry = reg.lock();
+    if (!parent_id || !registry) {
         position = value;
         return;
     }
-    const auto parent = reg->get<transform>(parent_id);
+    const auto parent = registry->get<transform>(parent_id);
     if (!parent) {
         position = value;
         return;
@@ -210,11 +212,12 @@ void  transform::set_rotation(const bgui::vec3& v) {
 
 void transform::set_world_rotation(const bgui::vec3& value) {
     m_usar_target = false;
-    if (!parent_id || !reg) {
+    const auto registry = reg.lock();
+    if (!parent_id || !registry) {
         rotation = value;
         return;
     }
-    const auto parent = reg->get<transform>(parent_id);
+    const auto parent = registry->get<transform>(parent_id);
     if (!parent) {
         rotation = value;
         return;
@@ -232,11 +235,12 @@ bool transform::set_parent(const uint32_t new_parent, const bool preserve_world)
     if (new_parent == my_object)
         return false;
 
+    const auto registry = reg.lock();
     std::shared_ptr<transform> parent_transform;
     if (new_parent) {
-        if (!reg)
+        if (!registry)
             return false;
-        parent_transform = reg->get<transform>(new_parent);
+        parent_transform = registry->get<transform>(new_parent);
         if (!parent_transform)
             return false;
 
@@ -247,7 +251,7 @@ bool transform::set_parent(const uint32_t new_parent, const bool preserve_world)
                 !visited.insert(ancestor->my_object).second)
                 return false;
             ancestor = ancestor->parent_id
-                ? reg->get<transform>(ancestor->parent_id)
+                ? registry->get<transform>(ancestor->parent_id)
                 : nullptr;
         }
     }

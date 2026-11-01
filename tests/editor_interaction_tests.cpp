@@ -329,6 +329,15 @@ TEST_F(EditorInteractionTest, InspectorUsesCompactAlignedPropertyRows) {
     bgui::on_update();
     EXPECT_EQ(fov->get_inputbox().processed_x(), scale->get_inputbox().processed_x());
     EXPECT_EQ(fov->get_inputbox().processed_height(), 22);
+    auto* rotation = find_element<bgui::text>(dock, [](auto& item) {
+        return item.get_buffer() == "Rotation";
+    });
+    ASSERT_NE(rotation, nullptr);
+    const auto* position_row = position->get_parent();
+    const auto* rotation_row = rotation->get_parent();
+    EXPECT_EQ(position_row->processed_height(), 22);
+    EXPECT_EQ(rotation_row->processed_y() -
+        (position_row->processed_y() + position_row->processed_height()), 2);
 }
 
 TEST_F(EditorInteractionTest, RotationGizmoUsesWorldQuaternionAndKeepsWorldRings) {

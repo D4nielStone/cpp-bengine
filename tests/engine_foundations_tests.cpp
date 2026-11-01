@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "core/ecs.hpp"
+#include "core/scene.hpp"
+#include "components/camera.hpp"
 #include "components/transform.hpp"
 #include "components/physics.hpp"
 #include "systems/physics_system.hpp"
@@ -13,7 +15,6 @@
 using namespace commons;
 
 namespace {
-// Components own the registry in the current API; explicitly tear down test scenes.
 struct Foundations : testing::Test {
     std::shared_ptr<ecs> registry = std::make_shared<ecs>();
     void TearDown() override {
@@ -67,7 +68,7 @@ TEST_F(Foundations, ReplacingComponentUpdatesLookupAndIterationWithoutDuplicates
     registry->add<transform>(object, bgui::vec3{3, 2, 1});
     EXPECT_NE(at(4), old);
     EXPECT_EQ(at(4)->my_object, 4u);
-    EXPECT_EQ(at(4)->reg, registry);
+    EXPECT_EQ(at(4)->reg.lock(), registry);
     expect_vector(at(4)->position, {3, 2, 1});
     unsigned count = 0;
     registry->cada<transform>([&](uint32_t id) { EXPECT_EQ(id, 4u); ++count; });
@@ -78,7 +79,7 @@ TEST(EngineEcs, StackRegistryCanCreateAndAddComponents) {
     ecs registry;
     auto object = registry.create(5);
     ASSERT_NE(registry.get<transform>(object.id), nullptr);
-    EXPECT_EQ(registry.get<transform>(object.id)->reg, nullptr);
+    EXPECT_TRUE(registry.get<transform>(object.id)->reg.expired());
     registry.add<physics>(object, true);
     EXPECT_TRUE(registry.has<physics>(object.id));
     EXPECT_TRUE(registry.validate_invariants());
@@ -693,4 +694,65 @@ TEST_F(Foundations, CharacterIsStoppedByTheVisibleRampSide) {
     const auto distance=glm::dot(glm::vec3(origin.x(),origin.y()+0.9f,origin.z())-surface,normal);
     EXPECT_GE(distance,0.32f);
     EXPECT_NEAR(player->getVelocidade().x,0.f,0.1f);
+}
+
+namespace {
+    struct tracked_component : component {
+        static constexpr component::mask mask = component::COMPONENTE_TEXTO;
+        std::shared_ptr<int> resource;
+        explicit tracked_component(std::shared_ptr<int> value) : resource(std::move(value)) {}
+    };
+}
+
+TEST(EcsLifetime, ReleasingSceneDestroysRegistryComponentsAndResources) {
+    std::weak_ptr<ecs> registry_observer;
+    std::weak_ptr<component> component_observer;
+    std::weak_ptr<int> resource_observer;
+    {
+        scene active_scene;
+        auto registry = active_scene.get_ecs();
+        registry_observer = registry;
+        auto object = registry->create();
+        auto resource = std::make_shared<int>(42);
+        resource_observer = resource;
+        registry->add<tracked_component>(object, resource);
+        component_observer = registry->get<tracked_component>(object.id);
+    }
+    EXPECT_TRUE(registry_observer.expired());
+    EXPECT_TRUE(component_observer.expired());
+    EXPECT_TRUE(resource_observer.expired());
+}
+
+TEST(EcsLifetime, RetainedCameraAndTransformSafelyOutliveRegistry) {
+    auto registry = std::make_shared<ecs>();
+    auto parent = registry->create();
+    auto object = registry->create();
+    registry->add<camera>(object);
+    auto camera_component = registry->get<camera>(object.id);
+    auto transform_component = registry->get<transform>(object.id);
+    ASSERT_TRUE(transform_component->set_parent(parent.id, false));
+    camera_component->getViewMatrix();
+    std::weak_ptr<ecs> observer = registry;
+    registry.reset();
+    EXPECT_TRUE(observer.expired());
+    EXPECT_TRUE(camera_component->reg.expired());
+    EXPECT_NO_THROW(camera_component->getViewMatrix());
+    EXPECT_EQ(camera_component->m_transform, nullptr);
+    EXPECT_NO_THROW(camera_component->move({1, 2, 3}));
+    EXPECT_NO_THROW(transform_component->get_world_model_matrix());
+    EXPECT_FALSE(transform_component->set_parent(999, false));
+}
+
+TEST(EcsLifetime, CameraResolvesRemovedAndReplacedTransform) {
+    auto registry = std::make_shared<ecs>();
+    auto object = registry->create();
+    registry->add<camera>(object);
+    auto camera_component = registry->get<camera>(object.id);
+    camera_component->getViewMatrix();
+    registry->remove<transform>(object.id);
+    EXPECT_NO_THROW(camera_component->getViewMatrix());
+    EXPECT_EQ(camera_component->m_transform, nullptr);
+    registry->add<transform>(object);
+    camera_component->getViewMatrix();
+    EXPECT_EQ(camera_component->m_transform, registry->get<transform>(object.id).get());
 }

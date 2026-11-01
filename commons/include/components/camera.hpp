@@ -57,6 +57,7 @@ namespace COMMONS_NS {
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override;
 
         ~camera();
+        void release_graphics_resources() override;
 		camera(const bool ortho = false);
 
 		void createFB();

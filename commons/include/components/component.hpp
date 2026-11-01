@@ -49,9 +49,11 @@ namespace COMMONS_NS {
         // Id da entity ECS atual
         // Todo component deve ter um e ele é utilizado para encontrar o "eu" (entity do component de código) para a api lua.
 		uint32_t my_object{ 0 };
-		std::shared_ptr<ecs> reg = nullptr;
+		std::weak_ptr<ecs> reg;
 		component() = default;
 		virtual ~component() = default;
+        // Called with the owning context current; implementations must be idempotent.
+        virtual void release_graphics_resources() {}
 	    virtual bool analyze(const rapidjson::Value& obj) {return true;};
         virtual bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const{return true;};
 	};

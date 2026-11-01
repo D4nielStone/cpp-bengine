@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include "opengl_test_support.hpp"
 #include "os/window.hpp"
+#include "components/camera.hpp"
+#include "components/renderer.hpp"
 #include "asset_import.hpp"
 #include "loaders/model.hpp"
 #include "asset_drop_overlay.hpp"
@@ -189,28 +191,44 @@ TEST(WindowFileDropTest, NativeF3KeyIsDeliveredToTheSharedInputState) {
     EXPECT_FALSE(bgui::get_pressed(bgui::input_key::f3));
 }
 
-namespace {
-struct context_lifetime_probe final : commons::component {
-    static constexpr auto mask = COMPONENTE_RENDER;
-    bool& destroyed_with_context;
-    explicit context_lifetime_probe(bool& result) : destroyed_with_context(result) {}
-    ~context_lifetime_probe() override { destroyed_with_context = glfwGetCurrentContext() != nullptr; }
-};
-}
-
-TEST(WindowLifecycleTest, ReleasesSceneComponentsBeforeDestroyingOpenGLContext) {
-    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for window lifetime verification";
+TEST(WindowLifetimeTest, ReleasesAttachedGraphicsBeforeContextEvenWithExternalOwners) {
+    if (!glfwInit()) GTEST_SKIP() << "No display for graphics shutdown verification";
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    bool destroyed_with_context = false;
     std::shared_ptr<commons::ecs> registry;
+    std::shared_ptr<commons::camera> camera;
+    std::shared_ptr<commons::renderer> renderer;
+    bool released_with_context = false;
+    struct context_probe : commons::component {
+        bool& observed;
+        explicit context_probe(bool& value) : observed(value) {}
+        void release_graphics_resources() override {
+            observed = glfwGetCurrentContext() != nullptr;
+        }
+    };
     {
-        commons::window window("Window lifetime test", 100, 100);
+        commons::window window("ECS shutdown", 100, 100);
         registry = window.get_ecs();
-        auto entity = registry->create();
-        registry->add<context_lifetime_probe>(entity, destroyed_with_context);
+        auto object = registry->create();
+        registry->add<commons::camera>(object);
+        camera = registry->get<commons::camera>(object.id);
+        camera->createFB();
+        ASSERT_TRUE(camera->flag_fb);
+        auto geometry = std::make_unique<commons::model>();
+        geometry->meshes.emplace_back(std::vector<commons::vertex>{},
+            std::vector<unsigned int>{}, commons::material{});
+        geometry->meshes.front().load();
+        registry->add<commons::renderer>(object, geometry.release());
+        renderer = registry->get<commons::renderer>(object.id);
+        registry->entities[object.id][commons::component::COMPONENTE_TEXTO] =
+            std::make_shared<context_probe>(released_with_context);
+        glfwMakeContextCurrent(nullptr);
     }
-    EXPECT_TRUE(destroyed_with_context);
+    EXPECT_TRUE(released_with_context);
+    EXPECT_FALSE(camera->flag_fb);
+    EXPECT_FALSE(renderer->m_modelo->meshes.front().isLoaded());
     EXPECT_TRUE(registry->entities.empty());
-    EXPECT_TRUE(registry->live_entities.empty());
-    EXPECT_TRUE(registry->mascaras.empty());
+    EXPECT_TRUE(registry->validate_invariants());
+    EXPECT_EQ(glfwGetCurrentContext(), nullptr);
+    camera.reset();
+    renderer.reset();
 }

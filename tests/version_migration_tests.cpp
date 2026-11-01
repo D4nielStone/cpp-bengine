@@ -32,7 +32,7 @@ TEST(ProjectMigration, IncrementalAndIdempotentPreservesUnknownFields) {
     EXPECT_FALSE(changed);
 }
 TEST(ProjectMigration, RejectsFutureOrMalformedManifest) {
-    for (const auto* text : {R"({"version":3})", R"({"version":0})", R"({"version":2,"engine_version":"99.0.0","minimum_engine_version":"0.1.0","project_version":"1.0.0"})", R"({"version":2,"engine_version":"0.1.0","minimum_engine_version":"99.0.0","project_version":"1.0.0"})", R"({"version":1,"project_version":"1.0.0"})"}) {
+    for (const auto* text : {"null", "[]", R"({"version":3})", R"({"version":0})", R"({"version":2,"engine_version":"99.0.0","minimum_engine_version":"0.1.0","project_version":"1.0.0"})", R"({"version":2,"engine_version":"0.1.0","minimum_engine_version":"99.0.0","project_version":"1.0.0"})", R"({"version":1,"project_version":"1.0.0"})"}) {
         rapidjson::Document doc;
         doc.Parse(text);
         std::string error;
@@ -57,5 +57,24 @@ TEST(ProjectMigration, VerifiedBackupAndTransactionalConversion) {
     EXPECT_EQ(editor::ui::project_files::read(fs::path(file.string() + ".migration-backup-0") / file.filename()), before);
     EXPECT_EQ(editor::ui::project_files::read(file), editor::ui::project_files::encode(doc));
     EXPECT_FALSE(fs::exists(editor::ui::project_files::journal_path(file)));
+    fs::remove_all(root);
+}
+
+TEST(ProjectMigration, ConcurrentEditIsPreservedBeforeBackupOrReplacement) {
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / ("bengine-migration-edit-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directory(root);
+    const auto file = root / "project.bengine";
+    const std::string original = R"({"version":1})";
+    const std::string edited = R"({"version":1,"edited":true})";
+    { std::ofstream output(file); output << edited; }
+    rapidjson::Document doc;
+    doc.Parse(original.c_str());
+    bool changed = false;
+    std::string error;
+    ASSERT_TRUE(project_migration_manager::convert(doc, changed, error));
+    EXPECT_FALSE(project_migration_manager::commit(file, doc, error, &original));
+    EXPECT_EQ(editor::ui::project_files::read(file), edited);
+    EXPECT_FALSE(fs::exists(file.string() + ".migration-backup-0"));
     fs::remove_all(root);
 }
