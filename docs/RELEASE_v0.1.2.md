@@ -18,6 +18,14 @@ frame from 20.56 to 2.18 ms (static) and 70.67 to 13.64 ms (dynamic).
 The benchmark used three repetitions and 3,600 measured frames across ten
 scenarios. Widget/window timings varied and do not establish a general FPS gain.
 
+## Rendering and Windows compatibility
+
+- Bound the Fresnel cosine to its physical range before exponentiation, avoiding
+  undefined negative-base `pow` results caused by floating-point rounding on
+  software OpenGL drivers.
+- Keep orthographic matrix headers compatible with the legacy `near`/`far`
+  qualifier macros from Windows headers; add a compile regression for that order.
+
 ## Automated release benchmarks
 
 An opt-in UI benchmark covers static/dynamic text, long documents, widget groups

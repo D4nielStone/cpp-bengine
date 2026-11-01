@@ -1682,3 +1682,33 @@ esse contexto ignora apenas a verificação gráfica, executada no Linux/Xvfb.
   específicas da versão, além do changelog gerado. Validação Windows e
   geração dos pacotes serão verificadas pelo fluxo remoto de release.
   Os limites estatísticos do benchmark permanecem os de BENCHMARKS.md.
+
+#### Complemento após a primeira validação remota do v0.1.2
+
+- A primeira tentativa não publicou uma release: o fluxo interrompeu a
+  publicação ao encontrar falhas Linux/Windows. No Linux, o teste de
+  holofote/normal map reproduziu pixel preto com llvmpipe; a mesma falha
+  foi reproduzida localmente com LIBGL_ALWAYS_SOFTWARE=1.
+- Causa: o produto escalar de vetores normalizados pode ultrapassar 1 por
+  arredondamento; `pow(1 - cosTheta, 5.0)` fica indefinido para essa base
+  negativa em GLSL. `fresnelSchlick` agora limita o cosseno a [0,1]. A
+  otimização de descarte fora do cone e a correção gamma foram preservadas.
+  Os 16 testes do executável de renderização passaram tanto na Intel
+  quanto no llvmpipe após a correção.
+- No Windows, os parâmetros `near` e `far` de `bgui::orthographic` colidiam
+  com macros legadas vindas de headers do sistema. A reprodução com essas
+  macros falhou no GCC nos mesmos pontos do MSVC. Parâmetros renomeados
+  para `near_plane`/`far_plane`, preservando assinatura e cálculo.
+  BGUI `9d4ef06`; 131 testes aprovados, incluindo a nova regressão de
+  compilação com os qualificadores definidos antes do header.
+- Uma compilação externa utilizava simultaneamente `out`, causando uma
+  disputa ao gravar a biblioteca estática. Somente a compilação deste chat
+  foi interrompida; a validação integral foi repetida sequencialmente.
+  Build integral aprovado; 349 testes passaram com llvmpipe e o smoke
+  real habilitado, sem skips. Isso não foi tratado como falha de código
+  ou falta de espaço em disco.
+- A tag criada na primeira tentativa ainda não tinha uma release publicada.
+  Sua referência anterior foi preservada localmente antes de atualizar apenas
+  essa tag para a revisão corrigida, com verificação do valor remoto esperado.
+  Novas alterações do demo surgidas durante a validação permaneceram locais;
+  a correção manteve o snapshot do demo incluído na tentativa inicial.
