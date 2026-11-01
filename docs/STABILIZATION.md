@@ -1292,3 +1292,34 @@ de publicação usa nome de binário consistente com o manifest e o sistema.
 A janela consulta o leitor de recursos existente para o tema, permitindo temas
 embutidos em jogos de executável único. O Actions passa a iniciar as duas
 exportações Linux em um diretório externo e verificar a inicialização Lua do FPP.
+
+## Cubemap 4×3 e configuração do FPP
+
+O cubemap agora aceita uma imagem em cruz horizontal 4×3. A API anterior e os
+campos de seis faces continuam legíveis, enquanto o inspector edita uma única
+imagem. O carregamento valida dimensões e restaura o estado de upload OpenGL.
+Persistência, snapshots de Play, movimentação de assets e exportação reconhecem
+o novo caminho; caminhos com NUL são rejeitados em vez de truncados.
+
+As falhas antigas de cubemap/atmosfera usavam `viewMatrix` diretamente, mas a
+câmera calcula a orientação pelo Transform. As regressões agora exercitam esse
+contrato e verificam seis faces, cantos, fallback e restauração do estado OpenGL.
+
+No FPP, caminhos absolutos de modelos, escala/orientação da câmera e o script de
+pickup colocado em um pilar eram problemas da cena. A cena agora inclui seus
+modelos locais e um pickup separado. A movimentação Lua aplicava a rotação do
+mouse depois da velocidade e acelerava em diagonais; a ordem e a normalização
+foram corrigidas. Testes carregam a cena real, comparam movimento e câmera e
+exercitam a coleta sem remover a geometria da arena.
+
+A rodada seguinte aprovou os 320 testes nativos do Windows, mas a exportação
+falhou no primeiro teste do compilador por exceder o limite de caminho do MSVC.
+O identificador de workspace usa agora os primeiros 16 dígitos SHA-256, como os
+identificadores compactos já usados no cache de templates. A regressão de
+exportação passou a usar o workspace padrão, incluindo caminhos com espaços;
+os sete testes de `platform_build_tests.py` passaram localmente.
+
+Validação local da implementação: 331/331 testes CTest aprovados com OpenGL por
+software e smoke de runtime real, antes das verificações adicionais de caminho
+malformado, undo/redo do inspector e contato físico da cena. A regressão isolada
+do inspector também passou. A matriz remota verificará a implementação em MSVC.

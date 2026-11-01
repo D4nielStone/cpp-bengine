@@ -983,30 +983,30 @@ private:
         );
 
         add_shadow_toggle(content, "Enable Skybox", camera, &commons::camera::m_use_skybox);
-        const char* face_names[] = {"Right (+X)", "Left (-X)", "Top (+Y)", "Bottom (-Y)", "Front (+Z)", "Back (-Z)"};
-        for (unsigned i = 0; i < 6; ++i) {
-            auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
-            configure_property_row(row);
-            auto& label = row.add<bgui::text>(face_names[i], 0.27f);
-            configure_property_label(label);
-            auto& input = row.add<bgui::inputbox>(camera->skybox_faces[i], "Drop image or enter path", 0.26f);
-            configure_property_input(input);
-            auto assign = [this, camera, i](const std::filesystem::path& path) {
-                auto before = camera->skybox_faces[i];
-                auto after = path.generic_string();
-                if (path.is_absolute() && !m_context->project_root.empty()) {
-                    const auto relative = path.lexically_relative(m_context->project_root);
-                    if (!relative.empty() && *relative.begin() != "..") after = relative.generic_string();
-                }
-                camera->skybox_asset_root = m_context->project_root.string();
-                camera->skybox_faces[i] = after;
-                m_context->record_action(
-                    [camera, i, before]() { camera->skybox_faces[i] = before; },
-                    [camera, i, after]() { camera->skybox_faces[i] = after; });
-            };
-            input.m_enter_func = [assign](const std::string& path) { assign(path); };
-            m_asset_targets.push_back({&input, assign});
-        }
+        auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
+        configure_property_row(row);
+        auto& label = row.add<bgui::text>("Cubemap image (4 x 3 cross)", 0.27f);
+        configure_property_label(label);
+        auto& input = row.add<bgui::inputbox>(camera->skybox_image, "Drop a horizontal cross image", 0.26f);
+        configure_property_input(input);
+        auto assign = [this, camera](const std::filesystem::path& path) {
+            auto before = camera->skybox_image;
+            auto after = path.generic_string();
+            if (path.is_absolute() && !m_context->project_root.empty()) {
+                const auto relative = path.lexically_relative(m_context->project_root);
+                if (!relative.empty() && *relative.begin() != "..") after = relative.generic_string();
+            }
+            camera->skybox_asset_root = m_context->project_root.string();
+            camera->skybox_image = after;
+            m_context->record_action(
+                [camera, before]() { camera->skybox_image = before; },
+                [camera, after]() { camera->skybox_image = after; });
+        };
+        input.m_enter_func = [assign](const std::string& path) { assign(path); };
+        m_asset_targets.push_back({&input, assign});
+        if (camera->skybox_image.empty() && std::any_of(camera->skybox_faces.begin(), camera->skybox_faces.end(),
+                [](const auto& path) { return !path.empty(); }))
+            content.add<bgui::text>("Legacy six-face cubemap loaded; select a cross image to replace it.", 0.25f);
         const char* channels[] = {"Atmosphere Zenith R", "Atmosphere Zenith G", "Atmosphere Zenith B"};
         for (unsigned i = 0; i < 3; ++i) {
             add_number_field(content, channels[i], camera->atmosphere_zenith[i],

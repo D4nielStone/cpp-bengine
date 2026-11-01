@@ -13,6 +13,7 @@
 #include <fstream>
 #include <filesystem>
 #include <chrono>
+#include <cmath>
 
 TEST(LuaApi, UnityStyleTransformAndLegacyApiCoexist) {
     commons::script_log::instance().clear();
@@ -128,9 +129,20 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     auto moved = sol::protected_function(body->f_update)();
     ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
     auto player_transform = registry->get<commons::transform>(player.id);
-    EXPECT_NEAR(physical->getVelocidade().z, 5.f, 0.0001f);
+    EXPECT_NEAR(physical->getVelocidade().z, -std::sin(glm::radians(-91.2f)) * 5.f, 0.0001f);
+    EXPECT_NEAR(physical->getVelocidade().x, std::cos(glm::radians(-91.2f)) * 5.f, 0.0001f);
     EXPECT_FLOAT_EQ(physical->getVelocidade().y, -3.f);
     EXPECT_NEAR(player_transform->get_rotation().y, -91.2f, 0.0001f);
+
+    input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 0.f}; });
+    input.set_function("GetAxis", [](const std::string&) { return 1.f; });
+    for (const auto delta : {0.001f, 0.1f}) {
+        body->estado_lua["Time"]["deltaTime"] = delta;
+        ASSERT_NO_THROW(body->update());
+        const auto velocity = physical->getVelocidade();
+        EXPECT_NEAR(std::hypot(velocity.x, velocity.z), 5.f, 0.0001f);
+        EXPECT_FLOAT_EQ(velocity.y, -3.f);
+    }
 
     auto look = load(camera, "fpp_camera.lua");
     setup = sol::protected_function(look->f_setup)();

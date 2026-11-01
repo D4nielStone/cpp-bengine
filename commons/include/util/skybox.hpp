@@ -43,10 +43,15 @@ namespace COMMONS_NS {
         void draw_background(glm::mat4 view, glm::mat4 proj,
             const std::array<std::string, 6>& faces, const std::string& root,
             bool enabled, const bgui::vec3& horizon, const bgui::vec3& zenith);
+        // Cross layout: +Y above; -X, +Z, +X, -Z across; -Y below. Legacy faces remain readable.
+        void draw_background(glm::mat4 view, glm::mat4 proj,
+            const std::array<std::string, 6>& faces, const std::string& root,
+            bool enabled, const bgui::vec3& horizon, const bgui::vec3& zenith,
+            const std::string& cross_image);
     private:
         unsigned int m_vao{0};
         bool m_owned{false}, m_attempted{false}, m_valid{false};
         std::array<std::string, 6> m_faces{};
-        std::string m_root;
+        std::string m_root, m_image;
     };
 }

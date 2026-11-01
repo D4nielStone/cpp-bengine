@@ -156,6 +156,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
     }
 
     if (name == "camera") {
+        if (value.HasMember("skybox_image") && (!value["skybox_image"].IsString() ||
+            value["skybox_image"].GetStringLength() != std::char_traits<char>::length(value["skybox_image"].GetString()))) return false;
         if (value.HasMember("skybox_faces")) {
             const auto& faces = value["skybox_faces"];
             if (!faces.IsArray() || faces.Size() != 6) return false;
@@ -720,6 +722,16 @@ bool project_persistence_system::serialize_project(
                         entry.SetString(resolved.c_str(), static_cast<rapidjson::SizeType>(resolved.size()), allocator);
                     }
                 }
+            } else if (mask == commons::component::COMPONENTE_CAM &&
+                       !m_asset_root.empty() && !saving_in_project) {
+                const auto resolve_image = [&](rapidjson::Value& value) {
+                    if (!value.GetStringLength()) return;
+                    const std::filesystem::path path(value.GetString());
+                    const auto absolute = (path.is_absolute() ? path : m_asset_root / path).lexically_normal().string();
+                    value.SetString(absolute.c_str(), static_cast<rapidjson::SizeType>(absolute.size()), allocator);
+                };
+                resolve_image(component_data["skybox_image"]);
+                for (auto& face : component_data["skybox_faces"].GetArray()) resolve_image(face);
             } else if (mask == commons::component::COMPONENTE_RENDER &&
                        !m_asset_root.empty()) {
                 const auto renderer =

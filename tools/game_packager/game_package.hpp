@@ -195,7 +195,7 @@ public:
     void rewrite(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator,
                  const std::string& role = "") const {
         if (value.IsString() && (role == "scene" || role == "model" || role == "directory" || role == "scripts" ||
-                                role == "maps" || role == "skybox_faces" || role == "image")) {
+                                role == "maps" || role == "skybox_faces" || role == "skybox_image" || role == "image")) {
             const auto path = asset(value.GetString(), role == "model");
             value.SetString(path.c_str(), static_cast<rapidjson::SizeType>(path.size()), allocator);
         } else if (value.IsArray()) {

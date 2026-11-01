@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 if (-not $Workspace) {
     $key = "$RepositoryRoot|$ProjectFile|$BuildDirectory|$Target"
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    $hash = [System.BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key))).Replace("-", "")
+    $hash = [System.BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key))).Replace("-", "").Substring(0, 16)
     $Workspace = Join-Path $env:LOCALAPPDATA "cpp-bengine/game-builds/$hash"
 }
 New-Item -ItemType Directory -Force $Workspace | Out-Null

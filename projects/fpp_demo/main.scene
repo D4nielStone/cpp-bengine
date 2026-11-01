@@ -27,7 +27,7 @@
                     "shadows": true,
                     "shadow_resolution": 4096,
                     "shadow_distance": 50.0,
-                    "shadow_bias": 0.00009999999747378752,
+                    "shadow_bias": 9.999999747378752e-05,
                     "shadow_strength": 1.0
                 },
                 "transform": {
@@ -82,7 +82,7 @@
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
-                    "model": "/home/d4nl/repos/cpp-bengine/commons/assets/models/cube.obj",
+                    "model": "assets/models/cube.obj",
                     "materials": [
                         {
                             "albedo": [
@@ -127,19 +127,17 @@
                         9.0990629196167
                     ]
                 }
-            }
+            },
+            "name": "ArenaRamp"
         },
         {
             "id": 4,
             "locked": false,
             "components": {
-                "code": {
-                    "directory": "scripts/fpp_game.lua"
-                },
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
-                    "model": "/home/d4nl/repos/cpp-bengine/commons/assets/models/cube.obj",
+                    "model": "assets/models/cube.obj",
                     "materials": [
                         {
                             "albedo": [
@@ -210,7 +208,8 @@
                         1.0
                     ]
                 }
-            }
+            },
+            "name": "ArenaPillar"
         },
         {
             "id": 100,
@@ -245,13 +244,14 @@
                         0.25,
                         0.550000011920929
                     ],
-                    "skybox": false
+                    "skybox": false,
+                    "skybox_image": ""
                 },
                 "transform": {
                     "position": [
-                        -0.000001430511474609375,
-                        1.6499998569488525,
-                        7.152557373046875e-7
+                        0.0,
+                        1.65,
+                        0.0
                     ],
                     "rotation": [
                         0.0,
@@ -259,9 +259,9 @@
                         0.0
                     ],
                     "scale": [
-                        1.3972746133804321,
-                        0.7070761919021606,
-                        1.0121665000915527
+                        1.0,
+                        1.0,
+                        1.0
                     ]
                 }
             }
@@ -429,6 +429,90 @@
             }
         },
         {
+            "id": 103,
+            "locked": false,
+            "components": {
+                "renderer": {
+                    "cast_shadows": true,
+                    "receive_shadows": true,
+                    "model": "assets/models/pickup.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                1.0,
+                                0.65,
+                                0.1,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
+                "physics": {
+                    "shape": "sphere",
+                    "static": true,
+                    "body_type": "static",
+                    "collision_size": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "collision_offset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "collision_rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "fit_to_model": false,
+                    "collision_enabled": true,
+                    "trigger": true,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        1.0,
+                        5.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                },
+                "code": {
+                    "directory": "scripts/fpp_game.lua"
+                }
+            },
+            "name": "PickupOrb"
+        },
+        {
             "id": 104,
             "locked": false,
             "name": "WestWall",
@@ -499,7 +583,7 @@
                     "rotation": [
                         -90.0,
                         90.0,
-                        92.71890258789063
+                        92.71890258789062
                     ],
                     "scale": [
                         20.0,
@@ -626,13 +710,13 @@
                 },
                 "transform": {
                     "position": [
-                        -4.985036849975586,
-                        0.40905407071113586,
-                        17.151351928710938
+                        0.0,
+                        0.1,
+                        10.0
                     ],
                     "rotation": [
                         0.0,
-                        59.109825134277344,
+                        90.0,
                         0.0
                     ],
                     "scale": [

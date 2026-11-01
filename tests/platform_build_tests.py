@@ -217,6 +217,7 @@ class PlatformBuildTests(unittest.TestCase):
 
     def test_windows_game_wrapper_exports_clean_game_with_dlls(self):
         import json
+        import hashlib
         pwsh = self.powershell()
         with tempfile.TemporaryDirectory(prefix="bengine windows game ") as directory:
             root = Path(directory)
@@ -238,7 +239,10 @@ class PlatformBuildTests(unittest.TestCase):
                 script = commands / name
                 script.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$BUILD_TEST_LOG"\nexit 0\n')
                 script.chmod(0o755)
-            workspace = root / "cache"
+            output = root / "export"
+            workspace_key = f"{REPO}|{project / 'project.bengine'}|{output}|windows"
+            digest = hashlib.sha256(workspace_key.encode()).hexdigest().upper()[:16]
+            workspace = root / "localappdata/cpp-bengine/game-builds" / digest
             packager = workspace / "packager/Release/game_packager.exe"
             packager.parent.mkdir(parents=True)
             packager.write_text('#!/bin/sh\nexec "' + str(native / "game_packager") + '" "$@"\n')
@@ -251,13 +255,12 @@ class PlatformBuildTests(unittest.TestCase):
             (release / "runtime_app.pdb").write_text("debug")
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                        VCPKG_ROOT=str(commands), BENGINE_TEMPLATE_CACHE=str(root / "templates"),
-                       BUILD_TEST_LOG=str(host_log))
-            output = root / "export"
+                       BUILD_TEST_LOG=str(host_log), LOCALAPPDATA=str(root / "localappdata"))
             result = subprocess.run([pwsh, "-NoLogo", "-NoProfile", "-File",
                 str(REPO / "scripts/platform_build.ps1"), "-Target", "windows",
                 "-RepositoryRoot", str(REPO), "-BuildDirectory", str(output),
                 "-ProgressFile", str(workspace / "progress"),
-                "-ProjectFile", str(project / "project.bengine"), "-Workspace", str(workspace)],
+                "-ProjectFile", str(project / "project.bengine")],
                 env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("zlib:x64-windows-static", host_log.read_text())

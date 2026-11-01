@@ -19,7 +19,14 @@ void skybox::draw(glm::mat4 view, glm::mat4 proj) {
 void skybox::draw_background(glm::mat4 view, glm::mat4 proj,
     const std::array<std::string, 6>& faces, const std::string& root,
     bool enabled, const bgui::vec3& horizon, const bgui::vec3& zenith) {
-    GLint vao, program, active, binding, unpack;
+    draw_background(view, proj, faces, root, enabled, horizon, zenith, {});
+}
+
+void skybox::draw_background(glm::mat4 view, glm::mat4 proj,
+    const std::array<std::string, 6>& faces, const std::string& root,
+    bool enabled, const bgui::vec3& horizon, const bgui::vec3& zenith,
+    const std::string& cross_image) {
+    GLint vao, program, active, binding, unpack, row_length, skip_rows, skip_pixels;
     GLboolean depth_mask;
     const bool depth = glIsEnabled(GL_DEPTH_TEST), cull = glIsEnabled(GL_CULL_FACE);
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
@@ -28,33 +35,54 @@ void skybox::draw_background(glm::mat4 view, glm::mat4 proj,
     glActiveTexture(GL_TEXTURE0);
     glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP, &binding);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &row_length);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &skip_rows);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &skip_pixels);
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
     if (!enabled && !m_valid) m_attempted = false;
-    if (enabled && (!m_attempted || m_faces != faces || m_root != root)) {
-        m_attempted = true; m_faces = faces; m_root = root; m_valid = false;
+    if (enabled && (!m_attempted || m_faces != faces || m_root != root || m_image != cross_image)) {
+        m_attempted = true; m_faces = faces; m_root = root; m_image = cross_image; m_valid = false;
         unsigned int candidate = 0;
         try {
             std::array<const bgui::texture*, 6> images{};
             int size = 0;
-            for (unsigned i = 0; i < 6; ++i) {
-                if (faces[i].empty()) throw std::runtime_error("Missing cubemap face");
-                auto path = std::filesystem::path(faces[i]);
-                images[i] = &bgui::asset_manager::get_instance().load_texture(
+            const auto load = [&](const std::string& name) -> const bgui::texture& {
+                if (name.empty()) throw std::runtime_error("Missing cubemap image");
+                const std::filesystem::path path(name);
+                return bgui::asset_manager::get_instance().load_texture(
                     (path.is_absolute() ? path : std::filesystem::path(root) / path).string());
-                const auto& image = *images[i];
-                int width = static_cast<int>(image.m_size.x);
-                if (width <= 0 || image.m_size.y != width || (size && size != width) ||
-                    image.m_buffer.size() != static_cast<size_t>(width) * width * (image.m_has_alpha ? 4 : 3))
-                    throw std::runtime_error("Cubemap faces must be equally sized square RGB/RGBA images");
-                size = width;
+            };
+            if (!cross_image.empty()) {
+                const auto& image = load(cross_image);
+                const auto width = static_cast<int>(image.m_size.x);
+                const auto height = static_cast<int>(image.m_size.y);
+                if (width <= 0 || height <= 0 || width % 4 || height % 3 || width / 4 != height / 3 ||
+                    image.m_buffer.size() != static_cast<size_t>(width) * height * (image.m_has_alpha ? 4 : 3))
+                    throw std::runtime_error("Cubemap image must be a horizontal 4 x 3 cross with square faces");
+                size = width / 4;
+                images.fill(&image);
+            } else {
+                for (unsigned i = 0; i < 6; ++i) {
+                    images[i] = &load(faces[i]);
+                    const auto& image = *images[i];
+                    const auto width = static_cast<int>(image.m_size.x);
+                    if (width <= 0 || image.m_size.y != width || (size && size != width) ||
+                        image.m_buffer.size() != static_cast<size_t>(width) * width * (image.m_has_alpha ? 4 : 3))
+                        throw std::runtime_error("Cubemap faces must be equally sized square RGB/RGBA images");
+                    size = width;
+                }
             }
             GLint maximum; glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &maximum);
             if (size > maximum) throw std::runtime_error("Cubemap exceeds GPU limit");
             glGenTextures(1, &candidate);
             glBindTexture(GL_TEXTURE_CUBE_MAP, candidate);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            const int tiles[6][2] = {{2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1}};
             for (unsigned i = 0; i < 6; ++i) {
                 const auto& image = *images[i];
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, cross_image.empty() ? 0 : static_cast<int>(image.m_size.x));
+                glPixelStorei(GL_UNPACK_SKIP_PIXELS, cross_image.empty() ? 0 : tiles[i][0] * size);
+                glPixelStorei(GL_UNPACK_SKIP_ROWS, cross_image.empty() ? 0 : tiles[i][1] * size);
                 glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB8,
                     size, size, 0, image.m_has_alpha ? GL_RGBA : GL_RGB,
                     GL_UNSIGNED_BYTE, image.m_buffer.data());
@@ -86,5 +114,8 @@ void skybox::draw_background(glm::mat4 view, glm::mat4 proj,
     if (depth) glEnable(GL_DEPTH_TEST);
     if (cull) glEnable(GL_CULL_FACE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, skip_rows);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, skip_pixels);
     glBindTexture(GL_TEXTURE_CUBE_MAP, binding); glActiveTexture(active);
 }

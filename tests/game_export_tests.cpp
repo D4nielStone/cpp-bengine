@@ -221,3 +221,12 @@ TEST_F(GameExportTest, SelectedProjectIsRewrittenEvenWithCustomJsonExtension) {
     auto upper = game_package::read_json(staging / "game/MAIN.SCENE");
     EXPECT_STREQ(upper["entities"][0]["components"]["renderer"]["model"].GetString(), "../assets/models/cube.obj");
 }
+
+TEST_F(GameExportTest, CopiesSingleCrossCubemapReferencedByCamera) {
+    put(project / "assets/sky-cross.png", "cross pixels");
+    scene(R"({"camera":{"skybox":true,"skybox_image":"assets/sky-cross.png"}})");
+    prepare();
+    EXPECT_TRUE(fs::is_regular_file(staging / "game/assets/sky-cross.png"));
+    const auto document = game_package::read_json(staging / "game/main.scene");
+    EXPECT_STREQ(document["entities"][0]["components"]["camera"]["skybox_image"].GetString(), "assets/sky-cross.png");
+}

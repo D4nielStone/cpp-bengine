@@ -71,7 +71,7 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
         "fieldOfView", &camera::fov, "aspect", &camera::aspecto,
         "nearClipPlane", &camera::corte_curto, "farClipPlane", &camera::corte_longo,
         "orthographic", &camera::flag_orth, "orthographicSize", &camera::scale,
-        "backgroundColor", &camera::ceu, "useSkybox", &camera::m_use_skybox);
+        "backgroundColor", &camera::ceu, "useSkybox", &camera::m_use_skybox, "skyboxImage", &camera::skybox_image);
     lua.new_usertype<directional_light>("DirectionalLight", sol::no_constructor,
         "direction", &directional_light::direction, "ambient", &directional_light::ambient,
         "color", &directional_light::color, "intensity", &directional_light::intensity,

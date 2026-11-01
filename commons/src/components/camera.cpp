@@ -91,6 +91,9 @@ bool camera::analyze(const rapidjson::Value& value)
 			_ceu[3].GetFloat() / 255,
 		};
 	}
+    if (value.HasMember("skybox_image") && (!value["skybox_image"].IsString() ||
+        value["skybox_image"].GetStringLength() != std::char_traits<char>::length(value["skybox_image"].GetString()))) return false;
+    skybox_image = value.HasMember("skybox_image") ? value["skybox_image"].GetString() : "";
     m_use_skybox = value.HasMember("skybox") && value["skybox"].GetBool();
     skybox_faces = {};
     if (value.HasMember("skybox_faces")) {
@@ -236,6 +239,7 @@ void camera::viewport(const bgui::vec2i& viewp) {
 }
 bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const
 {
+    if (skybox_image.find('\0') != std::string::npos) return false;
     // fov
     value.AddMember("fov", fov, allocator);
 
@@ -256,6 +260,7 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
     cor_ceu.PushBack(static_cast<int>(ceu.a * 255), allocator);
     value.AddMember("ceu", cor_ceu, allocator);
 
+    value.AddMember("skybox_image", rapidjson::Value(skybox_image.c_str(), allocator), allocator);
     rapidjson::Value faces(rapidjson::kArrayType);
     for (const auto& path : skybox_faces)
         faces.PushBack(rapidjson::Value(path.c_str(), allocator), allocator);

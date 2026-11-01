@@ -3,6 +3,7 @@
 #include "asset_import.hpp"
 #include "components/code.hpp"
 #include "components/renderer.hpp"
+#include "components/camera.hpp"
 
 namespace editor::ui {
 inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
@@ -32,6 +33,15 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
         for (const auto& child : script->scripts) update_script(child);
     };
     context->registry->cada<commons::code>([&](auto id) { update_script(context->registry->get<commons::code>(id)); });
+    context->registry->cada<commons::camera>([&](auto id) {
+        const auto camera = context->registry->get<commons::camera>(id);
+        const auto relocate = [&](std::string& value) {
+            if (!value.empty() && absolute(value) == from)
+                value = std::filesystem::path(value).is_absolute() ? to.string() : to.lexically_relative(root).generic_string();
+        };
+        relocate(camera->skybox_image);
+        for (auto& face : camera->skybox_faces) relocate(face);
+    });
     context->registry->cada<commons::renderer>([&](auto id) {
         const auto renderer = context->registry->get<commons::renderer>(id);
         auto* model = renderer->m_modelo;

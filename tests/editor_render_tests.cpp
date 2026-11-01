@@ -5,6 +5,11 @@
 #include <bgui_backend_freetype.hpp>
 #include <gtest/gtest.h>
 #include "components/camera.hpp"
+#include "components/code.hpp"
+#include "systems/code_system.hpp"
+#include "systems/physics_system.hpp"
+#include <tuple>
+#include <cmath>
 #include "components/renderer.hpp"
 #include "components/directional_light.hpp"
 #include "systems/render_system.hpp"
@@ -484,6 +489,7 @@ TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
     EXPECT_FALSE(camera.m_use_skybox);
     rapidjson::Document data(rapidjson::kObjectType);
     camera.m_use_skybox = true;
+    camera.skybox_image = "assets/cross.png";
     camera.skybox_faces = {"right.png", "left.png", "top.png", "bottom.png", "front.png", "back.png"};
     camera.atmosphere_zenith = {0.1f, 0.2f, 0.3f};
     ASSERT_TRUE(camera.serialize(data, data.GetAllocator()));
@@ -491,11 +497,13 @@ TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
     ASSERT_TRUE(loaded.analyze(data));
     EXPECT_TRUE(loaded.m_use_skybox);
     EXPECT_EQ(loaded.skybox_faces, camera.skybox_faces);
+    EXPECT_EQ(loaded.skybox_image, camera.skybox_image);
     EXPECT_FLOAT_EQ(loaded.atmosphere_zenith.y, 0.2f);
     EXPECT_EQ(loaded.m_skybox, nullptr); // Loading never allocates GPU resources.
     rapidjson::Document legacy(rapidjson::kObjectType);
     ASSERT_TRUE(loaded.analyze(legacy));
     EXPECT_FALSE(loaded.m_use_skybox);
+    EXPECT_TRUE(loaded.skybox_image.empty());
 }
 
 TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
@@ -569,4 +577,130 @@ TEST_F(EditorRenderTest, CubemapOverridesAtmosphereAndDisableRestoresIt) {
     EXPECT_GT(pixel[1], 100);
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
     std::filesystem::remove_all(folder);
+}
+
+TEST_F(EditorRenderTest, CrossCubemapMapsAllSixFacesAndRestoresUploadState) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->viewportFBO = {64, 64}; camera->createFB();
+    camera->m_use_skybox = true;
+    camera->skybox_image = (std::filesystem::path(BENGINE_SOURCE_DIR) / "tests/fixtures/cubemap_cross.png").string();
+    commons::render_system render;
+    const bgui::vec3 rotations[] = {{0,0,0},{0,180,0},{90,0,0},{-90,0,0},{0,90,0},{0,-90,0}};
+    const std::array<unsigned char, 3> colors[] = {{255,0,0},{0,255,0},{0,0,255},{255,255,0},{255,0,255},{0,255,255}};
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 8);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 7);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 2);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 1);
+    for (unsigned i = 0; i < 6; ++i) {
+        registry->get<commons::transform>(entity.id)->set_rotation(rotations[i]);
+        render.update(registry);
+        std::array<unsigned char, 4> pixel{};
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+        for (unsigned c = 0; c < 3; ++c) EXPECT_NEAR(pixel[c], colors[i][c], 2) << "Face " << i;
+    }
+    GLint state{};
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &state); EXPECT_EQ(state, 8);
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &state); EXPECT_EQ(state, 7);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &state); EXPECT_EQ(state, 2);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &state); EXPECT_EQ(state, 1);
+    registry->get<commons::transform>(entity.id)->set_rotation({0,0,0});
+    render.update(registry);
+    const std::array<unsigned char, 3> corners[] = {{255,255,255},{0,255,0},{0,0,255},{255,255,0}};
+    const int positions[4][2] = {{60,60},{3,60},{60,3},{3,3}};
+    for (unsigned i = 0; i < 4; ++i) {
+        std::array<unsigned char, 4> pixel{};
+        glReadPixels(positions[i][0], positions[i][1], 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+        for (unsigned c = 0; c < 3; ++c) EXPECT_NEAR(pixel[c], corners[i][c], 2) << "Corner " << i;
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4); glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0); glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    registry->entities.clear();
+}
+
+TEST_F(EditorRenderTest, InvalidCrossImageFallsBackToAtmosphereWithoutGpuErrors) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create(); registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->viewportFBO = {64,64}; camera->createFB();
+    commons::render_system render;
+    render.update(registry);
+    std::array<unsigned char,4> atmosphere{}, fallback{};
+    glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,atmosphere.data());
+    camera->m_use_skybox = true;
+    for (const auto* path : {"external/cpp-bgui/tests/assets/rgb.jpg", "missing-cross.png"}) {
+        camera->skybox_image = (std::filesystem::path(BENGINE_SOURCE_DIR) / path).string();
+        render.update(registry);
+        glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,fallback.data());
+        EXPECT_EQ(atmosphere, fallback);
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    }
+    registry->entities.clear();
+}
+
+TEST_F(EditorRenderTest, FppSceneMovementFollowsCameraAndPickupIsSeparateFromArena) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(999);
+    registry->add<commons::camera>(editor_camera);
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    persistence.set_migration_writes_enabled(false);
+    std::string error;
+    ASSERT_TRUE(persistence.load((std::filesystem::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine").string(), error)) << error;
+    const auto player = registry->find_by_name("PlayerCapsule");
+    const auto camera_entity = registry->find_by_name("PlayerCamera");
+    const auto pickup = registry->find_by_name("PickupOrb");
+    ASSERT_TRUE(player); ASSERT_TRUE(camera_entity); ASSERT_TRUE(pickup);
+    EXPECT_EQ(registry->get<commons::transform>(*camera_entity)->parent_id, *player);
+    EXPECT_EQ(registry->get<commons::transform>(*camera_entity)->get_scale(), (bgui::vec3{1,1,1}));
+    const auto pillar = registry->find_by_name("ArenaPillar");
+    ASSERT_TRUE(pillar);
+    EXPECT_FALSE(registry->has<commons::code>(*pillar));
+    commons::code_system scripts;
+    scripts.setup(registry);
+    auto body = registry->get<commons::physics>(*player);
+    body->setVelocidade({0,-3,0});
+    auto controller = registry->get<commons::code>(*player);
+    sol::table input = controller->estado_lua["Input"];
+    input.set_function("GetAxis", [](const std::string& axis) { return axis == "Vertical" ? 1.f : 0.f; });
+    input.set_function("GetMouseDelta", [] { return std::tuple<float,float>{10,0}; });
+    ASSERT_NO_THROW(controller->update());
+    const auto velocity = body->getVelocidade();
+    auto camera = registry->get<commons::camera>(*camera_entity);
+    camera->getViewMatrix();
+    EXPECT_NEAR(velocity.x, camera->forward.x * 5.f, 0.0001f);
+    EXPECT_NEAR(velocity.z, camera->forward.z * 5.f, 0.0001f);
+    EXPECT_FLOAT_EQ(velocity.y, -3.f);
+    commons::physics_system physics;
+    physics.setup(registry);
+    const auto start = body->m_rigid_body->getWorldTransform().getOrigin();
+    for (int step = 0; step < 120; ++step) physics.world()->stepSimulation(1.f / 60.f, 0);
+    const auto landed = body->m_rigid_body->getWorldTransform().getOrigin();
+    EXPECT_GT(landed.y(), -0.1f); EXPECT_LT(landed.y(), 0.25f);
+    EXPECT_NEAR(std::hypot(landed.x() - start.x(), landed.z() - start.z()), 10.f, 0.2f);
+    EXPECT_EQ(body->m_rigid_body->getAngularFactor(), btVector3(0,0,0));
+    physics.speed = 0; physics.update(registry);
+    registry->get<commons::transform>(*player)->set_position(registry->get<commons::transform>(*pickup)->get_position());
+    auto game = registry->get<commons::code>(*pickup);
+    ASSERT_NO_THROW(game->update());
+    EXPECT_FALSE(registry->get<commons::renderer>(*pickup)->visible);
+    EXPECT_FALSE(registry->has<commons::physics>(*pickup));
+    ASSERT_NO_THROW(game->update());
+    physics.update(registry);
+    registry->entities.clear();
+}
+
+TEST(CameraSettings, RejectsMalformedCrossPathsWithoutTruncatingThem) {
+    commons::camera camera;
+    camera.skybox_image = "assets/original.png";
+    for (const auto* json : {R"({"skybox_image":42})", R"({"skybox_image":"bad\u0000path"})"}) {
+        rapidjson::Document data; data.Parse(json);
+        EXPECT_FALSE(camera.analyze(data));
+        EXPECT_EQ(camera.skybox_image, "assets/original.png");
+    }
+    camera.skybox_image = std::string("bad\0path", 8);
+    rapidjson::Document data(rapidjson::kObjectType);
+    EXPECT_FALSE(camera.serialize(data, data.GetAllocator()));
 }

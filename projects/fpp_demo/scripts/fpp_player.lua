@@ -13,9 +13,19 @@ function setup()
 end
 
 function update()
-    local distance = move_speed
-    local forward = Input.GetAxis("Vertical") * distance
-    local right = Input.GetAxis("Horizontal") * distance
+    local mouse_x = Input.GetMouseDelta()
+    yaw = yaw - mouse_x * 0.12
+    body.localEulerAngles = Vector3(0.0, yaw, 0.0)
+
+    local forward = Input.GetAxis("Vertical")
+    local right = Input.GetAxis("Horizontal")
+    local length = math.sqrt(forward * forward + right * right)
+    if length > 1.0 then
+        forward = forward / length
+        right = right / length
+    end
+    forward = forward * move_speed
+    right = right * move_speed
     local angle = math.rad(yaw)
     local velocity = rigidbody.velocity
     -- Preserve gravity and contact response on the vertical axis.
@@ -24,9 +34,4 @@ function update()
         velocity.y,
         -math.sin(angle) * forward + math.cos(angle) * right
     )
-
-    local mouse_x = Input.GetMouseDelta()
-    yaw = yaw - mouse_x * 0.12
-
-    body.localEulerAngles = Vector3(0.0, yaw, 0.0)
 end

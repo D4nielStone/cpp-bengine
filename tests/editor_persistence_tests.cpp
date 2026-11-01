@@ -759,3 +759,27 @@ TEST(ProjectPersistenceTest, PreservesIndependentProjectVersionAcrossSave) {
     EXPECT_STREQ(doc["project_version"].GetString(), "3.4.5");
     remove_project_files(path);
 }
+
+TEST(ProjectPersistenceTest, CubemapCrossPathSurvivesTemporaryRuntimeSnapshot) {
+    const auto directory = temporary_project_path();
+    std::filesystem::create_directory(directory);
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(999); registry->add<commons::camera>(editor_camera);
+    auto scene_camera = registry->create(100); registry->add<commons::camera>(scene_camera);
+    auto camera = registry->get<commons::camera>(scene_camera.id);
+    camera->m_use_skybox = true; camera->skybox_image = "assets/cross.png";
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    std::string error;
+    const auto project = directory / "project.bengine";
+    ASSERT_TRUE(persistence.save(project.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(project.string(), error)) << error;
+    std::filesystem::create_directory(directory / "temporary runtime");
+    const auto snapshot = directory / "temporary runtime/snapshot.bengine";
+    ASSERT_TRUE(persistence.save(snapshot.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(snapshot.string(), error)) << error;
+    camera = registry->get<commons::camera>(scene_camera.id);
+    ASSERT_NE(camera, nullptr);
+    EXPECT_EQ(std::filesystem::path(camera->skybox_image), (directory / "assets/cross.png").lexically_normal());
+    registry->entities.clear();
+    std::filesystem::remove_all(directory);
+}

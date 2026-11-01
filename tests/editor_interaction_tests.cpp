@@ -843,3 +843,24 @@ TEST_F(EditorInteractionTest, DirectionGizmoTextureTracksRotationAndScale) {
     gizmo.get_requires(&resized);
     EXPECT_EQ(resized.m_quad_requires.front().m_material.m_texture.m_buffer.size(), 36u * 36u * 4u);
 }
+
+TEST_F(EditorInteractionTest, CameraInspectorUsesOneCubemapImageAndSupportsUndo) {
+    auto entity = registry->create(); registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->skybox_image = "assets/original-cross.png";
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context); panel.build(dock); panel.update();
+    auto* image = find_element<bgui::inputbox>(dock, [](auto& field) {
+        return field.get_buffer() == "assets/original-cross.png";
+    });
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(find_element<bgui::text>(dock, [](auto& text) {
+        return text.get_buffer() == "Right (+X)";
+    }), nullptr);
+    image->m_enter_func("assets/new-cross.png");
+    EXPECT_EQ(camera->skybox_image, "assets/new-cross.png");
+    ASSERT_TRUE(context->undo()); EXPECT_EQ(camera->skybox_image, "assets/original-cross.png");
+    ASSERT_TRUE(context->redo()); EXPECT_EQ(camera->skybox_image, "assets/new-cross.png");
+    registry->entities.clear();
+}
