@@ -339,9 +339,13 @@ private:
         context->hidden_entities.erase(id);
         context->locked_entities.erase(id);
         context->selected_entity.reset();
+        const std::weak_ptr<editor_context> weak_context = context;
         context->record_action(
-            [registry, context, id, removed_components, removed_mask,
+            [registry, weak_context, id, removed_components, removed_mask,
              name, was_hidden, was_locked, children]() {
+                const auto context = weak_context.lock();
+                if (!context)
+                    return;
                 registry->entities[id] = removed_components;
                 registry->mascaras[id] = removed_mask;
                 registry->live_entities.insert(id);
@@ -355,7 +359,10 @@ private:
                     restore_transform(child.transform, child.before);
                 context->selected_entity = id;
             },
-            [registry, context, id, children]() {
+            [registry, weak_context, id, children]() {
+                const auto context = weak_context.lock();
+                if (!context)
+                    return;
                 for (const auto& child : children)
                     restore_transform(child.transform, child.after);
                 registry->remove(id);

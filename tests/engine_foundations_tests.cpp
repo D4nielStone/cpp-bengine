@@ -15,6 +15,26 @@
 using namespace commons;
 
 namespace {
+template<typename T>
+struct allocation_probe_allocator {
+    using value_type = T;
+    std::size_t* live_blocks;
+    explicit allocation_probe_allocator(std::size_t& blocks) : live_blocks(&blocks) {}
+    template<typename U>
+    allocation_probe_allocator(const allocation_probe_allocator<U>& other)
+        : live_blocks(other.live_blocks) {}
+    T* allocate(std::size_t count) {
+        auto* result = std::allocator<T>{}.allocate(count);
+        ++*live_blocks;
+        return result;
+    }
+    void deallocate(T* value, std::size_t count) {
+        std::allocator<T>{}.deallocate(value, count);
+        --*live_blocks;
+    }
+    bool operator==(const allocation_probe_allocator&) const = default;
+};
+
 struct Foundations : testing::Test {
     std::shared_ptr<ecs> registry = std::make_shared<ecs>();
     void TearDown() override {
@@ -315,6 +335,25 @@ function update() updates = updates + 1 end
         std::filesystem::remove(path, error);
     }
 };
+}
+
+TEST_F(ScriptLifecycle, RemovalReleasesTransformAndItsWeakReferenceControlBlock) {
+    std::size_t live_blocks = 0;
+    const auto object = registry->create(1);
+    auto tracked = std::allocate_shared<transform>(allocation_probe_allocator<transform>{live_blocks});
+    tracked->reg = registry;
+    tracked->my_object = object.id;
+    registry->entities.at(object.id).at(transform::mask) = tracked;
+    tracked.reset();
+    {
+        auto entity = object;
+        registry->add<code>(entity, path.string());
+        code_system system;
+        system.setup(registry);
+        system.update(registry);
+        registry->remove(object.id);
+    }
+    EXPECT_EQ(live_blocks, 0u);
 }
 
 TEST_F(ScriptLifecycle, LateAttachmentInitializesOnceAndRemovalStopsUpdates) {

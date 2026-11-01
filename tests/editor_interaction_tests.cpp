@@ -143,6 +143,35 @@ TEST_F(EditorInteractionTest, EntityDeleteActionHasAVisibleIconAndSupportsUndo) 
     EXPECT_TRUE(registry->validate_invariants());
 }
 
+TEST_F(EditorInteractionTest, EntityDeletionHistoryDoesNotKeepItsContextAlive) {
+    for (const bool leave_in_redo : {false, true}) {
+        auto entity = registry->create();
+        std::weak_ptr<commons::transform> removed = registry->get<commons::transform>(entity.id);
+        auto owner = std::make_shared<editor::ui::editor_context>(registry);
+        std::weak_ptr<editor::ui::editor_context> weak_owner = owner;
+        owner->selected_entity = entity.id;
+        {
+            bgui::dock dock;
+            editor::ui::entities_view panel(owner);
+            panel.build(dock);
+            auto* remove = find_element<bgui::button>(dock, [](auto& item) {
+                return item.has_class("entities-remove-button");
+            });
+            ASSERT_NE(remove, nullptr);
+            remove->on_pressed();
+            remove->on_released();
+            bgui::on_update();
+            ASSERT_FALSE(registry->is_alive(entity.id));
+            if (leave_in_redo)
+                ASSERT_TRUE(owner->undo());
+        }
+        owner.reset();
+        EXPECT_TRUE(weak_owner.expired());
+        registry->remove(entity.id);
+        EXPECT_TRUE(removed.expired());
+    }
+}
+
 TEST_F(EditorInteractionTest, InspectorExposesPbrFactorsAndNormalMap) {
     auto entity = registry->create();
     registry->add<commons::renderer>(entity, new commons::model());

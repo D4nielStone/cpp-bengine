@@ -21,6 +21,7 @@
 #include <memory>
 #include <tuple>
 #include <fstream>
+#include <functional>
 #include <filesystem>
 #include <set>
 #include <stdexcept>
@@ -246,7 +247,8 @@ void code::setup() {
     );
     input_api.set_function(
         "mouse_delta",
-        [mouse_position]() {
+        // GCC can give distinct no-argument lambdas the same sol2 GC metatable name.
+        std::function<std::tuple<float, float>()>{[mouse_position]() {
             auto* window = glfwGetCurrentContext();
             if (!window)
                 return std::tuple<float, float>{0.f, 0.f};
@@ -268,7 +270,7 @@ void code::setup() {
             mouse_position->x = x;
             mouse_position->y = y;
             return delta;
-        }
+        }}
     );
     bubble["input"] = input_api;
 

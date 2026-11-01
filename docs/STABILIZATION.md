@@ -1503,3 +1503,64 @@ remoção do fechamento do arquivo antes do replace: o fechamento foi restaurado
 assim como a validação única de leitura. O novo teste de recursos externos usa
 a mesma sondagem OpenGL 3.3 dos demais testes de janela; o runner Windows sem
 esse contexto ignora apenas a verificação gráfica, executada no Linux/Xvfb.
+
+### 2026-10-31 — Vazamentos e encerramento detectados pelo Valgrind
+
+- Evidência inicial: Valgrind 3.22.0 nos 25 executáveis de teste, com
+  `--leak-check=full --show-leak-kinds=all --track-origins=yes`.
+  `window::~window()` acessava `m_ecs` depois de `reset()`, reproduzindo
+  SIGSEGV também sem instrumentação nos testes de janela e importação.
+  Removida somente a limpeza duplicada; os recursos gráficos continuam
+  sendo liberados com o contexto corrente, antes do encerramento da janela.
+- BGUI/FreeType: `scoped_interface` inicializava o FreeType sem encerrá-lo;
+  chamadas repetidas sobrescreviam a biblioteca anterior. O encerramento da
+  interface agora drena o carregador e libera o FreeType. Inicialização e
+  encerramento explícitos são idempotentes, preservando os chamadores atuais
+  da engine. Erros de carregamento são registrados sem escapar do destrutor
+  `noexcept`. A alteração no backend FreeType pertence ao submódulo aninhado
+  `external/cpp-bgui/backend`.
+- Lua: lambdas sem argumentos em `code::setup()` recebiam nomes iguais de
+  metatabela de coleta no sol2 com GCC. A captura de `shared_ptr<cursor_state>`
+  era usada para destruir capturas de `weak_ptr<transform>`, deixando seus
+  blocos de controle alocados. A função de delta do mouse agora usa um
+  `std::function` com assinatura explícita para distinguir a metatabela,
+  sem modificar sol2 ou as APIs Lua. O teste com alocador contador falha
+  contra `code.cpp` original (um bloco restante) e passa com a correção.
+- Histórico de exclusão: as ações armazenadas em `editor_context` capturavam
+  o próprio contexto por `shared_ptr`, formando um ciclo. Capturas fracas
+  verificadas antes do uso preservam desfazer/refazer e permitem liberar
+  o contexto, os componentes removidos e seu histórico.
+- Testes funcionais: a suíte de layout salva/restaura o tema e usa um tema
+  vazio por caso, evitando depender do tema deixado por testes anteriores.
+  O teste FPP cria uma cena pequena própria e continua executando os scripts
+  reais de movimento/câmera/coleta; não exige mais entidades removidas do
+  projeto de demonstração editável. Nenhum dado desse projeto foi restaurado
+  ou alterado nesta correção.
+- Regressões: ciclos de setup/shutdown e reinicialização do FreeType com
+  carregamento de fontes, liberação do bloco de controle de Transform após
+  scripts e liberação de contexto/componentes com ações nos históricos de
+  desfazer ou refazer. Os testes existentes de janela verificam recursos
+  retidos externamente e a presença do contexto durante sua liberação.
+- Durante a nova rodada apareceu também uma leitura não inicializada no
+  conversor de temas: `layout.align = center` inicializava o segundo eixo
+  usando a própria variável ainda indefinida. O valor único agora é aplicado
+  aos dois eixos, mantendo o formato de dois valores; regressão com arquivo
+  de tema cobrindo alinhamento simples e duplo.
+- Validação final executada: build integral Debug com
+  `cmake --build out --parallel 2`, sem avisos emitidos nos logs desta
+  correção. CTest: 346 entradas, 345 aprovadas, zero falhas e uma opt-in
+  ignorada. Esta última foi ativada com `BENGINE_RUNTIME_SMOKE=1` e passou
+  separadamente, verificando início e reinício do runtime real.
+- Valgrind final: 25 executáveis concluídos com código 0, zero erros e
+  zero bytes definitivamente, indiretamente ou possivelmente perdidos,
+  sem supressões. As suítes completas de BGUI e interação foram repetidas
+  após suas últimas correções: respectivamente 128 e 34 casos aprovados.
+  Diff revisado e whitespace verificado nos três repositórios envolvidos.
+  Evidências e logs: `out/valgrind/report.md`, `final-summary.json`,
+  `ctest-final.log`, `runtime-smoke-final.log`, `history-final.valgrind.log`
+  e `all-final.valgrind.log`; logs dos demais executáveis em `fixed/`.
+- Limites: validação Linux/GCC e OpenGL disponível nesta máquina. Não foi
+  executada uma sessão manual completa do editor nem instrumentação de
+  todos os subprocessos do runtime. Memória ainda alcançável em bibliotecas
+  do sistema não foi tratada como vazamento. APIs públicas, formatos de
+  persistência e alterações concomitantes do usuário foram preservados.

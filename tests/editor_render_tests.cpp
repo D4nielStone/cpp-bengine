@@ -643,12 +643,37 @@ TEST_F(EditorRenderTest, InvalidCrossImageFallsBackToAtmosphereWithoutGpuErrors)
 
 TEST_F(EditorRenderTest, FppSceneMovementFollowsCameraAndPickupIsSeparateFromArena) {
     auto registry = std::make_shared<commons::ecs>();
-    auto editor_camera = registry->create(999);
-    registry->add<commons::camera>(editor_camera);
-    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
-    persistence.set_migration_writes_enabled(false);
-    std::string error;
-    ASSERT_TRUE(persistence.load((std::filesystem::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine").string(), error)) << error;
+    auto player_object = registry->create(106);
+    registry->entity_names[player_object.id] = "PlayerCapsule";
+    auto player_transform = registry->get<commons::transform>(player_object.id);
+    player_transform->set_position({0, 0.1f, 10});
+    player_transform->set_rotation({0, 90, 0});
+    registry->add<commons::physics>(player_object);
+    auto player_body = registry->get<commons::physics>(player_object.id);
+    player_body->configure_collision(commons::physics::shapes::forma_capsula,
+        {0.7f, 0.6f, 0.7f}, {0, 0.9f, 0}, true, false);
+    player_body->set_body_type(commons::physics::body_type::character);
+    player_body->setFriccao(0.f);
+    auto camera_object = registry->create(100);
+    registry->entity_names[camera_object.id] = "PlayerCamera";
+    registry->add<commons::camera>(camera_object);
+    registry->get<commons::transform>(camera_object.id)->set_parent(player_object.id, false);
+    auto pickup_object = registry->create(103);
+    registry->entity_names[pickup_object.id] = "PickupOrb";
+    registry->get<commons::transform>(pickup_object.id)->set_position({20, 1, 0});
+    registry->add<commons::renderer>(pickup_object);
+    registry->add<commons::physics>(pickup_object, true);
+    auto pillar_object = registry->create(107);
+    registry->entity_names[pillar_object.id] = "ArenaPillar";
+    auto floor = registry->create(101);
+    registry->get<commons::transform>(floor.id)->set_position({0, -0.5f, 0});
+    registry->add<commons::physics>(floor, true);
+    registry->get<commons::physics>(floor.id)->configure_collision(
+        commons::physics::shapes::box_shape, {40, 1, 40}, {0, 0, 0}, true, false);
+    const auto scripts_path = std::filesystem::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/scripts";
+    registry->add<commons::code>(player_object, (scripts_path / "fpp_player.lua").string());
+    registry->add<commons::code>(camera_object, (scripts_path / "fpp_camera.lua").string());
+    registry->add<commons::code>(pickup_object, (scripts_path / "fpp_game.lua").string());
     const auto player = registry->find_by_name("PlayerCapsule");
     const auto camera_entity = registry->find_by_name("PlayerCamera");
     const auto pickup = registry->find_by_name("PickupOrb");
