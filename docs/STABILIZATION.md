@@ -1495,5 +1495,5 @@ ECS fracas e as alterações de interface. A finalização da janela removia o E
 e depois o acessava novamente; a limpeza duplicada foi removida. O submódulo
 BGUI combina o novo inputbox com as correções de MSVC, medidas e fixtures já
 validadas. A cena recém-editada referenciava GLB e script ausentes no repositório;
-ela foi preservada integralmente em main.experimental.scene, mantendo main.scene
+ela foi preservada integralmente em main.experimental.scene.backup, mantendo main.scene
 como exemplo de release autocontido, sem descartar a edição.

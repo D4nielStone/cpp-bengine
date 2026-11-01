@@ -29,5 +29,5 @@ Scenes with six legacy `skybox_faces` remain readable. A nonempty
 exposes the new path as `Camera.skyboxImage`.
 
 The scene edited after the release baseline is preserved as
-`main.experimental.scene`. It references an unavailable GLB and `NewScript.lua`;
+`main.experimental.scene.backup`. It references an unavailable GLB and `NewScript.lua`;
 `main.scene` remains the self-contained release example.
