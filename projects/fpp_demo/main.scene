@@ -23,11 +23,11 @@
                         1.0,
                         1.0
                     ],
-                    "intensity": 1.0,
+                    "intensity": 2.0,
                     "shadows": true,
                     "shadow_resolution": 4096,
-                    "shadow_distance": 40.0,
-                    "shadow_bias": 0.00009999999747378752,
+                    "shadow_distance": 50.0,
+                    "shadow_bias": 9.999999747378752e-05,
                     "shadow_strength": 1.0
                 },
                 "transform": {
@@ -53,89 +53,6 @@
             "id": 3,
             "locked": false,
             "components": {
-                "renderer": {
-                    "cast_shadows": true,
-                    "receive_shadows": true,
-                    "model": "/home/d4nl/repos/cpp-bengine/commons/assets/models/cube.obj",
-                    "materials": [
-                        {
-                            "albedo": [
-                                0.6000000238418579,
-                                0.6000000238418579,
-                                0.6000000238418579,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": true,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 0.10000000149011612,
-                            "uvRepeatY": 0.10000000149011612,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        }
-                    ],
-                    "visible": true
-                },
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "body_type": "static",
-                    "collision_size": [
-                        1.0,
-                        1.0,
-                        1.0
-                    ],
-                    "collision_offset": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "collision_rotation": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "fit_to_model": true,
-                    "collision_enabled": true,
-                    "trigger": false,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
-                },
-                "transform": {
-                    "position": [
-                        -1.515022873878479,
-                        2.535750150680542,
-                        -6.982738494873047
-                    ],
-                    "rotation": [
-                        27.671964645385742,
-                        0.0,
-                        0.0
-                    ],
-                    "scale": [
-                        6.252854347229004,
-                        1.0,
-                        9.0990629196167
-                    ]
-                }
-            }
-        },
-        {
-            "id": 4,
-            "locked": false,
-            "components": {
-                "code": {
-                    "directory": "scripts/fpp_game.lua"
-                },
                 "physics": {
                     "shape": "box",
                     "static": true,
@@ -177,6 +94,61 @@
                             "metallic": 0.0,
                             "roughness": 0.5,
                             "ao": 1.0,
+                            "world_texture": true,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 0.10000000149011612,
+                            "uvRepeatY": 0.10000000149011612,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
+                "transform": {
+                    "position": [
+                        -1.515022873878479,
+                        2.535750150680542,
+                        -6.982738494873047
+                    ],
+                    "rotation": [
+                        27.671964645385742,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        6.252854347229004,
+                        1.0,
+                        9.0990629196167
+                    ]
+                }
+            },
+            "name": "ArenaRamp"
+        },
+        {
+            "id": 4,
+            "locked": false,
+            "components": {
+                "renderer": {
+                    "cast_shadows": true,
+                    "receive_shadows": true,
+                    "model": "assets/models/cube.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                0.6000000238418579,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
                             "world_texture": false,
                             "uvOffsetX": 0.0,
                             "uvOffsetY": 0.0,
@@ -192,6 +164,32 @@
                         }
                     ],
                     "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "body_type": "static",
+                    "collision_size": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "collision_offset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "collision_rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "fit_to_model": true,
+                    "collision_enabled": true,
+                    "trigger": false,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [
@@ -210,965 +208,8 @@
                         1.0
                     ]
                 }
-            }
-        },
-        {
-            "id": 5,
-            "locked": false,
-            "name": "Cilindro",
-            "components": {
-                "renderer": {
-                    "cast_shadows": true,
-                    "receive_shadows": true,
-                    "model": "/home/d4nl/repos/cpp-bengine/commons/assets/models/cylinder.obj",
-                    "materials": [
-                        {
-                            "albedo": [
-                                0.6000000238418579,
-                                0.6000000238418579,
-                                0.6000000238418579,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        }
-                    ],
-                    "visible": true
-                },
-                "transform": {
-                    "position": [
-                        0.0,
-                        1.737594723701477,
-                        0.0
-                    ],
-                    "rotation": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "scale": [
-                        1.0,
-                        1.0,
-                        1.0
-                    ]
-                }
-            }
-        },
-        {
-            "id": 6,
-            "locked": false,
-            "name": "Cilindro (cópia)",
-            "components": {
-                "code": {
-                    "directory": "scripts/NewScript.lua",
-                    "properties": [
-                        {
-                            "name": "speed",
-                            "type": "number",
-                            "value": 2.0
-                        }
-                    ]
-                },
-                "renderer": {
-                    "cast_shadows": true,
-                    "receive_shadows": true,
-                    "model": "/home/d4nl/repos/cpp-bengine/commons/assets/models/cylinder.obj",
-                    "materials": [
-                        {
-                            "albedo": [
-                                0.7179816961288452,
-                                0.2907075881958008,
-                                0.7930136919021606,
-                                1.0
-                            ],
-                            "metallic": 1.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        }
-                    ],
-                    "visible": true
-                },
-                "transform": {
-                    "position": [
-                        0.0,
-                        1.737594723701477,
-                        5.4882636070251465
-                    ],
-                    "rotation": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "scale": [
-                        1.0,
-                        1.0,
-                        1.0
-                    ]
-                }
-            }
-        },
-        {
-            "id": 7,
-            "locked": false,
-            "parent": 106,
-            "name": "low-poly_stm-556",
-            "components": {
-                "renderer": {
-                    "cast_shadows": true,
-                    "receive_shadows": true,
-                    "model": "assets/low-poly_stm-556.glb",
-                    "materials": [
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.0202884990721941,
-                                0.0202884990721941,
-                                0.020288599655032158,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.44520100951194763,
-                                0.36625200510025024,
-                                0.0528608001768589,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.44520100951194763,
-                                0.36625200510025024,
-                                0.0528608001768589,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.4793199896812439,
-                                0.1714410036802292,
-                                0.033104799687862396,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.0202884990721941,
-                                0.0202884990721941,
-                                0.020288599655032158,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.0202884990721941,
-                                0.0202884990721941,
-                                0.020288599655032158,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                0.010960100218653679,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                0.2033119946718216,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.0,
-                                0.0,
-                                0.0,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.44797399640083313,
-                                0.44797399640083313,
-                                0.44797399640083313,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.0202884990721941,
-                                0.0202884990721941,
-                                0.020288599655032158,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.44797399640083313,
-                                0.44797399640083313,
-                                0.44797399640083313,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.0202884990721941,
-                                0.0202884990721941,
-                                0.020288599655032158,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.44520100951194763,
-                                0.36625200510025024,
-                                0.0528608001768589,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        },
-                        {
-                            "albedo": [
-                                0.4793199896812439,
-                                0.1714410036802292,
-                                0.033104799687862396,
-                                1.0
-                            ],
-                            "metallic": 0.0,
-                            "roughness": 0.5,
-                            "ao": 1.0,
-                            "world_texture": false,
-                            "uvOffsetX": 0.0,
-                            "uvOffsetY": 0.0,
-                            "uvRepeatX": 1.0,
-                            "uvRepeatY": 1.0,
-                            "maps": {
-                                "tex_albedo": "",
-                                "tex_normal": "",
-                                "tex_metallic": "",
-                                "tex_roughness": "",
-                                "tex_ao": ""
-                            }
-                        }
-                    ],
-                    "visible": true
-                },
-                "transform": {
-                    "position": [
-                        1.904179334640503,
-                        1.3268039226531982,
-                        1.5014629364013672
-                    ],
-                    "rotation": [
-                        -0.0,
-                        7.768789768218994,
-                        0.0
-                    ],
-                    "scale": [
-                        0.5,
-                        0.5,
-                        0.5
-                    ]
-                }
-            }
+            },
+            "name": "ArenaPillar"
         },
         {
             "id": 100,
@@ -1192,7 +233,7 @@
                     ],
                     "skybox_faces": [
                         "",
-                        "assets/Cubemap_Sky_11-512x512_negx.png",
+                        "",
                         "",
                         "",
                         "",
@@ -1203,7 +244,8 @@
                         0.25,
                         0.550000011920929
                     ],
-                    "skybox": true
+                    "skybox": false,
+                    "skybox_image": ""
                 },
                 "transform": {
                     "position": [
@@ -1229,32 +271,6 @@
             "locked": false,
             "name": "ArenaFloor",
             "components": {
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "body_type": "static",
-                    "collision_size": [
-                        2.0,
-                        0.10000000149011612,
-                        2.0
-                    ],
-                    "collision_offset": [
-                        0.0,
-                        0.05000000074505806,
-                        0.0
-                    ],
-                    "collision_rotation": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "fit_to_model": false,
-                    "collision_enabled": true,
-                    "trigger": false,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
-                },
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
@@ -1286,6 +302,32 @@
                     ],
                     "visible": true
                 },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "body_type": "static",
+                    "collision_size": [
+                        2.0,
+                        0.10000000149011612,
+                        2.0
+                    ],
+                    "collision_offset": [
+                        0.0,
+                        0.05000000074505806,
+                        0.0
+                    ],
+                    "collision_rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "fit_to_model": false,
+                    "collision_enabled": true,
+                    "trigger": false,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
                 "transform": {
                     "position": [
                         0.0,
@@ -1310,32 +352,6 @@
             "locked": false,
             "name": "NorthWall",
             "components": {
-                "physics": {
-                    "shape": "box",
-                    "static": true,
-                    "body_type": "static",
-                    "collision_size": [
-                        2.0,
-                        2.0,
-                        1.0
-                    ],
-                    "collision_offset": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "collision_rotation": [
-                        0.0,
-                        0.0,
-                        0.0
-                    ],
-                    "fit_to_model": false,
-                    "collision_enabled": true,
-                    "trigger": false,
-                    "mass": 0.0,
-                    "friction": 0.5,
-                    "restitution": 0.0
-                },
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
@@ -1366,6 +382,32 @@
                         }
                     ],
                     "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "body_type": "static",
+                    "collision_size": [
+                        2.0,
+                        2.0,
+                        1.0
+                    ],
+                    "collision_offset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "collision_rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "fit_to_model": false,
+                    "collision_enabled": true,
+                    "trigger": false,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [
@@ -1387,17 +429,47 @@
             }
         },
         {
-            "id": 104,
+            "id": 103,
             "locked": false,
-            "name": "WestWall",
             "components": {
+                "renderer": {
+                    "cast_shadows": true,
+                    "receive_shadows": true,
+                    "model": "assets/models/pickup.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                1.0,
+                                0.65,
+                                0.1,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
                 "physics": {
-                    "shape": "box",
+                    "shape": "sphere",
                     "static": true,
                     "body_type": "static",
                     "collision_size": [
-                        2.0,
-                        2.0,
+                        1.0,
+                        1.0,
                         1.0
                     ],
                     "collision_offset": [
@@ -1412,11 +484,39 @@
                     ],
                     "fit_to_model": false,
                     "collision_enabled": true,
-                    "trigger": false,
+                    "trigger": true,
                     "mass": 0.0,
                     "friction": 0.5,
                     "restitution": 0.0
                 },
+                "transform": {
+                    "position": [
+                        0.0,
+                        1.0,
+                        5.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                },
+                "code": {
+                    "directory": "scripts/fpp_game.lua"
+                }
+            },
+            "name": "PickupOrb"
+        },
+        {
+            "id": 104,
+            "locked": false,
+            "name": "WestWall",
+            "components": {
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
@@ -1448,30 +548,6 @@
                     ],
                     "visible": true
                 },
-                "transform": {
-                    "position": [
-                        -19.034936904907227,
-                        0.6837462186813354,
-                        1.5701327323913574
-                    ],
-                    "rotation": [
-                        -90.0,
-                        90.0,
-                        92.71890258789063
-                    ],
-                    "scale": [
-                        20.0,
-                        3.0,
-                        1.0
-                    ]
-                }
-            }
-        },
-        {
-            "id": 105,
-            "locked": false,
-            "name": "EastWall",
-            "components": {
                 "physics": {
                     "shape": "box",
                     "static": true,
@@ -1498,6 +574,30 @@
                     "friction": 0.5,
                     "restitution": 0.0
                 },
+                "transform": {
+                    "position": [
+                        -19.034936904907227,
+                        0.6837462186813354,
+                        1.5701327323913574
+                    ],
+                    "rotation": [
+                        -90.0,
+                        90.0,
+                        92.71890258789062
+                    ],
+                    "scale": [
+                        20.0,
+                        3.0,
+                        1.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 105,
+            "locked": false,
+            "name": "EastWall",
+            "components": {
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
@@ -1528,6 +628,32 @@
                         }
                     ],
                     "visible": true
+                },
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "body_type": "static",
+                    "collision_size": [
+                        2.0,
+                        2.0,
+                        1.0
+                    ],
+                    "collision_offset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "collision_rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "fit_to_model": false,
+                    "collision_enabled": true,
+                    "trigger": false,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
                 },
                 "transform": {
                     "position": [

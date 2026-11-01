@@ -1489,3 +1489,11 @@ Logs: `/tmp/bengine-usability-resume-build.log`,
   Não foi executado o editor completo nem feita inspeção gráfica manual.
   A rolagem adicionada trata os campos de uma linha; o comportamento de
   rolagem de editores multilinha não foi ampliado nesta alteração.
+
+A integração do commit concorrente 7f8846dd preserva a migração de referências
+ECS fracas e as alterações de interface. A finalização da janela removia o ECS
+e depois o acessava novamente; a limpeza duplicada foi removida. O submódulo
+BGUI combina o novo inputbox com as correções de MSVC, medidas e fixtures já
+validadas. A cena recém-editada referenciava GLB e script ausentes no repositório;
+ela foi preservada integralmente em main.experimental.scene, mantendo main.scene
+como exemplo de release autocontido, sem descartar a edição.

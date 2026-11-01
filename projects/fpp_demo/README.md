@@ -27,3 +27,7 @@ the project and included in game exports. The demo defaults to the atmosphere.
 Scenes with six legacy `skybox_faces` remain readable. A nonempty
 `skybox_image` takes precedence; clearing it restores the legacy faces. Lua
 exposes the new path as `Camera.skyboxImage`.
+
+The scene edited after the release baseline is preserved as
+`main.experimental.scene`. It references an unavailable GLB and `NewScript.lua`;
+`main.scene` remains the self-contained release example.
