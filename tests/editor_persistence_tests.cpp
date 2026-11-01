@@ -7,6 +7,7 @@
 #include "components/code.hpp"
 #include "components/physics.hpp"
 #include "components/point_light.hpp"
+#include "components/spot_light.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 
@@ -627,6 +628,37 @@ TEST(ProjectPersistenceTest, RejectsComponentsWithoutSerializationSupport) {
 
     EXPECT_FALSE(persistence.save(temporary_project_path().string(), error));
     EXPECT_NE(error.find("does not support project serialization"), std::string::npos);
+}
+
+TEST(ProjectPersistenceTest, RoundTripsSpotLightSettings) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto entity = registry->create(23);
+    registry->add<commons::spot_light>(entity);
+    auto light = registry->get<commons::spot_light>(entity.id);
+    light->position = {2.f, 3.f, 4.f};
+    light->direction = {0.f, 0.f, -1.f};
+    light->color = {0.4f, 0.5f, 0.6f};
+    light->intensity = 7.f;
+    light->inner_cutoff = 9.f;
+    light->outer_cutoff = 24.f;
+
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const auto path = temporary_project_path();
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+
+    light = registry->get<commons::spot_light>(entity.id);
+    ASSERT_NE(light, nullptr);
+    EXPECT_FLOAT_EQ(light->position.z, 4.f);
+    EXPECT_FLOAT_EQ(light->direction.z, -1.f);
+    EXPECT_FLOAT_EQ(light->color.y, 0.5f);
+    EXPECT_FLOAT_EQ(light->intensity, 7.f);
+    EXPECT_FLOAT_EQ(light->inner_cutoff, 9.f);
+    EXPECT_FLOAT_EQ(light->outer_cutoff, 24.f);
+    remove_project_files(path);
 }
 
 }

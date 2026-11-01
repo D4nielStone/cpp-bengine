@@ -8,6 +8,7 @@
 #include "components/directional_light.hpp"
 #include "components/physics.hpp"
 #include "components/renderer.hpp"
+#include "components/spot_light.hpp"
 #include "components/transform.hpp"
 #include "entities/entity.hpp"
 #include "util/pbr_material.hpp"
@@ -189,6 +190,22 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
                value.HasMember("intensity") && is_number(value["intensity"]);
     }
 
+    if (name == "spot_light") {
+        if (!value.HasMember("position") || !is_vector3(value["position"]) ||
+            !value.HasMember("direction") || !is_vector3(value["direction"]) ||
+            !value.HasMember("color") || !is_vector3(value["color"]))
+            return false;
+        for (const char* field : {"intensity", "constant", "linear", "quadratic",
+                 "inner_cutoff", "outer_cutoff"})
+            if (value.HasMember(field) && !is_number(value[field]))
+                return false;
+        const float inner = value.HasMember("inner_cutoff")
+            ? value["inner_cutoff"].GetFloat() : 12.5f;
+        const float outer = value.HasMember("outer_cutoff")
+            ? value["outer_cutoff"].GetFloat() : 17.5f;
+        return inner >= 0.f && inner < outer && outer < 90.f;
+    }
+
     return false;
 }
 
@@ -206,6 +223,8 @@ std::string component_name(const component_mask mask) {
         return "physics";
     case commons::component::COMPONENTE_LUZ_DIRECIONAL:
         return "directional_light";
+    case commons::component::COMPONENTE_LUZ_HOLOFOTE:
+        return "spot_light";
     default:
         return {};
     }
@@ -233,6 +252,8 @@ bool serialize_component(
         return std::static_pointer_cast<commons::physics>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_LUZ_DIRECIONAL:
         return std::static_pointer_cast<commons::directional_light>(component)->serialize(destination, allocator);
+    case commons::component::COMPONENTE_LUZ_HOLOFOTE:
+        return std::static_pointer_cast<commons::spot_light>(component)->serialize(destination, allocator);
     default:
         return false;
     }
@@ -382,6 +403,11 @@ bool parse_component(
     if (name == "directional_light") {
         registry.add<commons::directional_light>(entity);
         return registry.get<commons::directional_light>(entity.id)->analyze(data);
+    }
+
+    if (name == "spot_light") {
+        registry.add<commons::spot_light>(entity);
+        return registry.get<commons::spot_light>(entity.id)->analyze(data);
     }
 
     return false;

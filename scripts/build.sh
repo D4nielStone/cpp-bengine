@@ -28,6 +28,7 @@ case "$build_dir" in
 esac
 
 cmake -S "$repo_root" -B "$build_dir" \
+    -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_TESTING="$run_tests" \
     -DBUILD_RUNTIME=ON \
     -DBUILD_EDITOR=ON

@@ -2,6 +2,7 @@
 
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
+#include "components/point_light.hpp"
 #include "components/transform.hpp"
 #include "editor_context.hpp"
 #include "viewport_input_state.hpp"
@@ -370,6 +371,16 @@ public:
                     transform->get_position(),
                     light->direction
                 );
+            }
+        );
+
+        m_context->registry->cada<commons::point_light>(
+            [&](const std::uint32_t id) {
+                if (editor_camera && id == *editor_camera)
+                    return;
+                const auto light = m_context->registry->get<commons::point_light>(id);
+                if (light)
+                    m_grid_gizmo.draw_point_light(*m_camera, viewport, light->position);
             }
         );
 

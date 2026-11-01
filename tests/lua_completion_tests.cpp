@@ -91,12 +91,38 @@ TEST(LuaCompletion, MouseAcceptanceRestoresTypingFocus) {
 TEST(LuaCompletion, InfersWritableComponentProperties) {
     for (const auto& [type, property] : std::vector<std::pair<std::string, std::string>>{
         {"Rigidbody", "mass"}, {"Camera", "fieldOfView"},
-        {"DirectionalLight", "direction"}, {"PointLight", "intensity"}}) {
+        {"DirectionalLight", "direction"}, {"PointLight", "intensity"},
+        {"SpotLight", "outerCutoff"}}) {
         const auto source = "local component = gameObject:GetComponent(\"" + type + "\")\ncomponent." + property;
         const auto result = complete_lua(source, source.size());
         ASSERT_TRUE(result) << source;
         EXPECT_EQ(result->members, (std::vector<std::string>{property}));
     }
+}
+
+TEST(LuaCompletion, SpotLightOffersAllPropertiesAndMethods) {
+    const std::string source =
+        "local spot = gameObject:GetComponent(\"SpotLight\")\nspot.";
+    const auto properties = complete_lua(source, source.size());
+    ASSERT_TRUE(properties);
+    EXPECT_EQ(properties->members, (std::vector<std::string>{
+        "color", "constant", "direction", "innerCutoff", "intensity",
+        "linear", "outerCutoff", "position", "quadratic", "worldDirection",
+        "worldPosition"
+    }));
+
+    const std::string method_source =
+        "local spot = gameObject:GetComponent(\"SpotLight\")\nspot:Get";
+    const auto methods = complete_lua(method_source, method_source.size());
+    ASSERT_TRUE(methods);
+    EXPECT_EQ(methods->members, (std::vector<std::string>{"GetWorldDirection"}));
+    const std::string setter_source =
+        "local spot = gameObject:GetComponent(\"SpotLight\")\nspot:Set";
+    const auto setters = complete_lua(setter_source, setter_source.size());
+    ASSERT_TRUE(setters);
+    EXPECT_EQ(setters->members, (std::vector<std::string>{
+        "SetInnerCutoff", "SetOuterCutoff"
+    }));
 }
 
 TEST(LuaCompletion, OffersShadowControls) {

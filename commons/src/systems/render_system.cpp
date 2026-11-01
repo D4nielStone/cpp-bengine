@@ -9,6 +9,7 @@
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
+#include "components/spot_light.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 #include "debugging/debug.hpp"
@@ -35,9 +36,11 @@ render_system::~render_system() {
 }
 
 bool render_system::prepare_shadow_map(int resolution) {
+    resolution = std::clamp(resolution, 128, 8192);
+    if (m_shadow_fbo && m_shadow_resolution == resolution) return true;
     GLint max_texture_size;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
-    resolution = std::min(std::clamp(resolution, 128, 8192), max_texture_size);
+    resolution = std::min(resolution, max_texture_size);
     if (m_shadow_fbo && m_shadow_resolution == resolution) return true;
     GLint framebuffer, read_framebuffer, texture;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
@@ -106,6 +109,21 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             point_lights.push_back(*light);
     });
 
+    std::vector<spot_light> spot_lights;
+    reg->cada<spot_light>([&](const uint32_t light_entity) {
+        if (auto light = reg->get<spot_light>(light_entity)) {
+            auto world_light = *light;
+            world_light.position = light->get_world_position();
+            world_light.direction = light->get_world_direction();
+            const glm::vec3 direction{
+                world_light.direction.x, world_light.direction.y, world_light.direction.z
+            };
+            const float length_squared = glm::dot(direction, direction);
+            if (std::isfinite(length_squared) && length_squared > 1e-8f)
+                spot_lights.push_back(std::move(world_light));
+        }
+    });
+
     std::vector<std::pair<std::shared_ptr<renderer>, std::shared_ptr<transform>>> renderables;
     reg->cada<renderer, transform>([&](const uint32_t render_entity) {
         renderables.emplace_back(
@@ -115,6 +133,8 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
     });
 
     reg->cada<camera>([&](const uint32_t entity) {
+        if (m_camera_filter && !m_camera_filter(entity))
+            return;
         auto camera_component = reg->get<camera>(entity);
         if (!camera_component) {
             return;
@@ -233,6 +253,23 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
                 shader.setFloat(prefix + "constant", point_lights[index].constant);
                 shader.setFloat(prefix + "linear", point_lights[index].linear);
                 shader.setFloat(prefix + "quadratic", point_lights[index].quadratic);
+            }
+            shader.setInt("spotLightCount", static_cast<int>(spot_lights.size()));
+
+            for (size_t index = 0; index < spot_lights.size(); ++index) {
+                const auto prefix = "spotLights[" + std::to_string(index) + "].";
+                const auto& light = spot_lights[index];
+                shader.setVec3(prefix + "position", light.position);
+                shader.setVec3(prefix + "direction", light.direction);
+                shader.setVec3(prefix + "color", light.color);
+                shader.setFloat(prefix + "intensity", light.intensity);
+                shader.setFloat(prefix + "constant", light.constant);
+                shader.setFloat(prefix + "linear", light.linear);
+                shader.setFloat(prefix + "quadratic", light.quadratic);
+                const float inner = finite_clamp(light.inner_cutoff, 12.5f, 0.f, 89.f);
+                const float outer = finite_clamp(light.outer_cutoff, 17.5f, inner + 0.1f, 89.9f);
+                shader.setFloat(prefix + "innerCutoff", std::cos(glm::radians(inner)));
+                shader.setFloat(prefix + "outerCutoff", std::cos(glm::radians(outer)));
             }
 
             render_component->m_modelo->draw();

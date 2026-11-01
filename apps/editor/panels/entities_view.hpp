@@ -5,6 +5,7 @@
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
 #include "components/renderer.hpp"
+#include "components/spot_light.hpp"
 #include "components/transform.hpp"
 #include "editor_context.hpp"
 #include "panel.hpp"
@@ -151,6 +152,8 @@ private:
         if (m_context->registry->get<commons::camera>(id))
             return "camera";
         if (m_context->registry->get<commons::directional_light>(id))
+            return "lightbulb";
+        if (m_context->registry->get<commons::spot_light>(id))
             return "lightbulb";
         if (m_context->registry->get<commons::renderer>(id))
             return "cube";

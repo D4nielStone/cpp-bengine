@@ -1564,3 +1564,121 @@ esse contexto ignora apenas a verificação gráfica, executada no Linux/Xvfb.
   todos os subprocessos do runtime. Memória ainda alcançável em bibliotecas
   do sistema não foi tratada como vazamento. APIs públicas, formatos de
   persistência e alterações concomitantes do usuário foram preservados.
+
+### 2026-11-01 — Diagnóstico de BGUI e benchmarks automáticos de release
+
+- Investigação executada no BGUI `ed6e3b32`, vinculado à engine atual, sem
+  alterar os submódulos. A suíte usa APIs reais de texto, botão, checkbox e
+  janela; uma subclasse de texto conta medições de conteúdo e gerações de
+  comandos, delegando o comportamento à implementação original.
+- Evidência local: Intel Core i3-1215U, GPU integrada Intel ADL GT2, Mesa
+  25.2.8, GCC 13.3, RelWithDebInfo (`-O2 -g -DNDEBUG`), 1280×720. Dez cenários,
+  três repetições, 30 quadros de aquecimento e 120 quadros medidos por cenário
+  em cada repetição. Amostras, JSON, Markdown e logs em
+  `out/benchmarks/final/benchmark-Intel*` (saída local ignorada pelo Git).
+- Achado 1: `text::set_buffer()` invalida layout até a raiz;
+  `layout::calculate_content_sizes()` percorre todos os filhos habilitados,
+  sem restringir a medição aos textos alterados. Mudar somente o primeiro
+  texto produziu 102 medições em uma árvore de 100 textos e 1.002 em uma de
+  1.000, embora somente uma geração de comandos de texto tenha ocorrido em
+  cada quadro. Tempo médio de atualização da UI: 1,14 e 4,52 ms,
+  respectivamente. O cache de desenho preserva os demais textos, mas não
+  elimina a medição global durante esse tipo de invalidação.
+- Achado 2: `text::get_requires()` mede novamente o conteúdo, converte UTF-8
+  e aloca vetores proporcionais ao texto antes de emitir os glifos.
+  `calc_content_size()` e o próprio desenho percorrem a string. Um texto
+  dinâmico de 2.000 linhas teve três medições e uma geração por quadro,
+  aproximadamente 52,10 ms de atualização da UI e 2,17 ms de mutação.
+  A mediana do quadro sincronizado foi 70,67 ms, contra 20,56 ms com a mesma
+  string estática. Esses números são evidências da carga sintética, não
+  medições de FPS do editor ou do jogo.
+- Achado 3: os glifos fora da tela continuam sendo enfileirados por
+  `text::get_requires()`; o backend expande os comandos em vértices antes
+  do recorte por scissor. O texto de 2.000 linhas gerou aproximadamente
+  100.002 comandos mesmo estático e com apenas uma parte visível. O cache
+  evitou novas gerações, mas a cópia de comandos e a submissão continuaram:
+  aproximadamente 3,23 ms de atualização e 13,31 ms de submissão por quadro.
+  Comandos não são draw calls: o backend já possui batching de comandos
+  consecutivos compatíveis. A suíte não substitui esse batching.
+- Achado 4: com 100 e 1.000 grupos de botão/checkbox, a mediana do quadro foi
+  10,37 e 21,72 ms; com quatro e 32 janelas sobrepostas, 3,10 e 8,80 ms.
+  A árvore ainda participa de atualização/input/commit mesmo estática,
+  enquanto os comandos visíveis e trocas de material/clip também aumentam.
+  Não foi isolada a participação individual de cada travessia ou de cada
+  draw call; não se atribui todo esse custo a um único subsistema.
+- Implementação na engine: alvo opt-in `bengine_ui_benchmark`, runner Python
+  sem dependências adicionais, relatórios JSON/Markdown, amostras brutas,
+  contadores e tempos separados de mutação/UI/submissão/espera/GPU.
+  API e arquitetura de BGUI permanecem compatíveis. O sistema não altera
+  projetos, fontes, shaders ou dados de cena para criar as cargas.
+- Release: o workflow de tags passa a compilar e executar a suíte no Linux
+  com Xvfb/llvmpipe, consultar o relatório da release anterior e anexar os
+  dois relatórios e um ZIP com evidências junto aos pacotes. Metadados
+  incompatíveis impedem comparação percentual. Regressões estatísticas são
+  consultivas por padrão; erros de execução impedem a publicação. O runner
+  permite gating explícito em hardware estável.
+- Validação executada: configuração CMake e build otimizado do alvo;
+  dez cenários completos na GPU Intel; dez cenários curtos em duas
+  repetições com llvmpipe no display disponível; testes de estatística,
+  comparação, execução do runner e preservação de logs de falha;
+  CTest `benchmark_reports`, `release_packaging`, `platform_build_scripts`;
+  YAML do workflow analisado e diff verificado. Não houve modificação
+  funcional na biblioteca que exigisse revalidar sua implementação.
+- Limites: o kernel bloqueia `perf` (`perf_event_paranoid=4`), portanto não
+  houve amostragem de stacks de CPU. Xvfb não está instalado localmente;
+  a validação llvmpipe usou o display existente. GitHub Actions, download
+  de baseline/publicação remota e execução nativa Windows não foram
+  executados nesta sessão. Uma janela escondida com `glFinish()` por
+  quadro mede throughput sincronizado, sem compositor/VSync e sem a
+  sobreposição normal CPU/GPU. Os tempos não devem ser somados ao tempo
+  GPU nem extrapolados para a engine completa.
+- Próximas correções orientadas por essas evidências: medição incremental
+  com invalidação correta de tamanhos dos ancestrais, geração apenas dos
+  glifos visíveis e redução de cópias/submissões de comandos. Nenhuma dessas
+  alterações foi misturada à infraestrutura de benchmark desta etapa.
+
+### 2026-11-01 — Otimizações de BGUI e patch v0.1.2
+
+- Reproduzido com regressão: modificar um texto fazia um irmão inalterado
+  passar novamente por medição. O teste falhou antes da correção. Folhas
+  agora limpam a invalidação após o arrange; a medição de layout e a etapa
+  de medição em layouts lineares respeitam a invalidação de cada filho.
+  A propagação para ancestrais permanece, preservando reflow e estilos.
+- Glifos totalmente fora do clip ativo não geram comandos nem atualizações
+  de material. Glifos parcialmente visíveis preservam geometria/UV e o
+  recorte do backend. Layout, cursor, seleção e guias continuam percorrendo
+  o texto para manter offsets e navegação. Vetores de guias são alocados
+  somente quando as guias estão ativas. Regressão cobre texto longo,
+  glifos parcialmente visíveis e mudança de posição por scroll.
+- BGUI: commit `dc7709b`, seis arquivos, sem mudanças no backend aninhado
+  ou nas APIs públicas. Os 130 testes do BGUI passaram no build otimizado.
+- Benchmark comparável, mesma máquina/configuração e protocolo da rodada
+  anterior: três repetições de 120 quadros medidos, aquecimento de 30.
+  Relatório em `out/benchmarks/v0.1.2/benchmark-Intel.{json,md}`, com todas
+  as amostras e os logs no mesmo diretório. Texto longo estático:
+  mediana 20,56 → 2,18 ms (-89,4%); dinâmico: 70,67 → 13,64 ms (-80,7%).
+  Os comandos do texto longo caíram de aproximadamente 100.002 para 2.552;
+  a alteração de um texto em uma árvore de 1.000 textos passou de 1.002
+  para três medições por quadro. Nenhum cenário excedeu o limite consultivo
+  de regressão de 20%, mas widgets/janelas não demonstraram ganho consistente:
+  houve variações de até +16,2% na mediana de grupos de widgets. A redução
+  observada de trabalho em textos não é extrapolada para FPS do editor.
+- O patch inclui, por autorização do usuário, as alterações locais de
+  holofotes, Lua, editor, cenas e benchmarks. Na revisão da compatibilidade,
+  `setUnityApi` foi preservada como alias de `setUpApi`. O demo declara
+  engine/minimum_engine_version 0.1.2 por utilizar holofotes.
+- A suíte completa revelou dois erros nas novas verificações de Lua:
+  o teste de avanço ainda usava a entrada diagonal do passo anterior e
+  a posição rotacionada do holofote era comparada por igualdade exata de
+  float. A entrada de avanço foi explicitada antes da verificação e a
+  comparação da rotação usa a tolerância já adotada nos outros eixos.
+- Validação local: build integral Debug; CTest com 349 entradas, 348
+  aprovadas e uma opt-in ignorada; esta última passou separadamente com
+  BENGINE_RUNTIME_SMOKE=1, iniciando e reiniciando o runtime real do demo.
+  Zero falhas na rodada final. Build otimizado de BGUI/benchmark e 130
+  testes BGUI aprovados; 3.600 quadros medidos na comparação. Validação da
+  versão v0.1.2, sintaxe YAML/shell do workflow e whitespace executadas.
+- Release: notas em `docs/RELEASE_v0.1.2.md`; o workflow incorpora notas
+  específicas da versão, além do changelog gerado. Validação Windows e
+  geração dos pacotes serão verificadas pelo fluxo remoto de release.
+  Os limites estatísticos do benchmark permanecem os de BENCHMARKS.md.

@@ -36,6 +36,11 @@ namespace editor {
             const bgui::vec3& position,
             const bgui::vec3& ray_direction
         );
+        void draw_point_light(
+            const COMMONS_NS::camera& viewport_camera,
+            const bgui::vec4i& viewport,
+            const bgui::vec3& position
+        );
 
     private:
         unsigned int m_program{0};

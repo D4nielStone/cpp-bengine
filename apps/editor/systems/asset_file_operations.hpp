@@ -9,6 +9,7 @@ namespace editor::ui {
 namespace asset_files {
 namespace fs = std::filesystem;
 
+// Returns the canonical path of a file inside the project, or throws an exception if the file is not editable.
 inline fs::path editable_file(const fs::path& requested, const fs::path& project) {
     const auto root = fs::canonical(project);
     const auto source = fs::canonical(requested);
@@ -19,11 +20,13 @@ inline fs::path editable_file(const fs::path& requested, const fs::path& project
     return source;
 }
 
+// Returns true if the path is a scene document (".scene", ".world" or ".bengine").
 inline bool scene_document(const fs::path& path) {
     const auto ext = path.extension().string();
     return ext == ".scene" || ext == ".world" || ext == ".bengine";
 }
 
+// Rewrites all paths in a JSON document, returning true if any changes were made.
 inline bool rewrite_paths(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator,
     const fs::path& root, const fs::path& from, const fs::path& to, bool path_value = false) {
     bool changed = false;

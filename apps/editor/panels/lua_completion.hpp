@@ -70,6 +70,7 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
             else if (value.find("GetComponent") != std::string::npos && value.find("Rigidbody") != std::string::npos) type = "rigidbody";
             else if (value.find("GetComponent") != std::string::npos && value.find("DirectionalLight") != std::string::npos) type = "directionalLight";
             else if (value.find("GetComponent") != std::string::npos && value.find("PointLight") != std::string::npos) type = "pointLight";
+            else if (value.find("GetComponent") != std::string::npos && value.find("SpotLight") != std::string::npos) type = "spotLight";
             else if (value.find("GetComponent") != std::string::npos && value.find("Camera") != std::string::npos) type = "camera";
             else if (value.starts_with("gameObject.transform") || value == "transform") type = "transform";
             else if (value.starts_with("GameObject.Find(") || value == "gameObject") type = "gameObject";
@@ -86,10 +87,13 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
     } else if (type == "rigidbody") {
         names = {"AddForce", "SetLinearFactor", "SetAngularFactor"};
         if (!methods) names.insert(names.end(), {"mass", "friction", "restitution", "velocity"});
+    } else if (type == "spotLight" && methods) {
+        names = {"GetWorldDirection", "SetInnerCutoff", "SetOuterCutoff"};
     } else if (!methods) {
         if (type == "camera") names = {"fieldOfView", "aspect", "nearClipPlane", "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox"};
         else if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "pointLight") names = {"position", "color", "intensity", "constant", "linear", "quadratic"};
+        else if (type == "spotLight") names = {"position", "worldPosition", "direction", "worldDirection", "color", "intensity", "constant", "linear", "quadratic", "innerCutoff", "outerCutoff"};
         else if (type == "renderer") names = {"enabled", "visible", "castShadows", "receiveShadows"};
         else if (type == "GameObject") names = {"Find"};
         else if (type == "Time") names = {"deltaTime", "time"};

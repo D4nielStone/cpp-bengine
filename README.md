@@ -98,6 +98,23 @@ Both helpers configure and build the editor and runtime in `build/` by default.
 Pass a build directory to use another location. Add `--test` on Linux or
 `-RunTests` on Windows to also build and run the test suite.
 
+For performance measurements, use an optimized build with debug symbols:
+
+```sh
+cmake --preset performance
+cmake --build --preset performance --target editor_app runtime_app editor_render_tests
+ctest --preset performance -R EditorRenderTest
+./out/performance/apps/editor_app
+```
+
+This uses a separate build directory and leaves existing Debug builds intact.
+The preset uses Unix Makefiles; on Windows, configure with the native generator
+and `-DCMAKE_BUILD_TYPE=RelWithDebInfo` (or build `--config RelWithDebInfo`
+with a multi-configuration generator).
+
+Automated UI stress tests and per-release performance reports are described in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
 Once the editor is open, select **Build > Export Game**. Export saves the
 current project/scene and produces a ready-to-run game for the selected target.
 Choose a dedicated empty output directory; it will contain only `linux/` and/or

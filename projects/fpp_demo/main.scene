@@ -23,11 +23,11 @@
                         1.0,
                         1.0
                     ],
-                    "intensity": 2.0,
+                    "intensity": 0.30000001192092896,
                     "shadows": true,
                     "shadow_resolution": 4096,
                     "shadow_distance": 50.0,
-                    "shadow_bias": 9.999999747378752e-05,
+                    "shadow_bias": 0.00009999999747378752,
                     "shadow_strength": 1.0
                 },
                 "transform": {
@@ -52,6 +52,7 @@
         {
             "id": 3,
             "locked": false,
+            "name": "ArenaRamp",
             "components": {
                 "physics": {
                     "shape": "box",
@@ -94,7 +95,7 @@
                             "metallic": 0.0,
                             "roughness": 0.5,
                             "ao": 1.0,
-                            "world_texture": true,
+                            "world_texture": false,
                             "uvOffsetX": 0.0,
                             "uvOffsetY": 0.0,
                             "uvRepeatX": 0.10000000149011612,
@@ -127,12 +128,12 @@
                         9.0990629196167
                     ]
                 }
-            },
-            "name": "ArenaRamp"
+            }
         },
         {
             "id": 4,
             "locked": false,
+            "name": "ArenaPillar",
             "components": {
                 "renderer": {
                     "cast_shadows": true,
@@ -208,8 +209,55 @@
                         1.0
                     ]
                 }
-            },
-            "name": "ArenaPillar"
+            }
+        },
+        {
+            "id": 5,
+            "locked": false,
+            "parent": 100,
+            "name": "luz",
+            "components": {
+                "spot_light": {
+                    "position": [
+                        0.0,
+                        2.0,
+                        -2.0
+                    ],
+                    "direction": [
+                        1.0,
+                        0.0,
+                        0.0
+                    ],
+                    "color": [
+                        1.0,
+                        0.0,
+                        0.9443216323852539
+                    ],
+                    "intensity": 5.0,
+                    "constant": 1.0,
+                    "linear": 0.09000000357627869,
+                    "quadratic": 0.03200000151991844,
+                    "inner_cutoff": 12.5,
+                    "outer_cutoff": 17.5
+                },
+                "transform": {
+                    "position": [
+                        10.0,
+                        -1.7500001192092896,
+                        4.37113897078234e-7
+                    ],
+                    "rotation": [
+                        -0.0,
+                        -1.653984785079956,
+                        -0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0000001192092896,
+                        1.0
+                    ]
+                }
+            }
         },
         {
             "id": 100,
@@ -231,6 +279,7 @@
                         219,
                         255
                     ],
+                    "skybox_image": "",
                     "skybox_faces": [
                         "",
                         "",
@@ -244,14 +293,13 @@
                         0.25,
                         0.550000011920929
                     ],
-                    "skybox": false,
-                    "skybox_image": ""
+                    "skybox": false
                 },
                 "transform": {
                     "position": [
-                        0.0,
-                        1.65,
-                        0.0
+                        -0.39293766021728516,
+                        1.65001380443573,
+                        -0.00013569848670158535
                     ],
                     "rotation": [
                         0.0,
@@ -292,7 +340,7 @@
                             "uvRepeatX": 1.0,
                             "uvRepeatY": 1.0,
                             "maps": {
-                                "tex_albedo": "assets/g1779.png",
+                                "tex_albedo": "",
                                 "tex_normal": "",
                                 "tex_metallic": "",
                                 "tex_roughness": "",
@@ -431,7 +479,23 @@
         {
             "id": 103,
             "locked": false,
+            "name": "PickupOrb",
             "components": {
+                "code": {
+                    "directory": "scripts/fpp_game.lua",
+                    "scripts": [
+                        "scripts/rotacao.lua"
+                    ],
+                    "script_properties": [
+                        [
+                            {
+                                "name": "speed",
+                                "type": "number",
+                                "value": 5.0
+                            }
+                        ]
+                    ]
+                },
                 "renderer": {
                     "cast_shadows": true,
                     "receive_shadows": true,
@@ -440,8 +504,8 @@
                         {
                             "albedo": [
                                 1.0,
-                                0.65,
-                                0.1,
+                                0.6499999761581421,
+                                0.10000000149011612,
                                 1.0
                             ],
                             "metallic": 0.0,
@@ -489,6 +553,29 @@
                     "friction": 0.5,
                     "restitution": 0.0
                 },
+                "spot_light": {
+                    "position": [
+                        0.0,
+                        2.0,
+                        -2.0
+                    ],
+                    "direction": [
+                        0.0,
+                        -1.0,
+                        0.0
+                    ],
+                    "color": [
+                        0.9497030973434448,
+                        0.7292678952217102,
+                        0.9999999403953552
+                    ],
+                    "intensity": 4.0,
+                    "constant": 2.0,
+                    "linear": 0.09000000357627869,
+                    "quadratic": 0.03200000151991844,
+                    "inner_cutoff": 30.0,
+                    "outer_cutoff": 89.9000015258789
+                },
                 "transform": {
                     "position": [
                         0.0,
@@ -505,12 +592,8 @@
                         1.0,
                         1.0
                     ]
-                },
-                "code": {
-                    "directory": "scripts/fpp_game.lua"
                 }
-            },
-            "name": "PickupOrb"
+            }
         },
         {
             "id": 104,
@@ -583,7 +666,7 @@
                     "rotation": [
                         -90.0,
                         90.0,
-                        92.71890258789062
+                        92.71890258789063
                     ],
                     "scale": [
                         20.0,
@@ -711,7 +794,7 @@
                 "transform": {
                     "position": [
                         0.0,
-                        0.1,
+                        0.10000000149011612,
                         10.0
                     ],
                     "rotation": [

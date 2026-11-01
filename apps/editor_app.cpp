@@ -508,6 +508,9 @@ int main(int argc, char** argv) {
     bgui::get_layout().add<editor::ui::asset_drop_overlay, bgui::layer::overlay>([&window]() { return window.file_drag_hovered(); }, editor_context);
     editor.add_panel<editor::ui::debug_view>();
     auto render_system = window.add<commons::render_system>();
+    render_system->set_camera_filter([&scene](std::uint32_t entity) {
+        return scene.needs_camera_render(entity);
+    });
     auto& runtime_tools_panel =
         editor.add_panel<editor::ui::runtime_tools_view>(
             window,

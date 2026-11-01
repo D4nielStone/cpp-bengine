@@ -12,6 +12,7 @@
 #include <cmath>
 #include "components/renderer.hpp"
 #include "components/directional_light.hpp"
+#include "components/spot_light.hpp"
 #include "systems/render_system.hpp"
 #include "project_persistence_system.hpp"
 #include "viewport_sync.hpp"
@@ -149,6 +150,7 @@ TEST_F(EditorRenderTest, NeutralNormalMapPreservesLightingOnAHorizontalSurface) 
     shader.setVec3("dirLight.ambient", {0, 0, 0});
     shader.setFloat("dirLight.intensity", 1.f);
     shader.setInt("pointLightCount", 0);
+    shader.setInt("spotLightCount", 0);
 
     commons::material material;
     material.set_uniform("material.albedo", commons::color{0.5f, 0.5f, 0.5f, 1.f});
@@ -171,6 +173,21 @@ TEST_F(EditorRenderTest, NeutralNormalMapPreservesLightingOnAHorizontalSurface) 
     };
     const auto untextured = render();
     ASSERT_GT(untextured[0], 30);
+    shader.setVec3("spotLights[0].position", {0, 3, 0});
+    shader.setVec3("spotLights[0].direction", {0, -1, 0});
+    shader.setVec3("spotLights[0].color", {1, 1, 1});
+    shader.setFloat("spotLights[0].intensity", 10.f);
+    shader.setFloat("spotLights[0].constant", 1.f);
+    shader.setFloat("spotLights[0].linear", 0.f);
+    shader.setFloat("spotLights[0].quadratic", 0.f);
+    shader.setFloat("spotLights[0].innerCutoff", std::cos(glm::radians(10.f)));
+    shader.setFloat("spotLights[0].outerCutoff", std::cos(glm::radians(20.f)));
+    shader.setInt("spotLightCount", 1);
+    const auto spot_lit = render();
+    EXPECT_GT(spot_lit[0], untextured[0]);
+    shader.setVec3("spotLights[0].direction", {1, 0, 0});
+    EXPECT_NEAR(render()[0], untextured[0], 2);
+    shader.setInt("spotLightCount", 0);
     unsigned int normal{};
     glGenTextures(1, &normal);
     glBindTexture(GL_TEXTURE_2D, normal);
@@ -307,6 +324,21 @@ TEST_F(EditorRenderTest, DirectionalShadowsRespectCasterReceiverAndLightControls
             if (int(b[i]) - int(a[i]) > 10) ++count;
         return count;
     };
+    light->shadows = false;
+    cube->visible = false;
+    const auto unspotted = render();
+    auto spot_entity = registry->create();
+    registry->add<commons::spot_light>(spot_entity);
+    auto spot = registry->get<commons::spot_light>(spot_entity.id);
+    spot->position = {0, 4, 0};
+    spot->direction = {0, -1, 0};
+    spot->intensity = 30.f;
+    EXPECT_GT(darkened(unspotted, render()), 20);
+    spot->direction = {1, 0, 0};
+    EXPECT_LT(darkened(unspotted, render()), 10);
+    registry->remove(spot_entity.id);
+    cube->visible = true;
+    light->shadows = true;
     EXPECT_GT(darkened(shadowed, lit), 20);
     auto previous_shadow = shadowed;
     for (const int resolution : {128, 1024, 2048}) {
@@ -387,6 +419,14 @@ TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
     int green = 0;
     for (size_t i=0;i<pixels.size();i+=3) if (pixels[i+1]>150 && pixels[i+1]>pixels[i]*2) ++green;
     EXPECT_GT(green,10);
+    glClear(GL_COLOR_BUFFER_BIT);
+    overlay.draw_point_light(*camera, {0,0,64,64}, {0,0,0});
+    std::fill(pixels.begin(), pixels.end(), 0);
+    glReadPixels(0,0,64,64,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+    int yellow = 0;
+    for (size_t i=0;i<pixels.size();i+=3)
+        if (pixels[i] > 180 && pixels[i+1] > 150 && pixels[i+2] < 120) ++yellow;
+    EXPECT_GT(yellow,10);
     registry->remove(2);registry->remove(1);
 }
 
@@ -728,4 +768,32 @@ TEST(CameraSettings, RejectsMalformedCrossPathsWithoutTruncatingThem) {
     camera.skybox_image = std::string("bad\0path", 8);
     rapidjson::Document data(rapidjson::kObjectType);
     EXPECT_FALSE(camera.serialize(data, data.GetAllocator()));
+}
+
+TEST_F(EditorRenderTest, CameraFilterSkipsUnusedFramebuffersAndCanBeCleared) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto first = registry->create();
+    auto second = registry->create();
+    registry->add<commons::camera>(first);
+    registry->add<commons::camera>(second);
+    auto first_camera = registry->get<commons::camera>(first.id);
+    auto second_camera = registry->get<commons::camera>(second.id);
+    first_camera->viewport({32, 32});
+    second_camera->viewport({32, 32});
+    first_camera->request_framebuffer_size({48, 48});
+    second_camera->request_framebuffer_size({48, 48});
+    commons::render_system render;
+    render.set_camera_filter([id = first.id](std::uint32_t entity) { return entity == id; });
+    render.update(registry);
+    EXPECT_EQ(render.last_camera_count(), 1u);
+    EXPECT_EQ(first_camera->viewportFBO.x, 48);
+    EXPECT_EQ(second_camera->viewportFBO.x, 32);
+    render.set_camera_filter([](std::uint32_t) { return false; });
+    render.update(registry);
+    EXPECT_EQ(render.last_camera_count(), 0u);
+    render.set_camera_filter({});
+    render.update(registry);
+    EXPECT_EQ(render.last_camera_count(), 2u);
+    EXPECT_EQ(second_camera->viewportFBO.x, 48);
+    EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
 }

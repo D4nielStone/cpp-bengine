@@ -5,8 +5,9 @@
  *  Este file é responsável por expor components internos do motor gráfico ao ambient
  *  de scripts Lua utilizando a biblioteca LuaBridge. Ele define a estrutura `entity`, que
  *  agrega múltiplos components possíveis de uma entity de jogo (transformação, física, câmera,
- *  text, image, renderer e luz direcional), e oferece funções auxiliares para registrar
- *  utilitários, física, time e entradas no estado da máquina virtual Lua.
+ *  text, image, renderer e luzes direcionais, pontuais e holofotes), e oferece
+ *  funções auxiliares para registrar utilitários, física, time e entradas no
+ *  estado da máquina virtual Lua.
  *
  *  Ao incluir este cabeçalho e chamar as funções apropriadas de definição, o motor pode ser
  *  facilmente estendido e controlado por meio de scripts Lua, facilitando a criação de lógicas
@@ -17,7 +18,7 @@
  *  - Física (integração com Bullet Physics)
  *  - Câmera (visão da cena)
  *  - Texto e image (elements de interface)
- *  - Luz direcional e renderer (system gráfico)
+ *  - Luzes direcionais, pontuais e holofotes, e renderer (system gráfico)
  *
  *  ### Exemplo de uso no script lua:
  *  \code {lua}
@@ -41,6 +42,7 @@ namespace COMMONS_NS {
     struct ecs;
     namespace api {
         void setUnityApi(sol::state&, const std::shared_ptr<ecs>&, std::uint32_t);
+        void setUpApi(sol::state&, const std::shared_ptr<ecs>&, std::uint32_t);
 	     /**  Define as classes da api */
 	  	void setClasses(sol::state&);
          /**  Define os namespaces da api como math e inputs */

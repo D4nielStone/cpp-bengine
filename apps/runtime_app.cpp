@@ -229,6 +229,9 @@ int main(const int argc, char** argv) {
     );
 
     auto render_system = std::make_shared<commons::render_system>();
+    render_system->set_camera_filter([id = game_camera->my_object](std::uint32_t entity) {
+        return entity == id;
+    });
     if (diagnostics) {
     auto& profiler = root.add<runtime_profiler_text>(
         window,

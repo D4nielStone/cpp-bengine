@@ -196,6 +196,8 @@ gtest_discover_tests(model_import_tests)
 # Shell/PowerShell orchestration contracts; no graphics context required.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME benchmark_reports
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_report_tests.py)
     add_test(NAME release_packaging
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_tests.py)
 endif()

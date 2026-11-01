@@ -20,7 +20,7 @@ end
 - `gameObject.transform` e `transform`: Transform da entidade; ausente retorna `nil`.
 - `gameObject:GetComponent("Transform")`: consulta o Transform. Também aceita `"Renderer"`
   (`enabled`/`visible`, visibilidade), `"Rigidbody"`, `"Camera"`,
-  `"DirectionalLight"` e `"PointLight"`. Outros nomes retornam `nil`.
+  `"DirectionalLight"`, `"PointLight"` e `"SpotLight"`. Outros nomes retornam `nil`.
   `Destroy(body)` remove um Rigidbody do ECS; o sistema de física sincroniza
   a remoção na próxima atualização.
 - `GameObject.Find(id)` ou `GameObject.Find("nome")`: procura por ID numérico
@@ -95,6 +95,19 @@ body.velocity = Vector3(0, 2, 0)
   a rotação do Transform e de seus ancestrais é aplicada ao renderizar, sem
   influência da posição ou escala e sem alterar a direção armazenada.
 - PointLight: `position`, `color`, `intensity`, `constant`, `linear`, `quadratic`.
+- SpotLight: `position` (offset local ao Transform), `worldPosition`,
+  `direction`, `worldDirection`, `color`, `intensity`,
+  `constant`, `linear`, `quadratic`, `innerCutoff`, `outerCutoff`; métodos
+  `GetWorldDirection()`, `SetInnerCutoff(graus)` e `SetOuterCutoff(graus)`.
+  A direção local padrão é +X; a rotação do Transform do objeto e de seus
+  ancestrais a converte em direção
+  mundial, sem influência da posição ou escala. `worldDirection` e
+  `GetWorldDirection()` retornam esse resultado. `worldPosition` aplica o
+  Transform hierárquico ao offset local `position`. Os ângulos de corte são
+  expressos em graus; o ângulo interno deve ser
+  menor que o externo, e o ângulo externo deve ser menor que 90°. A luz atinge
+  a intensidade máxima dentro do cone interno e diminui suavemente até o limite
+  externo.
 
 O painel Debug usa fundo escuro e recebe `print`, `Debug.Log` e falhas de
 carregamento, `setup()` e `update()`, inclusive do runtime separado. Erros incluem
@@ -136,7 +149,8 @@ pontuais continuam iluminando o material. Objetos invisíveis e malhas em overla
 não projetam sombras. A passagem de profundidade considera a geometria opaca;
 transparência de texturas não recorta a sombra. Shaders personalizados precisam
 implementar os uniforms de sombra usados em `phong.frag`. Esta implementação usa
-uma projeção por câmera, sem cascatas e sem sombras de luzes pontuais.
+uma projeção por câmera, sem cascatas e sem sombras de luzes pontuais ou holofotes.
+O shader padrão aceita até 16 luzes pontuais e 16 holofotes por material.
 
 Para shaders personalizados, `shadowMap` usa a unidade de textura 15 (reservada
 pelo renderizador); `lightSpaceMatrix` transforma coordenadas de mundo para o

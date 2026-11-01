@@ -27,6 +27,7 @@ public:
 
     bgui::image& image();
     bool is_open() const noexcept;
+    bool needs_camera_render(std::uint32_t entity) const noexcept;
     std::optional<editor_context::entity_id> entity_at(const bgui::vec2i& position) const;
     std::shared_ptr<viewport_input_state> input_state() const noexcept;
 

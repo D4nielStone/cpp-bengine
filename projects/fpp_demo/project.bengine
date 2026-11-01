@@ -1,8 +1,8 @@
 {
     "format": "bubble-engine-project",
     "version": 2,
-    "engine_version": "0.1.0",
-    "minimum_engine_version": "0.1.0",
+    "engine_version": "0.1.2",
+    "minimum_engine_version": "0.1.2",
     "project_version": "0.1.0",
     "settings": {
         "gravity": [
@@ -12,13 +12,13 @@
         ],
         "editor_camera_transform": {
             "position": [
-                -9.621138572692871,
-                10.663262367248535,
-                25.315109252929688
+                10.306008338928223,
+                8.016977310180664,
+                38.112491607666016
             ],
             "rotation": [
-                -37.55418395996094,
-                309.35211181640625,
+                -18.20458221435547,
+                261.4299011230469,
                 0.0
             ],
             "scale": [

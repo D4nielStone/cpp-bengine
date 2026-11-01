@@ -388,6 +388,62 @@ void editor::grid_gizmo::draw_directional_light(
     );
 }
 
+void editor::grid_gizmo::draw_point_light(
+    const COMMONS_NS::camera& viewport_camera,
+    const bgui::vec4i& viewport,
+    const bgui::vec3& position)
+{
+    if (!viewport_camera.flag_fb || viewport_camera.viewportFBO.x <= 0 ||
+        viewport_camera.viewportFBO.y <= 0 || viewport.z <= 0 || viewport.w <= 0)
+        return;
+
+    const glm::vec3 center{position.x, position.y, position.z};
+    if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z))
+        return;
+
+    constexpr float color[4]{1.f, 0.9f, 0.25f, 1.f};
+    constexpr float radius = 0.2f;
+    constexpr float marker_length = 0.32f;
+    constexpr int segments = 12;
+    std::vector<grid_vertex> vertices;
+    vertices.reserve(segments * 6 + 6);
+    const auto append_line = [&vertices, &color](
+        const glm::vec3& start, const glm::vec3& end) {
+        vertices.push_back({start.x, start.y, start.z,
+            color[0], color[1], color[2], color[3]});
+        vertices.push_back({end.x, end.y, end.z,
+            color[0], color[1], color[2], color[3]});
+    };
+
+    const glm::vec3 axes[]{
+        {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 0.f, 1.f}
+    };
+    for (const auto& axis : axes) {
+        const auto reference = std::abs(axis.y) > 0.9f
+            ? glm::vec3{1.f, 0.f, 0.f} : glm::vec3{0.f, 1.f, 0.f};
+        const auto right = glm::normalize(glm::cross(axis, reference));
+        const auto up = glm::normalize(glm::cross(axis, right));
+        for (int segment = 0; segment < segments; ++segment) {
+            const float start_angle = 2.f * glm::pi<float>() * segment / segments;
+            const float end_angle = 2.f * glm::pi<float>() * (segment + 1) / segments;
+            const auto start = center + radius *
+                (right * std::cos(start_angle) + up * std::sin(start_angle));
+            const auto end = center + radius *
+                (right * std::cos(end_angle) + up * std::sin(end_angle));
+            append_line(start, end);
+        }
+    }
+
+    append_line(center - axes[0] * marker_length, center + axes[0] * marker_length);
+    append_line(center - axes[1] * marker_length, center + axes[1] * marker_length);
+    append_line(center - axes[2] * marker_length, center + axes[2] * marker_length);
+
+    ensure_resources(m_program, m_vao, m_vbo);
+    render_vertices(
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 2.f
+    );
+}
+
 
 void editor::grid_gizmo::draw_colliders(const COMMONS_NS::camera& camera,
     const bgui::vec4i& viewport, const std::shared_ptr<commons::ecs>& registry) {

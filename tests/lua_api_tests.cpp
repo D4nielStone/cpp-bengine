@@ -7,6 +7,7 @@
 #include "components/physics.hpp"
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
+#include "components/spot_light.hpp"
 #include "components/camera.hpp"
 #include "core/ecs.hpp"
 #include "systems/code_system.hpp"
@@ -89,7 +90,7 @@ TEST(LuaApi, TransformSeparatesWorldAndLocalPosition) {
     ASSERT_TRUE(transform->set_parent(parent.id, false));
     commons::api::setNamespaces(lua);
     lua["bubble"]["input"] = lua.create_table();
-    commons::api::setUnityApi(lua, registry, child.id);
+    commons::api::setUpApi(lua, registry, child.id);
     EXPECT_NO_THROW(lua.script(R"(
         transform.localPosition = Vector3(2, 0, 0)
         assert(transform.position.x == 12)
@@ -103,9 +104,16 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     auto player = registry->create(106);
     registry->entity_names[player.id] = "PlayerCapsule";
     auto camera = registry->create(100);
+    registry->add<commons::camera>(camera);
+    const auto camera_component = registry->get<commons::camera>(camera.id);
     auto pickup = registry->create(103);
     registry->get<commons::transform>(player.id)->set_rotation({0.f, -90.f, 0.f});
     registry->get<commons::transform>(camera.id)->set_parent(player.id, false);
+    auto light_entity = registry->create();
+    ASSERT_TRUE(registry->get<commons::transform>(light_entity.id)->set_parent(
+        camera.id, false));
+    registry->add<commons::spot_light>(light_entity);
+    registry->get<commons::spot_light>(light_entity.id)->position = {0.f, 0.f, 0.f};
     registry->add<commons::renderer>(pickup);
     registry->add<commons::physics>(pickup);
     auto load = [&](commons::entity& entity, const std::string& filename) {
@@ -148,8 +156,29 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     setup = sol::protected_function(look->f_setup)();
     ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
     auto camera_input = look->estado_lua["Input"].get<sol::table>();
-    camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 10000.f}; });
+    camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 10.f}; });
     auto looked = sol::protected_function(look->f_update)();
+    ASSERT_TRUE(looked.valid()) << looked.get<sol::error>().what();
+    EXPECT_FLOAT_EQ(registry->get<commons::transform>(camera.id)->get_rotation().x, -1.2f);
+    camera_component->getViewMatrix();
+    const auto horizontal_length = std::hypot(
+        camera_component->forward.x, camera_component->forward.z);
+    input.set_function("GetAxis", [](const std::string& axis) {
+        return axis == "Vertical" ? 1.f : 0.f;
+    });
+    ASSERT_NO_THROW(body->update());
+    const auto velocity = physical->getVelocidade();
+    EXPECT_NEAR(velocity.x, camera_component->forward.x / horizontal_length * 5.f, 0.0001f);
+    EXPECT_NEAR(velocity.z, camera_component->forward.z / horizontal_length * 5.f, 0.0001f);
+    const auto spotlight_direction =
+        registry->get<commons::spot_light>(light_entity.id)->get_world_direction();
+    EXPECT_NEAR(spotlight_direction.x, camera_component->forward.x, 0.0001f);
+    EXPECT_NEAR(spotlight_direction.y, camera_component->forward.y, 0.0001f);
+    EXPECT_NEAR(spotlight_direction.z, camera_component->forward.z, 0.0001f);
+    EXPECT_EQ(registry->get<commons::spot_light>(light_entity.id)->get_world_position(),
+        registry->get<commons::transform>(camera.id)->get_world_position());
+    camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 10000.f}; });
+    looked = sol::protected_function(look->f_update)();
     ASSERT_TRUE(looked.valid()) << looked.get<sol::error>().what();
     EXPECT_FLOAT_EQ(registry->get<commons::transform>(camera.id)->get_rotation().x, -89.f);
 
@@ -175,7 +204,7 @@ TEST(LuaApi, TranslateUsesTheEngineRotationOrder) {
     const auto direction = transform->get_world_model_matrix() * glm::vec4{0.f, 0.f, 1.f, 0.f};
     commons::api::setNamespaces(lua);
     lua["bubble"]["input"] = lua.create_table();
-    commons::api::setUnityApi(lua, registry, entity.id);
+    commons::api::setUpApi(lua, registry, entity.id);
     auto result = lua.safe_script("transform:Translate(Vector3(0, 0, 1))", sol::script_pass_on_error);
     ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     const auto position = transform->get_position();
@@ -256,13 +285,14 @@ TEST(LuaApi, ComponentPropertiesAreWritable) {
     registry->add<commons::physics>(entity);
     registry->add<commons::directional_light>(entity);
     registry->add<commons::point_light>(entity);
+    registry->add<commons::spot_light>(entity);
     registry->add<commons::camera>(entity);
     registry->add<commons::renderer>(entity);
     sol::state lua;
     lua.open_libraries(sol::lib::base);
     commons::api::setNamespaces(lua);
     lua["bubble"]["input"] = lua.create_table();
-    commons::api::setUnityApi(lua, registry, entity.id);
+    commons::api::setUpApi(lua, registry, entity.id);
     auto result = lua.safe_script(R"(
         local body = gameObject:GetComponent("Rigidbody")
         body.mass = 2
@@ -281,6 +311,13 @@ TEST(LuaApi, ComponentPropertiesAreWritable) {
         light.intensity = 4
         light.color = Vector3(0.1, 0.2, 0.3)
         gameObject:GetComponent("PointLight").intensity = 8
+        local spot = gameObject:GetComponent("SpotLight")
+        spot.position = Vector3(1, 2, 3)
+        spot.direction = Vector3(0, -1, 0)
+        spot.color = Vector3(0.5, 0.6, 0.7)
+        spot.intensity = 9
+        spot.innerCutoff = 10
+        spot.outerCutoff = 20
     )", sol::script_pass_on_error);
     ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     auto body = registry->get<commons::physics>(entity.id);
@@ -298,6 +335,102 @@ TEST(LuaApi, ComponentPropertiesAreWritable) {
     EXPECT_FLOAT_EQ(body->getVelocidade().y, 2.f);
     EXPECT_FLOAT_EQ(registry->get<commons::directional_light>(entity.id)->intensity, 4.f);
     EXPECT_FLOAT_EQ(registry->get<commons::point_light>(entity.id)->intensity, 8.f);
+    const auto spot = registry->get<commons::spot_light>(entity.id);
+    EXPECT_FLOAT_EQ(spot->position.y, 2.f);
+    EXPECT_FLOAT_EQ(spot->color.z, 0.7f);
+    EXPECT_FLOAT_EQ(spot->intensity, 9.f);
+    EXPECT_FLOAT_EQ(spot->inner_cutoff, 10.f);
+    EXPECT_FLOAT_EQ(spot->outer_cutoff, 20.f);
+}
+
+TEST(LuaApi, SpotLightDirectionUsesTransformHierarchy) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto parent = registry->create();
+    auto entity = registry->create();
+    registry->get<commons::transform>(parent.id)->set_rotation({0.f, 20.f, 0.f});
+    registry->get<commons::transform>(entity.id)->set_rotation({0.f, 70.f, 0.f});
+    ASSERT_TRUE(registry->get<commons::transform>(entity.id)->set_parent(parent.id, false));
+    registry->add<commons::spot_light>(entity);
+    const auto light = registry->get<commons::spot_light>(entity.id);
+
+    const auto direction = light->get_world_direction();
+    EXPECT_NEAR(direction.x, 0.f, 0.0001f);
+    EXPECT_NEAR(direction.y, 0.f, 0.0001f);
+    EXPECT_NEAR(direction.z, -1.f, 0.0001f);
+    EXPECT_EQ(light->direction, (bgui::vec3{1.f, 0.f, 0.f}));
+}
+
+TEST(LuaApi, SpotLightPositionUsesTransformHierarchy) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto parent = registry->create();
+    auto entity = registry->create();
+    auto parent_transform = registry->get<commons::transform>(parent.id);
+    auto entity_transform = registry->get<commons::transform>(entity.id);
+    parent_transform->set_position({3.f, 4.f, 5.f});
+    parent_transform->set_rotation({0.f, 90.f, 0.f});
+    entity_transform->set_position({0.f, 0.f, 2.f});
+    ASSERT_TRUE(entity_transform->set_parent(parent.id, false));
+    registry->add<commons::spot_light>(entity);
+    const auto light = registry->get<commons::spot_light>(entity.id);
+    light->position = {1.f, 0.f, 0.f};
+
+    const auto position = light->get_world_position();
+    EXPECT_NEAR(position.x, 5.f, 0.0001f);
+    EXPECT_NEAR(position.y, 4.f, 0.0001f);
+    EXPECT_NEAR(position.z, 4.f, 0.0001f);
+}
+
+TEST(LuaApi, SpotLightChildOfCameraFollowsCameraPitchAndParentYaw) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto player = registry->create();
+    auto camera_entity = registry->create();
+    auto light_entity = registry->create();
+    registry->get<commons::transform>(player.id)->set_rotation({0.f, 30.f, 0.f});
+    registry->add<commons::camera>(camera_entity);
+    auto camera_transform = registry->get<commons::transform>(camera_entity.id);
+    camera_transform->set_rotation({25.f, 0.f, 0.f});
+    ASSERT_TRUE(camera_transform->set_parent(player.id, false));
+    ASSERT_TRUE(registry->get<commons::transform>(light_entity.id)->set_parent(
+        camera_entity.id, false));
+    registry->add<commons::spot_light>(light_entity);
+
+    const auto direction =
+        registry->get<commons::spot_light>(light_entity.id)->get_world_direction();
+    const float pitch = glm::radians(25.f);
+    const float yaw = glm::radians(30.f);
+    EXPECT_NEAR(direction.x, std::cos(yaw) * std::cos(pitch), 0.0001f);
+    EXPECT_NEAR(direction.y, std::sin(pitch), 0.0001f);
+    EXPECT_NEAR(direction.z, -std::sin(yaw) * std::cos(pitch), 0.0001f);
+}
+
+TEST(LuaApi, SpotLightExposesWorldDirectionAndCutoffMethods) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->get<commons::transform>(entity.id)->set_rotation({0.f, 90.f, 0.f});
+    registry->add<commons::spot_light>(entity);
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+
+    const auto result = lua.safe_script(R"(
+        local spot = gameObject:GetComponent("SpotLight")
+        local direction = spot:GetWorldDirection()
+        local position = spot.worldPosition
+        assert(direction.x > -0.0001 and direction.x < 0.0001)
+        assert(direction.z > -1.0001 and direction.z < -0.9999)
+        assert(spot.worldDirection.z > -1.0001 and spot.worldDirection.z < -0.9999)
+        assert(position.x > -2.0001 and position.x < -1.9999)
+        assert(position.y > spot.position.y - 0.0001 and position.y < spot.position.y + 0.0001)
+        assert(position.z > -0.0001 and position.z < 0.0001)
+        spot:SetInnerCutoff(8)
+        spot:SetOuterCutoff(22)
+    )", sol::script_pass_on_error);
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
+    const auto light = registry->get<commons::spot_light>(entity.id);
+    EXPECT_FLOAT_EQ(light->inner_cutoff, 8.f);
+    EXPECT_FLOAT_EQ(light->outer_cutoff, 22.f);
 }
 
 TEST(LuaApi, DirectionalLightRotatesConfiguredDirectionInWorldSpace) {
@@ -399,7 +532,7 @@ TEST(LuaApi, FindAcceptsObjectNamesAndKeepsNumericLookup) {
     registry->entity_names[numeric_name.id] = "42";
     commons::api::setNamespaces(lua);
     lua["bubble"]["input"] = lua.create_table();
-    commons::api::setUnityApi(lua, registry, entity.id);
+    commons::api::setUpApi(lua, registry, entity.id);
     auto result = lua.safe_script(R"(
         assert(GameObject.Find('Player').id == 42)
         assert(GameObject.Find(42).id == 42)
@@ -435,7 +568,7 @@ TEST(LuaApi, ShadowControlsUpdateNativeComponentsAndSerialize) {
     registry->add<commons::directional_light>(entity, bgui::vec3{0,-1,0}, bgui::vec3{0.1f}, bgui::vec3{1}, 1.f);
     commons::api::setNamespaces(lua);
     lua["bubble"]["input"] = lua.create_table();
-    commons::api::setUnityApi(lua, registry, entity.id);
+    commons::api::setUpApi(lua, registry, entity.id);
     ASSERT_NO_THROW(lua.script(R"(
         local r = gameObject:GetComponent('Renderer')
         assert(r.castShadows and r.receiveShadows)

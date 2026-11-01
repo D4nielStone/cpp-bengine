@@ -5,6 +5,7 @@
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
+#include "components/spot_light.hpp"
 #include "core/ecs.hpp"
 
 namespace commons::api {
@@ -31,7 +32,7 @@ struct game_object {
 };
 }
 
-void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id) {
+void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id) {
     lua.new_usertype<bgui::vec3>("Vector3",
         sol::call_constructor, sol::factories(
             []() { return bgui::vec3{0.f, 0.f, 0.f}; },
@@ -81,6 +82,22 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
         "position", &point_light::position, "color", &point_light::color,
         "intensity", &point_light::intensity, "constant", &point_light::constant,
         "linear", &point_light::linear, "quadratic", &point_light::quadratic);
+    lua.new_usertype<spot_light>("SpotLight", sol::no_constructor,
+        "position", &spot_light::position, "direction", &spot_light::direction,
+        "color", &spot_light::color, "intensity", &spot_light::intensity,
+        "constant", &spot_light::constant, "linear", &spot_light::linear,
+        "quadratic", &spot_light::quadratic,
+        "worldPosition", sol::property(&spot_light::get_world_position),
+        "worldDirection", sol::property(&spot_light::get_world_direction),
+        "innerCutoff", sol::property(
+            [](const spot_light& light) { return light.inner_cutoff; },
+            &spot_light::set_inner_cutoff),
+        "outerCutoff", sol::property(
+            [](const spot_light& light) { return light.outer_cutoff; },
+            &spot_light::set_outer_cutoff),
+        "GetWorldDirection", &spot_light::get_world_direction,
+        "SetInnerCutoff", &spot_light::set_inner_cutoff,
+        "SetOuterCutoff", &spot_light::set_outer_cutoff);
     lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
         if (body) {
             if (const auto registry = body->reg.lock())
@@ -98,6 +115,7 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
             if (name == "Camera") return sol::make_object(state, owner->get<camera>(object.id));
             if (name == "DirectionalLight") return sol::make_object(state, owner->get<directional_light>(object.id));
             if (name == "PointLight") return sol::make_object(state, owner->get<point_light>(object.id));
+            if (name == "SpotLight") return sol::make_object(state, owner->get<spot_light>(object.id));
             if (name == "Rigidbody") return sol::make_object(state, owner->get<physics>(object.id));
             return sol::make_object(state, sol::nil);
         });
@@ -131,5 +149,11 @@ void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uin
     auto debug = lua.create_named_table("Debug");
     debug["Log"] = bubble["log"];
     lua.create_named_table("Time", "deltaTime", 0.f, "time", 0.f);
+}
+}
+
+namespace commons::api {
+void setUnityApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id) {
+    setUpApi(lua, registry, id);
 }
 }

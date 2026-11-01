@@ -40,6 +40,7 @@ namespace COMMONS_NS {
         inline static std::unordered_map<mask, std::string> mapa_nomes_componentes = {
             {mask::COMPONENTE_LUZ_DIRECIONAL            ,"Iluminacao"},
             {mask::COMPONENTE_LUZ_PONTUAL               ,"Iluminacao"},
+            {mask::COMPONENTE_LUZ_HOLOFOTE              ,"Iluminacao"},
             {mask::COMPONENTE_RENDER                    ,"Renderizador"},
             {mask::COMPONENTE_TRANSFORMACAO             ,"Transformacao"},
             {mask::COMPONENTE_CODIGO                    ,"Codigo"},

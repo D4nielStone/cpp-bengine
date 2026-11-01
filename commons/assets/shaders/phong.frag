@@ -7,6 +7,7 @@ in vec3 Position;
 
 #define PI 3.14159265359
 #define MAX_POINT_LIGHTS 16
+#define MAX_SPOT_LIGHTS 16
 
 struct Material {
     vec4 albedo;
@@ -33,6 +34,18 @@ struct PointLight {
     float constant;
     float linear;
     float quadratic;
+};
+
+struct SpotLight {
+    vec3 position;
+    vec3 direction;
+    vec3 color;
+    float intensity;
+    float constant;
+    float linear;
+    float quadratic;
+    float innerCutoff;
+    float outerCutoff;
 };
 
 uniform bool shadowEnabled;
@@ -70,6 +83,8 @@ uniform Material material;
 uniform DirLight dirLight;
 uniform PointLight pointLights[MAX_POINT_LIGHTS];
 uniform int pointLightCount;
+uniform SpotLight spotLights[MAX_SPOT_LIGHTS];
+uniform int spotLightCount;
 uniform vec3 viewPos;
 
 uniform sampler2D tex_albedo;
@@ -192,6 +207,20 @@ void main() {
         float distanceToLight = length(light.position - Position);
         float attenuation = 1.0 / (light.constant + light.linear * distanceToLight + light.quadratic * distanceToLight * distanceToLight);
         vec3 radiance = light.color * light.intensity * attenuation;
+        result += calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
+    }
+
+    for (int i = 0; i < spotLightCount && i < MAX_SPOT_LIGHTS; ++i) {
+        SpotLight light = spotLights[i];
+        vec3 toLight = light.position - Position;
+        float distanceToLight = length(toLight);
+        vec3 L = normalize(toLight);
+        float cone = dot(normalize(-L), normalize(light.direction));
+        if (cone <= light.outerCutoff || light.intensity == 0.0) continue;
+        float coneIntensity = smoothstep(light.outerCutoff, light.innerCutoff, cone);
+        float attenuation = 1.0 / (light.constant + light.linear * distanceToLight
+            + light.quadratic * distanceToLight * distanceToLight);
+        vec3 radiance = light.color * light.intensity * attenuation * coneIntensity;
         result += calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
     }
 

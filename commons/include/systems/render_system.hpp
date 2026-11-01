@@ -2,6 +2,9 @@
 #include "system.hpp"
 #include <memory>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <utility>
 
 namespace COMMONS_NS {
   /**
@@ -17,6 +20,11 @@ namespace COMMONS_NS {
 		  void setup(const std::shared_ptr<ecs>&) override;
       void update(const std::shared_ptr<ecs>&) override;
 
+      // An empty filter preserves rendering to every camera.
+      void set_camera_filter(std::function<bool(std::uint32_t)> filter) {
+        m_camera_filter = std::move(filter);
+      }
+
       double last_render_time_ms() const noexcept {
         return m_last_render_time_ms;
       }
@@ -30,6 +38,7 @@ namespace COMMONS_NS {
       }
 
     private:
+      std::function<bool(std::uint32_t)> m_camera_filter;
       unsigned int m_shadow_fbo{0}, m_shadow_texture{0};
       int m_shadow_resolution{0};
       bool prepare_shadow_map(int resolution);

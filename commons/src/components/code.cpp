@@ -347,7 +347,7 @@ void code::setup() {
     );
     bubble["transform"] = transform_api;
 
-    api::setUnityApi(estado_lua, reg.lock(), my_object);
+    api::setUpApi(estado_lua, reg.lock(), my_object);
     std::string property_error;
     if (!load_properties(property_error)) throw sol::error(property_error);
     auto values = estado_lua.create_table();

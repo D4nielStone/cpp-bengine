@@ -73,7 +73,7 @@ jobs:
 
       - name: Configure Linux release
         if: runner.os == 'Linux'
-        run: cmake -S . -B out -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON
+        run: cmake -S . -B out -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON -DBENGINE_BUILD_BENCHMARKS=ON
       - name: Configure Windows release
         if: runner.os == 'Windows'
         shell: pwsh
@@ -87,6 +87,32 @@ jobs:
       - name: Exercise editor runtime with the real demo
         if: runner.os == 'Linux'
         run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure
+      - name: Generate release performance reports
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p out/benchmark-baseline release
+          baseline=()
+          if gh release download --repo "$GITHUB_REPOSITORY" --pattern benchmark-Linux.json --dir out/benchmark-baseline; then
+            baseline=(--baseline out/benchmark-baseline/benchmark-Linux.json)
+          else
+            echo "No previous benchmark available; recording the first baseline."
+          fi
+          xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python3 tools/benchmarks/run.py \
+            --executable out/tools/benchmarks/bengine_ui_benchmark \
+            --output out/benchmark-reports --release "$GITHUB_REF_NAME" --label Linux "${baseline[@]}"
+          cp out/benchmark-reports/benchmark-Linux.json out/benchmark-reports/benchmark-Linux.md release/
+          python3 -c 'import shutil; shutil.make_archive("release/benchmark-Linux-raw", "zip", "out/benchmark-reports")'
+          cat out/benchmark-reports/benchmark-Linux.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve benchmark evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-Linux
+          path: out/benchmark-reports/
+          if-no-files-found: warn
       - name: Configure relocatable Linux binaries
         if: runner.os == 'Linux'
         run: cmake -S . -B release-build -DCMAKE_BUILD_TYPE=Release -DBENGINE_DISTRIBUTION_BUILD=ON -DBUILD_TESTING=OFF -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON
@@ -132,8 +158,13 @@ jobs:
         run: |
           mkdir release
           find release-artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
-          (cd release && sha256sum bubble-engine-*.zip > SHA256SUMS)
+          (cd release && sha256sum *.zip > SHA256SUMS)
           gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body > release/CHANGELOG.md
+          notes_path="docs/RELEASE_${GITHUB_REF_NAME}.md"
+          if [ -f "$notes_path" ]; then
+            printf '\n' >> release/CHANGELOG.md
+            cat "$notes_path" >> release/CHANGELOG.md
+          fi
           previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           printf '\n## Commits\n\n' >> release/CHANGELOG.md
           if [ -n "$previous" ]; then

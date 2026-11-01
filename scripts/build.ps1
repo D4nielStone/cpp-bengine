@@ -17,6 +17,7 @@ $configureArgs = @(
     "-B", $buildDirectory,
     "-DBUILD_TESTING=$($RunTests.IsPresent.ToString().ToUpperInvariant())",
     "-DBUILD_RUNTIME=ON",
+    "-DCMAKE_BUILD_TYPE=Release",
     "-DBUILD_EDITOR=ON"
 )
 

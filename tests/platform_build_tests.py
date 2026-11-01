@@ -10,6 +10,23 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class PlatformBuildTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "POSIX build helper")
+    def test_build_helper_configures_release_for_single_config_generators(self):
+        with tempfile.TemporaryDirectory(prefix="bengine helper ") as directory:
+            root = Path(directory)
+            commands = root / "commands"
+            commands.mkdir()
+            log = root / "cmake.log"
+            cmake = commands / "cmake"
+            cmake.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$BUILD_TEST_LOG"\n')
+            cmake.chmod(0o755)
+            environment = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                               BUILD_TEST_LOG=str(log))
+            result = subprocess.run(["sh", str(REPO / "scripts/build.sh"), str(root / "build")],
+                                    env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("-DCMAKE_BUILD_TYPE=Release", log.read_text().splitlines())
+
     def test_linux_native_uses_host_compiler_and_stages_assets(self):
         with tempfile.TemporaryDirectory(prefix="bengine build ") as directory:
             root = Path(directory)

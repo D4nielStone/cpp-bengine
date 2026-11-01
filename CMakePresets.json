@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "performance",
+      "displayName": "Optimized build with debug symbols",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/out/performance",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON",
+        "BENGINE_BUILD_BENCHMARKS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "performance",
+      "configurePreset": "performance",
+      "jobs": 2
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "performance",
+      "configurePreset": "performance",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

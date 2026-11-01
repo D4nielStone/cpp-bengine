@@ -9,6 +9,7 @@
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 #include "components/physics.hpp"
+#include "components/spot_light.hpp"
 #include "util/pbr_material.hpp"
 #include "script_tools.hpp"
 
@@ -121,6 +122,7 @@ public:
         m_model_import_error = std::move(callback);
     }
 
+    // Returns true if the asset was dropped on a valid target in the components view.
     bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
         if (!*m_surface_alive)
             return false;
@@ -277,6 +279,9 @@ private:
         if (auto light = registry->get<commons::directional_light>(id))
             add_directional_light(id, light);
 
+        if (auto light = registry->get<commons::spot_light>(id))
+            add_spot_light(id, light);
+
         if (auto physics = registry->get<commons::physics>(id)) {
             auto& section = add_section("Physics", true,
                 [this, id]() { remove_component<commons::physics>(id); });
@@ -430,10 +435,12 @@ private:
             bgui::mode::match_parent,
             bgui::mode::wrap_content
         );
+        add_component_button.style.layout.align = {bgui::alignment::center, bgui::alignment::center};
 
         const bool can_add_camera = !registry->get<commons::camera>(id);
-        const bool can_add_light =
+        const bool can_add_directional_light =
             !registry->get<commons::directional_light>(id);
+        const bool can_add_spot_light = !registry->get<commons::spot_light>(id);
         m_component_options = &m_root->add<bgui::linear>(
             bgui::orientation::vertical
         );
@@ -457,13 +464,21 @@ private:
             );
             camera_button.add_class("editor-input");
         }
-        if (can_add_light) {
+        if (can_add_directional_light) {
             auto& light_button = m_component_options->add<bgui::button>(
                 "Directional Light",
                 0.28f,
                 [this, id]() {
                     add_component<commons::directional_light>(id);
                 }
+            );
+            light_button.add_class("editor-input");
+        }
+        if (can_add_spot_light) {
+            auto& light_button = m_component_options->add<bgui::button>(
+                "Spot Light",
+                0.28f,
+                [this, id]() { add_component<commons::spot_light>(id); }
             );
             light_button.add_class("editor-input");
         }
@@ -494,7 +509,8 @@ private:
         section.add_class("editor-section");
         section.set_icon(name == "Transform" ? "directory_open" :
             name == "Renderer" ? "cube" : name == "Camera" ? "camera" :
-            name == "Directional Light" ? "lightbulb" : name == "Physics" ? "circle" : "code", 0.24f);
+            name == "Directional Light" || name == "Spot Light" ? "lightbulb" :
+            name == "Physics" ? "circle" : "code", 0.24f);
         section.children().add_class("editor-surface");
         section.children().style.layout.padding = bgui::vec4i{6, 4, 6, 4};
         section.children().style.layout.align = bgui::vec<2, bgui::alignment>{
@@ -1115,6 +1131,57 @@ private:
             [light]() { return light->intensity; },
             [light](float value) { light->intensity = value; }
         );
+    }
+
+    void add_spot_light(
+        const entity_id id,
+        const std::shared_ptr<commons::spot_light>& light
+    ) {
+        auto& section = add_section(
+            "Spot Light",
+            true,
+            [this, id]() { remove_component<commons::spot_light>(id); }
+        );
+        auto& content = section.children();
+        add_vector_field(content, "Position", light->position,
+            [light]() { return light->position; },
+            [light](std::size_t axis, float value) { light->position[axis] = value; });
+        add_vector_field(content, "Direction", light->direction,
+            [light]() { return light->direction; },
+            [light](std::size_t axis, float value) { light->direction[axis] = value; });
+        content.add<bgui::text>("Color", 0.27f);
+        auto& color_picker = content.add<bgui::color_picker>(
+            bgui::color{light->color.x, light->color.y, light->color.z, 1.f});
+        color_picker.add_class("editor-input");
+        color_picker.style.layout.require_size(128.f, 92.f);
+        color_picker.set_on_change([this, light](const bgui::color& color) {
+            const auto previous = light->color;
+            const bgui::vec3 next{color.x, color.y, color.z};
+            if (previous == next)
+                return;
+            light->color = next;
+            m_context->record_action(
+                [light, previous]() { light->color = previous; },
+                [light, next]() { light->color = next; });
+        });
+        add_number_field(content, "Intensity", light->intensity,
+            [light]() { return light->intensity; },
+            [light](float value) { light->intensity = value; });
+        add_number_field(content, "Constant Attenuation", light->constant,
+            [light]() { return light->constant; },
+            [light](float value) { light->constant = value; });
+        add_number_field(content, "Linear Attenuation", light->linear,
+            [light]() { return light->linear; },
+            [light](float value) { light->linear = value; });
+        add_number_field(content, "Quadratic Attenuation", light->quadratic,
+            [light]() { return light->quadratic; },
+            [light](float value) { light->quadratic = value; });
+        add_number_field(content, "Inner Cutoff (degrees)", light->inner_cutoff,
+            [light]() { return light->inner_cutoff; },
+            [light](float value) { light->set_inner_cutoff(value); });
+        add_number_field(content, "Outer Cutoff (degrees)", light->outer_cutoff,
+            [light]() { return light->outer_cutoff; },
+            [light](float value) { light->set_outer_cutoff(value); });
     }
 
     void add_vector_field(

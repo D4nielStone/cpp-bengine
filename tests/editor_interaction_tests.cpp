@@ -692,6 +692,35 @@ TEST_F(EditorInteractionTest, InspectorShadowControlsSupportUndoAndRedo) {
     EXPECT_FLOAT_EQ(light->shadow_distance, 50.f);
 }
 
+TEST_F(EditorInteractionTest, SpotLightColorUsesColorPickerAndSupportsUndoRedo) {
+    auto entity = registry->create();
+    registry->add<commons::spot_light>(entity);
+    const auto light = registry->get<commons::spot_light>(entity.id);
+    light->color = {0.2f, 0.4f, 0.6f};
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    auto* picker = find_element<bgui::color_picker>(dock, [](auto&) { return true; });
+    ASSERT_NE(picker, nullptr);
+    EXPECT_FLOAT_EQ(picker->get_color().x, 0.2f);
+    EXPECT_FLOAT_EQ(picker->get_color().y, 0.4f);
+    EXPECT_FLOAT_EQ(picker->get_color().z, 0.6f);
+    const auto expect_color = [&light](const bgui::vec3& expected) {
+        EXPECT_NEAR(light->color.x, expected.x, 0.0001f);
+        EXPECT_NEAR(light->color.y, expected.y, 0.0001f);
+        EXPECT_NEAR(light->color.z, expected.z, 0.0001f);
+    };
+    picker->set_color({0.8f, 0.3f, 0.1f, 1.f});
+    expect_color({0.8f, 0.3f, 0.1f});
+    ASSERT_TRUE(context->undo());
+    expect_color({0.2f, 0.4f, 0.6f});
+    ASSERT_TRUE(context->redo());
+    expect_color({0.8f, 0.3f, 0.1f});
+}
+
 
 TEST_F(EditorInteractionTest, InspectorExposesBodyTypesAndColliderControlsWithHistory) {
     auto entity = registry->create();

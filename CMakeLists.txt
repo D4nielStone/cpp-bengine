@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
     BubbleEngine
-    VERSION 0.1.1
+    VERSION 0.1.2
     LANGUAGES C CXX
 )
 
@@ -42,6 +42,11 @@ add_subdirectory(commons)
 
 # Runtime and editor applications.
 add_subdirectory(apps)
+
+option(BENGINE_BUILD_BENCHMARKS "Build automated performance benchmarks" OFF)
+if(BENGINE_BUILD_BENCHMARKS)
+    add_subdirectory(tools/benchmarks)
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

@@ -354,4 +354,12 @@ std::shared_ptr<viewport_input_state> scene_view::input_state() const noexcept {
     return m_input_state;
 }
 
+bool scene_view::needs_camera_render(std::uint32_t entity) const noexcept {
+    if (!is_open())
+        return false;
+    return entity == m_camera->my_object ||
+        (m_camera_preview->hovered && m_camera_preview->main_runtime_camera &&
+         entity == m_camera_preview->main_runtime_camera->my_object);
+}
+
 }
