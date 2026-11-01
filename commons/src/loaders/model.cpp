@@ -94,13 +94,26 @@ void model::load_model(const std::string& path) {
     m_pose.swap(replacement.m_pose);
     directory.swap(replacement.directory);
     source_path.swap(replacement.source_path);
+    std::swap(m_source_missing, replacement.m_source_missing);
     m_animation_clip = replacement.m_animation_clip;
     m_animation_start = replacement.m_animation_start;
+}
+
+bool model::source_available() const {
+    if (source_path.empty())
+        return false;
+
+    const bool available = bgui::resource_files::exists(source_path);
+    if (!available && !m_source_missing)
+        debugging::emit(alerta, "model", "Asset source is missing: " + source_path);
+    m_source_missing = !available;
+    return available;
 }
 
 void model::load_model_data(const std::string& path) {
     meshes.clear();
     m_pose.reset();
+    m_source_missing = false;
     const auto resolved_path = resolve_model_path(path);
     source_path = resolved_path.string();
     const auto resolved_string = resolved_path.string();
@@ -261,6 +274,7 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
 // Carrega Textura assimp2bubble
 texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
     texture tex;
+    if (m_pose) tex.filtering = m_pose->options.filtering;
     if (hasTextura(mat, type)) {
         aiString str;
         mat->GetTexture(type, 0, &str);
@@ -285,7 +299,7 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
             tex.embedded->m_path = tex.path;
             return tex;
         }
-        tex.path = (std::filesystem::path(directory) / reference).lexically_normal().string();
+        tex.path = resolve_model_texture(source_path, reference).string();
     }
     return tex;
 }

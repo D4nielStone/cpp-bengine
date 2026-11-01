@@ -686,7 +686,7 @@ public:
             bgui::alignment::center
         };
 
-        m_filter = &m_toolbar->add<bgui::inputbox>(
+        m_filter = &panel::add_input(*m_toolbar,
             "",
             "Search entities...",
             0.3f

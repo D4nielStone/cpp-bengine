@@ -1,3 +1,4 @@
+#include "panel.hpp"
 #include "../core/distribution_paths.hpp"
 #include "project_context_menu.hpp"
 #include "editor_ui.hpp"
@@ -261,6 +262,11 @@ editor_ui::editor_ui(
     menu_bar.add_menu(
         "View", 0.3f,
         [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
+            menu.add_button("Editor Camera...", [this]() {
+                if (m_context && m_context->registry && m_context->editor_camera_entity &&
+                    m_context->registry->is_alive(*m_context->editor_camera_entity))
+                    m_context->selected_entity = m_context->editor_camera_entity;
+            });
             menu.add_button("Show/Hide Colliders    F3", [this]() {
                 if (m_context) m_context->show_colliders = !m_context->show_colliders;
             });
@@ -437,7 +443,7 @@ void editor_ui::create_build_modal() {
         "Game export directory",
         0.3f
     );
-    m_build_directory_input = &m_build_modal->content().add<bgui::inputbox>(
+    m_build_directory_input = &panel::add_input(m_build_modal->content(),
         m_build_directory.string(),
         "Choose an export directory...",
         0.28f
@@ -463,12 +469,12 @@ void editor_ui::create_build_modal() {
         "Game files are exported to <directory>/<target>. Build files stay in the cache.",
         0.25f
     );
-    auto& compact = m_build_modal->content().add<bgui::checkbox>(
+    auto& compact = panel::add_checkbox(m_build_modal->content(),
         "Single executable (compressed assets, read directly without extraction)", 0.25f, m_single_executable);
     m_single_executable_checkbox = &compact;
     compact.set_on_change([this](bool value) { if (!m_build_running) m_single_executable = value; });
     m_build_modal->content().add<bgui::text>("Precompiled runtime template (optional; empty = automatic)", 0.25f);
-    auto& runtime_template = m_build_modal->content().add<bgui::inputbox>(m_runtime_template.string(), "Template folder...", 0.25f);
+    auto& runtime_template = panel::add_input(m_build_modal->content(), m_runtime_template.string(), "Template folder...", 0.25f);
     m_runtime_template_input = &runtime_template;
     runtime_template.m_enter_func = [this](const std::string& value) { if (!m_build_running) m_runtime_template = value; };
     const auto add_target = [this](const char* icon_name,
@@ -1029,7 +1035,7 @@ void editor_ui::create_project_modal(
         "Open an existing project",
         0.34f
     );
-    m_project_directory_input = &m_project_modal->content().add<bgui::inputbox>(
+    m_project_directory_input = &panel::add_input(m_project_modal->content(),
         selected_path,
         "Project directory or file...",
         0.32f
@@ -1098,12 +1104,12 @@ void editor_ui::create_new_project_modal() {
         0.28f
     );
     content.add<bgui::text>("Project name", 0.28f);
-    m_new_project_name_input = &content.add<bgui::inputbox>(
+    m_new_project_name_input = &panel::add_input(content,
         "New Project", "Project name", 0.32f
     );
     content.add<bgui::text>("Location", 0.28f);
     const auto default_location = std::filesystem::path(m_project_path).parent_path();
-    m_new_project_location_input = &content.add<bgui::inputbox>(
+    m_new_project_location_input = &panel::add_input(content,
         default_location.empty()
             ? std::filesystem::current_path().string()
             : default_location.string(),
@@ -1271,7 +1277,7 @@ void editor_ui::open_preferences_modal() {
     auto& content = modal.content().add<preferences_content>();
     content.add<bgui::text>("Editor Preferences", .4f);
     content.add<bgui::text>("Preferences apply to this editor session.", .26f);
-    auto& grid = content.add<bgui::checkbox>(
+    auto& grid = panel::add_checkbox(content,
         "Show scene grid", .3f, m_context->preferences.show_grid);
     constexpr std::array labels{
         "Movement speed (0.1 - 100)", "Sprint multiplier (1 - 10)",
@@ -1287,7 +1293,7 @@ void editor_ui::open_preferences_modal() {
     const auto current = values(m_context->preferences);
     for (std::size_t i = 0; i < inputs.size(); ++i) {
         content.add<bgui::text>(labels[i], .28f);
-        inputs[i] = &content.add<bgui::inputbox>(format_number(current[i]), "", .3f);
+        inputs[i] = &panel::add_input(content, format_number(current[i]), "", .3f);
     }
     auto& status = content.add<bgui::text>("", .27f);
     content.add<bgui::button>("Reset Navigation", .3f, [inputs, values]() {

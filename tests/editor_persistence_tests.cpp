@@ -73,6 +73,10 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
 
     const auto editor_camera = registry->get<commons::camera>(editor_camera_entity.id);
     const auto scene_camera = registry->get<commons::camera>(scene_camera_entity.id);
+    editor_camera->skybox_image = "assets/editor-cross.png";
+    editor_camera->m_use_skybox = true;
+    editor_camera->atmosphere_zenith = {0.2f, 0.3f, 0.4f};
+    editor_camera->fov = 63.f;
     registry->get<commons::transform>(editor_camera_entity.id)->set_position(
         {2.f, 3.f, 4.f}
     );
@@ -117,7 +121,15 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
         {-2.f, -2.f, -2.f}
     );
 
+    editor_camera->skybox_image.clear();
+    editor_camera->m_use_skybox = false;
+    editor_camera->fov = 90.f;
     ASSERT_TRUE(persistence.load(path_string, error)) << error;
+    EXPECT_EQ(editor_camera->skybox_image, "assets/editor-cross.png");
+    EXPECT_TRUE(editor_camera->m_use_skybox);
+    EXPECT_FLOAT_EQ(editor_camera->fov, 63.f);
+    EXPECT_FLOAT_EQ(editor_camera->atmosphere_zenith.x, 0.2f);
+    EXPECT_EQ(editor_camera->skybox_asset_root, path.parent_path().string());
     EXPECT_EQ(registry->get<commons::camera>(editor_camera_entity.id), editor_camera);
     EXPECT_NE(registry->get<commons::camera>(scene_camera_entity.id), scene_camera);
 
@@ -643,6 +655,10 @@ TEST(ProjectPersistenceTest, RoundTripsSpotLightSettings) {
     light->intensity = 7.f;
     light->inner_cutoff = 9.f;
     light->outer_cutoff = 24.f;
+    light->shadows = false;
+    light->shadow_distance = 75.f;
+    light->shadow_bias = 0.003f;
+    light->shadow_strength = 0.6f;
 
     editor::ui::project_persistence_system persistence(registry, editor_camera.id);
     const auto path = temporary_project_path();
@@ -658,6 +674,10 @@ TEST(ProjectPersistenceTest, RoundTripsSpotLightSettings) {
     EXPECT_FLOAT_EQ(light->intensity, 7.f);
     EXPECT_FLOAT_EQ(light->inner_cutoff, 9.f);
     EXPECT_FLOAT_EQ(light->outer_cutoff, 24.f);
+    EXPECT_FALSE(light->shadows);
+    EXPECT_FLOAT_EQ(light->shadow_distance, 75.f);
+    EXPECT_FLOAT_EQ(light->shadow_bias, 0.003f);
+    EXPECT_FLOAT_EQ(light->shadow_strength, 0.6f);
     remove_project_files(path);
 }
 

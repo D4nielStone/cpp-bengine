@@ -191,19 +191,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
     }
 
     if (name == "spot_light") {
-        if (!value.HasMember("position") || !is_vector3(value["position"]) ||
-            !value.HasMember("direction") || !is_vector3(value["direction"]) ||
-            !value.HasMember("color") || !is_vector3(value["color"]))
-            return false;
-        for (const char* field : {"intensity", "constant", "linear", "quadratic",
-                 "inner_cutoff", "outer_cutoff"})
-            if (value.HasMember(field) && !is_number(value[field]))
-                return false;
-        const float inner = value.HasMember("inner_cutoff")
-            ? value["inner_cutoff"].GetFloat() : 12.5f;
-        const float outer = value.HasMember("outer_cutoff")
-            ? value["outer_cutoff"].GetFloat() : 17.5f;
-        return inner >= 0.f && inner < outer && outer < 90.f;
+        commons::spot_light light;
+        return light.analyze(value);
     }
 
     return false;
@@ -325,8 +314,13 @@ bool parse_component(
                         if (enabled) {
                             if (!texture_path.is_absolute())
                                 texture_path = project_directory / texture_path;
-                            material.set_texture(map.name,
-                                commons::texture{0, texture_path.lexically_normal().string()});
+                            texture_path = texture_path.lexically_normal();
+                            const auto imported_texture = material.getTextura(map.name);
+                            if (!imported_texture.embedded ||
+                                imported_texture.path != texture_path.string()) {
+                                material.set_texture(map.name,
+                                    commons::texture{0, texture_path.string()});
+                            }
                         } else {
                             material.textures.erase(map.name);
                         }
@@ -500,6 +494,8 @@ bool validate_project(const rapidjson::Document& document, std::string& error) {
         (!document["settings"].IsObject() ||
          (document["settings"].HasMember("gravity") &&
           !is_vector3(document["settings"]["gravity"])) ||
+         (document["settings"].HasMember("editor_camera") &&
+          !validate_component("camera", document["settings"]["editor_camera"])) ||
          (document["settings"].HasMember("editor_camera_transform") &&
           !validate_component("transform", document["settings"]["editor_camera_transform"])))) {
         error = "The project contains invalid global settings.";
@@ -877,6 +873,12 @@ bool project_persistence_system::serialize_project(
         editor_camera_transform, project_allocator
     );
     settings.AddMember("editor_camera_transform", editor_camera_transform, project_allocator);
+    rapidjson::Value editor_camera(rapidjson::kObjectType);
+    if (!m_registry->get<commons::camera>(m_editor_camera_id)->serialize(editor_camera, project_allocator)) {
+        error = "The editor camera settings are invalid.";
+        return false;
+    }
+    settings.AddMember("editor_camera", editor_camera, project_allocator);
     project_document.AddMember("settings", settings, project_allocator);
 
     auto scene_reference = scene_target.lexically_relative(
@@ -1178,6 +1180,10 @@ bool project_persistence_system::load(
     m_registry->mascaras = std::move(staged_registry_copy->mascaras);
     m_registry->live_entities = std::move(staged_registry_copy->live_entities);
     m_registry->entity_names = std::move(staged_registry_copy->entity_names);
+    if (is_project_document && document.HasMember("settings") &&
+        document["settings"].HasMember("editor_camera"))
+        active_camera->analyze(document["settings"]["editor_camera"]);
+    active_camera->skybox_asset_root = project_directory.string();
     if (staged_editor_camera_transform)
         active_transform->analyze(*staged_editor_camera_transform);
     active_transform->parent_id = 0;

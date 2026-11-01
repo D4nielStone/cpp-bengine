@@ -603,6 +603,50 @@ TEST(LuaApi, ShadowControlsUpdateNativeComponentsAndSerialize) {
     EXPECT_FALSE(legacy.analyze(data));
 }
 
+TEST(LuaApi, SpotShadowControlsUpdateNativeComponentsAndSerialize) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity);
+    registry->add<commons::spot_light>(entity);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+    ASSERT_NO_THROW(lua.script(R"(
+        local r = gameObject:GetComponent('Renderer')
+        assert(r.castShadows and r.receiveShadows)
+        r.castShadows = false
+        r.receiveShadows = false
+        local l = gameObject:GetComponent('SpotLight')
+        l.shadows = false
+        l.shadowDistance = 35
+        l.shadowBias = 0.002
+        l.shadowStrength = 0.7
+    )"));
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->cast_shadows);
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->receive_shadows);
+    auto light = registry->get<commons::spot_light>(entity.id);
+    rapidjson::Document data(rapidjson::kObjectType);
+    ASSERT_TRUE(light->serialize(data, data.GetAllocator()));
+    commons::spot_light loaded;
+    ASSERT_TRUE(loaded.analyze(data));
+    EXPECT_FALSE(loaded.shadows);
+    EXPECT_FLOAT_EQ(loaded.shadow_distance, 35.f);
+    EXPECT_FLOAT_EQ(loaded.shadow_bias, 0.002f);
+    EXPECT_FLOAT_EQ(loaded.shadow_strength, 0.7f);
+    data.RemoveMember("shadows");
+    data.RemoveMember("shadow_distance");
+    data.RemoveMember("shadow_bias");
+    data.RemoveMember("shadow_strength");
+    commons::spot_light legacy;
+    ASSERT_TRUE(legacy.analyze(data));
+    EXPECT_TRUE(legacy.shadows);
+    EXPECT_FLOAT_EQ(legacy.shadow_distance, 50.f);
+    data.AddMember("shadow_bias", "invalid", data.GetAllocator());
+    EXPECT_FALSE(legacy.analyze(data));
+}
+
 TEST(LuaApi, SetupAndUpdateFailuresLeaveOtherScriptsRunning) {
     const auto folder = std::filesystem::temp_directory_path() /
         ("bengine-lua-isolation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));

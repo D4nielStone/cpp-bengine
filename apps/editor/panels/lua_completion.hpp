@@ -93,7 +93,7 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
         if (type == "camera") names = {"fieldOfView", "aspect", "nearClipPlane", "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox"};
         else if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "pointLight") names = {"position", "color", "intensity", "constant", "linear", "quadratic"};
-        else if (type == "spotLight") names = {"position", "worldPosition", "direction", "worldDirection", "color", "intensity", "constant", "linear", "quadratic", "innerCutoff", "outerCutoff"};
+        else if (type == "spotLight") names = {"position", "worldPosition", "direction", "worldDirection", "color", "intensity", "constant", "linear", "quadratic", "innerCutoff", "outerCutoff", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "renderer") names = {"enabled", "visible", "castShadows", "receiveShadows"};
         else if (type == "GameObject") names = {"Find"};
         else if (type == "Time") names = {"deltaTime", "time"};

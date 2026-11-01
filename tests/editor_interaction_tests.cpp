@@ -1,3 +1,4 @@
+#include <tuple>
 #include <gtest/gtest.h>
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
@@ -692,6 +693,109 @@ TEST_F(EditorInteractionTest, InspectorShadowControlsSupportUndoAndRedo) {
     EXPECT_FLOAT_EQ(light->shadow_distance, 50.f);
 }
 
+TEST_F(EditorInteractionTest, InspectorKeepsSectionExpansionAcrossRefreshes) {
+    auto entity = registry->create();
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    auto* section = find_element<bgui::tree>(dock, [](auto& item) {
+        return item.label().get_buffer() == "Transform";
+    });
+    ASSERT_NE(section, nullptr);
+    ASSERT_TRUE(section->is_expanded());
+    section->set_expanded(false);
+
+    panel.refresh();
+    panel.update();
+
+    section = find_element<bgui::tree>(dock, [](auto& item) {
+        return item.label().get_buffer() == "Transform";
+    });
+    ASSERT_NE(section, nullptr);
+    EXPECT_FALSE(section->is_expanded());
+}
+
+TEST_F(EditorInteractionTest, InspectorRefreshesUnfocusedInputsWhenPropertiesChange) {
+    auto entity = registry->create();
+    auto transform = registry->get<commons::transform>(entity.id);
+    ASSERT_NE(transform, nullptr);
+    transform->set_position({2.25f, 3.5f, 4.75f});
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    auto* x_input = find_element<bgui::inputbox>(dock, [](auto& item) {
+        return item.get_buffer() == "2.25";
+    });
+    ASSERT_NE(x_input, nullptr);
+    transform->set_position({7.25f, 8.5f, 9.75f});
+    panel.update();
+
+    x_input = find_element<bgui::inputbox>(dock, [](auto& item) {
+        return item.get_buffer() == "7.25";
+    });
+    EXPECT_NE(x_input, nullptr);
+    EXPECT_NE(find_element<bgui::inputbox>(dock, [](auto& item) {
+        return item.get_buffer() == "8.5";
+    }), nullptr);
+    EXPECT_NE(find_element<bgui::inputbox>(dock, [](auto& item) {
+        return item.get_buffer() == "9.75";
+    }), nullptr);
+
+    ASSERT_NE(x_input, nullptr);
+    x_input->set_focused(true);
+    x_input->set_buffer("editing");
+    transform->set_position({6.f, 8.5f, 9.75f});
+    panel.update();
+    EXPECT_EQ(x_input->get_buffer(), "editing");
+    x_input->set_focused(false);
+    panel.update();
+    EXPECT_EQ(x_input->get_buffer(), "6");
+}
+
+TEST_F(EditorInteractionTest, SpotShadowControlsSupportUndoRedoAndClampValues) {
+    auto entity = registry->create();
+    registry->add<commons::spot_light>(entity);
+    const auto light = registry->get<commons::spot_light>(entity.id);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+    auto* toggle = find_element<bgui::checkbox>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Shadows";
+    });
+    ASSERT_NE(toggle, nullptr);
+    toggle->on_clicked();
+    EXPECT_FALSE(light->shadows);
+    ASSERT_TRUE(context->undo());
+    EXPECT_TRUE(light->shadows);
+    ASSERT_TRUE(context->redo());
+    EXPECT_FALSE(light->shadows);
+    for (const auto& [label, member, initial, updated, maximum] : {
+        std::tuple{"Shadow Distance", &commons::spot_light::shadow_distance, 50.f, 75.f, 10000.f},
+        {"Shadow Bias", &commons::spot_light::shadow_bias, 0.001f, 0.002f, 0.1f},
+        {"Shadow Strength", &commons::spot_light::shadow_strength, 1.f, 0.5f, 1.f}}) {
+        auto* field = find_element<bgui::field>(dock, [label](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(field, nullptr);
+        field->get_inputbox().m_enter_func(std::to_string(updated));
+        EXPECT_FLOAT_EQ(light.get()->*member, updated);
+        ASSERT_TRUE(context->undo());
+        EXPECT_FLOAT_EQ(light.get()->*member, initial);
+        ASSERT_TRUE(context->redo());
+        EXPECT_FLOAT_EQ(light.get()->*member, updated);
+        field->get_inputbox().m_enter_func("99999");
+        EXPECT_FLOAT_EQ(light.get()->*member, maximum);
+    }
+}
+
 TEST_F(EditorInteractionTest, SpotLightColorUsesColorPickerAndSupportsUndoRedo) {
     auto entity = registry->create();
     registry->add<commons::spot_light>(entity);
@@ -929,5 +1033,122 @@ TEST_F(EditorInteractionTest, CameraInspectorUsesOneCubemapImageAndSupportsUndo)
     EXPECT_EQ(camera->skybox_image, "assets/new-cross.png");
     ASSERT_TRUE(context->undo()); EXPECT_EQ(camera->skybox_image, "assets/original-cross.png");
     ASSERT_TRUE(context->redo()); EXPECT_EQ(camera->skybox_image, "assets/new-cross.png");
+    registry->entities.clear();
+}
+
+namespace {
+class helper_test_panel final : public editor::ui::panel {
+public:
+    std::vector<std::pair<std::function<void()>, std::function<void()>>> edits;
+    void build(bgui::dock&) override {}
+    void update() override {}
+protected:
+    void record_edit(std::function<void()> undo, std::function<void()> redo) override {
+        edits.emplace_back(std::move(undo), std::move(redo));
+    }
+};
+}
+
+TEST_F(EditorInteractionTest, PanelFloatBindingValidatesInputAndRecordsHistory) {
+    helper_test_panel panel;
+    bgui::linear root(bgui::orientation::vertical);
+    float value = 2.f;
+    panel.add_float(root, "Value", &value);
+    auto* field = find_element<bgui::field>(root, [](const auto&) { return true; });
+    ASSERT_NE(field, nullptr);
+    for (const char* invalid : {"nan", "inf", "1junk", "", "1e100"}) {
+        field->get_inputbox().m_enter_func(invalid);
+        EXPECT_EQ(value, 2.f);
+    }
+    EXPECT_TRUE(panel.edits.empty());
+    field->get_inputbox().m_enter_func("3.5");
+    EXPECT_EQ(value, 3.5f);
+    ASSERT_EQ(panel.edits.size(), 1u);
+    panel.edits.back().first();
+    EXPECT_EQ(value, 2.f);
+    panel.edits.back().second();
+    EXPECT_EQ(value, 3.5f);
+}
+
+TEST_F(EditorInteractionTest, PanelVectorBindingEditsOnlySelectedAxis) {
+    helper_test_panel panel;
+    bgui::linear root(bgui::orientation::vertical);
+    bgui::vec3 value{1.f, 2.f, 3.f};
+    panel.add_vec_field(root, "Vector", &value);
+    auto* input = find_element<bgui::inputbox>(root, [](const auto&) { return true; });
+    ASSERT_NE(input, nullptr);
+    input->m_enter_func("4");
+    EXPECT_EQ(value, (bgui::vec3{4.f, 2.f, 3.f}));
+    ASSERT_EQ(panel.edits.size(), 1u);
+    panel.edits.back().first();
+    EXPECT_EQ(value, (bgui::vec3{1.f, 2.f, 3.f}));
+}
+
+TEST_F(EditorInteractionTest, PanelBindingsRejectNullStorage) {
+    helper_test_panel panel;
+    bgui::linear root(bgui::orientation::vertical);
+    EXPECT_THROW(panel.add_float(root, "Value", static_cast<float*>(nullptr)), std::invalid_argument);
+    EXPECT_THROW(panel.add_vec_field(root, "Vector", static_cast<bgui::vec3*>(nullptr)), std::invalid_argument);
+    EXPECT_THROW(panel.add_color(root, static_cast<bgui::color*>(nullptr)), std::invalid_argument);
+}
+
+TEST_F(EditorInteractionTest, PanelHistoryReadsCurrentBoundValue) {
+    helper_test_panel panel;
+    bgui::linear root(bgui::orientation::vertical);
+    float value = 2.f;
+    panel.add_float(root, "Value", &value);
+    auto* field = find_element<bgui::field>(root, [](const auto&) { return true; });
+    ASSERT_NE(field, nullptr);
+    value = 7.f;
+    field->get_inputbox().m_enter_func("9");
+    ASSERT_EQ(panel.edits.size(), 1u);
+    panel.edits.back().first();
+    EXPECT_EQ(value, 7.f);
+}
+
+
+TEST_F(EditorInteractionTest, EditorCameraInspectorExposesEnvironmentWithoutComponentManagement) {
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    context->editor_camera_entity = entity.id;
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+    EXPECT_NE(find_element<bgui::text>(dock, [](auto& text) {
+        return text.get_buffer() == "Editor Camera";
+    }), nullptr);
+    EXPECT_EQ(find_element<bgui::button>(dock, [](auto& button) {
+        return button.get_label().get_buffer() == "Add Component";
+    }), nullptr);
+    auto* section = find_element<bgui::tree>(dock, [](auto& tree) {
+        return tree.label().get_buffer() == "Camera";
+    });
+    ASSERT_NE(section, nullptr);
+    EXPECT_EQ(find_element<bgui::button>(section->header(), [](auto& button) { return button.has_class("component-remove-button"); }), nullptr);
+    auto* fov = find_element<bgui::field>(dock, [](auto& field) {
+        return field.get_label().get_buffer() == "Field of View";
+    });
+    ASSERT_NE(fov, nullptr);
+    fov->get_inputbox().m_enter_func("200");
+    EXPECT_FLOAT_EQ(camera->fov, 179.f);
+    auto* atmosphere = find_element<bgui::field>(dock, [](auto& field) {
+        return field.get_label().get_buffer() == "Atmosphere Zenith R";
+    });
+    ASSERT_NE(atmosphere, nullptr);
+    atmosphere->get_inputbox().m_enter_func("0.4");
+    EXPECT_FLOAT_EQ(camera->atmosphere_zenith.x, 0.4f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->atmosphere_zenith.x, 0.08f);
+    auto* image = find_element<bgui::inputbox>(dock, [](auto& field) {
+        return field.get_buffer().empty();
+    });
+    ASSERT_NE(image, nullptr);
+    image->m_enter_func("assets/editor-sky.png");
+    EXPECT_EQ(camera->skybox_image, "assets/editor-sky.png");
+    ASSERT_TRUE(context->undo());
+    EXPECT_TRUE(camera->skybox_image.empty());
     registry->entities.clear();
 }

@@ -1,4 +1,6 @@
 #include <os/resource_files.hpp>
+#include "commons_namespace.hpp"
+#include "util/texture.hpp"
 #pragma once
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -15,10 +17,31 @@
 #include <string>
 
 namespace commons {
+// Shared by dependency collection and runtime loading, including embedded projects.
+inline std::filesystem::path resolve_model_texture(const std::filesystem::path& model,
+    std::string reference) {
+    namespace fs = std::filesystem;
+    std::replace(reference.begin(), reference.end(), '\\', '/');
+    const fs::path name(reference);
+    const auto base = model.parent_path();
+    if (!name.is_absolute() && reference.find(':') == std::string::npos) {
+        const auto direct = (base / name).lexically_normal();
+        if (bgui::resource_files::exists(direct)) return direct;
+        const auto sibling = (base.parent_path() / name).lexically_normal();
+        if (bgui::resource_files::exists(sibling)) return sibling;
+    }
+    for (const auto& root : {base, base.parent_path()})
+        for (const char* folder : {"Texture", "Textures", "texture", "textures"}) {
+            const auto candidate = root / folder / name.filename();
+            if (bgui::resource_files::exists(candidate)) return candidate.lexically_normal();
+        }
+    return (base / name).lexically_normal();
+}
 // Ordinal node paths distinguish duplicate and unnamed nodes in the source scene.
 struct model_import_options {
     bool flip_uvs = true, smooth_normals = true, join_vertices = true;
     bool skins = true, skeleton = true, animations = true;
+    texture_filter filtering = texture_filter::original;
     double scale = 1.0;
     std::set<std::string> excluded_nodes;
     std::set<unsigned> excluded_meshes, excluded_animations;
@@ -49,6 +72,14 @@ inline model_import_options read_model_import_options(const std::filesystem::pat
             *value = d[name].GetBool();
         }
     }
+    if (d.HasMember("texture_filter")) {
+        const auto& v = d["texture_filter"];
+        if (!v.IsString()) throw std::runtime_error("Filtro de textura inválido.");
+        const std::string name(v.GetString(), v.GetStringLength());
+        if (name == "bilinear") o.filtering = texture_filter::bilinear;
+        else if (name == "trilinear") o.filtering = texture_filter::trilinear;
+        else if (name != "original") throw std::runtime_error("Filtro de textura inválido.");
+    }
     if (d.HasMember("scale")) {
         if (!d["scale"].IsNumber() || !(d["scale"].GetDouble() > 0) || d["scale"].GetDouble() > 1000000)
             throw std::runtime_error("Escala de importação inválida.");
@@ -72,6 +103,13 @@ inline std::string serialize_model_import_options(const model_import_options& o)
     w.StartObject(); w.Key("version"); w.Int(1);
     for (auto [name, value] : {std::pair{"flip_uvs", o.flip_uvs}, {"smooth_normals", o.smooth_normals},
         {"join_vertices", o.join_vertices}, {"skins", o.skins}, {"skeleton", o.skeleton}, {"animations", o.animations}}) { w.Key(name); w.Bool(value); }
+    w.Key("texture_filter");
+    switch (o.filtering) {
+        case texture_filter::original: w.String("original"); break;
+        case texture_filter::bilinear: w.String("bilinear"); break;
+        case texture_filter::trilinear: w.String("trilinear"); break;
+        default: throw std::runtime_error("Filtro de textura inválido.");
+    }
     w.Key("scale"); w.Double(o.scale);
     w.Key("excluded_nodes"); w.StartArray(); for (const auto& v : o.excluded_nodes) w.String(v.c_str()); w.EndArray();
     w.Key("excluded_meshes"); w.StartArray(); for (auto v : o.excluded_meshes) w.Uint(v); w.EndArray();

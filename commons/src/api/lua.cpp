@@ -97,7 +97,9 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
             &spot_light::set_outer_cutoff),
         "GetWorldDirection", &spot_light::get_world_direction,
         "SetInnerCutoff", &spot_light::set_inner_cutoff,
-        "SetOuterCutoff", &spot_light::set_outer_cutoff);
+        "SetOuterCutoff", &spot_light::set_outer_cutoff,
+        "shadows", &spot_light::shadows, "shadowDistance", &spot_light::shadow_distance,
+        "shadowBias", &spot_light::shadow_bias, "shadowStrength", &spot_light::shadow_strength);
     lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
         if (body) {
             if (const auto registry = body->reg.lock())

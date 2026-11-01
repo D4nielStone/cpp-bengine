@@ -2,6 +2,7 @@
 #define GLFW_INCLUDE_NONE
 #include <gtest/gtest.h>
 #include "opengl_test_support.hpp"
+#include "loaders/model.hpp"
 #include "loaders/model_pose.hpp"
 #include "model_import_dialog.hpp"
 #include <chrono>
@@ -89,12 +90,51 @@ TEST(ModelImport, SettingsRoundTripAndRejectCorruption) {
     std::ofstream(settings) << "{\"version\":1,\"scale\":-1}";
     EXPECT_THROW(commons::read_model_import_options(file), std::runtime_error);
 }
+TEST(ModelImport, TextureFilteringSettingsRoundTripAndCompatibility) {
+    const auto dir = std::filesystem::temp_directory_path() / ("bengine-filter-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    struct cleanup { std::filesystem::path p; ~cleanup() { std::filesystem::remove_all(p); } } cleanup{dir};
+    const auto model = dir / "model.obj";
+    const auto settings = commons::model_import_settings_path(model);
+    EXPECT_EQ(commons::read_model_import_options(model).filtering, commons::texture_filter::original);
+    std::ofstream(settings) << R"({"version":1})";
+    EXPECT_EQ(commons::read_model_import_options(model).filtering, commons::texture_filter::original);
+    for (auto filter : {commons::texture_filter::original, commons::texture_filter::bilinear,
+                        commons::texture_filter::trilinear}) {
+        commons::model_import_options options;
+        options.filtering = filter;
+        std::ofstream(settings) << commons::serialize_model_import_options(options);
+        EXPECT_EQ(commons::read_model_import_options(model).filtering, filter);
+    }
+    for (auto invalid : {R"({"version":1,"texture_filter":2})",
+                         R"({"version":1,"texture_filter":"invalid"})"}) {
+        std::ofstream(settings) << invalid;
+        EXPECT_THROW(commons::read_model_import_options(model), std::runtime_error);
+    }
+}
 TEST(ModelImport, DetectsFormatsFromInstalledAssimp) {
     EXPECT_TRUE(commons::supports_model_import("a.GLB"));
     EXPECT_TRUE(commons::supports_model_import("a.fbx"));
     EXPECT_TRUE(commons::supports_model_import("a.obj"));
     EXPECT_TRUE(commons::supports_model_import("a.blend"));
     EXPECT_FALSE(commons::supports_model_import("a.unknownformat"));
+}
+TEST(ModelImport, DetectsWhenItsSourceAssetIsDeletedAndRestored) {
+    const auto dir = std::filesystem::temp_directory_path() / ("bengine-model-source-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    struct cleanup { std::filesystem::path p; ~cleanup() { std::filesystem::remove_all(p); } } cleanup{dir};
+    const auto source = dir / "model.obj";
+    std::ofstream(source) << "source";
+
+    commons::model model;
+    model.relocate_source_path(source);
+    EXPECT_TRUE(model.source_available());
+    std::filesystem::remove(source);
+    EXPECT_FALSE(model.source_available());
+    std::ofstream(source) << "restored";
+    EXPECT_TRUE(model.source_available());
 }
 
 namespace {
@@ -130,6 +170,20 @@ TEST_F(ImportDialogTest, ImportsSettingsAndCompletesOutsideClickDispatch) {
     bgui::on_update();
     EXPECT_TRUE(complete); EXPECT_FALSE(dialog.open());
     EXPECT_TRUE(std::filesystem::exists(commons::model_import_settings_path(folder / "test.obj")));
+}
+TEST_F(ImportDialogTest, PersistsSelectedTextureFiltering) {
+    triangle();
+    editor::ui::model_import_dialog dialog;
+    dialog.show(folder / "test.obj", folder);
+    auto* filter = button("Trilinear");
+    ASSERT_NE(filter, nullptr);
+    filter->on_pressed(); filter->on_released();
+    auto* import = button("Importar / Reimportar");
+    ASSERT_NE(import, nullptr);
+    import->on_pressed(); import->on_released();
+    bgui::on_update();
+    EXPECT_EQ(commons::read_model_import_options(folder / "test.obj").filtering,
+              commons::texture_filter::trilinear);
 }
 TEST_F(ImportDialogTest, FailedImportShowsDiagnosticAndAllowsRetry) {
     std::ofstream(folder / "test.obj") << "invalid";
@@ -189,15 +243,53 @@ TEST(ModelImportGpuTest, LoadsEmbeddedGlbTextureAndAnimatesThroughExistingRender
     const auto path = folder / "animated.glb";
     Assimp::Exporter exporter;
     ASSERT_EQ(exporter.Export(&f.scene, "glb2", path.string()), AI_SUCCESS) << exporter.GetErrorString();
+    commons::model_import_options options;
+    options.filtering = commons::texture_filter::trilinear;
+    std::ofstream(commons::model_import_settings_path(path)) << commons::serialize_model_import_options(options);
     commons::model model(path.string());
     ASSERT_EQ(model.meshes.size(), 1u);
     const auto material = model.meshes[0].getMaterial();
     auto tex = material.getTextura("tex_albedo");
     ASSERT_NE(tex.embedded, nullptr);
+    EXPECT_EQ(tex.filtering, commons::texture_filter::trilinear);
     EXPECT_EQ(tex.embedded->m_size, (bgui::vec2{3,2}));
     tex.bind(0);
     GLint width = 0; glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
     EXPECT_EQ(width, 3);
+    GLint original_min = 0, original_mag = 0;
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &original_min);
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &original_mag);
+    static GLint expected_min;
+    static bool draw_called;
+    const auto original_draw = glad_glDrawElements;
+    struct restore_draw { PFNGLDRAWELEMENTSPROC fn; ~restore_draw() { glad_glDrawElements = fn; } } restore{original_draw};
+    glad_glDrawElements = [](GLenum, GLsizei, GLenum, const void*) {
+        draw_called = true;
+        GLint min_filter = 0, mag_filter = 0, mip_width = 0;
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &min_filter);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &mag_filter);
+        EXPECT_EQ(min_filter, expected_min);
+        EXPECT_EQ(mag_filter, GL_LINEAR);
+        if (expected_min == GL_LINEAR_MIPMAP_LINEAR) {
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &mip_width);
+            EXPECT_GT(mip_width, 0);
+        }
+    };
+    for (const auto filter : {commons::texture_filter::bilinear, commons::texture_filter::trilinear}) {
+        auto filtered_material = material;
+        tex.filtering = filter;
+        filtered_material.set_texture("tex_albedo", tex);
+        model.meshes[0].setMaterial(filtered_material);
+        expected_min = filter == commons::texture_filter::bilinear ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR;
+        draw_called = false;
+        model.draw();
+        EXPECT_TRUE(draw_called);
+        GLint restored_min = 0, restored_mag = 0;
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &restored_min);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &restored_mag);
+        EXPECT_EQ(restored_min, original_min);
+        EXPECT_EQ(restored_mag, original_mag);
+    }
     model.update_animation(.5);
     EXPECT_NEAR(model.meshes[0].getVertices()[0].position.x, 1, .001);
     EXPECT_THROW(model.set_animation(10), std::out_of_range);
@@ -224,4 +316,45 @@ TEST_F(ImportDialogTest, CopiesImportSettingsTogetherWithExternalModel) {
     EXPECT_FALSE(commons::read_model_import_options(imported).skeleton);
     Assimp::Importer validation;
     EXPECT_NE(validation.ReadFile(imported.string(), options.flags()), nullptr);
+}
+
+TEST(ModelImport, ResolvesSiblingTextureFolderAndPreservesBundle) {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() / ("bengine-sibling-textures-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir / "package/source");
+    fs::create_directories(dir / "package/Texture");
+    fs::create_directories(dir / "project");
+    struct cleanup { fs::path p; ~cleanup() { fs::remove_all(p); } } cleanup{dir};
+    const auto source = dir / "package/source/model.obj";
+    std::ofstream(source) << "mtllib model.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl test\nf 1 2 3\n";
+    std::ofstream(source.parent_path() / "model.mtl") << "newmtl test\nmap_Kd Texture/color.png\n";
+    const auto texture = dir / "package/Texture/color.png";
+    std::ofstream(texture) << "texture fixture";
+    EXPECT_EQ(commons::resolve_model_texture(source, "Texture\\color.png"), texture);
+    EXPECT_EQ(commons::resolve_model_texture(source, "C:\\export\\color.png"), texture);
+    EXPECT_EQ(commons::resolve_model_texture(source, "../Texture/color.png"), texture);
+    const auto imported = editor::ui::import_asset(source, dir / "project", true);
+    EXPECT_TRUE(fs::is_regular_file(commons::resolve_model_texture(imported, "Texture/color.png")));
+    EXPECT_EQ(editor::ui::import_asset(source, dir / "project", true), imported);
+}
+
+TEST(ModelImport, PreviewDrawsGeometryAndRespectsSelection) {
+    fixture f;
+    auto* mesh = f.scene.mMeshes[0];
+    delete[] mesh->mVertices; delete[] mesh->mNormals;
+    mesh->mNormals = nullptr;
+    mesh->mNumVertices = 3; mesh->mVertices = new aiVector3D[3]{{0,0,0},{1,0,0},{0,1,0}};
+    mesh->mNumFaces = 1; mesh->mFaces = new aiFace[1];
+    mesh->mFaces[0].mNumIndices = 3; mesh->mFaces[0].mIndices = new unsigned[3]{0,1,2};
+    const auto visible = editor::ui::model_import_preview(f.scene, {});
+    const auto orbited = editor::ui::model_import_preview(f.scene, {}, 1.2f, .4f);
+    const auto zoomed = editor::ui::model_import_preview(f.scene, {}, .65f, .4f, 1.5f);
+    commons::model_import_options options; options.excluded_meshes.insert(0);
+    const auto hidden = editor::ui::model_import_preview(f.scene, options);
+    EXPECT_EQ(visible.m_buffer.size(), 480u * 260u * 4u);
+    EXPECT_TRUE(visible.m_has_alpha);
+    EXPECT_NE(visible.m_buffer, orbited.m_buffer);
+    EXPECT_NE(visible.m_buffer, zoomed.m_buffer);
+    EXPECT_NE(visible.m_buffer, hidden.m_buffer);
 }

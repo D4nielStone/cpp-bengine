@@ -36,7 +36,9 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace editor::ui {
 namespace detail {
@@ -94,7 +96,7 @@ public:
         m_root->set_scrollable(true);
         m_root->add_class("editor-panel");
         m_root->add_class("components-view");
-        m_root->before_update = [this]() { refresh_if_needed(); };
+        m_root->before_update = [this]() { update_inspector(); };
         m_root->alive = m_surface_alive;
 
         m_toolbar = &m_root->add<bgui::linear>(
@@ -111,7 +113,7 @@ public:
     }
 
     void update() override {
-        refresh_if_needed();
+        update_inspector();
     }
 
     void refresh() {
@@ -143,6 +145,10 @@ public:
     }
 
 private:
+    void record_edit(std::function<void()> undo, std::function<void()> redo) override {
+        m_context->record_action(std::move(undo), std::move(redo));
+    }
+
     using entity_id = editor_context::entity_id;
     std::function<void(const std::filesystem::path&, const std::string&)> m_model_import_error;
 
@@ -156,6 +162,12 @@ private:
     bool m_refresh_requested{false};
     commons::component::mask m_rendered_mask{commons::component::COMPONENTE_NONE};
     std::size_t m_history_revision{0};
+    struct property_input {
+        bgui::inputbox* input;
+        std::function<std::string()> read_value;
+    };
+    std::vector<property_input> m_property_inputs;
+    std::unordered_map<std::string, bool> m_section_expansion;
     bgui::text* m_edit_status{nullptr};
     struct asset_target {
         bgui::element* bounds;
@@ -164,53 +176,39 @@ private:
     std::vector<asset_target> m_asset_targets;
     std::shared_ptr<bool> m_surface_alive = std::make_shared<bool>(true);
 
-    static std::string format_value(const float value) {
-        auto result = std::to_string(value);
-        result.erase(result.find_last_not_of('0') + 1);
-        if (!result.empty() && result.back() == '.')
-            result.pop_back();
-        return result;
+    void track_property_input(
+        bgui::inputbox& input,
+        std::function<std::string()> read_value
+    ) override {
+        m_property_inputs.push_back({&input, std::move(read_value)});
     }
 
-    static void configure_row(bgui::linear& row) {
-        row.style.layout.require_mode(
-            bgui::mode::match_parent,
-            bgui::mode::wrap_content
-        );
-        row.style.layout.align = bgui::vec<2, bgui::alignment>{
-            bgui::alignment::start,
-            bgui::alignment::center
-        };
+    void update_inspector() {
+        refresh_if_needed();
+        for (const auto& binding : m_property_inputs) {
+            if (binding.input->is_focused())
+                continue;
+            const auto value = binding.read_value();
+            if (binding.input->get_buffer() != value)
+                binding.input->set_buffer(value);
+        }
     }
 
-    static void configure_property_label(bgui::text& label) {
-        label.add_class("editor-property-label");
-        label.style.layout.require_mode(bgui::mode::pixel, bgui::mode::wrap_content);
-        label.style.layout.require_width(bgui::mode::pixel, 112.f);
-        label.style.layout.margin = bgui::vec4i{0, 0, 4, 0};
-    }
-
-    static void configure_property_row(bgui::linear& row) {
-        configure_row(row);
-        row.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
-        row.style.layout.margin = bgui::vec4i{0, 2, 0, 2};
-    }
-
-    static void configure_property_input(bgui::inputbox& input) {
-        input.add_class("editor-input");
-        input.style.layout.require_mode(bgui::mode::stretch, bgui::mode::pixel);
-        input.style.layout.require_height(bgui::mode::pixel, 22.f);
-        input.style.layout.margin = bgui::vec4i{0, 0, 0, 0};
-        input.style.layout.padding = bgui::vec4i{4, 2, 4, 2};
-    }
-
-    static void configure_property_field(bgui::field& field) {
-        configure_property_row(field);
-        configure_property_label(field.get_label());
-        configure_property_input(field.get_inputbox());
+    void remember_section_expansion() {
+        for (auto& [layer, elements] : m_root->get_elements()) {
+            (void)layer;
+            for (const auto& element : elements) {
+                auto* section = dynamic_cast<bgui::tree*>(element.get());
+                if (!section)
+                    continue;
+                m_section_expansion[section->label().get_buffer()] =
+                    section->is_expanded();
+            }
+        }
     }
 
     void clear_content() {
+        m_property_inputs.clear();
         m_asset_targets.clear();
         m_entity_tree = nullptr;
         for (auto& [layer, elements] : m_root->get_elements()) {
@@ -243,6 +241,7 @@ private:
             return;
 
         m_refresh_requested = false;
+        remember_section_expansion();
         m_rendered_selection = selected;
         m_rendered_mask = mask;
         m_history_revision = history_revision;
@@ -266,6 +265,12 @@ private:
 
     void build_entity(const entity_id id) {
         const auto registry = m_context->registry;
+        if (m_context->editor_camera_entity == id) {
+            m_toolbar->add<bgui::text>("Editor Camera", 0.3f);
+            if (auto camera = registry->get<commons::camera>(id))
+                add_camera(id, camera);
+            return;
+        }
         build_toolbar(id);
         if (auto transform = registry->get<commons::transform>(id))
             add_transform(transform);
@@ -314,7 +319,7 @@ private:
                     [apply, after]() { apply(after); });
             });
             auto toggle = [this, physics, &content](const char* label, bool commons::physics::*field) {
-                auto& checkbox = content.add<bgui::checkbox>(label, 0.29f, physics.get()->*field);
+                auto& checkbox = panel::add_checkbox(content, label, 0.29f, physics.get()->*field);
                 checkbox.set_on_change([this, physics, field](bool value) {
                     const bool previous = physics.get()->*field;
                     physics.get()->*field = value;
@@ -325,12 +330,12 @@ private:
             toggle("Fit to Model", &commons::physics::fit_to_model);
             toggle("Collision Enabled", &commons::physics::collision_enabled);
             toggle("Trigger", &commons::physics::trigger);
-            add_vector_field(content, "Rotation Offset", physics->collision_rotation,
+            add_vec_field(content, "Rotation Offset", physics->collision_rotation,
                 [physics]() { return physics->collision_rotation; },
                 [physics](std::size_t axis, float value) { physics->collision_rotation[axis] = value; });
             for (bool offset : {false, true}) {
                 auto get = [physics, offset]() { return offset ? physics->collision_offset : physics->collision_size; };
-                add_vector_field(content, offset ? "Collider Offset" : "Collider Scale", get(), get,
+                add_vec_field(content, offset ? "Collider Offset" : "Collider Scale", get(), get,
                     [physics, offset](std::size_t axis, float value) {
                         auto size = physics->collision_size, position = physics->collision_offset;
                         (offset ? position : size)[axis] = offset ? value : std::max(0.001f, value);
@@ -338,13 +343,13 @@ private:
                             physics->collision_enabled, physics->trigger);
                     });
             }
-            add_number_field(content, "Friction", physics->friction,
+            add_float(content, "Friction", physics->friction,
                 [physics]() { return physics->friction; },
                 [physics](float value) { physics->setFriccao(std::max(0.f, value)); });
-            add_number_field(content, "Restitution", physics->restitution,
+            add_float(content, "Restitution", physics->restitution,
                 [physics]() { return physics->restitution; },
                 [physics](float value) { physics->setRestituicao(std::clamp(value, 0.f, 1.f)); });
-            add_number_field(section.children(), "Mass", physics->m_massa,
+            add_float(section.children(), "Mass", physics->m_massa,
                 [physics]() { return physics->m_massa; },
                 [physics](float mass) { physics->setMass(std::max(0.f, mass)); });
         }
@@ -379,7 +384,7 @@ private:
         header.add_class("entities-toolbar");
         configure_row(header);
 
-        auto& name_input = header.add<bgui::inputbox>(
+        auto& name_input = panel::add_input(header,
             entity_name(id),
             "Entity name...",
             0.3f,
@@ -485,7 +490,7 @@ private:
         if (!registry->get<commons::physics>(id))
             m_component_options->add<bgui::button>("Physics", 0.28f,
                 [this, id]() { add_component<commons::physics>(id); });
-        auto& script_input = m_component_options->add<bgui::inputbox>(
+        auto& script_input = panel::add_input(*m_component_options,
             "", "Add Lua script: drop a file or enter its path", 0.27f);
         configure_property_input(script_input);
         script_input.style.layout.require_width(bgui::mode::match_parent);
@@ -504,8 +509,11 @@ private:
         const bool removable,
         const std::function<void()>& remove_component
     ) {
-        auto& section = m_root->add<bgui::tree>(name, 0.28f, true);
-        section.set_expanded(true);
+        const auto expansion = m_section_expansion.find(name);
+        const bool expanded = expansion == m_section_expansion.end()
+            ? true
+            : expansion->second;
+        auto& section = m_root->add<bgui::tree>(name, 0.28f, expanded);
         section.add_class("editor-section");
         section.set_icon(name == "Transform" ? "directory_open" :
             name == "Renderer" ? "cube" : name == "Camera" ? "camera" :
@@ -557,7 +565,7 @@ private:
         auto& section = add_section("Transform", false, {});
         auto& content = section.children();
 
-        add_vector_field(
+        add_vec_field(
             content,
             "Position",
             transform->get_position(),
@@ -568,7 +576,7 @@ private:
                 transform->set_position(position);
             }
         );
-        add_vector_field(
+        add_vec_field(
             content,
             "Rotation",
             transform->get_rotation(),
@@ -579,7 +587,7 @@ private:
                 transform->set_rotation(rotation);
             }
         );
-        add_vector_field(
+        add_vec_field(
             content,
             "Scale",
             transform->get_scale(),
@@ -603,7 +611,7 @@ private:
         );
         add_shadow_toggle(section.children(), "Cast Shadows", renderer, &commons::renderer::cast_shadows);
         add_shadow_toggle(section.children(), "Receive Shadows", renderer, &commons::renderer::receive_shadows);
-        auto& model_field = section.children().add<bgui::field>(
+        auto& model_field = panel::add_field(section.children(),
             "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", 0.27f);
         configure_property_field(model_field);
         auto* model_input = &model_field.get_inputbox();
@@ -667,7 +675,7 @@ private:
                 bgui::mode::wrap_content
             );
 
-            auto& color_picker = section.children().add<bgui::color_picker>(
+            auto& color_picker = panel::add_color(section.children(),
                 bgui::color{
                     base_color.r,
                     base_color.g,
@@ -675,8 +683,6 @@ private:
                     base_color.a
                 }
             );
-            color_picker.add_class("editor-input");
-            color_picker.style.layout.require_size(128.f, 92.f);
             color_picker.set_on_change(
                 [this, renderer, index, base_color](const bgui::color& color) {
                     if (!renderer->m_modelo ||
@@ -717,7 +723,7 @@ private:
             );
 
             for (const auto& factor : commons::pbr_factors) {
-                add_number_field(section.children(), factor.label,
+                add_float(section.children(), factor.label,
                     commons::pbr_value(material, factor),
                     [renderer, index, factor]() {
                         return commons::pbr_value(renderer->m_modelo->meshes[index].getMaterial(), factor);
@@ -729,7 +735,7 @@ private:
                         renderer->m_modelo->meshes[index].setMaterial(updated);
                     });
             }
-            auto& world = section.children().add<bgui::checkbox>(
+            auto& world = panel::add_checkbox(section.children(),
                 "WorldTexture", 0.29f, commons::world_texture(material));
             world.set_on_change([this, renderer, index](bool enabled) {
                 auto apply = [renderer, index](bool value) {
@@ -743,7 +749,7 @@ private:
                     [apply, enabled]() { apply(enabled); });
             });
             for (const auto& factor : commons::texture_factors) {
-                add_number_field(section.children(), factor.label,
+                add_float(section.children(), factor.label,
                     commons::pbr_value(material, factor),
                     [renderer, index, factor]() {
                         return commons::pbr_value(renderer->m_modelo->meshes[index].getMaterial(), factor);
@@ -767,7 +773,7 @@ private:
         configure_property_row(row);
         auto& label = row.add<bgui::text>(map.label, 0.27f);
         configure_property_label(label);
-        auto& input = row.add<bgui::inputbox>(material.getTextura(map.name).path,
+        auto& input = panel::add_input(row, material.getTextura(map.name).path,
             "Drop a texture or enter its path", 0.26f);
         configure_property_input(input);
         auto& preview = content.add<bgui::image>();
@@ -863,7 +869,7 @@ private:
                     }
                     refresh();
                 });
-            auto& input = section.children().add<bgui::inputbox>(
+            auto& input = panel::add_input(section.children(),
                 entries[index]->file, "Drop a Lua script or enter its path", 0.27f);
             configure_property_input(input);
             input.style.layout.require_width(bgui::mode::match_parent);
@@ -907,18 +913,16 @@ private:
                 [script, name, next]() { script->set_property(name, next); });
         };
         if (property.type == "boolean") {
-            auto& checkbox = content.add<bgui::checkbox>(property.name, .29f, std::get<bool>(property.value));
+            auto& checkbox = panel::add_checkbox(content, property.name, .29f, std::get<bool>(property.value));
             checkbox.set_on_change([change](bool value) { change(value); });
         } else if (property.type == "color") {
             content.add<bgui::text>(property.name, .27f);
             const auto color = std::get<std::array<float, 4>>(property.value);
-            auto& picker = content.add<bgui::color_picker>(bgui::color{color[0], color[1], color[2], color[3]});
-            picker.add_class("editor-input");
-            picker.style.layout.require_size(128.f, 92.f);
+            auto& picker = panel::add_color(content, bgui::color{color[0], color[1], color[2], color[3]});
             picker.set_on_change([change](const bgui::color& value) {
                 change(std::array<float, 4>{value.x, value.y, value.z, value.w});
             });
-            auto& alpha = content.add<bgui::field>(property.name + " Alpha", std::to_string(color[3]), .27f,
+            auto& alpha = panel::add_field(content, property.name + " Alpha", std::to_string(color[3]), .27f,
                 [this, script, name = property.name, change](const std::string& text) {
                     float value{};
                     const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
@@ -957,7 +961,7 @@ private:
                     change(!relative.empty() && *relative.begin() != ".." ? relative.generic_string() : path.string());
                 } else change(text);
             };
-            auto& field = content.add<bgui::field>(property.name, buffer, .27f, assign);
+            auto& field = panel::add_field(content, property.name, buffer, .27f, assign);
             configure_property_field(field);
             field.add_class("lua-property-" + property.type);
             if (property.type == "image") m_asset_targets.push_back({&field.get_inputbox(),
@@ -971,39 +975,42 @@ private:
     ) {
         auto& section = add_section(
             "Camera",
-            true,
+            m_context->editor_camera_entity != id,
             [this, id]() { remove_component<commons::camera>(id); }
         );
         auto& content = section.children();
 
-        add_number_field(
+        add_float(
             content,
             "Field of View",
             camera->fov,
             [camera]() { return camera->fov; },
-            [camera](float value) { camera->fov = value; }
+            [camera](float value) { camera->fov = std::clamp(value, 1.f, 179.f); }
         );
-        add_number_field(
+        add_float(
             content,
             "Far Clip",
             camera->corte_longo,
             [camera]() { return camera->corte_longo; },
-            [camera](float value) { camera->corte_longo = value; }
+            [camera](float value) {
+                if (value > camera->corte_curto) camera->corte_longo = value;
+            }
         );
-        add_number_field(
+        add_float(
             content,
             "Orthographic Scale",
             camera->scale,
             [camera]() { return camera->scale; },
-            [camera](float value) { camera->scale = value; }
+            [camera](float value) { if (value > 0.f) camera->scale = value; }
         );
 
+        content.add<bgui::text>("With skybox disabled, the atmosphere gradient is used.", 0.25f);
         add_shadow_toggle(content, "Enable Skybox", camera, &commons::camera::m_use_skybox);
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         configure_property_row(row);
         auto& label = row.add<bgui::text>("Cubemap image (4 x 3 cross)", 0.27f);
         configure_property_label(label);
-        auto& input = row.add<bgui::inputbox>(camera->skybox_image, "Drop a horizontal cross image", 0.26f);
+        auto& input = panel::add_input(row, camera->skybox_image, "Drop a horizontal cross image", 0.26f);
         configure_property_input(input);
         auto assign = [this, camera](const std::filesystem::path& path) {
             auto before = camera->skybox_image;
@@ -1025,7 +1032,7 @@ private:
             content.add<bgui::text>("Legacy six-face cubemap loaded; select a cross image to replace it.", 0.25f);
         const char* channels[] = {"Atmosphere Zenith R", "Atmosphere Zenith G", "Atmosphere Zenith B"};
         for (unsigned i = 0; i < 3; ++i) {
-            add_number_field(content, channels[i], camera->atmosphere_zenith[i],
+            add_float(content, channels[i], camera->atmosphere_zenith[i],
                 [camera, i]() { return camera->atmosphere_zenith[i]; },
                 [camera, i](float v) { camera->atmosphere_zenith[i] = std::clamp(v, 0.f, 1.f); });
         }
@@ -1033,14 +1040,14 @@ private:
         const char* horizon_labels[] = {"Atmosphere Horizon R", "Atmosphere Horizon G", "Atmosphere Horizon B"};
         for (unsigned i = 0; i < 3; ++i) {
             auto read = [camera, i]() { return i == 0 ? camera->ceu.r : i == 1 ? camera->ceu.g : camera->ceu.b; };
-            add_number_field(content, horizon_labels[i], read(), read,
+            add_float(content, horizon_labels[i], read(), read,
                 [camera, i](float value) {
                     float& channel = i == 0 ? camera->ceu.r : i == 1 ? camera->ceu.g : camera->ceu.b;
                     channel = std::clamp(value, 0.f, 1.f);
                 });
         }
 
-        auto& orthographic = content.add<bgui::checkbox>(
+        auto& orthographic = panel::add_checkbox(content,
             "Orthographic",
             0.29f,
             camera->flag_orth
@@ -1063,7 +1070,7 @@ private:
     template<class Content, class Component>
     void add_shadow_toggle(Content& content, const char* label,
         std::shared_ptr<Component> component, bool Component::*field) {
-        auto& checkbox = content.template add<bgui::checkbox>(label, 0.29f, component.get()->*field);
+        auto& checkbox = panel::add_checkbox(content, label, 0.29f, component.get()->*field);
         checkbox.set_on_change([this, component, field](bool enabled) {
             const bool previous = component.get()->*field;
             if (previous == enabled) return;
@@ -1088,16 +1095,16 @@ private:
         auto& content = section.children();
 
         add_shadow_toggle(content, "Shadows", light, &commons::directional_light::shadows);
-        add_number_field(content, "Shadow Resolution", static_cast<float>(light->shadow_resolution),
+        add_float(content, "Shadow Resolution", static_cast<float>(light->shadow_resolution),
             [light]() { return static_cast<float>(light->shadow_resolution); },
             [light](float v) { light->shadow_resolution = static_cast<int>(std::clamp(v, 128.f, 8192.f)); });
-        add_number_field(content, "Shadow Distance", light->shadow_distance,
+        add_float(content, "Shadow Distance", light->shadow_distance,
             [light]() { return light->shadow_distance; }, [light](float v) { light->shadow_distance = v; });
-        add_number_field(content, "Shadow Bias", light->shadow_bias,
+        add_float(content, "Shadow Bias", light->shadow_bias,
             [light]() { return light->shadow_bias; }, [light](float v) { light->shadow_bias = v; });
-        add_number_field(content, "Shadow Strength", light->shadow_strength,
+        add_float(content, "Shadow Strength", light->shadow_strength,
             [light]() { return light->shadow_strength; }, [light](float v) { light->shadow_strength = v; });
-        add_vector_field(
+        add_vec_field(
             content,
             "Direction",
             light->direction,
@@ -1106,7 +1113,7 @@ private:
                 light->direction[axis] = value;
             }
         );
-        add_vector_field(
+        add_vec_field(
             content,
             "Ambient",
             light->ambient,
@@ -1115,7 +1122,7 @@ private:
                 light->ambient[axis] = value;
             }
         );
-        add_vector_field(
+        add_vec_field(
             content,
             "Color",
             light->color,
@@ -1124,7 +1131,7 @@ private:
                 light->color[axis] = value;
             }
         );
-        add_number_field(
+        add_float(
             content,
             "Intensity",
             light->intensity,
@@ -1143,17 +1150,25 @@ private:
             [this, id]() { remove_component<commons::spot_light>(id); }
         );
         auto& content = section.children();
-        add_vector_field(content, "Position", light->position,
+        add_shadow_toggle(content, "Shadows", light, &commons::spot_light::shadows);
+        add_float(content, "Shadow Distance", light->shadow_distance,
+            [light]() { return light->shadow_distance; },
+            [light](float v) { light->shadow_distance = std::clamp(v, 1.f, 10000.f); });
+        add_float(content, "Shadow Bias", light->shadow_bias,
+            [light]() { return light->shadow_bias; },
+            [light](float v) { light->shadow_bias = std::clamp(v, 0.f, 0.1f); });
+        add_float(content, "Shadow Strength", light->shadow_strength,
+            [light]() { return light->shadow_strength; },
+            [light](float v) { light->shadow_strength = std::clamp(v, 0.f, 1.f); });
+        add_vec_field(content, "Position", light->position,
             [light]() { return light->position; },
             [light](std::size_t axis, float value) { light->position[axis] = value; });
-        add_vector_field(content, "Direction", light->direction,
+        add_vec_field(content, "Direction", light->direction,
             [light]() { return light->direction; },
             [light](std::size_t axis, float value) { light->direction[axis] = value; });
         content.add<bgui::text>("Color", 0.27f);
-        auto& color_picker = content.add<bgui::color_picker>(
+        auto& color_picker = panel::add_color(content,
             bgui::color{light->color.x, light->color.y, light->color.z, 1.f});
-        color_picker.add_class("editor-input");
-        color_picker.style.layout.require_size(128.f, 92.f);
         color_picker.set_on_change([this, light](const bgui::color& color) {
             const auto previous = light->color;
             const bgui::vec3 next{color.x, color.y, color.z};
@@ -1164,139 +1179,24 @@ private:
                 [light, previous]() { light->color = previous; },
                 [light, next]() { light->color = next; });
         });
-        add_number_field(content, "Intensity", light->intensity,
+        add_float(content, "Intensity", light->intensity,
             [light]() { return light->intensity; },
             [light](float value) { light->intensity = value; });
-        add_number_field(content, "Constant Attenuation", light->constant,
+        add_float(content, "Constant Attenuation", light->constant,
             [light]() { return light->constant; },
             [light](float value) { light->constant = value; });
-        add_number_field(content, "Linear Attenuation", light->linear,
+        add_float(content, "Linear Attenuation", light->linear,
             [light]() { return light->linear; },
             [light](float value) { light->linear = value; });
-        add_number_field(content, "Quadratic Attenuation", light->quadratic,
+        add_float(content, "Quadratic Attenuation", light->quadratic,
             [light]() { return light->quadratic; },
             [light](float value) { light->quadratic = value; });
-        add_number_field(content, "Inner Cutoff (degrees)", light->inner_cutoff,
+        add_float(content, "Inner Cutoff (degrees)", light->inner_cutoff,
             [light]() { return light->inner_cutoff; },
             [light](float value) { light->set_inner_cutoff(value); });
-        add_number_field(content, "Outer Cutoff (degrees)", light->outer_cutoff,
+        add_float(content, "Outer Cutoff (degrees)", light->outer_cutoff,
             [light]() { return light->outer_cutoff; },
             [light](float value) { light->set_outer_cutoff(value); });
-    }
-
-    void add_vector_field(
-        bgui::linear& parent,
-        const std::string& label,
-        const bgui::vec3& value,
-        const std::function<bgui::vec3()>& get_value,
-        const std::function<void(std::size_t, float)>& on_change
-    ) {
-        auto current_value = std::make_shared<bgui::vec3>(value);
-        auto& row = parent.add<bgui::linear>(bgui::orientation::horizontal);
-        configure_property_row(row);
-        row.style.layout.require_height(bgui::mode::pixel, 22.f);
-        row.style.layout.margin = bgui::vec4i{0, 1, 0, 1};
-        auto& name = row.add<bgui::text>(label, 0.27f);
-        configure_property_label(name);
-        auto& values = row.add<bgui::linear>(bgui::orientation::horizontal);
-        values.add_class("editor-property-row");
-        configure_row(values);
-        values.style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
-        values.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
-        values.style.layout.margin = bgui::vec4i{0, 0, 0, 0};
-
-        constexpr const char* axes[]{"X", "Y", "Z"};
-        for (std::size_t axis = 0; axis < 3; ++axis) {
-            auto& axis_label = values.add<bgui::text>(axes[axis], 0.27f);
-            axis_label.add_class("editor-property-label");
-            axis_label.style.layout.require_width(bgui::mode::pixel, 12.f);
-
-            auto& input = values.add<bgui::inputbox>(
-                format_value(value[axis]),
-                "",
-                0.27f,
-                [this, on_change, current_value, axis, label](
-                    const std::string& buffer
-                ) {
-                    float parsed{};
-                    const auto result = std::from_chars(
-                        buffer.data(),
-                        buffer.data() + buffer.size(),
-                        parsed,
-                        std::chars_format::general
-                    );
-                    if (result.ec != std::errc{} ||
-                        result.ptr != buffer.data() + buffer.size() ||
-                        !std::isfinite(parsed)) {
-                        std::cerr << "[editor] Invalid number for "
-                                  << label << ": " << buffer << '\n';
-                        return;
-                    }
-                    const float previous = (*current_value)[axis];
-                    if (previous == parsed)
-                        return;
-                    auto apply_value = [on_change, current_value, axis](
-                        const float next
-                    ) {
-                        on_change(axis, next);
-                        (*current_value)[axis] = next;
-                    };
-                    apply_value(parsed);
-                    m_context->record_action(
-                        [apply_value, previous]() { apply_value(previous); },
-                        [apply_value, parsed]() { apply_value(parsed); }
-                    );
-                },
-                bgui::input_mode::inputbox
-            );
-            configure_property_input(input);
-        }
-        *current_value = get_value();
-    }
-
-    void add_number_field(
-        bgui::linear& parent,
-        const std::string& label,
-        const float value,
-        const std::function<float()>& get_value,
-        const std::function<void(float)>& on_change
-    ) {
-        auto current_value = std::make_shared<float>(value);
-        auto& field = parent.add<bgui::field>(
-            label,
-            format_value(value),
-            0.27f,
-            [this, on_change, current_value, label](const std::string& buffer) {
-                float parsed{};
-                const auto result = std::from_chars(
-                    buffer.data(),
-                    buffer.data() + buffer.size(),
-                    parsed,
-                    std::chars_format::general
-                );
-                if (result.ec != std::errc{} ||
-                    result.ptr != buffer.data() + buffer.size() ||
-                    !std::isfinite(parsed)) {
-                    std::cerr << "[editor] Invalid number for "
-                              << label << ": " << buffer << '\n';
-                    return;
-                }
-                const float previous = *current_value;
-                if (previous == parsed)
-                    return;
-                auto apply_value = [on_change, current_value](float next) {
-                    on_change(next);
-                    *current_value = next;
-                };
-                apply_value(parsed);
-                m_context->record_action(
-                    [apply_value, previous]() { apply_value(previous); },
-                    [apply_value, parsed]() { apply_value(parsed); }
-                );
-            }
-        );
-        configure_property_field(field);
-        *current_value = get_value();
     }
 
     template<typename Component>

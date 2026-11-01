@@ -1,6 +1,9 @@
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include <assimp/Exporter.hpp>
+#include <assimp/material.h>
+#include <assimp/scene.h>
 #include <bgui.hpp>
 #include <bgui_backend_freetype.hpp>
 #include <gtest/gtest.h>
@@ -22,6 +25,8 @@
 #include <fstream>
 #include <filesystem>
 #include <array>
+#include <cstring>
+#include <iterator>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace {
@@ -111,6 +116,92 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
         EXPECT_TRUE(enabled.valor.b);
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
     std::filesystem::remove_all(folder);
+}
+
+TEST_F(EditorRenderTest, KeepsEmbeddedModelTexturesWhenLoadingSavedScene) {
+    namespace fs = std::filesystem;
+    const auto folder = fs::temp_directory_path() /
+        ("bengine-embedded-texture-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(folder);
+    struct cleanup {
+        fs::path path;
+        ~cleanup() { fs::remove_all(path); }
+    } cleanup{folder};
+
+    aiScene scene;
+    scene.mRootNode = new aiNode("root");
+    scene.mRootNode->mNumMeshes = 1;
+    scene.mRootNode->mMeshes = new unsigned[1]{0};
+    scene.mNumMeshes = 1;
+    scene.mMeshes = new aiMesh*[1]{new aiMesh};
+    auto* mesh = scene.mMeshes[0];
+    mesh->mNumVertices = 3;
+    mesh->mVertices = new aiVector3D[3]{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh->mNormals = new aiVector3D[3]{{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    mesh->mTextureCoords[0] = new aiVector3D[3]{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh->mNumUVComponents[0] = 2;
+    mesh->mNumFaces = 1;
+    mesh->mFaces = new aiFace[1];
+    mesh->mFaces[0].mNumIndices = 3;
+    mesh->mFaces[0].mIndices = new unsigned[3]{0, 1, 2};
+    mesh->mPrimitiveTypes = aiPrimitiveType_TRIANGLE;
+    scene.mNumMaterials = 1;
+    scene.mMaterials = new aiMaterial*[1]{new aiMaterial};
+    aiString embedded_reference("*0");
+    scene.mMaterials[0]->AddProperty(
+        &embedded_reference,
+        AI_MATKEY_TEXTURE_DIFFUSE(0)
+    );
+    const auto image_path = fs::path(BENGINE_SOURCE_DIR) /
+        "external/cpp-bgui/tests/assets/rgb.jpg";
+    std::ifstream image(image_path, std::ios::binary);
+    const std::string image_bytes{std::istreambuf_iterator<char>(image), {}};
+    ASSERT_FALSE(image_bytes.empty());
+    scene.mNumTextures = 1;
+    scene.mTextures = new aiTexture*[1]{new aiTexture};
+    auto* embedded = scene.mTextures[0];
+    embedded->mWidth = static_cast<unsigned>(image_bytes.size());
+    embedded->pcData = new aiTexel[
+        (image_bytes.size() + sizeof(aiTexel) - 1) / sizeof(aiTexel)
+    ];
+    std::memcpy(embedded->pcData, image_bytes.data(), image_bytes.size());
+    std::strcpy(embedded->achFormatHint, "jpg");
+
+    const auto model_path = folder / "embedded.glb";
+    Assimp::Exporter exporter;
+    ASSERT_EQ(exporter.Export(&scene, "glb2", model_path.string()), AI_SUCCESS)
+        << exporter.GetErrorString();
+
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(17);
+    registry->add<commons::camera>(camera);
+    auto entity = registry->create(23);
+    registry->add<commons::renderer>(entity, model_path.string().c_str());
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    ASSERT_FALSE(renderer->m_modelo->meshes.empty());
+    ASSERT_NE(
+        renderer->m_modelo->meshes[0].getMaterial()
+            .getTextura("tex_albedo").embedded,
+        nullptr
+    );
+
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    const auto project_path = folder / "project.bengine";
+    std::string error;
+    ASSERT_TRUE(persistence.save(project_path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(project_path.string(), error)) << error;
+
+    const auto loaded_renderer = registry->get<commons::renderer>(entity.id);
+    ASSERT_NE(loaded_renderer, nullptr);
+    const auto loaded_texture = loaded_renderer->m_modelo->meshes[0]
+        .getMaterial().getTextura("tex_albedo");
+    ASSERT_NE(loaded_texture.embedded, nullptr);
+    loaded_texture.bind(0);
+    GLint binding{};
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);
+    EXPECT_GT(binding, 0);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
 }
 
 TEST_F(EditorRenderTest, SmallInterfaceTextUsesAntialiasedMipmappedGlyphs) {
@@ -267,6 +358,148 @@ TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextC
     EXPECT_TRUE(preview->flag_fb);
     EXPECT_EQ(preview->viewportFBO, (bgui::vec2i{19, 13}));
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST_F(EditorRenderTest, SpotShadowsRespectCasterReceiverAndLightControls) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera_entity = registry->create();
+    registry->add<commons::camera>(camera_entity);
+    auto camera = registry->get<commons::camera>(camera_entity.id);
+    registry->get<commons::transform>(camera_entity.id)->set_position({0,6,8});
+    registry->get<commons::transform>(camera_entity.id)->set_rotation({-36.8699f,-90,0});
+    camera->position = {0, 6, 8};
+    camera->viewMatrix = glm::lookAt(glm::vec3{0,6,8}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
+    camera->flag_orth = true;
+    camera->scale = 5.f;
+    camera->request_framebuffer_size({128,128});
+    auto light_entity = registry->create();
+    registry->add<commons::directional_light>(light_entity, bgui::vec3{0,-1,0}, bgui::vec3{0.02f}, bgui::vec3{0}, 1.f);
+    registry->get<commons::directional_light>(light_entity.id)->shadows = false;
+    registry->add<commons::spot_light>(light_entity);
+    auto light = registry->get<commons::spot_light>(light_entity.id);
+    light->position = {-2, 6, 0};
+    light->direction = {2, -6, 0};
+    light->inner_cutoff = 35.f;
+    light->outer_cutoff = 45.f;
+    light->intensity = 30.f;
+    light->shadow_distance = 12.f;
+    commons::material surface;
+    surface.set_uniform("material.albedo", commons::color{0.6f,0.6f,0.6f,1.f});
+    surface.set_uniform("material.metallic", 0.f);
+    surface.set_uniform("material.roughness", 0.5f);
+    surface.set_uniform("material.ao", 1.f);
+    auto make_plane = [&]() {
+        auto model = new commons::model();
+        model->meshes.emplace_back(std::vector<commons::vertex>{
+            {{-1,0,-1},{0,1,0},{0,0}}, {{1,0,-1},{0,1,0},{1,0}},
+            {{1,0,1},{0,1,0},{1,1}}, {{-1,0,1},{0,1,0},{0,1}}},
+            std::vector<unsigned int>{0,2,1,0,3,2}, surface);
+        model->meshes[0].load();
+        return model;
+    };
+    auto floor_entity = registry->create();
+    registry->add<commons::renderer>(floor_entity, make_plane());
+    registry->get<commons::transform>(floor_entity.id)->set_scale({5,1,5});
+    auto floor = registry->get<commons::renderer>(floor_entity.id);
+    auto cube_entity = registry->create();
+    registry->get<commons::transform>(cube_entity.id)->set_position({0,2,0});
+    registry->add<commons::renderer>(cube_entity, make_plane());
+    auto cube = registry->get<commons::renderer>(cube_entity.id);
+    commons::render_system system;
+    auto render = [&]() {
+        system.update(registry);
+        std::vector<unsigned char> pixels(128*128*3);
+        glReadPixels(0,0,128,128,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+        return pixels;
+    };
+    const auto darkened = [](const auto& a, const auto& b) {
+        int count = 0;
+        for (size_t i = 0; i < a.size(); i += 3)
+            if (int(b[i]) - int(a[i]) > 10) ++count;
+        return count;
+    };
+    const auto shadowed = render();
+    light->shadows = false;
+    const auto lit = render();
+    EXPECT_GT(darkened(shadowed, lit), 20);
+    light->shadows = true;
+    floor->receive_shadows = false;
+    EXPECT_LT(darkened(render(), lit), 10);
+    floor->receive_shadows = true;
+    cube->cast_shadows = false;
+    EXPECT_LT(darkened(render(), lit), 10);
+    cube->cast_shadows = true;
+    light->shadow_strength = 0.f;
+    EXPECT_EQ(render(), lit);
+    light->shadow_strength = 1.f;
+    light->shadow_distance = 1.f;
+    EXPECT_EQ(render(), lit);
+    light->shadow_distance = 12.f;
+    cube->visible = false;
+    const auto no_caster = render();
+    light->shadows = false;
+    EXPECT_EQ(render(), no_caster);
+    cube->visible = true;
+    // Moving a light to another atlas tile must preserve its shadow.
+    auto second_entity = registry->create();
+    registry->add<commons::spot_light>(second_entity);
+    auto second = registry->get<commons::spot_light>(second_entity.id);
+    second->position = light->position;
+    second->direction = light->direction;
+    second->inner_cutoff = light->inner_cutoff;
+    second->outer_cutoff = light->outer_cutoff;
+    second->intensity = light->intensity;
+    second->shadow_distance = light->shadow_distance;
+    light->intensity = 0.f;
+    second->shadows = true;
+    EXPECT_EQ(render(), shadowed);
+    second->shadows = false;
+    EXPECT_EQ(render(), lit);
+    // Concurrent lights have independent shadow switches.
+    light->intensity = 30.f;
+    light->shadows = true;
+    second->shadows = true;
+    const auto both_shadowed = render();
+    second->shadows = false;
+    EXPECT_GT(darkened(both_shadowed, render()), 20);
+    registry->remove(second_entity.id);
+    EXPECT_EQ(render(), shadowed);
+    light->position = {0, 6, 0};
+    light->direction = {0, -1, 0};
+    render();
+    light->direction = {0, 0, 0};
+    render();
+}
+
+TEST(ShadowSettings, SpotSettingsValidateAndDefaultForLegacyScenes) {
+    commons::spot_light light;
+    rapidjson::Document data(rapidjson::kObjectType);
+    ASSERT_TRUE(light.serialize(data, data.GetAllocator()));
+    for (const auto* key : {"shadows", "shadow_distance", "shadow_bias", "shadow_strength"}) {
+        rapidjson::Value saved;
+        saved.CopyFrom(data[key], data.GetAllocator());
+        data[key].SetString("invalid");
+        EXPECT_FALSE(light.analyze(data)) << key;
+        data[key].CopyFrom(saved, data.GetAllocator());
+    }
+    data["shadow_distance"].SetFloat(0.f);
+    EXPECT_FALSE(light.analyze(data));
+    data["shadow_distance"].SetFloat(50.f);
+    data["shadow_strength"].SetFloat(2.f);
+    EXPECT_FALSE(light.analyze(data));
+    data["shadow_strength"].SetFloat(1.f);
+    data["shadow_bias"].SetFloat(-1.f);
+    EXPECT_FALSE(light.analyze(data));
+    for (const auto* key : {"shadows", "shadow_distance", "shadow_bias", "shadow_strength"})
+        data.RemoveMember(key);
+    light.shadows = false;
+    light.shadow_distance = 75.f;
+    ASSERT_TRUE(light.analyze(data));
+    EXPECT_TRUE(light.shadows);
+    EXPECT_FLOAT_EQ(light.shadow_distance, 50.f);
+    EXPECT_FLOAT_EQ(light.shadow_bias, 0.001f);
+    EXPECT_FLOAT_EQ(light.shadow_strength, 1.f);
 }
 
 TEST_F(EditorRenderTest, DirectionalShadowsRespectCasterReceiverAndLightControls) {

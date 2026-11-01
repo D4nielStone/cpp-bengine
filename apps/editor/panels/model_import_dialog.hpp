@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/panel.hpp"
 #include "../systems/asset_import.hpp"
 #include "../systems/project_file_transaction.hpp"
 #include "loaders/model_import.hpp"
@@ -7,9 +8,12 @@
 #include <elem/checkbox.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/text.hpp>
+#include <elem/image.hpp>
+#include "model_import_preview.hpp"
 #include <functional>
 #include <memory>
 #include <cmath>
+#include <charconv>
 
 namespace editor::ui {
 class model_import_dialog {
@@ -41,7 +45,8 @@ public:
         modal.set_on_confirm([this]() { m_modal = nullptr; m_importer.reset(); });
         auto& content = modal.content();
         content.style.layout.require_height(bgui::mode::pixel, std::max(100, std::min(520, bgui::get_context().m_size.y - 150)));
-        content.style.layout.require_width(bgui::mode::pixel, std::max(160, std::min(720, bgui::get_context().m_size.x - 100)));
+        const int dialog_width = std::max(160, std::min(1000, bgui::get_context().m_size.x - 100));
+        content.style.layout.require_width(bgui::mode::pixel, dialog_width);
         content.set_scrollable(true);
         modal.add<bgui::text>("Importador 3D — " + source.filename().string(), .36f);
         modal.add<bgui::text>(source.string(), .25f);
@@ -54,54 +59,99 @@ public:
             });
             return;
         }
+        auto& columns = modal.add<bgui::linear>(bgui::orientation::horizontal);
+        columns.style.layout.require_mode(bgui::mode::stretch, bgui::mode::stretch);
+        auto& settings = columns.add<bgui::linear>(bgui::orientation::vertical);
+        settings.style.layout.require_mode(bgui::mode::pixel, bgui::mode::stretch);
+        const float settings_width = std::clamp(dialog_width * .42f, 160.f, 400.f);
+        const float preview_width = std::min(480.f,
+            std::max(160.f, dialog_width - settings_width - 48.f));
+        settings.style.layout.require_width(bgui::mode::pixel, settings_width);
+        settings.set_scrollable(true);
+        auto& preview_panel = columns.add<bgui::linear>(bgui::orientation::vertical);
+        preview_panel.style.layout.require_mode(bgui::mode::stretch, bgui::mode::stretch);
+        preview_panel.add<bgui::text>("Visualização 3D orbital", .32f);
+        auto& preview = preview_panel.add<bgui::image>(model_import_preview(*scene, m_options));
+        preview.set_size(preview_width, preview_width * 260.f / 480.f);
+        auto& orbit = preview_panel.add<model_import_orbit>(m_importer, *scene, m_options, preview);
+        const auto refresh_preview = [&orbit]() { orbit.refresh(); };
+        preview_panel.add<bgui::text>("Arraste para orbitar · use a roda do mouse para aproximar ou afastar.", .27f);
+        preview_panel.add<bgui::button>("Redefinir órbita", .28f, [&orbit]() { orbit.reset(); });
+        preview_panel.add<bgui::button>("Atualizar prévia da seleção", .28f, refresh_preview);
         const auto check = [&](const std::string& label, bool& value) {
-            modal.add<bgui::checkbox>(&value, value, label, .28f);
+            panel::add_checkbox(settings, &value, value, label, .28f)
+                .set_on_change([refresh_preview](bool) { refresh_preview(); });
         };
         check("Importar outra cópia", m_another_copy);
-        modal.add<bgui::text>("Configurações de malha", .32f);
+        settings.add<bgui::text>("Configurações de malha", .32f);
+        settings.add<bgui::text>("Filtragem de texturas (suavização)", .28f);
+        auto& filter_label = settings.add<bgui::text>("", .28f);
+        const auto refresh_filter = [this, label = &filter_label]() {
+            label->set_buffer(m_options.filtering == commons::texture_filter::bilinear ? "Bilinear" :
+                m_options.filtering == commons::texture_filter::trilinear ? "Trilinear" : "Original");
+        };
+        refresh_filter();
+        for (const auto& [label, value] : {std::pair{"Original", commons::texture_filter::original},
+            {"Bilinear", commons::texture_filter::bilinear}, {"Trilinear", commons::texture_filter::trilinear}})
+            settings.add<bgui::button>(label, .28f, [this, value, refresh_filter]() {
+                m_options.filtering = value;
+                refresh_filter();
+            });
         check("Inverter UVs", m_options.flip_uvs);
         check("Gerar normais suaves quando ausentes", m_options.smooth_normals);
         check("Unir vértices idênticos", m_options.join_vertices);
-        modal.add<bgui::text>("Escala uniforme (> 0)", .28f);
-        auto& scale = modal.add<bgui::inputbox>(std::to_string(m_options.scale), "Escala uniforme (> 0)", .28f);
-        modal.add<bgui::text>("Nodes / estrutura da cena (desmarcar exclui a geometria dos descendentes)", .30f);
+        settings.add<bgui::text>("Escala uniforme (> 0)", .28f);
+        auto& scale = panel::add_input(settings, std::to_string(m_options.scale), "Escala uniforme (> 0)", .28f);
+        scale.m_enter_func = [this, refresh_preview](const std::string& value) {
+            double next_scale = 0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), next_scale);
+            if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() &&
+                std::isfinite(next_scale) && next_scale > 0 && next_scale <= 1000000) {
+                m_options.scale = next_scale;
+                refresh_preview();
+            }
+        };
+        settings.add<bgui::text>("Nodes / estrutura da cena (desmarcar exclui a geometria dos descendentes)", .30f);
         const auto node_ui = [&](const auto& self, const aiNode* node, const std::string& path, unsigned depth) -> void {
-            auto& toggle = modal.add<bgui::checkbox>(std::string(depth * 2, ' ') + node->mName.C_Str() +
+            auto& toggle = panel::add_checkbox(settings, std::string(depth * 2, ' ') + node->mName.C_Str() +
                 " [" + std::to_string(node->mNumMeshes) + " meshes]", .27f, !m_options.excluded_nodes.contains(path));
-            toggle.set_on_change([this, path](bool enabled) {
+            toggle.set_on_change([this, path, refresh_preview](bool enabled) {
                 if (enabled) m_options.excluded_nodes.erase(path); else m_options.excluded_nodes.insert(path);
+                refresh_preview();
             });
             for (unsigned i = 0; i < node->mNumChildren; ++i) self(self, node->mChildren[i], path + "/" + std::to_string(i), depth + 1);
         };
         node_ui(node_ui, scene->mRootNode, "0", 0);
-        modal.add<bgui::text>("Meshes / skins / skeleton", .32f);
+        settings.add<bgui::text>("Meshes / skins / skeleton", .32f);
         check("Importar skeleton e canais dos ossos", m_options.skeleton);
         check("Importar skins e pesos dos ossos (requer skeleton)", m_options.skins);
         for (unsigned i = 0; i < scene->mNumMeshes; ++i) {
             const auto* mesh = scene->mMeshes[i];
-            auto& toggle = modal.add<bgui::checkbox>(std::string(mesh->mName.C_Str()) + " #" + std::to_string(i) +
+            auto& toggle = panel::add_checkbox(settings, std::string(mesh->mName.C_Str()) + " #" + std::to_string(i) +
                 " — " + std::to_string(mesh->mNumVertices) + " vértices; " + std::to_string(mesh->mNumBones) + " bones",
                 .27f, !m_options.excluded_meshes.contains(i));
-            toggle.set_on_change([this, i](bool enabled) {
+            toggle.set_on_change([this, i, refresh_preview](bool enabled) {
                 if (enabled) m_options.excluded_meshes.erase(i); else m_options.excluded_meshes.insert(i);
+                refresh_preview();
             });
             for (unsigned b = 0; b < mesh->mNumBones; ++b)
-                modal.add<bgui::text>("    Bone: " + std::string(mesh->mBones[b]->mName.C_Str()) + " — " +
+                settings.add<bgui::text>("    Bone: " + std::string(mesh->mBones[b]->mName.C_Str()) + " — " +
                     std::to_string(mesh->mBones[b]->mNumWeights) + " pesos", .25f);
         }
-        modal.add<bgui::text>("Animations", .32f);
+        settings.add<bgui::text>("Animations", .32f);
         check("Importar e reproduzir animações (primeiro clipe selecionado)", m_options.animations);
         for (unsigned i = 0; i < scene->mNumAnimations; ++i) {
             const auto* clip = scene->mAnimations[i];
             const double rate = clip->mTicksPerSecond > 0 ? clip->mTicksPerSecond : 25;
-            auto& toggle = modal.add<bgui::checkbox>(std::string(clip->mName.C_Str()) + " #" + std::to_string(i) +
+            auto& toggle = panel::add_checkbox(settings, std::string(clip->mName.C_Str()) + " #" + std::to_string(i) +
                 " — " + std::to_string(clip->mDuration / rate) + " s; " + std::to_string(clip->mNumChannels) + " canais",
                 .27f, !m_options.excluded_animations.contains(i));
-            toggle.set_on_change([this, i](bool enabled) {
+            toggle.set_on_change([this, i, refresh_preview](bool enabled) {
                 if (enabled) m_options.excluded_animations.erase(i); else m_options.excluded_animations.insert(i);
+                refresh_preview();
             });
         }
-        modal.add<bgui::text>("Materiais: " + std::to_string(scene->mNumMaterials) +
+        settings.add<bgui::text>("Materiais: " + std::to_string(scene->mNumMaterials) +
             "; texturas embutidas: " + std::to_string(scene->mNumTextures) +
             ". Câmeras, luzes e morph targets não são convertidos em entidades.", .27f);
         modal.add<bgui::button>("Importar / Reimportar", .30f,

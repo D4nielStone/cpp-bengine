@@ -22,6 +22,7 @@
 #include <os/asset_manager.hpp>
 #include <lay/dock.hpp>
 #include <lay/linear.hpp>
+#include <lay/grid.hpp>
 #include <os/os.hpp>
 
 #include <algorithm>
@@ -159,6 +160,7 @@ public:
 
     ~files_view() override {
         if (m_delete_modal) bgui::get_layout().remove(m_delete_modal);
+        if (m_script_modal) bgui::get_layout().remove(m_script_modal);
     }
 
     files_view(const files_view&) = delete;
@@ -224,6 +226,7 @@ public:
 
     void set_project_file(const std::filesystem::path& project_file) {
         if (m_delete_modal) { bgui::get_layout().remove(m_delete_modal); m_delete_modal = nullptr; }
+        if (m_script_modal) { bgui::get_layout().remove(m_script_modal); m_script_modal = nullptr; }
         for (auto& [path, doc] : m_documents)
             if (doc.window && m_dock) m_dock->remove_window(doc.window);
         m_documents.clear();
@@ -363,6 +366,7 @@ private:
     file_moved_callback m_on_file_moved;
     std::function<bool()> m_can_modify_files;
     bgui::modal* m_delete_modal{nullptr};
+    bgui::modal* m_script_modal{nullptr};
     bool m_import_another_copy{false};
     model_import_dialog m_model_importer;
     std::function<void(const std::filesystem::path&)> m_on_model_imported;
@@ -521,7 +525,7 @@ private:
             if (lower_extension(doc.path) == ".lua")
                 doc.editor = &m_document_body->add<lua_inputbox>(doc.buffer);
             else
-                doc.editor = &m_document_body->add<bgui::inputbox>(
+                doc.editor = &panel::add_input(*m_document_body,
                     doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
             doc.editor->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
             doc.editor->style.layout.padding = bgui::vec4i{0};
@@ -913,7 +917,9 @@ private:
     void build_file_list() {
         const auto relative_directory =
             m_current_directory.lexically_relative(m_project_root);
-        auto& path_label = m_file_area->add<bgui::text>(
+        auto& header = m_file_area->add<bgui::linear>(bgui::orientation::horizontal);
+        header.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        auto& path_label = header.add<bgui::text>(
             relative_directory.empty() || relative_directory == "."
                 ? "Projeto"
                 : relative_directory.generic_string(),
@@ -921,54 +927,13 @@ private:
         );
         configure_label(path_label);
         path_label.add_class("editor-header");
-
-        auto& create_row = m_file_area->add<bgui::linear>(bgui::orientation::horizontal);
-        create_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        auto& filename = create_row.add<bgui::inputbox>(m_new_script_name, "Script.lua", 0.27f);
-        filename.add_class("new-script-name");
-        filename.style.layout.require_width(bgui::mode::stretch);
-        auto create = [this, input = &filename]() {
-            m_new_script_name = input->get_buffer();
-            std::filesystem::path created;
-            std::string error;
-            if (create_lua_script(m_current_directory, m_new_script_name, created, error)) {
-                m_selected_file = created;
-                m_asset_status = "Script criado. Arraste-o para uma entidade na Scene.";
-                open_document(created);
-            } else m_asset_status = error;
-            request_refresh();
-        };
-        filename.m_enter_func = [create](const std::string&) { create(); };
-        filename.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
-        create_row.add<bgui::button>("Novo script Lua", 0.27f, create).add_class("new-script-button");
-        create_row.add<bgui::checkbox>(&m_import_another_copy, m_import_another_copy, "Importar outra cópia", .27f);
-        if (!m_selected_file.empty()) {
-            create_row.add<bgui::button>("Excluir arquivo", .27f, [this, file = m_selected_file]() {
-                bgui::add_function([this, file]() { confirm_file_delete(file); });
-            }).add_class("delete-file-button");
-        }
-        if (!m_selected_file.empty() && is_model_file(m_selected_file)) {
-            create_row.add<bgui::button>("Mostrar importador 3D", .27f, [this, file = m_selected_file]() {
-                bgui::add_function([this, file]() { show_model_importer(file); });
-            });
-        }
+        path_label.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
+        auto& actions_menu = header.add<context_action_button>("Ações", .28f, []() {});
+        actions_menu.add_class("files-actions-menu-button");
+        actions_menu.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
+        actions_menu.context_options = [this]() { return file_actions(); };
+        actions_menu.set_function([button = &actions_menu]() { button->open_context(); });
         if (!m_asset_status.empty()) add_message(m_asset_status);
-
-        if (!m_selected_file.empty() && is_scene_file(m_selected_file)) {
-            auto& action = m_file_area->add<bgui::button>(
-                m_selected_file == m_main_scene
-                    ? "Cena principal"
-                    : "Tornar cena principal",
-                0.28f,
-                [this]() { set_main_scene(); }
-            );
-            action.style.layout.require_mode(
-                bgui::mode::wrap_content,
-                bgui::mode::wrap_content
-            );
-            action.style.layout.padding = bgui::vec4i{7, 3, 7, 3};
-            action.set_enable(m_selected_file != m_main_scene);
-        }
 
         std::error_code error;
         std::vector<std::filesystem::path> files, folders;
@@ -992,9 +957,13 @@ private:
             return;
         }
 
+        auto& entries = m_file_area->add<bgui::grid>(bgui::vec2i{180, 40}, bgui::vec2i{6, 6});
+        entries.add_class("file-grid");
+        entries.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+
         std::sort(folders.begin(), folders.end());
         for (const auto& directory : folders) {
-            auto& item = m_file_area->add<bgui::button>("", .28f, [this, directory]() {
+            auto& item = entries.add<bgui::button>("", .28f, [this, directory]() {
                 m_current_directory = directory;
                 m_selected_file.clear();
                 request_refresh();
@@ -1002,8 +971,11 @@ private:
             item.add_class("file-folder-target");
             item.get_label().set_enable(false);
             item.add<bgui::icon>("folder", .27f).receives_input(false);
-            item.add<bgui::text>(directory.filename().string(), .28f).receives_input(false);
-            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+            auto& label = item.add<bgui::text>(directory.filename().string(), .28f);
+            label.receives_input(false);
+            label.set_wrap(false);
+            label.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
+            item.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
             item.style.layout.padding = bgui::vec4i{5, 3, 5, 3};
             m_folder_targets.emplace_back(&item, directory);
         }
@@ -1014,7 +986,7 @@ private:
         }
         for (const auto& file : files) {
             const bool selected = file == m_selected_file;
-            auto& item = m_file_area->add<file_button>(
+            auto& item = entries.add<file_button>(
                 "",
                 [this, file]() {
                     m_selected_file = file;
@@ -1071,7 +1043,7 @@ private:
             };
             item.style.layout.require_mode(
                 bgui::mode::match_parent,
-                bgui::mode::wrap_content
+                bgui::mode::match_parent
             );
             item.style.layout.padding = bgui::vec4i{5, 3, 5, 3};
             item.style.visual.background.normal = selected
@@ -1081,6 +1053,59 @@ private:
                 bgui::color{0.22f, 0.24f, 0.27f, 1.f};
             item.style.visual.border_radius = 3.f;
         }
+    }
+
+    context_actions file_actions() {
+        context_actions actions{
+            {"Novo script Lua...", [this]() { show_new_script_dialog(); }},
+            {m_import_another_copy
+                ? "Importar outra cópia: ativado"
+                : "Importar outra cópia: desativado",
+                [this]() {
+                    m_import_another_copy = !m_import_another_copy;
+                    request_refresh();
+                }}
+        };
+        if (!m_selected_file.empty()) {
+            const auto file = m_selected_file;
+            actions.emplace_back("Excluir arquivo...", [this, file]() { confirm_file_delete(file); });
+            if (is_model_file(file))
+                actions.emplace_back("Configurar importação 3D...", [this, file]() { show_model_importer(file); });
+            if (is_scene_file(file) && file != m_main_scene)
+                actions.emplace_back("Tornar cena principal", [this, file]() {
+                    m_selected_file = file;
+                    set_main_scene();
+                });
+        }
+        return actions;
+    }
+
+    void show_new_script_dialog() {
+        if (m_script_modal) return;
+        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+        m_script_modal = &modal;
+        modal.add<bgui::text>("Nome do novo script Lua", .3f);
+        auto& filename = panel::add_input(modal.content(), m_new_script_name, "Script.lua", .27f);
+        filename.add_class("new-script-name");
+        modal.set_confirmation_text("Criar");
+        modal.set_on_confirm([this, input = &filename]() {
+            m_script_modal = nullptr;
+            m_new_script_name = input->get_buffer();
+            std::filesystem::path created;
+            std::string error;
+            if (create_lua_script(m_current_directory, m_new_script_name, created, error)) {
+                m_selected_file = created;
+                m_asset_status = "Script criado. Arraste-o para uma entidade na Scene.";
+                open_document(created);
+            } else {
+                m_asset_status = error;
+            }
+            request_refresh();
+        });
+        modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
+            if (m_script_modal == surface) m_script_modal = nullptr;
+            bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
+        }).add_class("cancel-new-script");
     }
 
     void confirm_file_delete(const std::filesystem::path& file) {

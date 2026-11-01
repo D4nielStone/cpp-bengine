@@ -36,6 +36,19 @@ Editor e runtime leem as mesmas opções. Reimportar atualiza os Renderers ativo
 que usam o mesmo caminho; o carregador prepara a substituição antes de trocar
 as malhas, preservando o modelo anterior quando o novo carregamento falha.
 
+## Filtragem de texturas
+
+No importador, selecione **Original**, **Bilinear** ou **Trilinear** e confirme em
+**Importar / Reimportar**. A escolha vale para as texturas do modelo no editor e
+no runtime. Bilinear interpola os texels; trilinear também interpola entre níveis
+de mipmaps, reduzindo a cintilação de texturas distantes. Isso não substitui
+antialiasing das bordas da geometria.
+
+O campo opcional `texture_filter` aceita `original`, `bilinear` ou `trilinear`.
+Arquivos antigos sem esse campo preservam a filtragem original. Valores inválidos
+são rejeitados. Em C++, `commons::texture::filtering` usa `commons::texture_filter`.
+Os parâmetros compartilhados com a BGUI são restaurados após desenhar a malha.
+
 ## Reprodução e limites
 
 O carregador mantém a cena do Assimp, aplica as transformações dos nodes e
@@ -58,3 +71,15 @@ indica esses limites. Seleções por índices/posição devem ser revistas se um
 versão do arquivo mudar a ordem de nodes, malhas ou clipes. Rigs que dependem de
 nomes de ossos duplicados precisam de verificação específica. O custo de skinning
 na CPU depende da quantidade de vértices e ossos; não houve benchmark nesta fase.
+
+A janela de importação separa as configurações, à esquerda, da prévia 3D orbital,
+à direita. A prévia sombreada enquadra automaticamente a geometria na pose inicial
+e acompanha as seleções de nodes e meshes. Arraste sobre a imagem para orbitar,
+use a roda do mouse para aproximar ou afastar e “Redefinir órbita” para restaurar
+a vista inicial. “Atualizar prévia da seleção” também permite atualizar a imagem
+manualmente. A prévia não exibe texturas nem reproduz animações.
+
+Texturas externas são resolvidas primeiro pelo caminho relativo gravado no modelo,
+depois a partir da pasta pai e nas pastas `Texture`, `Textures`, `texture` e
+`textures`, junto do modelo ou ao lado de `source`. O carregamento usa a mesma
+regra após a importação; a cópia preserva a estrutura relativa do pacote.

@@ -107,7 +107,8 @@ TEST(LuaCompletion, SpotLightOffersAllPropertiesAndMethods) {
     ASSERT_TRUE(properties);
     EXPECT_EQ(properties->members, (std::vector<std::string>{
         "color", "constant", "direction", "innerCutoff", "intensity",
-        "linear", "outerCutoff", "position", "quadratic", "worldDirection",
+        "linear", "outerCutoff", "position", "quadratic", "shadowBias",
+        "shadowDistance", "shadowStrength", "shadows", "worldDirection",
         "worldPosition"
     }));
 

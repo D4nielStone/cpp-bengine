@@ -46,26 +46,33 @@ struct SpotLight {
     float quadratic;
     float innerCutoff;
     float outerCutoff;
+    bool shadowEnabled;
+    mat4 shadowMatrix;
+    float shadowBias;
+    float shadowStrength;
 };
 
 uniform bool shadowEnabled;
 uniform sampler2D shadowMap;
+uniform sampler2D spotShadowMap;
 uniform mat4 lightSpaceMatrix;
 uniform float shadowBias;
 uniform float shadowStrength;
 
-float shadowVisibility(vec3 normal, vec3 lightDirection) {
-    if (!shadowEnabled) return 1.0;
-    vec4 lightPosition = lightSpaceMatrix * vec4(Position, 1.0);
+float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D depthMap,
+                       mat4 matrix, float depthBias, float strength, vec2 offset, float scale) {
+    if (!enabled) return 1.0;
+    vec4 lightPosition = matrix * vec4(Position, 1.0);
     vec3 projected = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
-    float bias = max(shadowBias * (1.0 - dot(normal, lightDirection)), shadowBias);
-    vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0));
+    float bias = max(depthBias * (1.0 - dot(normal, lightDirection)), depthBias);
+    vec2 atlasTexel = 1.0 / vec2(textureSize(depthMap, 0));
+    vec2 texel = atlasTexel / scale;
     // Bound receiver depth variation across the PCF footprint (one texel plus
     // half a texel of nearest-sample rounding). The geometric depth derivatives
     // also work with normal maps, whose shading normals do not describe this slope.
     vec3 dx = dFdx(projected);
     vec3 dy = dFdy(projected);
-    if (any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) return 1.0;
+    if (lightPosition.w <= 0.0 || any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) return 1.0;
     float determinant = dx.x * dy.y - dx.y * dy.x;
     if (abs(determinant) > 1e-12) {
         vec2 depthGradient = vec2(dy.y * dx.z - dx.y * dy.z,
@@ -74,9 +81,14 @@ float shadowVisibility(vec3 normal, vec3 lightDirection) {
     }
     float blocked = 0.0;
     for (int x = -1; x <= 1; ++x)
-        for (int y = -1; y <= 1; ++y)
-            blocked += projected.z - bias > texture(shadowMap, projected.xy + vec2(x, y) * texel).r ? 1.0 : 0.0;
-    return 1.0 - shadowStrength * blocked / 9.0;
+        for (int y = -1; y <= 1; ++y) {
+            vec2 uv = offset + projected.xy * scale + vec2(x, y) * atlasTexel;
+            // Keep PCF taps inside this light's atlas tile.
+            if (scale < 1.0)
+                uv = clamp(uv, offset + atlasTexel * 0.5, offset + vec2(scale) - atlasTexel * 0.5);
+            blocked += projected.z - bias > texture(depthMap, uv).r ? 1.0 : 0.0;
+        }
+    return 1.0 - strength * blocked / 9.0;
 }
 
 uniform Material material;
@@ -199,7 +211,9 @@ void main() {
 
     vec3 L_dir = normalize(-dirLight.direction);
     vec3 radiance_dir = dirLight.color * dirLight.intensity;
-    result += shadowVisibility(N, L_dir) * calculateLightLo(L_dir, radiance_dir, N, V, albedo.rgb, metallic, roughness);
+    float directionalVisibility = shadowVisibility(N, L_dir, shadowEnabled, shadowMap,
+        lightSpaceMatrix, shadowBias, shadowStrength, vec2(0.0), 1.0);
+    result += directionalVisibility * calculateLightLo(L_dir, radiance_dir, N, V, albedo.rgb, metallic, roughness);
 
     for (int i = 0; i < pointLightCount && i < MAX_POINT_LIGHTS; ++i) {
         PointLight light = pointLights[i];
@@ -215,13 +229,16 @@ void main() {
         vec3 toLight = light.position - Position;
         float distanceToLight = length(toLight);
         vec3 L = normalize(toLight);
+        float visibility = shadowVisibility(N, L, light.shadowEnabled, spotShadowMap,
+            light.shadowMatrix, light.shadowBias, light.shadowStrength,
+            vec2(i % 4, i / 4) * 0.25, 0.25);
         float cone = dot(normalize(-L), normalize(light.direction));
         if (cone <= light.outerCutoff || light.intensity == 0.0) continue;
         float coneIntensity = smoothstep(light.outerCutoff, light.innerCutoff, cone);
         float attenuation = 1.0 / (light.constant + light.linear * distanceToLight
             + light.quadratic * distanceToLight * distanceToLight);
         vec3 radiance = light.color * light.intensity * attenuation * coneIntensity;
-        result += calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
+        result += visibility * calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
     }
 
     float gamma = 2.2;

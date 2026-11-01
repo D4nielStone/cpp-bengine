@@ -51,6 +51,22 @@ bool spot_light::analyze(const rapidjson::Value& value) {
         !read_optional_number(value, "outer_cutoff", outer_cutoff))
         return false;
 
+    shadows = true;
+    shadow_distance = 50.f;
+    shadow_bias = 0.001f;
+    shadow_strength = 1.f;
+    if (value.HasMember("shadows")) {
+        if (!value["shadows"].IsBool()) return false;
+        shadows = value["shadows"].GetBool();
+    }
+    if (!read_optional_number(value, "shadow_distance", shadow_distance) ||
+        !read_optional_number(value, "shadow_bias", shadow_bias) ||
+        !read_optional_number(value, "shadow_strength", shadow_strength) ||
+        shadow_distance < 1.f || shadow_distance > 10000.f ||
+        shadow_bias < 0.f || shadow_bias > 0.1f ||
+        shadow_strength < 0.f || shadow_strength > 1.f)
+        return false;
+
     return inner_cutoff >= 0.f && inner_cutoff < outer_cutoff && outer_cutoff < 90.f;
 }
 
@@ -65,6 +81,9 @@ bool spot_light::serialize(
         !finite_vector(color) || !std::isfinite(intensity) || !std::isfinite(constant) ||
         !std::isfinite(linear) || !std::isfinite(quadratic) ||
         !std::isfinite(inner_cutoff) || !std::isfinite(outer_cutoff) ||
+        !std::isfinite(shadow_distance) || !std::isfinite(shadow_bias) || !std::isfinite(shadow_strength) ||
+        shadow_distance < 1.f || shadow_distance > 10000.f ||
+        shadow_bias < 0.f || shadow_bias > 0.1f || shadow_strength < 0.f || shadow_strength > 1.f ||
         inner_cutoff < 0.f || inner_cutoff >= outer_cutoff || outer_cutoff >= 90.f)
         return false;
 
@@ -85,6 +104,10 @@ bool spot_light::serialize(
     value.AddMember("quadratic", quadratic, allocator);
     value.AddMember("inner_cutoff", inner_cutoff, allocator);
     value.AddMember("outer_cutoff", outer_cutoff, allocator);
+    value.AddMember("shadows", shadows, allocator);
+    value.AddMember("shadow_distance", shadow_distance, allocator);
+    value.AddMember("shadow_bias", shadow_bias, allocator);
+    value.AddMember("shadow_strength", shadow_strength, allocator);
     return true;
 }
 

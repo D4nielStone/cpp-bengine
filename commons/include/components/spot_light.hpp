@@ -18,6 +18,10 @@ namespace COMMONS_NS {
         float quadratic{0.032f};
         float inner_cutoff{12.5f};
         float outer_cutoff{17.5f};
+        bool shadows{true};
+        float shadow_distance{50.f};
+        float shadow_bias{0.001f};
+        float shadow_strength{1.f};
 
         void set_inner_cutoff(float value) {
             if (std::isfinite(value))

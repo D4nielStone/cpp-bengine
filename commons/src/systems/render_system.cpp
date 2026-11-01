@@ -1,6 +1,7 @@
 #include "systems/render_system.hpp"
 
 #include <chrono>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
@@ -16,6 +17,7 @@
 #include "glad.h"
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -30,25 +32,27 @@ float finite_clamp(float value, float fallback, float low, float high) {
 render_system::~render_system() {
     // Systems may outlive the window during application shutdown.
     if (glad_glGetString && glGetString(GL_VERSION)) {
-        if (m_shadow_texture) glDeleteTextures(1, &m_shadow_texture);
-        if (m_shadow_fbo) glDeleteFramebuffers(1, &m_shadow_fbo);
+        for (auto* map : {&m_directional_shadow, &m_spot_shadow}) {
+            if (map->texture) glDeleteTextures(1, &map->texture);
+            if (map->fbo) glDeleteFramebuffers(1, &map->fbo);
+        }
     }
 }
 
-bool render_system::prepare_shadow_map(int resolution) {
+bool render_system::prepare_shadow_map(shadow_map& map, int resolution) {
     resolution = std::clamp(resolution, 128, 8192);
-    if (m_shadow_fbo && m_shadow_resolution == resolution) return true;
+    if (map.fbo && map.resolution == resolution) return true;
     GLint max_texture_size;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
     resolution = std::min(resolution, max_texture_size);
-    if (m_shadow_fbo && m_shadow_resolution == resolution) return true;
+    if (map.fbo && map.resolution == resolution) return true;
     GLint framebuffer, read_framebuffer, texture;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_framebuffer);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
-    if (!m_shadow_fbo) glGenFramebuffers(1, &m_shadow_fbo);
-    if (!m_shadow_texture) glGenTextures(1, &m_shadow_texture);
-    glBindTexture(GL_TEXTURE_2D, m_shadow_texture);
+    if (!map.fbo) glGenFramebuffers(1, &map.fbo);
+    if (!map.texture) glGenTextures(1, &map.texture);
+    glBindTexture(GL_TEXTURE_2D, map.texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, resolution, resolution,
         0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -57,8 +61,8 @@ bool render_system::prepare_shadow_map(int resolution) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     const float border[] = {1, 1, 1, 1};
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
-    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadow_texture, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, map.fbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, map.texture, 0);
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
     const bool complete = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
@@ -66,11 +70,11 @@ bool render_system::prepare_shadow_map(int resolution) {
     glBindFramebuffer(GL_READ_FRAMEBUFFER, read_framebuffer);
     glBindTexture(GL_TEXTURE_2D, texture);
     if (!complete) {
-        glDeleteTextures(1, &m_shadow_texture);
-        glDeleteFramebuffers(1, &m_shadow_fbo);
-        m_shadow_texture = m_shadow_fbo = 0;
+        glDeleteTextures(1, &map.texture);
+        glDeleteFramebuffers(1, &map.fbo);
+        map.texture = map.fbo = 0;
     }
-    m_shadow_resolution = complete ? resolution : 0;
+    map.resolution = complete ? resolution : 0;
     return complete;
 }
 
@@ -119,7 +123,9 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
                 world_light.direction.x, world_light.direction.y, world_light.direction.z
             };
             const float length_squared = glm::dot(direction, direction);
-            if (std::isfinite(length_squared) && length_squared > 1e-8f)
+            if (spot_lights.size() < 16 && std::isfinite(length_squared) && length_squared > 1e-8f &&
+                std::isfinite(world_light.position.x) && std::isfinite(world_light.position.y) &&
+                std::isfinite(world_light.position.z))
                 spot_lights.push_back(std::move(world_light));
         }
     });
@@ -132,6 +138,98 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         );
     });
 
+    std::unordered_map<const model*, bool> available_models;
+    for (const auto& [render_component, transform_component] : renderables) {
+        (void)transform_component;
+        if (render_component && render_component->m_modelo &&
+            !available_models.contains(render_component->m_modelo))
+            available_models.emplace(render_component->m_modelo, render_component->m_modelo->source_available());
+    }
+
+    const auto draw_depth = [&](const shadow_map& map, const glm::mat4& matrix, int x, int y, int size) {
+        GLint framebuffer, viewport[4], depth_function, scissor_box[4], vertex_array, program;
+        GLboolean depth_mask;
+        const bool depth_test = glIsEnabled(GL_DEPTH_TEST);
+        const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
+        const bool cull = glIsEnabled(GL_CULL_FACE);
+        glGetIntegerv(GL_SCISSOR_BOX, scissor_box);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vertex_array);
+        glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        glGetIntegerv(GL_DEPTH_FUNC, &depth_function);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, map.fbo);
+        glViewport(x, y, size, size);
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+        glDepthFunc(GL_LESS);
+        glDisable(GL_CULL_FACE); // Thin and double-sided surfaces can cast shadows.
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x, y, size, size);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
+        shader depth_shader("shadow.vert", "shadow.frag");
+        depth_shader.use();
+        depth_shader.setMat4("lightSpaceMatrix", glm::value_ptr(matrix));
+        for (const auto& [renderer, transform] : renderables) {
+            if (!renderer || !transform || !renderer->visible || !renderer->cast_shadows || !renderer->m_modelo ||
+                !available_models.at(renderer->m_modelo)) continue;
+            for (auto& mesh : renderer->m_modelo->meshes) {
+                if (mesh.isOverlayed()) continue;
+                if (!mesh.isLoaded()) mesh.load();
+                const auto& instances = mesh.instances();
+                auto draw = [&](const glm::mat4& matrix) {
+                    depth_shader.setMat4("model", glm::value_ptr(matrix));
+                    glBindVertexArray(mesh.getVertexArray());
+                    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.getIndices().size()), GL_UNSIGNED_INT, nullptr);
+                };
+                if (instances.empty()) draw(transform->get_model_matrix());
+                else for (const auto& instance : instances) draw(instance.get_world_model_matrix());
+            }
+        }
+        glBindVertexArray(vertex_array);
+        glUseProgram(program);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glDepthFunc(depth_function);
+        glDepthMask(depth_mask);
+        if (!depth_test) glDisable(GL_DEPTH_TEST);
+        glScissor(scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3]);
+        if (scissor) glEnable(GL_SCISSOR_TEST);
+        if (cull) glEnable(GL_CULL_FACE);
+    };
+
+    // A 4x4 atlas keeps all 16 spotlight shadows in one texture unit.
+    std::array<glm::mat4, 16> spot_spaces;
+    std::array<bool, 16> spot_shadows{};
+    bool has_spot_shadows = false;
+    bool spot_shadows_prepared = false;
+    const auto prepare_spot_shadows = [&]() {
+        has_spot_shadows = std::any_of(spot_lights.begin(), spot_lights.end(),
+            [](const auto& light) { return light.shadows && light.intensity > 0.f; }) &&
+            prepare_shadow_map(m_spot_shadow, 4096);
+        if (has_spot_shadows) {
+            const int tile_size = m_spot_shadow.resolution / 4;
+            for (size_t index = 0; index < spot_lights.size(); ++index) {
+                const auto& light = spot_lights[index];
+                if (!light.shadows || !(light.intensity > 0.f)) continue;
+                const glm::vec3 position{light.position.x, light.position.y, light.position.z};
+                const auto ray = glm::normalize(glm::vec3{light.direction.x, light.direction.y, light.direction.z});
+                const auto up = std::abs(ray.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
+                const float inner = finite_clamp(light.inner_cutoff, 12.5f, 0.f, 89.f);
+                const float outer = finite_clamp(light.outer_cutoff, 17.5f, inner + 0.1f, 89.9f);
+                spot_spaces[index] = glm::perspective(glm::radians(outer * 2.f), 1.f, 0.1f,
+                    finite_clamp(light.shadow_distance, 50.f, 1.f, 10000.f)) *
+                    glm::lookAt(position, position + ray, up);
+                draw_depth(m_spot_shadow, spot_spaces[index], static_cast<int>(index % 4) * tile_size,
+                    static_cast<int>(index / 4) * tile_size, tile_size);
+                spot_shadows[index] = true;
+            }
+        }
+        spot_shadows_prepared = true;
+    };
+
     reg->cada<camera>([&](const uint32_t entity) {
         if (m_camera_filter && !m_camera_filter(entity))
             return;
@@ -140,6 +238,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             return;
         }
 
+        if (!spot_shadows_prepared) prepare_spot_shadows();
         ++m_last_camera_count;
         camera_component->drawFB();
 
@@ -161,7 +260,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         glm::mat4 light_space{1.f};
         const glm::vec3 direction{direction_light.direction.x, direction_light.direction.y, direction_light.direction.z};
         const bool valid_direction = std::isfinite(glm::dot(direction, direction)) && glm::dot(direction, direction) > 1e-8f;
-        const bool shadows = direction_light.shadows && valid_direction && prepare_shadow_map(direction_light.shadow_resolution);
+        const bool shadows = direction_light.shadows && valid_direction && prepare_shadow_map(m_directional_shadow, direction_light.shadow_resolution);
         GLint shadow_binding = 0, active_texture = GL_TEXTURE0;
         if (shadows) {
             const float distance = finite_clamp(direction_light.shadow_distance, 50.f, 1.f, 10000.f);
@@ -170,54 +269,21 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             const auto up = std::abs(ray.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
             light_space = glm::ortho(-distance, distance, -distance, distance, 0.1f, distance * 4.f) *
                 glm::lookAt(center - ray * (distance * 2.f), center, up);
-            GLint framebuffer, viewport[4], depth_function;
-            GLboolean depth_mask;
-            const bool depth_test = glIsEnabled(GL_DEPTH_TEST);
-            const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
-            const bool cull = glIsEnabled(GL_CULL_FACE);
-            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
-            glGetIntegerv(GL_VIEWPORT, viewport);
-            glGetIntegerv(GL_DEPTH_FUNC, &depth_function);
-            glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_shadow_fbo);
-            glViewport(0, 0, m_shadow_resolution, m_shadow_resolution);
-            glEnable(GL_DEPTH_TEST);
-            glDepthMask(GL_TRUE);
-            glDepthFunc(GL_LESS);
-            glDisable(GL_SCISSOR_TEST);
-            glDisable(GL_CULL_FACE); // Thin and double-sided surfaces can cast shadows.
-            glClear(GL_DEPTH_BUFFER_BIT);
-            shader depth_shader("shadow.vert", "shadow.frag");
-            depth_shader.use();
-            depth_shader.setMat4("lightSpaceMatrix", glm::value_ptr(light_space));
-            for (const auto& [renderer, transform] : renderables) {
-                if (!renderer || !transform || !renderer->visible || !renderer->cast_shadows || !renderer->m_modelo) continue;
-                for (auto& mesh : renderer->m_modelo->meshes) {
-                    if (mesh.isOverlayed()) continue;
-                    if (!mesh.isLoaded()) mesh.load();
-                    const auto& instances = mesh.instances();
-                    auto draw = [&](const glm::mat4& matrix) {
-                        depth_shader.setMat4("model", glm::value_ptr(matrix));
-                        glBindVertexArray(mesh.getVertexArray());
-                        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.getIndices().size()), GL_UNSIGNED_INT, nullptr);
-                    };
-                    if (instances.empty()) draw(transform->get_model_matrix());
-                    else for (const auto& instance : instances) draw(instance.get_world_model_matrix());
-                }
-            }
-            glBindVertexArray(0);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-            glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-            glDepthFunc(depth_function);
-            glDepthMask(depth_mask);
-            if (!depth_test) glDisable(GL_DEPTH_TEST);
-            if (scissor) glEnable(GL_SCISSOR_TEST);
-            if (cull) glEnable(GL_CULL_FACE);
+            draw_depth(m_directional_shadow, light_space, 0, 0, m_directional_shadow.resolution);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
             glActiveTexture(GL_TEXTURE15);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &shadow_binding);
-            glBindTexture(GL_TEXTURE_2D, m_shadow_texture);
+            glBindTexture(GL_TEXTURE_2D, m_directional_shadow.texture);
             glActiveTexture(active_texture);
+        }
+
+        GLint spot_binding = 0, spot_active_texture = GL_TEXTURE0;
+        if (has_spot_shadows) {
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &spot_active_texture);
+            glActiveTexture(GL_TEXTURE14);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &spot_binding);
+            glBindTexture(GL_TEXTURE_2D, m_spot_shadow.texture);
+            glActiveTexture(spot_active_texture);
         }
 
         for (const auto& [render_component, transform_component] : renderables) {
@@ -225,13 +291,14 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
                 debugging::emit(debug, "render", "Renderizador ou transformação inválida");
                 continue;
             }
-            if (!render_component->visible)
+            if (!render_component->visible || !available_models.at(render_component->m_modelo))
                 continue;
 
             auto& shader = render_component->m_modelo->getShader();
             shader.use();
             shader.setBool("shadowEnabled", shadows && render_component->receive_shadows);
             shader.setInt("shadowMap", 15);
+            shader.setInt("spotShadowMap", 14);
             shader.setMat4("lightSpaceMatrix", glm::value_ptr(light_space));
             shader.setFloat("shadowBias", finite_clamp(direction_light.shadow_bias, 0.001f, 0.f, 0.1f));
             shader.setFloat("shadowStrength", finite_clamp(direction_light.shadow_strength, 1.f, 0.f, 1.f));
@@ -259,6 +326,11 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             for (size_t index = 0; index < spot_lights.size(); ++index) {
                 const auto prefix = "spotLights[" + std::to_string(index) + "].";
                 const auto& light = spot_lights[index];
+                shader.setBool(prefix + "shadowEnabled", spot_shadows[index] && render_component->receive_shadows);
+                if (spot_shadows[index])
+                    shader.setMat4(prefix + "shadowMatrix", glm::value_ptr(spot_spaces[index]));
+                shader.setFloat(prefix + "shadowBias", finite_clamp(light.shadow_bias, 0.001f, 0.f, 0.1f));
+                shader.setFloat(prefix + "shadowStrength", finite_clamp(light.shadow_strength, 1.f, 0.f, 1.f));
                 shader.setVec3(prefix + "position", light.position);
                 shader.setVec3(prefix + "direction", light.direction);
                 shader.setVec3(prefix + "color", light.color);
@@ -276,6 +348,11 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             ++m_last_rendered_entity_count;
         }
 
+        if (has_spot_shadows) {
+            glActiveTexture(GL_TEXTURE14);
+            glBindTexture(GL_TEXTURE_2D, spot_binding);
+            glActiveTexture(spot_active_texture);
+        }
         if (shadows) {
             glActiveTexture(GL_TEXTURE15);
             glBindTexture(GL_TEXTURE_2D, shadow_binding);

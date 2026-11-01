@@ -125,6 +125,8 @@ void material::usar(shader& shader) {
             tex.bind(slot);
             shader.setInt(nome, slot++);
         } catch (const std::exception& error) {
+            glActiveTexture(GL_TEXTURE0 + slot++);
+            glBindTexture(GL_TEXTURE_2D, 0);
             shader.setBool("use_" + nome, false);
             static std::unordered_set<std::string> reported;
             if (reported.insert(tex.path).second)

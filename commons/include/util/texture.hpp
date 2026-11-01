@@ -28,10 +28,12 @@ SOFTWARE.
 #include <string>
 #include <memory>
 namespace bgui { struct texture; }
-#include <glad.h>
 
 namespace COMMONS_NS {
+    enum class texture_filter { original, bilinear, trilinear };
+
     struct texture {
+        texture_filter filtering{texture_filter::original};
         unsigned int id{0};
         std::string path{""};
         std::shared_ptr<bgui::texture> embedded;

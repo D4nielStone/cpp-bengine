@@ -39,9 +39,12 @@ namespace COMMONS_NS {
 
     private:
       std::function<bool(std::uint32_t)> m_camera_filter;
-      unsigned int m_shadow_fbo{0}, m_shadow_texture{0};
-      int m_shadow_resolution{0};
-      bool prepare_shadow_map(int resolution);
+      struct shadow_map {
+        unsigned int fbo{0}, texture{0};
+        int resolution{0};
+      };
+      shadow_map m_directional_shadow, m_spot_shadow;
+      bool prepare_shadow_map(shadow_map& map, int resolution);
       double m_last_render_time_ms{0.0};
       std::size_t m_last_camera_count{0};
       std::size_t m_last_rendered_entity_count{0};

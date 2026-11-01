@@ -124,20 +124,39 @@ void mesh::draw(shader &shader) {
         glDepthFunc(GL_ALWAYS);
 
     m_material.usar(shader);
-    // Restore wrap modes after drawing: BGUI shares these texture objects.
-    struct texture_wrap { GLuint slot; GLint s, t; };
+    // Restore texture parameters after drawing: BGUI shares these texture objects.
+    struct texture_wrap { GLuint slot; GLint s, t, min_filter, mag_filter; };
     std::vector<texture_wrap> previous_wraps;
     GLint active_texture = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
-    for (GLuint slot = 0; slot < m_material.textures.size(); ++slot) {
+    GLuint next_slot = 0;
+    for (const auto& [name, tex] : m_material.textures) {
+        const GLuint slot = next_slot++;
         glActiveTexture(GL_TEXTURE0 + slot);
         GLint id = 0;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &id);
         if (!id) continue;
-        texture_wrap previous{slot, 0, 0};
+        texture_wrap previous{slot, 0, 0, 0, 0};
         glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &previous.s);
         glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &previous.t);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &previous.min_filter);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &previous.mag_filter);
         previous_wraps.push_back(previous);
+        if (tex.filtering != texture_filter::original) {
+            if (tex.filtering == texture_filter::trilinear) {
+                GLint width = 0;
+                glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &width);
+                if (!width) {
+                    GLint base_width = 0, base_height = 0;
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &base_width);
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &base_height);
+                    if (base_width > 1 || base_height > 1) glGenerateMipmap(GL_TEXTURE_2D);
+                }
+            }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                tex.filtering == texture_filter::trilinear ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     }
@@ -153,6 +172,8 @@ void mesh::draw(shader &shader) {
 
     for (auto it = previous_wraps.rbegin(); it != previous_wraps.rend(); ++it) {
         glActiveTexture(GL_TEXTURE0 + it->slot);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, it->min_filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, it->mag_filter);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, it->s);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, it->t);
     }

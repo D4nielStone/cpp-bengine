@@ -47,11 +47,33 @@ TEST_F(EditorAssetWorkflowTest, CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiL
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::files_view files(folder);
     files.build(dock);
-    auto* name = find<bgui::inputbox>(dock, [](auto& value) { return value.has_class("new-script-name"); });
-    auto* create = find<bgui::button>(dock, [](auto& value) { return value.has_class("new-script-button"); });
-    ASSERT_NE(name, nullptr); ASSERT_NE(create, nullptr);
-    name->set_buffer("Movement");
+    EXPECT_EQ(find<bgui::button>(dock, [](auto& value) {
+        return value.has_class("new-script-button");
+    }), nullptr);
+    auto* actions = find<editor::ui::context_action_button>(dock, [](auto& value) {
+        return value.has_class("files-actions-menu-button");
+    });
+    ASSERT_NE(actions, nullptr);
+    actions->on_released();
+    bgui::on_update();
+    bgui::on_update();
+    auto* create = find<bgui::button>(bgui::get_layout(), [](auto& value) {
+        return value.get_label().get_buffer() == "Novo script Lua...";
+    });
+    ASSERT_NE(create, nullptr);
     create->on_released();
+    bgui::on_update();
+    bgui::on_update();
+    auto* name = find<bgui::inputbox>(bgui::get_layout(), [](auto& value) {
+        return value.has_class("new-script-name");
+    });
+    ASSERT_NE(name, nullptr);
+    name->set_buffer("Movement");
+    auto* confirm = find<bgui::button>(bgui::get_layout(), [](auto& value) {
+        return value.has_class("modal-confirm");
+    });
+    ASSERT_NE(confirm, nullptr);
+    confirm->on_released();
     bgui::on_update();
     ASSERT_TRUE(std::filesystem::exists(folder / "Movement.lua"));
     auto* window = find<bgui::window>(dock, [](auto& value) {
@@ -73,6 +95,36 @@ TEST_F(EditorAssetWorkflowTest, CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiL
     EXPECT_EQ(window->get_title().get_buffer(), "Movement.lua");
     std::ifstream saved(folder / "Movement.lua");
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(saved), {}), content);
+}
+
+TEST_F(EditorAssetWorkflowTest, FilesViewActionsAreAvailableFromItsContextMenu) {
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+
+    auto open_actions = [&]() {
+        auto* menu = find<editor::ui::context_action_button>(dock, [](auto& value) {
+            return value.has_class("files-actions-menu-button");
+        });
+        ASSERT_NE(menu, nullptr);
+        menu->on_released();
+        bgui::on_update();
+        bgui::on_update();
+    };
+
+    open_actions();
+    auto* toggle = find<bgui::button>(bgui::get_layout(), [](auto& value) {
+        return value.get_label().get_buffer() == "Importar outra cópia: desativado";
+    });
+    ASSERT_NE(toggle, nullptr);
+    toggle->on_released();
+    bgui::on_update();
+    bgui::on_update();
+
+    open_actions();
+    EXPECT_NE(find<bgui::button>(bgui::get_layout(), [](auto& value) {
+        return value.get_label().get_buffer() == "Importar outra cópia: ativado";
+    }), nullptr);
 }
 
 TEST_F(EditorAssetWorkflowTest, LuaFilesDeliverTheirPathWhenDragged) {
@@ -367,10 +419,24 @@ TEST_F(EditorAssetWorkflowTest, DeletingAFileRequiresAnExplicitConfirmationAndSu
         item->on_released();
         bgui::on_update();
     };
+    auto open_delete_action = [&]() {
+        auto* actions = find<editor::ui::context_action_button>(dock, [](auto& value) {
+            return value.has_class("files-actions-menu-button");
+        });
+        EXPECT_NE(actions, nullptr);
+        if (!actions) return static_cast<bgui::button*>(nullptr);
+        actions->on_released();
+        bgui::on_update();
+        bgui::on_update();
+        return find<bgui::button>(bgui::get_layout(), [](auto& button) {
+            return button.get_label().get_buffer() == "Excluir arquivo...";
+        });
+    };
     select();
-    auto* remove = find<bgui::button>(dock, [](auto& button) { return button.has_class("delete-file-button"); });
+    auto* remove = open_delete_action();
     ASSERT_NE(remove, nullptr);
     remove->on_released();
+    bgui::on_update();
     bgui::on_update();
     EXPECT_TRUE(std::filesystem::exists(file));
     auto* cancel = find<bgui::button>(bgui::get_layout(), [](auto& button) { return button.has_class("cancel-file-delete"); });
@@ -378,7 +444,7 @@ TEST_F(EditorAssetWorkflowTest, DeletingAFileRequiresAnExplicitConfirmationAndSu
     cancel->on_released();
     bgui::on_update();
     EXPECT_TRUE(std::filesystem::exists(file));
-    remove = find<bgui::button>(dock, [](auto& button) { return button.has_class("delete-file-button"); });
+    remove = open_delete_action();
     ASSERT_NE(remove, nullptr);
     remove->on_released();
     bgui::on_update();
@@ -894,4 +960,21 @@ TEST_F(EditorAssetWorkflowTest, ContextMenuOpensWhenRightClickTargetsAChildOfThe
     bgui::get_context().m_input_map[bgui::input_key::mouse_right] = bgui::input_action::press;
     bgui::on_update(); bgui::on_update();
     EXPECT_NE(find<bgui::button>(root, [](auto& value) { return value.get_label().get_buffer() == "Project action"; }), nullptr);
+}
+
+TEST_F(EditorAssetWorkflowTest, FilesAndFoldersShareResponsiveGrid) {
+    std::filesystem::create_directory(folder / "assets");
+    std::ofstream(folder / "Movement.lua") << "function update() end";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+    bgui::on_update();
+    auto* entries = find<bgui::grid>(dock, [](auto& value) { return value.has_class("file-grid"); });
+    ASSERT_NE(entries, nullptr);
+    auto& children = entries->get_elements()[bgui::layer::base];
+    ASSERT_EQ(children.size(), 2u);
+    EXPECT_TRUE(children[0]->has_class("file-folder-target"));
+    EXPECT_EQ(children[0]->processed_y(), children[1]->processed_y());
+    EXPECT_GT(children[1]->processed_x(), children[0]->processed_x());
+    EXPECT_EQ(files.folder_at(children[0]->processed_position()), folder / "assets");
 }

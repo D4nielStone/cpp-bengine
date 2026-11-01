@@ -55,13 +55,12 @@ inline std::set<std::filesystem::path> asset_dependencies(const std::filesystem:
                 for (unsigned j = 0; j < scene->mMaterials[i]->GetTextureCount(texture_type); ++j) {
                     aiString name;
                     if (scene->mMaterials[i]->GetTexture(texture_type, j, &name) != AI_SUCCESS ||
-                        !name.length || name.C_Str()[0] == '*') continue;
+                        !name.length || scene->GetEmbeddedTexture(name.C_Str())) continue;
                     auto text = std::string(name.C_Str());
                     std::replace(text.begin(), text.end(), '\\', '/');
-                    const auto reference = fs::path(text);
-                    if (reference.is_absolute())
-                        throw std::runtime_error("O modelo usa uma textura com caminho absoluto. Use caminhos relativos antes de importar.");
-                    const auto texture = fs::absolute(source.parent_path() / reference).lexically_normal();
+                    const auto texture = commons::resolve_model_texture(source, text);
+                    if (fs::path(text).is_absolute() && texture == fs::path(text).lexically_normal())
+                        throw std::runtime_error("O modelo usa uma textura com caminho absoluto não resolvido no pacote.");
                     if (!fs::is_regular_file(texture))
                         throw fs::filesystem_error("Textura do modelo não encontrada", texture,
                             std::make_error_code(std::errc::no_such_file_or_directory));

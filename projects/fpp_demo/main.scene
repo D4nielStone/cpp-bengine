@@ -114,8 +114,8 @@
                 "transform": {
                     "position": [
                         -1.515022873878479,
-                        2.535750150680542,
-                        -6.982738494873047
+                        1.9734755754470825,
+                        -5.910488605499268
                     ],
                     "rotation": [
                         27.671964645385742,
@@ -212,10 +212,1225 @@
             }
         },
         {
-            "id": 5,
+            "id": 6,
             "locked": false,
-            "parent": 100,
-            "name": "luz",
+            "name": "прачечная aскетчфаб",
+            "components": {
+                "renderer": {
+                    "cast_shadows": true,
+                    "receive_shadows": true,
+                    "model": "assets/прачечная скетчфаб.fbx",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (12).jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия104_20260810121204.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия104_20260810121204.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия104_20260810121204.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия104_20260810121204.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (5).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (18).jpeg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (4).png",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия108_20260810125359.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия104_20260810121204.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (9).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (9).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (9).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (12).jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия102_20260810111916.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (2).png",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (9).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия103_20260810120002.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия103_20260810120002.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия103_20260810120002.jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия107_20260810122714.png",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap.png",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/image (9).jpg",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия104_20260810121204.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (3).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия110_20260810134114.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (5).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия110_20260810134114.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (5).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия110_20260810134114.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (5).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        },
+                        {
+                            "albedo": [
+                                0.800000011920929,
+                                0.800000011920929,
+                                0.800000011920929,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/Без названия110_20260810134114.jpg",
+                                "tex_normal": "assets/прачечная скетчфаб.fbx#прачечная скетчфаб.fbm/NormalMap (5).jpg",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
+                "transform": {
+                    "position": [
+                        -11.4118013381958,
+                        0.0,
+                        6.508604526519775
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        0.009999999776482582,
+                        0.009999999776482582,
+                        0.009999999776482582
+                    ]
+                }
+            }
+        },
+        {
+            "id": 7,
+            "locked": false,
+            "name": "ArenaFloor (cópia)",
+            "components": {
+                "physics": {
+                    "shape": "box",
+                    "static": true,
+                    "body_type": "static",
+                    "collision_size": [
+                        2.0,
+                        0.10000000149011612,
+                        2.0
+                    ],
+                    "collision_offset": [
+                        0.0,
+                        0.05000000074505806,
+                        0.0
+                    ],
+                    "collision_rotation": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "fit_to_model": false,
+                    "collision_enabled": true,
+                    "trigger": false,
+                    "mass": 0.0,
+                    "friction": 0.5,
+                    "restitution": 0.0
+                },
+                "renderer": {
+                    "cast_shadows": true,
+                    "receive_shadows": true,
+                    "model": "assets/models/floor.obj",
+                    "materials": [
+                        {
+                            "albedo": [
+                                0.6151844263076782,
+                                0.6151844263076782,
+                                0.6151844263076782,
+                                1.0
+                            ],
+                            "metallic": 0.0,
+                            "roughness": 0.5,
+                            "ao": 1.0,
+                            "world_texture": false,
+                            "uvOffsetX": 0.0,
+                            "uvOffsetY": 0.0,
+                            "uvRepeatX": 1.0,
+                            "uvRepeatY": 1.0,
+                            "maps": {
+                                "tex_albedo": "",
+                                "tex_normal": "",
+                                "tex_metallic": "",
+                                "tex_roughness": "",
+                                "tex_ao": ""
+                            }
+                        }
+                    ],
+                    "visible": true
+                },
+                "transform": {
+                    "position": [
+                        0.0,
+                        5.103895664215088,
+                        -4.461967080260365e-7
+                    ],
+                    "rotation": [
+                        180.0,
+                        -1.634719950516228e-7,
+                        -178.1297607421875
+                    ],
+                    "scale": [
+                        20.0,
+                        1.0,
+                        20.0
+                    ]
+                }
+            }
+        },
+        {
+            "id": 8,
+            "locked": false,
             "components": {
                 "spot_light": {
                     "position": [
@@ -229,31 +1444,35 @@
                         0.0
                     ],
                     "color": [
-                        1.0,
-                        0.0,
-                        0.9443216323852539
+                        0.45445093512535095,
+                        0.45445093512535095,
+                        0.45445093512535095
                     ],
                     "intensity": 5.0,
                     "constant": 1.0,
                     "linear": 0.09000000357627869,
                     "quadratic": 0.03200000151991844,
-                    "inner_cutoff": 12.5,
-                    "outer_cutoff": 17.5
+                    "inner_cutoff": 50.0,
+                    "outer_cutoff": 70.0,
+                    "shadows": true,
+                    "shadow_distance": 50.0,
+                    "shadow_bias": 0.0010000000474974513,
+                    "shadow_strength": 1.0
                 },
                 "transform": {
                     "position": [
-                        10.0,
-                        -1.7500001192092896,
-                        4.37113897078234e-7
+                        -10.731204986572266,
+                        4.701964855194092,
+                        5.295175552368164
                     ],
                     "rotation": [
-                        -0.0,
-                        -1.653984785079956,
-                        -0.0
+                        0.0,
+                        0.0,
+                        270.0
                     ],
                     "scale": [
                         1.0,
-                        1.0000001192092896,
+                        1.0,
                         1.0
                     ]
                 }
@@ -574,12 +1793,16 @@
                     "linear": 0.09000000357627869,
                     "quadratic": 0.03200000151991844,
                     "inner_cutoff": 30.0,
-                    "outer_cutoff": 89.9000015258789
+                    "outer_cutoff": 89.9000015258789,
+                    "shadows": true,
+                    "shadow_distance": 50.0,
+                    "shadow_bias": 0.0010000000474974513,
+                    "shadow_strength": 1.0
                 },
                 "transform": {
                     "position": [
                         0.0,
-                        1.0,
+                        0.9782058000564575,
                         5.0
                     ],
                     "rotation": [

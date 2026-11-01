@@ -12,6 +12,7 @@ function update()
     local position = player.transform.position
     local pickup = transform.position
     local dx, dy, dz = position.x - pickup.x, position.y - pickup.y, position.z - pickup.z
+	pickup.y = math.sin(math.rad(Time.time));
     if dx * dx + dy * dy + dz * dz < 3.24 then
         collected = true
         local visual = gameObject:GetComponent("Renderer")

@@ -1,5 +1,31 @@
 # Bubble Engine stabilization report
 
+
+## Files browser grid (2026-11-01)
+
+The right side of `files_view` previously added each folder and file directly
+into a vertical list. It now uses BGUI's reusable `grid` layout for those
+entries (180 × 40 logical-pixel cells, 6-pixel gaps), retaining the existing
+scrollable container, header/actions, selection and drag/drop callbacks.
+The grid adapts its column count to the available width, scales its cells and
+gaps with the UI, and omits disabled and non-flow children from measurement.
+
+Evidence: `GridTest.WrapsAndReflowsInsideScrollableParent` initially failed
+on narrowing the parent: items reflowed, but measured height stayed at 85px
+instead of 130px. `linear::arrange` now remeasures active flow children when
+arranging a dirty container, including children whose own dirty flag is clear,
+so width-dependent heights and scroll extents update in the same frame.
+Existing public APIs and project formats are preserved.
+
+Validation so far: clean CMake configuration in `/tmp/bengine-grid` and all
+19 BGUI CTest entries for the `all_tests` executable passed, including the new
+grid tests (reflow/scroll extent, narrow/empty grids, disabled children and
+interface scaling). The `editor_app` target built successfully. The build
+reported an existing ignored-`write`-result warning in `runtime_process.cpp:202`.
+All 34 `EditorAssetWorkflowTest` CTest cases passed, including the new grid
+integration test, document editing, file/folder drop targets and context menus.
+Interactive visual review and Windows remain unverified.
+
 ## Avaliação de prontidão — 2026-10-28
 
 Avaliação e plano completos em [STABILITY_ASSESSMENT.md](STABILITY_ASSESSMENT.md).
