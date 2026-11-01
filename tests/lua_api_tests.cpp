@@ -8,6 +8,8 @@
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
 #include "components/spot_light.hpp"
+#include "components/sound_listener.hpp"
+#include "components/sound_player.hpp"
 #include "components/camera.hpp"
 #include "core/ecs.hpp"
 #include "systems/code_system.hpp"
@@ -60,6 +62,43 @@ end
     EXPECT_GE(time["time"].get<float>(), time["deltaTime"].get<float>());
     EXPECT_LE(time["deltaTime"].get<float>(), 0.1f);
     std::filesystem::remove(path);
+}
+
+TEST(LuaApi, ExposesSoundListenerAndPlayerProperties) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::sound_listener>(entity);
+    registry->add<commons::sound_player>(entity);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+
+    ASSERT_TRUE(lua.safe_script(R"(
+        local listener = gameObject:GetComponent("SoundListener")
+        local player = gameObject:GetComponent("SoundPlayer")
+        assert(listener.enabled == true)
+        assert(player.clip == "")
+        assert(player.volume == 1 and player.pitch == 1 and player.radius == 10)
+        assert(player.looping == false and player.playOnAwake == false)
+        listener.enabled = false
+        player.clip = "audio/ambience.ogg"
+        player.volume = 0.6
+        player.pitch = 1.25
+        player.radius = 18
+        player.looping = true
+        player.playOnAwake = true
+    )").valid());
+    const auto listener = registry->get<commons::sound_listener>(entity.id);
+    const auto player = registry->get<commons::sound_player>(entity.id);
+    EXPECT_FALSE(listener->enabled);
+    EXPECT_EQ(player->clip, "audio/ambience.ogg");
+    EXPECT_FLOAT_EQ(player->volume, 0.6f);
+    EXPECT_FLOAT_EQ(player->pitch, 1.25f);
+    EXPECT_FLOAT_EQ(player->radius, 18.f);
+    EXPECT_TRUE(player->looping);
+    EXPECT_TRUE(player->play_on_awake);
 }
 
 TEST(LuaApi, GameObjectLookupTracksRegistryLifetime) {

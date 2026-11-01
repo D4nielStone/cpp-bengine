@@ -8,6 +8,8 @@
 #include "components/directional_light.hpp"
 #include "components/physics.hpp"
 #include "components/renderer.hpp"
+#include "components/sound_listener.hpp"
+#include "components/sound_player.hpp"
 #include "components/spot_light.hpp"
 #include "components/transform.hpp"
 #include "entities/entity.hpp"
@@ -195,6 +197,16 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
         return light.analyze(value);
     }
 
+    if (name == "sound_listener") {
+        commons::sound_listener listener;
+        return listener.analyze(value);
+    }
+
+    if (name == "sound_player") {
+        commons::sound_player player;
+        return player.analyze(value);
+    }
+
     return false;
 }
 
@@ -214,6 +226,10 @@ std::string component_name(const component_mask mask) {
         return "directional_light";
     case commons::component::COMPONENTE_LUZ_HOLOFOTE:
         return "spot_light";
+    case commons::component::COMPONENTE_SOUND_LISTENER:
+        return "sound_listener";
+    case commons::component::COMPONENTE_SOUND_PLAYER:
+        return "sound_player";
     default:
         return {};
     }
@@ -243,6 +259,10 @@ bool serialize_component(
         return std::static_pointer_cast<commons::directional_light>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_LUZ_HOLOFOTE:
         return std::static_pointer_cast<commons::spot_light>(component)->serialize(destination, allocator);
+    case commons::component::COMPONENTE_SOUND_LISTENER:
+        return std::static_pointer_cast<commons::sound_listener>(component)->serialize(destination, allocator);
+    case commons::component::COMPONENTE_SOUND_PLAYER:
+        return std::static_pointer_cast<commons::sound_player>(component)->serialize(destination, allocator);
     default:
         return false;
     }
@@ -402,6 +422,16 @@ bool parse_component(
     if (name == "spot_light") {
         registry.add<commons::spot_light>(entity);
         return registry.get<commons::spot_light>(entity.id)->analyze(data);
+    }
+
+    if (name == "sound_listener") {
+        registry.add<commons::sound_listener>(entity);
+        return registry.get<commons::sound_listener>(entity.id)->analyze(data);
+    }
+
+    if (name == "sound_player") {
+        registry.add<commons::sound_player>(entity);
+        return registry.get<commons::sound_player>(entity.id)->analyze(data);
     }
 
     return false;

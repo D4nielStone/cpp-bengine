@@ -3,6 +3,7 @@
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
+#include "components/sound_player.hpp"
 #include "components/transform.hpp"
 #include "editor_context.hpp"
 #include "viewport_input_state.hpp"
@@ -296,8 +297,21 @@ public:
 
         const auto visible_regions = visible_viewport_regions(viewport);
 
+        const auto editor_camera = m_context->editor_camera_entity;
         if (m_context->show_colliders)
             m_grid_gizmo.draw_colliders(*m_camera, viewport, m_context->registry);
+
+        m_context->registry->cada<commons::sound_player>(
+            [&](const std::uint32_t id) {
+                if (editor_camera && id == *editor_camera)
+                    return;
+                const auto player = m_context->registry->get<commons::sound_player>(id);
+                const auto transform = m_context->registry->get<commons::transform>(id);
+                if (player && transform)
+                    m_grid_gizmo.draw_sound_player_area(
+                        *m_camera, viewport, transform->get_world_position(), player->radius);
+            }
+        );
 
         if (m_context->preferences.show_grid)
             m_grid_gizmo.draw(*m_camera, viewport);
@@ -308,7 +322,6 @@ public:
             m_camera_preview->main_runtime_camera.reset();
         }
 
-        const auto editor_camera = m_context->editor_camera_entity;
         m_context->registry->cada<commons::camera>([&](const std::uint32_t id) {
             if (editor_camera && id == *editor_camera)
                 return;

@@ -92,12 +92,29 @@ TEST(LuaCompletion, InfersWritableComponentProperties) {
     for (const auto& [type, property] : std::vector<std::pair<std::string, std::string>>{
         {"Rigidbody", "mass"}, {"Camera", "fieldOfView"},
         {"DirectionalLight", "direction"}, {"PointLight", "intensity"},
-        {"SpotLight", "outerCutoff"}}) {
+        {"SpotLight", "outerCutoff"}, {"SoundListener", "enabled"},
+        {"SoundPlayer", "radius"}}) {
         const auto source = "local component = gameObject:GetComponent(\"" + type + "\")\ncomponent." + property;
         const auto result = complete_lua(source, source.size());
         ASSERT_TRUE(result) << source;
         EXPECT_EQ(result->members, (std::vector<std::string>{property}));
     }
+}
+
+TEST(LuaCompletion, OffersSoundPlayerAndListenerProperties) {
+    const std::string player_source =
+        "local sound = gameObject:GetComponent(\"SoundPlayer\")\nsound.";
+    const auto player = complete_lua(player_source, player_source.size());
+    ASSERT_TRUE(player);
+    EXPECT_EQ(player->members, (std::vector<std::string>{
+        "clip", "looping", "pitch", "playOnAwake", "radius", "volume"
+    }));
+
+    const std::string listener_source =
+        "local listener = gameObject:GetComponent(\"SoundListener\")\nlistener.";
+    const auto listener = complete_lua(listener_source, listener_source.size());
+    ASSERT_TRUE(listener);
+    EXPECT_EQ(listener->members, (std::vector<std::string>{"enabled"}));
 }
 
 TEST(LuaCompletion, SpotLightOffersAllPropertiesAndMethods) {

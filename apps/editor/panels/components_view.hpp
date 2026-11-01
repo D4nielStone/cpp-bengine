@@ -10,6 +10,8 @@
 #include "components/transform.hpp"
 #include "components/physics.hpp"
 #include "components/spot_light.hpp"
+#include "components/sound_listener.hpp"
+#include "components/sound_player.hpp"
 #include "util/pbr_material.hpp"
 #include "script_tools.hpp"
 
@@ -287,6 +289,12 @@ private:
         if (auto light = registry->get<commons::spot_light>(id))
             add_spot_light(id, light);
 
+        if (auto listener = registry->get<commons::sound_listener>(id))
+            add_sound_listener(id, listener);
+
+        if (auto player = registry->get<commons::sound_player>(id))
+            add_sound_player(id, player);
+
         if (auto physics = registry->get<commons::physics>(id)) {
             auto& section = add_section("Physics", true,
                 [this, id]() { remove_component<commons::physics>(id); });
@@ -446,6 +454,8 @@ private:
         const bool can_add_directional_light =
             !registry->get<commons::directional_light>(id);
         const bool can_add_spot_light = !registry->get<commons::spot_light>(id);
+        const bool can_add_sound_listener = !registry->get<commons::sound_listener>(id);
+        const bool can_add_sound_player = !registry->get<commons::sound_player>(id);
         m_component_options = &m_root->add<bgui::linear>(
             bgui::orientation::vertical
         );
@@ -487,6 +497,12 @@ private:
             );
             light_button.add_class("editor-input");
         }
+        if (can_add_sound_listener)
+            m_component_options->add<bgui::button>("Sound Listener", 0.28f,
+                [this, id]() { add_component<commons::sound_listener>(id); });
+        if (can_add_sound_player)
+            m_component_options->add<bgui::button>("Sound Player", 0.28f,
+                [this, id]() { add_component<commons::sound_player>(id); });
         if (!registry->get<commons::physics>(id))
             m_component_options->add<bgui::button>("Physics", 0.28f,
                 [this, id]() { add_component<commons::physics>(id); });
@@ -518,6 +534,7 @@ private:
         section.set_icon(name == "Transform" ? "directory_open" :
             name == "Renderer" ? "cube" : name == "Camera" ? "camera" :
             name == "Directional Light" || name == "Spot Light" ? "lightbulb" :
+            name == "Sound Listener" || name == "Sound Player" ? "circle" :
             name == "Physics" ? "circle" : "code", 0.24f);
         section.children().add_class("editor-surface");
         section.children().style.layout.padding = bgui::vec4i{6, 4, 6, 4};
@@ -609,8 +626,8 @@ private:
             true,
             [this, id]() { remove_component<commons::renderer>(id); }
         );
-        add_shadow_toggle(section.children(), "Cast Shadows", renderer, &commons::renderer::cast_shadows);
-        add_shadow_toggle(section.children(), "Receive Shadows", renderer, &commons::renderer::receive_shadows);
+        add_toggle(section.children(), "Cast Shadows", renderer, &commons::renderer::cast_shadows);
+        add_toggle(section.children(), "Receive Shadows", renderer, &commons::renderer::receive_shadows);
         auto& model_field = panel::add_field(section.children(),
             "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", 0.27f);
         configure_property_field(model_field);
@@ -1005,7 +1022,7 @@ private:
         );
 
         content.add<bgui::text>("With skybox disabled, the atmosphere gradient is used.", 0.25f);
-        add_shadow_toggle(content, "Enable Skybox", camera, &commons::camera::m_use_skybox);
+        add_toggle(content, "Enable Skybox", camera, &commons::camera::m_use_skybox);
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         configure_property_row(row);
         auto& label = row.add<bgui::text>("Cubemap image (4 x 3 cross)", 0.27f);
@@ -1068,7 +1085,7 @@ private:
     }
 
     template<class Content, class Component>
-    void add_shadow_toggle(Content& content, const char* label,
+    void add_toggle(Content& content, const char* label,
         std::shared_ptr<Component> component, bool Component::*field) {
         auto& checkbox = panel::add_checkbox(content, label, 0.29f, component.get()->*field);
         checkbox.set_on_change([this, component, field](bool enabled) {
@@ -1094,7 +1111,7 @@ private:
         );
         auto& content = section.children();
 
-        add_shadow_toggle(content, "Shadows", light, &commons::directional_light::shadows);
+        add_toggle(content, "Shadows", light, &commons::directional_light::shadows);
         add_float(content, "Shadow Resolution", static_cast<float>(light->shadow_resolution),
             [light]() { return static_cast<float>(light->shadow_resolution); },
             [light](float v) { light->shadow_resolution = static_cast<int>(std::clamp(v, 128.f, 8192.f)); });
@@ -1150,7 +1167,7 @@ private:
             [this, id]() { remove_component<commons::spot_light>(id); }
         );
         auto& content = section.children();
-        add_shadow_toggle(content, "Shadows", light, &commons::spot_light::shadows);
+        add_toggle(content, "Shadows", light, &commons::spot_light::shadows);
         add_float(content, "Shadow Distance", light->shadow_distance,
             [light]() { return light->shadow_distance; },
             [light](float v) { light->shadow_distance = std::clamp(v, 1.f, 10000.f); });
@@ -1197,6 +1214,69 @@ private:
         add_float(content, "Outer Cutoff (degrees)", light->outer_cutoff,
             [light]() { return light->outer_cutoff; },
             [light](float value) { light->set_outer_cutoff(value); });
+    }
+
+    void add_sound_listener(
+        const entity_id id,
+        const std::shared_ptr<commons::sound_listener>& listener
+    ) {
+        auto& section = add_section(
+            "Sound Listener",
+            true,
+            [this, id]() { remove_component<commons::sound_listener>(id); }
+        );
+        add_toggle(section.children(), "Enabled", listener, &commons::sound_listener::enabled);
+    }
+
+    void add_sound_player(
+        const entity_id id,
+        const std::shared_ptr<commons::sound_player>& player
+    ) {
+        auto& section = add_section(
+            "Sound Player",
+            true,
+            [this, id]() { remove_component<commons::sound_player>(id); }
+        );
+        auto& content = section.children();
+        auto& clip_field = panel::add_field(content, "Audio Clip", player->clip, 0.27f);
+        configure_property_field(clip_field);
+        auto& clip_input = clip_field.get_inputbox();
+        const auto assign_clip = [this, player, input = &clip_input](
+            const std::filesystem::path& requested
+        ) {
+            std::string next = requested.generic_string();
+            if (requested.is_absolute() && !m_context->project_root.empty()) {
+                const auto relative = requested.lexically_relative(m_context->project_root);
+                if (!relative.empty() && *relative.begin() != "..")
+                    next = relative.generic_string();
+            }
+            const auto previous = player->clip;
+            if (previous == next)
+                return;
+            player->clip = next;
+            input->set_buffer(next);
+            m_context->record_action(
+                [player, previous]() { player->clip = previous; },
+                [player, next]() { player->clip = next; }
+            );
+        };
+        clip_input.m_enter_func = [assign_clip](const std::string& path) {
+            assign_clip(path);
+        };
+        track_property_input(clip_input, [player]() { return player->clip; });
+        m_asset_targets.push_back({&clip_input, assign_clip});
+
+        add_float(content, "Volume", player->volume,
+            [player]() { return player->volume; },
+            [player](float value) { player->volume = std::clamp(value, 0.f, 1.f); });
+        add_float(content, "Pitch", player->pitch,
+            [player]() { return player->pitch; },
+            [player](float value) { player->pitch = std::clamp(value, 0.1f, 3.f); });
+        add_float(content, "Area Radius", player->radius,
+            [player]() { return player->radius; },
+            [player](float value) { player->radius = std::clamp(value, 0.1f, 10000.f); });
+        add_toggle(content, "Looping", player, &commons::sound_player::looping);
+        add_toggle(content, "Play On Awake", player, &commons::sound_player::play_on_awake);
     }
 
     template<typename Component>

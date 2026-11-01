@@ -506,6 +506,50 @@ TEST_F(EditorInteractionTest, InspectorComponentsAreIndependentTreesAndAddButton
     EXPECT_GT(add->processed_y(), transform->processed_y());
 }
 
+TEST_F(EditorInteractionTest, InspectorAddsAndEditsSoundComponents) {
+    auto entity = registry->create();
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    const auto click = [&](const std::string& label) {
+        auto* button = find_element<bgui::button>(dock, [&](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(button, nullptr) << label;
+        button->on_pressed();
+        button->on_released();
+        bgui::on_update();
+    };
+
+    click("Add Component");
+    click("Sound Player");
+    auto player = registry->get<commons::sound_player>(entity.id);
+    ASSERT_NE(player, nullptr);
+    EXPECT_NE(find_element<bgui::tree>(dock, [](auto& item) {
+        return item.label().get_buffer() == "Sound Player";
+    }), nullptr);
+    auto* radius = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Area Radius";
+    });
+    ASSERT_NE(radius, nullptr);
+    radius->get_inputbox().m_enter_func("24");
+    EXPECT_FLOAT_EQ(player->radius, 24.f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(player->radius, 10.f);
+    ASSERT_TRUE(context->redo());
+    EXPECT_FLOAT_EQ(player->radius, 24.f);
+
+    click("Add Component");
+    click("Sound Listener");
+    EXPECT_NE(registry->get<commons::sound_listener>(entity.id), nullptr);
+    EXPECT_NE(find_element<bgui::tree>(dock, [](auto& item) {
+        return item.label().get_buffer() == "Sound Listener";
+    }), nullptr);
+}
+
 TEST_F(EditorInteractionTest, ParentedCameraKeepsPitchAndYawAcrossFullTurns) {
     auto parent = registry->create();
     auto child = registry->create();

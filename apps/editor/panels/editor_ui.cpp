@@ -1345,10 +1345,6 @@ void editor_ui::confirm_exit() {
 }
 
 void editor_ui::update() {
-    const bool f3 = bgui::get_pressed(bgui::input_key::f3);
-    if (m_context && f3 && !m_f3_was_down)
-        m_context->show_colliders = !m_context->show_colliders;
-    m_f3_was_down = f3;
     for (auto& panel : m_panels)
         if (panel)
             panel->update();

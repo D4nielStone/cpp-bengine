@@ -84,7 +84,6 @@ private:
     std::function<void()> m_undo_callback;
     std::function<void()> m_redo_callback;
     bgui::button* m_play_button{nullptr};
-    bool m_f3_was_down{false};
     bgui::icon* m_play_icon{nullptr};
     bgui::button* m_pause_button{nullptr};
     bgui::icon* m_pause_icon{nullptr};

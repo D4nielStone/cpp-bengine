@@ -8,6 +8,8 @@
 #include "components/physics.hpp"
 #include "components/point_light.hpp"
 #include "components/spot_light.hpp"
+#include "components/sound_listener.hpp"
+#include "components/sound_player.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 
@@ -678,6 +680,42 @@ TEST(ProjectPersistenceTest, RoundTripsSpotLightSettings) {
     EXPECT_FLOAT_EQ(light->shadow_distance, 75.f);
     EXPECT_FLOAT_EQ(light->shadow_bias, 0.003f);
     EXPECT_FLOAT_EQ(light->shadow_strength, 0.6f);
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, RoundTripsSoundComponents) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto entity = registry->create(23);
+    registry->add<commons::sound_listener>(entity);
+    registry->get<commons::sound_listener>(entity.id)->enabled = false;
+    registry->add<commons::sound_player>(entity);
+    auto player = registry->get<commons::sound_player>(entity.id);
+    player->clip = "audio/ambience.ogg";
+    player->volume = 0.6f;
+    player->pitch = 1.25f;
+    player->radius = 18.f;
+    player->looping = true;
+    player->play_on_awake = true;
+
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const auto path = temporary_project_path();
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+
+    const auto listener = registry->get<commons::sound_listener>(entity.id);
+    player = registry->get<commons::sound_player>(entity.id);
+    ASSERT_NE(listener, nullptr);
+    ASSERT_NE(player, nullptr);
+    EXPECT_FALSE(listener->enabled);
+    EXPECT_EQ(player->clip, "audio/ambience.ogg");
+    EXPECT_FLOAT_EQ(player->volume, 0.6f);
+    EXPECT_FLOAT_EQ(player->pitch, 1.25f);
+    EXPECT_FLOAT_EQ(player->radius, 18.f);
+    EXPECT_TRUE(player->looping);
+    EXPECT_TRUE(player->play_on_awake);
     remove_project_files(path);
 }
 

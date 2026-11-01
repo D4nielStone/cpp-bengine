@@ -6,6 +6,8 @@
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
 #include "components/spot_light.hpp"
+#include "components/sound_listener.hpp"
+#include "components/sound_player.hpp"
 #include "core/ecs.hpp"
 
 namespace commons::api {
@@ -100,6 +102,15 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
         "SetOuterCutoff", &spot_light::set_outer_cutoff,
         "shadows", &spot_light::shadows, "shadowDistance", &spot_light::shadow_distance,
         "shadowBias", &spot_light::shadow_bias, "shadowStrength", &spot_light::shadow_strength);
+    lua.new_usertype<sound_listener>("SoundListener", sol::no_constructor,
+        "enabled", &sound_listener::enabled);
+    lua.new_usertype<sound_player>("SoundPlayer", sol::no_constructor,
+        "clip", &sound_player::clip,
+        "volume", &sound_player::volume,
+        "pitch", &sound_player::pitch,
+        "radius", &sound_player::radius,
+        "looping", &sound_player::looping,
+        "playOnAwake", &sound_player::play_on_awake);
     lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
         if (body) {
             if (const auto registry = body->reg.lock())
@@ -118,6 +129,8 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
             if (name == "DirectionalLight") return sol::make_object(state, owner->get<directional_light>(object.id));
             if (name == "PointLight") return sol::make_object(state, owner->get<point_light>(object.id));
             if (name == "SpotLight") return sol::make_object(state, owner->get<spot_light>(object.id));
+            if (name == "SoundListener") return sol::make_object(state, owner->get<sound_listener>(object.id));
+            if (name == "SoundPlayer") return sol::make_object(state, owner->get<sound_player>(object.id));
             if (name == "Rigidbody") return sol::make_object(state, owner->get<physics>(object.id));
             return sol::make_object(state, sol::nil);
         });

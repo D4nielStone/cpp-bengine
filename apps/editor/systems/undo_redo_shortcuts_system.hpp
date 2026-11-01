@@ -24,6 +24,11 @@ public:
     }
 
     void on_update() override {
+        const bool f3_down = bgui::get_pressed(bgui::input_key::f3);
+        if (m_context && f3_down && !m_f3_was_down)
+            m_context->show_colliders = !m_context->show_colliders;
+        m_f3_was_down = f3_down;
+
         const bool control_down =
             bgui::get_pressed(bgui::input_key::left_control) ||
             bgui::get_pressed(bgui::input_key::right_control);
@@ -71,6 +76,7 @@ private:
     bool m_c_was_down{false}, m_v_was_down{false};
     bool m_z_was_down{false};
     bool m_y_was_down{false};
+    bool m_f3_was_down{false};
 };
 
 }

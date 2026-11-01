@@ -8,6 +8,8 @@
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
 #include "components/spot_light.hpp"
+#include "components/sound_listener.hpp"
+#include "components/sound_player.hpp"
 #include "components/properties.hpp"
 #include <map>
 #include <set>
@@ -87,6 +89,8 @@ public:
                     case commons::physics::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::physics>(component))); break;
                     case commons::directional_light::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::directional_light>(component))); break;
                     case commons::spot_light::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::spot_light>(component))); break;
+                    case commons::sound_listener::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::sound_listener>(component))); break;
+                    case commons::sound_player::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::sound_player>(component))); break;
                     case commons::renderer::mask: {
                         const auto source = std::static_pointer_cast<commons::renderer>(component);
                         auto geometry = source->m_modelo ? std::shared_ptr<commons::model>(source->m_modelo->clone()) : nullptr;

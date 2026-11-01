@@ -41,6 +41,12 @@ namespace editor {
             const bgui::vec4i& viewport,
             const bgui::vec3& position
         );
+        void draw_sound_player_area(
+            const COMMONS_NS::camera& viewport_camera,
+            const bgui::vec4i& viewport,
+            const bgui::vec3& position,
+            float radius
+        );
 
     private:
         unsigned int m_program{0};

@@ -2,6 +2,7 @@
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include "editor_ui.hpp"
+#include "undo_redo_shortcuts_system.hpp"
 #include <elem/button.hpp>
 #include <elem/checkbox.hpp>
 #include <elem/inputbox.hpp>
@@ -43,6 +44,7 @@ protected:
         bgui::get_context().m_size = {1200, 800};
         bgui::set_global_scale(1.f);
         editor.set_editor_context(context);
+        root.add<editor::ui::undo_redo_shortcuts_system>(context);
     }
     void TearDown() override { bgui::set_global_scale(1.f); }
     void click(const std::string& label) {
@@ -227,15 +229,15 @@ TEST_F(EditorMenuTest, ResetUiRestoresStandardLayoutAndScaleWithoutClosingDocume
 TEST_F(EditorMenuTest, F3AndViewMenuShareColliderVisibilityWithoutRepeatToggling) {
     EXPECT_FALSE(context->show_colliders);
     bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::press;
-    editor.update(); EXPECT_TRUE(context->show_colliders);
+    bgui::on_update(); EXPECT_TRUE(context->show_colliders);
     bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::repeat;
-    editor.update(); EXPECT_TRUE(context->show_colliders);
+    bgui::on_update(); EXPECT_TRUE(context->show_colliders);
     bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::release;
-    editor.update();
+    bgui::on_update();
     click("Show/Hide Colliders    F3");
     EXPECT_FALSE(context->show_colliders);
     bgui::get_context().m_input_map[bgui::input_key::f3] = bgui::input_action::press;
-    editor.update(); EXPECT_TRUE(context->show_colliders);
+    bgui::on_update(); EXPECT_TRUE(context->show_colliders);
 }
 
 TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) {

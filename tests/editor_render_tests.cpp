@@ -663,6 +663,29 @@ TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
     registry->remove(2);registry->remove(1);
 }
 
+TEST_F(EditorRenderTest, SoundPlayerAreaRendersAVisibleSphere) {
+    auto camera = std::make_shared<commons::camera>();
+    camera->viewport({64, 64});
+    camera->createFB();
+    camera->viewMatrix = glm::mat4(1.f);
+    camera->projMatriz = glm::mat4(1.f);
+    camera->ceu = {0.f, 0.f, 0.f, 1.f};
+    camera->drawFB();
+
+    editor::grid_gizmo overlay;
+    glBindFramebuffer(GL_FRAMEBUFFER, camera->fbo);
+    overlay.draw_sound_player_area(*camera, {0, 0, 64, 64}, {0.f, 0.f, 0.f}, 0.75f);
+    std::array<unsigned char, 64 * 64 * 3> pixels{};
+    glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    int cyan = 0;
+    for (std::size_t index = 0; index < pixels.size(); index += 3)
+        if (pixels[index + 1] > 100 && pixels[index + 2] > 150 &&
+            pixels[index + 2] > pixels[index] + 50)
+            ++cyan;
+    EXPECT_GT(cyan, 20);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
 TEST(ShadowSettings, ResolutionRoundTripsAndValidatesWithoutGpu) {
     commons::directional_light light;
     light.shadow_resolution = 1024;

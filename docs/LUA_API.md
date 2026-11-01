@@ -20,7 +20,8 @@ end
 - `gameObject.transform` e `transform`: Transform da entidade; ausente retorna `nil`.
 - `gameObject:GetComponent("Transform")`: consulta o Transform. Também aceita `"Renderer"`
   (`enabled`/`visible`, visibilidade), `"Rigidbody"`, `"Camera"`,
-  `"DirectionalLight"`, `"PointLight"` e `"SpotLight"`. Outros nomes retornam `nil`.
+  `"DirectionalLight"`, `"PointLight"`, `"SpotLight"`, `"SoundListener"` e
+  `"SoundPlayer"`. Outros nomes retornam `nil`.
   `Destroy(body)` remove um Rigidbody do ECS; o sistema de física sincroniza
   a remoção na próxima atualização.
 - `GameObject.Find(id)` ou `GameObject.Find("nome")`: procura por ID numérico
@@ -108,6 +109,12 @@ body.velocity = Vector3(0, 2, 0)
   menor que o externo, e o ângulo externo deve ser menor que 90°. A luz atinge
   a intensidade máxima dentro do cone interno e diminui suavemente até o limite
   externo.
+- SoundListener: `enabled`.
+- SoundPlayer: `clip` (caminho do arquivo de áudio), `volume` (0–1), `pitch`
+  (0.1–3), `radius` (0.1–10000 unidades), `looping` e `playOnAwake`. O Inspector
+  também exibe a esfera do raio no viewport da cena. Os componentes e seus
+  valores são serializados e expostos ao Lua; a reprodução e a mistura de áudio
+  ainda não são implementadas pelo runtime.
 
 O painel Debug usa fundo escuro e recebe `print`, `Debug.Log` e falhas de
 carregamento, `setup()` e `update()`, inclusive do runtime separado. Erros incluem

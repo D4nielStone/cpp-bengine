@@ -34,7 +34,9 @@ namespace COMMONS_NS {
 			COMPONENTE_LUZ_PONTUAL = 1 << 8,
 			COMPONENTE_LUZ_DIRECIONAL = 1 << 9,
 			COMPONENTE_LUZ_HOLOFOTE = 1 << 10,
-			COMPONENTE_TERRENO = 1 << 11
+			COMPONENTE_TERRENO = 1 << 11,
+			COMPONENTE_SOUND_LISTENER = 1 << 12,
+			COMPONENTE_SOUND_PLAYER = 1 << 13
 		};
 		//  Mapeamento de nomes e mask
         inline static std::unordered_map<mask, std::string> mapa_nomes_componentes = {
@@ -45,7 +47,9 @@ namespace COMMONS_NS {
             {mask::COMPONENTE_TRANSFORMACAO             ,"Transformacao"},
             {mask::COMPONENTE_CODIGO                    ,"Codigo"},
             {mask::COMPONENTE_CAM                       ,"Camera"},
-            {mask::COMPONENTE_TERRENO                   ,"Terreno"}
+            {mask::COMPONENTE_TERRENO                   ,"Terreno"},
+            {mask::COMPONENTE_SOUND_LISTENER             ,"Som"},
+            {mask::COMPONENTE_SOUND_PLAYER               ,"Som"}
         };
         // Id da entity ECS atual
         // Todo component deve ter um e ele é utilizado para encontrar o "eu" (entity do component de código) para a api lua.
