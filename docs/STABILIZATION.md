@@ -1323,3 +1323,10 @@ Validação local da implementação: 331/331 testes CTest aprovados com OpenGL 
 software e smoke de runtime real, antes das verificações adicionais de caminho
 malformado, undo/redo do inspector e contato físico da cena. A regressão isolada
 do inspector também passou. A matriz remota verificará a implementação em MSVC.
+
+A validação do ZIP oficial de Ubuntu 22.04 em Ubuntu 24.04 reproduziu falha de
+janela: o libstdc++ empacotado não exportava GLIBCXX_3.4.32, exigido pelo LLVM/Mesa
+do host. Removendo os runtimes C++/GCC do pacote, Play/pausa/continuação/parada e
+reinício passaram com o mesmo binário oficial. O bundler agora mantém esses
+runtimes no sistema, junto de glibc e dos drivers gráficos; uma regressão compila
+um programa C++ e verifica que o pacote não inclui libstdc++ nem libgcc_s.
