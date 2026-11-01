@@ -14,6 +14,7 @@ public:
         doc.AddMember("project_version", rapidjson::Value(project_version.c_str(), allocator), allocator);
     }
     static bool compatible(const rapidjson::Document& doc, std::string& error) {
+        if (!doc.IsObject()) { error = "Invalid project manifest."; return false; }
         for (const char* key : {"engine_version", "minimum_engine_version", "project_version"}) {
             if (!doc.HasMember(key) || !doc[key].IsString() ||
                 !commons::semantic_version::parse({doc[key].GetString(), doc[key].GetStringLength()})) {
@@ -34,7 +35,7 @@ public:
     // and resources before committing the converted manifest.
     static bool convert(rapidjson::Document& doc, bool& changed, std::string& error) {
         changed = false;
-        if (!doc.HasMember("version") || !doc["version"].IsUint() ||
+        if (!doc.IsObject() || !doc.HasMember("version") || !doc["version"].IsUint() ||
             doc["version"].GetUint() < 1 || doc["version"].GetUint() > current_format) {
             error = "Unsupported project format; update the engine before opening this project.";
             return false;

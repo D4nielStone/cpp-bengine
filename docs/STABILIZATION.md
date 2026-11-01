@@ -1323,3 +1323,162 @@ Validação local da implementação: 331/331 testes CTest aprovados com OpenGL 
 software e smoke de runtime real, antes das verificações adicionais de caminho
 malformado, undo/redo do inspector e contato físico da cena. A regressão isolada
 do inspector também passou. A matriz remota verificará a implementação em MSVC.
+
+
+## Exportação com recursos embutidos e templates — 2026-10-31
+
+Decisões confirmadas pelo usuário: executável único deve ler diretamente do
+próprio arquivo, sem autoextração; assets externos devem ser importados para o
+projeto. Android permanece futuro. Linux exporta Linux/Windows; Windows exporta
+Windows nativamente e Linux via WSL2.
+
+- Jogos exportados em pasta e em executável único não criam o widget de profiling
+  nem o overlay F3 de colisores. Runtime de desenvolvimento mantém esses recursos.
+- Formato `single`: runtime seguido de recursos comprimidos com zlib, índice e
+  footer. Cenas, Lua (`loadfile`/`dofile` incluídos), shaders, temas, fontes,
+  modelos/sidecars Assimp e imagens leem do pacote; descompressão em memória.
+  Recursos soltos não substituem os embutidos. Escrita de projeto embutido é
+  recusada. CRC detecta corrupção, sem promessa de criptografia ou DRM.
+- Templates compatíveis são reutilizados por plataforma/formato e fingerprint
+  dos fontes do runtime. Ausência de template compila uma vez e guarda em cache;
+  template escolhido explicitamente incompatível falha. Inventário valida arquivos
+  e tamanhos. Mudança de fontes durante compilação impede publicar cache incorreto.
+- Editor compila e distribui o host `game_packager`; CLI aceita ferramenta
+  pré-compilada e prepara zlib/vcpkg no Windows quando precisa compilar a própria.
+  CI inclui dependência zlib e artefatos de templates. Workflow remoto não executado.
+- BGUI usa um provider de recursos compartilhado para imagem, tema e FreeType;
+  fontes embutidas dispensam a busca inicial por fontes do sistema. A mudança
+  no backend FreeType mantém a memória viva até destruir a face.
+
+A execução real encontrou uma checagem remanescente de arquivo físico em
+`commons/src/os/window.cpp`: abortava com tema ausente apesar de ele estar no
+pacote. A checagem passou pelo mesmo provider dos demais recursos. Foi adicionado
+um teste de leitura de tema embutido e corrigida a simulação de clique do teste de
+exportação para usar o evento `on_clicked` do checkbox BGUI.
+
+Validação desta fase ocorreu numa cópia estável dos fontes em
+`/tmp/bengine-v3-isolated-src`, baseada no commit `6c338cdf`, com a correção do
+tema e a correção já presente no checkout para o caminho mutável do empacotador.
+Isso evita misturar alterações simultâneas de release/migração/menus. Apenas na
+cópia de teste, caminhos absolutos do exemplo foram apontados para essa cópia e
+foi inserido um marcador Lua para comprovar leitura do pacote.
+
+Builds reais Linux x64 e Linux → Windows x64 concluídos. Diretórios de saída
+`/tmp/bengine-v3-isolated-export/linux` e `windows` contêm um executável cada.
+Linux mantém dependências do sistema gráfico e glibc; verificação de dependências
+recusa bibliotecas auxiliares do jogo no formato único. PE importa bibliotecas
+do Windows/UCRT, sem DLLs auxiliares do jogo. Windows nativo/MSVC e WSL2 reais não
+foram executados neste ambiente; contratos PowerShell/WSL foram simulados.
+
+Smoke Linux: executável copiado para outra pasta, iniciado sem argumentos, cena
+carregada e marcador Lua/FPP executados. `strace` não mostrou acesso ao checkout,
+projeto fonte ou staging, nem extração de recursos; houve somente escrita no
+cache de shaders Mesa do sistema gráfico. Executável com footer truncado encerrou
+com código 1 antes da janela. Smoke Windows no Wine: arquivo único iniciou a UI;
+segunda execução com o log explícito de scripts confirmou o marcador e os scripts
+FPP. Wine não substitui validação no Windows nativo. Os processos foram encerrados
+pelo teste; gameplay e encerramento manual não foram avaliados.
+
+Evidências: `/tmp/bengine-v3-smoke-final.log`,
+`/tmp/bengine-v3-direct-smoke/files.log`,
+`/tmp/bengine-v3-windows-direct-smoke/scripts.bin`,
+`/tmp/bengine-v3-final-affected-build.log`,
+`/tmp/bengine-v3-relevant-ctest-final.log`,
+`/tmp/bengine-v3-script-final.log` e `/tmp/bengine-v3-host-tool-final.log`.
+Avisos observados: overrides sem `override` na BGUI e retorno de `write` ignorado
+em `runtime_process.cpp`, já presentes; não foram alterados nesta fase.
+
+Validação concluída: editor e runtime compilaram; **39/39 testes CTest relevantes
+aprovados**, cobrindo exportação, processo, menu e 11 testes do arquivo embutido.
+Os seis testes Python dos fluxos de build também passaram. A configuração MSVC
+foi alinhada ao CRT estático dos templates `single` e do host packager estático;
+o modo `folder` preserva CRT dinâmico. Essa configuração é coberta pelos contratos
+PowerShell simulados, sem alegação de compilação MSVC local.
+
+## Usabilidade do editor: gizmo, importação e edição de objetos — 2026-10-31
+
+Escopo: os cinco pedidos desta conversa. Decisões do usuário: remover da lista e
+apagar a pasta são ações separadas; conteúdo idêntico deve ser reutilizado por
+padrão, com opção de outra cópia; Ctrl+C/Ctrl+V inclui todos os descendentes.
+As hipóteses originais P0/P1/P2 não foram reabertas.
+
+| Item | Status e evidência | Implementação e testes | Limites / revisão |
+|---|---|---|---|
+| Gizmo de direção sobre janelas e modais | CONFIRMADO. O teste de regressão original recebeu vértices na lista global e nenhuma chamada na fila normal. A prova OpenGL com um painel branco posterior leu RGB `15,18,23` no original e `255,255,255` com a correção. | `direction_gizmo.hpp` gera uma textura local transparente e usa a fila normal de imagens, respeitando a ordem das janelas. A textura só é regenerada quando rotação ou tamanho mudam; identificadores de cache distintos evitam reaproveitar conteúdo de um widget destruído. Cinco testes verificam projeção, escala, input, ordem e atualização da textura. | Sem alteração na arquitetura de renderização ou na BGUI. Aparência com várias janelas arrastadas não foi avaliada manualmente. |
+| Imagens e modelos repetidos | CONFIRMADO. A prova original importou `same.png` e depois `same_1.png`; com a correção, ambas as importações retornaram o mesmo caminho. | `asset_import.hpp` compara os bytes; modelos também exigem dependências e configurações equivalentes. Procura dentro do projeto, inclusive em outras pastas. A opção “Importar outra cópia” e a ação “Duplicar arquivo” permitem cópia explícita. Dois testes novos cobrem nomes/pastas diferentes, cópia forçada, conteúdo alterado, dependências e opções. A expectativa antiga de duplicação automática foi atualizada. | Sem migração ou limpeza automática das cópias já existentes. Destinos fora do projeto continuam recusados, mesmo quando existe um recurso igual. |
+| Remoção de projetos e arquivos por contexto | PARCIAL no diagnóstico: já havia exclusão de arquivos com confirmação, mas faltavam o menu de contexto e as ações de remover projetos. Os testes de clique direito falharam contra os widgets originais. | Menu nos cartões do Project Manager inicial e nas entradas do modal do editor; ações separadas “Remover da lista” e “Apagar pasta do disco...”. A pasta exige confirmação com caminho completo. O projeto ativo, raiz, cwd/ancestrais e caminhos simbólicos são protegidos. Arquivos oferecem abrir/editar, duplicar, excluir com confirmação e configurar importação 3D. Há testes de lista versus disco, confirmação, contexto em descendentes do cartão e destruição do manager enquanto a confirmação está aberta. | Apagar a pasta é definitivo e inclui todo o seu conteúdo. Projetos legados sem documento `.bengine` válido podem sair da lista, mas não são apagados por essa ação. Menus e confirmações verificam a vida útil do widget de origem antes de executar callbacks. |
+| Ctrl+C/Ctrl+V no editor de cena | CONFIRMADO. O teste de atalhos na implementação original não criou a cópia. | `entity_clipboard.hpp` captura uma cópia independente da entidade e dos filhos, remapeia os pais e registra a colagem como uma única ação de desfazer/refazer. Preserva geometria, materiais, configurações de scripts, física, câmeras, nomes e flags de edição. Componentes de câmera recebem o Transform da nova entidade. Testes cobrem cópias repetidas, estado capturado no Ctrl+C, remoção da origem, scripts, instâncias, pai apagado/ID reutilizado e bloqueio durante edição de texto, modal ou Play. | Clipboard interno ao editor e ao projeto atual. Componentes suportados: Transform, Renderer, Camera, Code, Physics, Directional Light, Point Light e Properties; componentes adicionais são recusados com erro, sem colagem parcial. Não copia estado de execução Lua ou velocidades da simulação. A API ganhou `model::clone()` e uma sobrecarga de transferência de instâncias, sem remover assinaturas existentes. |
+| Entidades com primitivas | CONFIRMADO: o teste da toolbar falhou contra a Hierarchy original. | “Hierarchy > Primitiva...” cria cubo, esfera, plano ou cilindro com Renderer e Transform, seleciona a entidade e registra desfazer/refazer. Plano e cilindro são assets OBJ da engine; todas as opções têm UVs. Testes sem GPU verificam geometria via Assimp, criação, seleção, histórico e bloqueio em Play. Uma prova OpenGL carregou as quatro opções e verificou VAOs distintos e válidos para suas cópias. | A criação usa a origem da cena. Não houve revisão visual manual dos materiais nem execução nativa no Windows. |
+
+Validação final:
+
+- Build integral em `/tmp/bengine-editor-usability-final`, diretório inicialmente
+  novo, incluindo editor, runtime e testes. Foi retomado após alterações
+  concomitantes de empacotamento/versionamento; o último build e a atualização
+  incremental terminaram sem erros ou avisos nos logs.
+- **319/321 entradas CTest aprovadas**, incluindo **46/46 diretamente relacionadas
+  aos pedidos**: 33 de workflow de assets, uma do Project Manager, cinco do gizmo
+  e sete do importador de modelos. A suíte completa de interação também passou:
+  31 testes, incluindo os cinco do gizmo.
+- As duas falhas restantes já apareceram na rodada inicial desta validação:
+  `EditorRenderTest.CubemapOverridesAtmosphereAndDisableRestoresIt` e
+  `LuaApi.FppScriptsMoveLookAndCollectUsingTheNewApi`. No segundo caso, a
+  velocidade Z foi 5 em vez de 2,5. Não foram alterados skybox, renderização do
+  cubemap ou scripts FPP para contornar essas falhas.
+- Provas OpenGL em janela oculta: ordem do gizmo corrigida e quatro primitivas
+  com cópias de geometria independentes. Esses testes não constituem avaliação
+  manual da interface nem certificação de uma GPU/driver específicos.
+- Na árvore concomitante, a declaração `const` do caminho `packager` impedia
+  compilar operações posteriores de limpeza/atribuição; apenas esse `const`
+  foi removido para desbloquear o build. A nova dependência CURL do verificador
+  de releases veio de outro trabalho. Seus headers foram extraídos em `/tmp`
+  para a validação, usando a biblioteca compartilhada já instalada; não houve
+  instalação global nem novo caminho específico da máquina no repositório.
+- Alterações simultâneas de distribuição, releases, persistência, janela, BGUI e
+  FPP foram preservadas. Parte da implementação desta tarefa foi incluída em
+  commits feitos concomitantemente (`6c338cdf` e `c2faa998`); este relatório
+  registra os testes executados nesta conversa, sem atribuir validação às demais
+  mudanças desses commits.
+
+Comandos principais, derivados do CMake/workflow:
+
+```sh
+cmake -S . -B /tmp/bengine-editor-usability-final -DBUILD_TESTING=ON -DBUILD_EDITOR=ON -DBUILD_RUNTIME=ON -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/out/_deps/googletest-src" -DCURL_INCLUDE_DIR=/tmp/bengine-usability-dependencies/extracted/usr/include/x86_64-linux-gnu -DCURL_LIBRARY=/usr/lib/x86_64-linux-gnu/libcurl.so.4.8.0
+cmake --build /tmp/bengine-editor-usability-final --parallel 2
+ctest --test-dir /tmp/bengine-editor-usability-final -C Release --output-on-failure
+```
+
+Logs: `/tmp/bengine-usability-resume-build.log`,
+`/tmp/bengine-usability-final-incremental.log`,
+`/tmp/bengine-usability-final-ctest.log`,
+`/tmp/bengine-usability-baseline-tests.log`,
+`/tmp/bengine-import-baseline.log`, `/tmp/bengine-import-fixed.log`,
+`/tmp/bengine-gizmo-baseline-test.log`,
+`/tmp/bengine-gizmo-gl-original.log`, `/tmp/bengine-gizmo-final-gl.log` e
+`/tmp/bengine-usability-gl-smoke.log`.
+
+### 2026-10-31 — Seleção e rolagem horizontal do inputbox
+
+- Evidência: os testes novos reproduziram Ctrl+A ignorado no campo de uma
+  linha (`originalreplacement` em vez de `replacement`) e o texto final fora
+  da área visível. Ctrl+End já era processado, mas não revelava o cursor.
+- Correção localizada em `external/cpp-bgui`: seleção total também nos campos
+  de uma linha e numéricos, seleção com Shift e navegação Home/End que encerra
+  a seleção na posição solicitada. A renderização desloca horizontalmente o
+  texto para manter o cursor visível; o cálculo do clique usa o mesmo
+  deslocamento. O recorte existente e as APIs públicas foram preservados.
+- Arquivos: `core/source/elem/inputbox.cpp`, `core/include/elem/text.hpp`,
+  `core/source/elem/text.cpp` e `tests/inputbox_tests.cpp` no BGUI.
+- Regressões cobertas: Ctrl+A e substituição em texto/números, Ctrl+End,
+  Home, setas sucessivas revelando texto oculto, clique após rolagem,
+  redimensionamento e navegação após seleção.
+- Validação executada: build de `bgui_core` e `all_tests` com
+  `cmake --build /tmp/bgui-window-improvements-clean --target all_tests -j2`;
+  `ctest --test-dir /tmp/bgui-window-improvements-clean --output-on-failure`
+  passou nas 18 suítes, incluindo os 18 casos de `InputAreaTest`.
+  Sem warnings nos logs de compilação desta alteração; diff sem erros de
+  whitespace.
+- Limites: validação headless, com OpenGL/GLFW desativados nesse build.
+  Não foi executado o editor completo nem feita inspeção gráfica manual.
+  A rolagem adicionada trata os campos de uma linha; o comportamento de
+  rolagem de editores multilinha não foi ampliado nesta alteração.

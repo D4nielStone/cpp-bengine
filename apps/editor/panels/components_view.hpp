@@ -1127,12 +1127,14 @@ private:
         auto current_value = std::make_shared<bgui::vec3>(value);
         auto& row = parent.add<bgui::linear>(bgui::orientation::horizontal);
         configure_property_row(row);
+        row.style.layout.require_height(bgui::mode::pixel, 22.f);
+        row.style.layout.margin = bgui::vec4i{0, 1, 0, 1};
         auto& name = row.add<bgui::text>(label, 0.27f);
         configure_property_label(name);
         auto& values = row.add<bgui::linear>(bgui::orientation::horizontal);
         values.add_class("editor-property-row");
         configure_row(values);
-        values.style.layout.require_width(bgui::mode::stretch);
+        values.style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
         values.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
         values.style.layout.margin = bgui::vec4i{0, 0, 0, 0};
 

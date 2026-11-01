@@ -27,6 +27,7 @@ inline void configure_project_context_menu(context_action_button& button,
     std::filesystem::path project, std::function<std::filesystem::path()> active,
     std::function<void()> open, std::function<void()> removed,
     std::function<void(const std::string&)> report_error) {
+    project = std::filesystem::absolute(project).lexically_normal();
     const auto alive = button.lifetime();
     button.context_options = [project, active, open, removed, report_error, alive]() {
         return context_actions{

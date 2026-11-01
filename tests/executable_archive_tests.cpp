@@ -2,6 +2,7 @@
 #include "tools/game_packager/runtime_template.hpp"
 #include "apps/runtime/game_bootstrap.hpp"
 #include <os/asset_manager.hpp>
+#include <utils/theme.hpp>
 #include <resources/assimp_resource_io.hpp>
 #include <loaders/model_import.hpp>
 #include <components/code.hpp>
@@ -138,4 +139,14 @@ TEST_F(ExecutableArchiveTest, ProjectLoaderReadsEmbeddedSceneAndCannotSaveIntoGa
     EXPECT_FALSE(project.save(entry.string(),error));
     EXPECT_NE(error.find("read-only"),std::string::npos);
     EXPECT_FALSE(fs::exists(entry));
+}
+
+TEST_F(ExecutableArchiveTest, LoadsThemeDirectlyFromExecutable) {
+    write(data/"assets/themes/custom.theme", "[base]\nvisual.visible = false\n");
+    pack();fs::remove_all(data);ASSERT_TRUE(game_bootstrap::mount_executable(output));
+    EXPECT_TRUE(bgui::resource_files::exists(output.parent_path()/"assets/themes/custom.theme"));
+    const auto theme=bgui::load_theme((output.parent_path()/"assets/themes/custom.theme").string());
+    ASSERT_TRUE(theme.base.visual.visible.has_value());
+    EXPECT_FALSE(*theme.base.visual.visible);
+    EXPECT_FALSE(fs::exists(output.parent_path()/"assets/themes/custom.theme"));
 }

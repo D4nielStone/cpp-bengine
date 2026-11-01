@@ -65,12 +65,13 @@ bool directional_light::serialize(rapidjson::Value& value, rapidjson::Document::
 }
 
 bgui::vec3 directional_light::get_world_direction() const {
-    if (!reg) return direction;
+    const auto registry = reg.lock();
+    if (!registry) return direction;
     glm::quat orientation{1.f, 0.f, 0.f, 0.f};
     std::unordered_set<std::uint32_t> visited;
     auto id = my_object;
     while (visited.insert(id).second) {
-        const auto tr = reg->get<transform>(id);
+        const auto tr = registry->get<transform>(id);
         if (!tr) break;
         const auto r = glm::radians(glm::vec3{tr->rotation.x, tr->rotation.y, tr->rotation.z});
         const auto local = glm::angleAxis(r.x, glm::vec3{1, 0, 0}) *

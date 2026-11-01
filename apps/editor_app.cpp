@@ -107,8 +107,6 @@ project_choice show_project_manager(
     auto& title = header.add<bgui::text>("Bubble Engine " BUBBLE_VERSION_COMPLETA_STR, 0.68f);
     title.style.layout.set_margin(0, 3);
     header.add<editor::ui::release_indicator>(release_check);
-    auto& subtitle = header.add<bgui::text>("PROJECT MANAGER  /  Choose a workspace or start something new", 0.3f);
-    subtitle.add_class("project-manager-muted");
 
     auto& project_dock = root.add<bgui::dock>();
     project_dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
@@ -136,7 +134,9 @@ project_choice show_project_manager(
         const auto folder_name = project_path.parent_path().filename().string();
         if (!folder_name.empty())
             project_label += "  ·  " + folder_name;
-        auto& card = recent.add<bgui::linear>(bgui::orientation::horizontal);
+        auto& card = recent.add<editor::ui::context_action_button>("", .34f,
+            [&, path]() { choice = {path, false}; window.close(); });
+        card.get_label().set_enable(false);
         card.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         card.style.layout.require_height(bgui::mode::pixel, 88.f);
         card.style.layout.set_padding(6, 5);
@@ -159,12 +159,12 @@ project_choice show_project_manager(
         auto& details = card.add<bgui::linear>(bgui::orientation::vertical);
         details.style.layout.require_width(bgui::mode::stretch);
         details.style.layout.require_height(bgui::mode::match_parent);
-        auto& button = details.add<editor::ui::context_action_button>(
+        auto& button = details.add<bgui::button>(
             project_label,
             0.34f,
             [&, path]() { choice = {path, false}; window.close(); }
         );
-        editor::ui::configure_project_context_menu(button, path,
+        editor::ui::configure_project_context_menu(card, path,
             []() { return std::filesystem::path{}; },
             [&, path]() { choice = {path, false}; window.close(); },
             [surface = &card]() { surface->set_enable(false); },

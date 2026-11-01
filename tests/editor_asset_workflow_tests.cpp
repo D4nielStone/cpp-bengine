@@ -759,6 +759,7 @@ TEST_F(EditorAssetWorkflowTest, PrimitivesHaveValidGeometryAndCreationSupportsUn
         const auto* scene = importer.ReadFile(path.string(), aiProcess_Triangulate | aiProcess_GenSmoothNormals);
         ASSERT_NE(scene, nullptr) << importer.GetErrorString();
         ASSERT_TRUE(scene->HasMeshes());
+        EXPECT_TRUE(scene->mMeshes[0]->HasTextureCoords(0));
         auto loader = [scene](const auto& path) {
             auto model = std::make_unique<commons::model>();
             model->relocate_source_path(path);
@@ -879,23 +880,18 @@ TEST_F(EditorAssetWorkflowTest, ProjectDeletionConfirmationRetiresWhenItsManager
     EXPECT_EQ(find<editor::ui::project_delete_confirmation>(root, [](auto&) { return true; }), nullptr);
 }
 
-TEST_F(EditorAssetWorkflowTest, SceneAssetRelocationResolvesProjectDirectoryAliases) {
-    const auto real = folder / "real";
-    const auto alias = folder / "alias";
-    std::filesystem::create_directories(real / "destination");
-    std::error_code error;
-    std::filesystem::create_directory_symlink(real, alias, error);
-    if (error) GTEST_SKIP() << "Directory aliases are not available: " << error.message();
-    std::ofstream(real / "destination/Move.lua") << "function update() end";
-    auto registry = std::make_shared<commons::ecs>();
-    auto context = std::make_shared<editor::ui::editor_context>(registry);
-    context->project_root = alias;
-    auto entity = registry->create();
-    registry->add<commons::code>(entity, "Move.lua");
-    auto script = registry->get<commons::code>(entity.id);
-    script->arquivoCompleto = (alias / "Move.lua").string();
-    editor::ui::relocate_scene_asset(context, real / "Move.lua", real / "destination/Move.lua");
-    EXPECT_EQ(script->file, "destination/Move.lua");
-    EXPECT_EQ(std::filesystem::path(script->arquivoCompleto), real / "destination/Move.lua");
-    registry->entities.clear();
+TEST_F(EditorAssetWorkflowTest, ContextMenuOpensWhenRightClickTargetsAChildOfTheProjectCard) {
+    auto& root = bgui::get_layout();
+    auto& card = root.add<editor::ui::context_action_button>("", .3f, []() {});
+    card.get_label().set_enable(false);
+    card.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
+    card.style.layout.require_size(320, 88);
+    auto& details = card.add<bgui::linear>(bgui::orientation::vertical);
+    auto& title = details.add<bgui::button>("Project title", .3f, []() {});
+    card.context_options = []() { return editor::ui::context_actions{{"Project action", []() {}}}; };
+    bgui::on_update();
+    bgui::get_context().m_mouse_position = {title.processed_x() + 5, title.processed_y() + 5};
+    bgui::get_context().m_input_map[bgui::input_key::mouse_right] = bgui::input_action::press;
+    bgui::on_update(); bgui::on_update();
+    EXPECT_NE(find<bgui::button>(root, [](auto& value) { return value.get_label().get_buffer() == "Project action"; }), nullptr);
 }

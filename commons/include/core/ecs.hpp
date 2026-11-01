@@ -74,11 +74,7 @@ namespace COMMONS_NS {
 		ent.mask |= mascaras[ent.id];
 		entities[ent.id][T::mask] = std::make_shared<T>(std::forward<Args>(args)...); // Adiciona o component
 		entities[ent.id][T::mask]->my_object = ent.id;
-		try {
-			entities[ent.id][T::mask]->reg = shared_from_this();
-		} catch (const std::bad_weak_ptr&) {
-			entities[ent.id][T::mask]->reg.reset();
-		}
+		entities[ent.id][T::mask]->reg = weak_from_this();
 	}
 
 	template<typename T>

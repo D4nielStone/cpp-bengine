@@ -183,8 +183,9 @@ public:
         m_orbit_target.reset();
         m_manual_orbit = false;
         m_orbit_initialized = false;
-        if (enabled && m_camera && m_camera->reg) {
-            auto transform = m_camera->reg->get<commons::transform>(m_camera->my_object);
+        const auto registry = m_camera ? m_camera->reg.lock() : nullptr;
+        if (enabled && registry) {
+            auto transform = registry->get<commons::transform>(m_camera->my_object);
             if (transform) {
                 initialize_orbit(transform);
                 m_manual_orbit = true;
@@ -193,8 +194,9 @@ public:
     }
 
     void focus_orbit_target(std::shared_ptr<commons::transform> target, float distance) {
-        if (!target || !m_camera || !m_camera->reg) return;
-        auto eye = m_camera->reg->get<commons::transform>(m_camera->my_object);
+        const auto registry = m_camera ? m_camera->reg.lock() : nullptr;
+        if (!target || !registry) return;
+        auto eye = registry->get<commons::transform>(m_camera->my_object);
         if (!eye) return;
         set_orbit_target(std::move(target));
         initialize_orbit(eye);
