@@ -43,6 +43,7 @@ if(BUILD_EDITOR)
         editor/systems/project_preview.cpp
         editor/systems/runtime_process.cpp
         editor/panels/runtime_tools_view.cpp
+        editor/panels/game_view.cpp
         editor/panels/scene_view.cpp
         editor/systems/ui_persistence_system.cpp
     )
@@ -50,6 +51,9 @@ if(BUILD_EDITOR)
     find_package(CURL REQUIRED)
     target_link_libraries(editor_app PRIVATE commons CURL::libcurl)
     add_dependencies(editor_app game_packager)
+    if(TARGET runtime_app)
+        add_dependencies(editor_app runtime_app)
+    endif()
     target_compile_definitions(editor_app PRIVATE BENGINE_PACKAGER_PATH="$<TARGET_FILE:game_packager>")
     target_compile_definitions(editor_app PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
     if(WIN32)

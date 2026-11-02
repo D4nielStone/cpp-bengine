@@ -4,6 +4,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -26,6 +27,102 @@ using namespace COMMONS_NS;
 namespace {
 float finite_clamp(float value, float fallback, float low, float high) {
     return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+}
+
+struct frustum_plane {
+    glm::vec3 normal{0.f};
+    float distance{0.f};
+};
+
+std::array<frustum_plane, 6> extract_frustum_planes(const glm::mat4& view, const glm::mat4& projection) {
+    const glm::mat4 inverse = glm::inverse(projection * view);
+    const std::array<glm::vec4, 8> ndc_corners = {
+        glm::vec4{-1.f, -1.f, -1.f, 1.f},
+        glm::vec4{ 1.f, -1.f, -1.f, 1.f},
+        glm::vec4{-1.f,  1.f, -1.f, 1.f},
+        glm::vec4{ 1.f,  1.f, -1.f, 1.f},
+        glm::vec4{-1.f, -1.f,  1.f, 1.f},
+        glm::vec4{ 1.f, -1.f,  1.f, 1.f},
+        glm::vec4{-1.f,  1.f,  1.f, 1.f},
+        glm::vec4{ 1.f,  1.f,  1.f, 1.f}
+    };
+
+    std::array<glm::vec3, 8> world_corners{};
+    for (std::size_t index = 0; index < world_corners.size(); ++index) {
+        const glm::vec4 world_space = inverse * ndc_corners[index];
+        world_corners[index] = glm::vec3(world_space) / std::max(world_space.w, 1e-6f);
+    }
+
+    glm::vec3 frustum_center{0.f};
+    for (const auto& corner : world_corners)
+        frustum_center += corner;
+    frustum_center /= static_cast<float>(world_corners.size());
+
+    const auto build_plane = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) {
+        glm::vec3 normal = glm::normalize(glm::cross(b - a, c - a));
+        const glm::vec3 plane_point = (a + b + c) / 3.f;
+        if (glm::dot(normal, frustum_center - plane_point) < 0.f)
+            normal *= -1.f;
+        const float distance = -glm::dot(normal, a);
+        return frustum_plane{normal, distance};
+    };
+
+    return {
+        build_plane(world_corners[0], world_corners[2], world_corners[6]),
+        build_plane(world_corners[1], world_corners[5], world_corners[7]),
+        build_plane(world_corners[0], world_corners[1], world_corners[5]),
+        build_plane(world_corners[2], world_corners[6], world_corners[7]),
+        build_plane(world_corners[0], world_corners[4], world_corners[6]),
+        build_plane(world_corners[1], world_corners[3], world_corners[7])
+    };
+}
+
+bool sphere_in_frustum(const glm::vec3& center, float radius, const std::array<frustum_plane, 6>& planes) {
+    for (const auto& plane : planes) {
+        const float signed_distance = glm::dot(plane.normal, center) + plane.distance;
+        if (signed_distance < -radius)
+            return false;
+    }
+    return true;
+}
+
+std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer_component, const transform& transform_component) {
+    glm::vec3 minimum{std::numeric_limits<float>::infinity()};
+    glm::vec3 maximum{-std::numeric_limits<float>::infinity()};
+    bool has_vertices = false;
+
+    if (renderer_component.m_modelo) {
+        for (const auto& mesh : renderer_component.m_modelo->meshes) {
+            for (const auto& vertex : mesh.getVertices()) {
+                const glm::vec3 position{vertex.position.x, vertex.position.y, vertex.position.z};
+                minimum = glm::min(minimum, position);
+                maximum = glm::max(maximum, position);
+                has_vertices = true;
+            }
+        }
+    }
+
+    if (!has_vertices) {
+        const auto position = transform_component.get_world_position();
+        const glm::vec3 world_center{position.x, position.y, position.z};
+        return {world_center, 0.f};
+    }
+
+    const glm::vec3 local_center = (minimum + maximum) * 0.5f;
+    const glm::vec4 world_center = transform_component.get_world_model_matrix() * glm::vec4(local_center, 1.f);
+
+    float radius = 0.f;
+    for (const auto& mesh : renderer_component.m_modelo->meshes) {
+        for (const auto& vertex : mesh.getVertices()) {
+            const glm::vec3 position{vertex.position.x, vertex.position.y, vertex.position.z};
+            const float distance = glm::length(position - local_center);
+            radius = std::max(radius, distance);
+        }
+    }
+
+    const float max_scale = std::max({std::abs(transform_component.get_scale().x),
+        std::abs(transform_component.get_scale().y), std::abs(transform_component.get_scale().z)});
+    return {glm::vec3(world_center), radius * std::max(max_scale, 1.f)};
 }
 }
 
@@ -244,12 +341,14 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
 
         const auto view = camera_component->getViewMatrix();
         const auto projection = camera_component->obtProjectionMatrix();
+        const auto frustum = extract_frustum_planes(view, projection);
         if (!camera_component->m_skybox) camera_component->m_skybox = new skybox();
         camera_component->m_skybox->draw_background(view, projection,
             camera_component->skybox_faces, camera_component->skybox_asset_root,
-            camera_component->m_use_skybox,
-            {camera_component->ceu.r, camera_component->ceu.g, camera_component->ceu.b},
-            camera_component->atmosphere_zenith, camera_component->skybox_image);
+            camera_component->config.use_skybox,
+            {camera_component->config.sky_solid_color.r, camera_component->config.sky_solid_color.g,
+                camera_component->config.sky_solid_color.b},
+            camera_component->config.atmosphere_zenith, camera_component->config.skybox_image);
 
         auto direction_light = global_direction_light;
         if (auto camera_light = reg->get<directional_light>(camera_component->my_object)) {
@@ -294,6 +393,10 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             if (!render_component->visible || !available_models.at(render_component->m_modelo))
                 continue;
 
+            const auto [world_center, world_radius] = model_bounds_in_world_space(*render_component, *transform_component);
+            if (!sphere_in_frustum(world_center, world_radius, frustum))
+                continue;
+
             auto& shader = render_component->m_modelo->getShader();
             shader.use();
             shader.setBool("shadowEnabled", shadows && render_component->receive_shadows);
@@ -306,6 +409,10 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             shader.setMat4("projection", glm::value_ptr(projection));
             shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
             shader.setVec3("viewPos", camera_component->position);
+            shader.setBool("fogEnabled", camera_component->config.fog_enabled);
+            shader.setVec3("fogColor", {camera_component->config.fog_color.r,
+                camera_component->config.fog_color.g, camera_component->config.fog_color.b});
+            shader.setFloat("fogDensity", camera_component->config.fog_density);
             shader.setVec3("dirLight.direction", direction_light.direction);
             shader.setVec3("dirLight.ambient", direction_light.ambient);
             shader.setVec3("dirLight.color", direction_light.color);

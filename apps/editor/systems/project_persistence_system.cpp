@@ -146,7 +146,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
             return false;
         const std::string shape(value["shape"].GetString());
         if (shape != "box" && shape != "capsule" && shape != "sphere" &&
-            shape != "cylinder" && shape != "cone" && shape != "plane")
+            shape != "cylinder" && shape != "cone" && shape != "plane" &&
+            shape != "mesh")
             return false;
         if ((value.HasMember("static") && !value["static"].IsBool()) ||
             (value.HasMember("mass") &&
@@ -154,6 +155,11 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
             (value.HasMember("friction") && !is_number(value["friction"])) ||
             (value.HasMember("restitution") &&
                 !is_number(value["restitution"])))
+            return false;
+        if (value.HasMember("model_collider") &&
+            (!value["model_collider"].IsString() ||
+                (std::string(value["model_collider"].GetString()) != "convex" &&
+                 std::string(value["model_collider"].GetString()) != "concave")))
             return false;
         return true;
     }
@@ -168,6 +174,7 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
         }
         if (value.HasMember("atmosphere_zenith") && !is_vector3(value["atmosphere_zenith"])) return false;
         if ((value.HasMember("fov") && !is_number(value["fov"])) ||
+            (value.HasMember("znear") && !is_number(value["znear"])) ||
             (value.HasMember("zfar") && !is_number(value["zfar"])) ||
             (value.HasMember("scale") && !is_number(value["scale"])) ||
             (value.HasMember("ortho") && !value["ortho"].IsBool()) ||
@@ -396,6 +403,8 @@ bool parse_component(
             shape = commons::physics::shapes::forma_cone;
         else if (shape_name == "plane")
             shape = commons::physics::shapes::forma_plano;
+        else if (shape_name == "mesh")
+            shape = commons::physics::shapes::mesh_shape;
         const bool static_body =
             data.HasMember("static") && data["static"].GetBool();
         registry.add<commons::physics>(entity, static_body, shape);

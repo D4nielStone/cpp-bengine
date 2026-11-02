@@ -646,7 +646,7 @@ public:
         configure_icon_button(add_entity, 18);
         add_button_icon(add_entity, "plus", 0.26f);
 
-        auto& primitives = m_toolbar->add<context_action_button>("Primitiva...", .27f, []() {});
+        auto& primitives = m_toolbar->add<context_action_button>("Primitivas", .27f, []() {});
         primitives.add_class("entities-primitives-button");
         primitives.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
         primitives.context_options = [this]() {

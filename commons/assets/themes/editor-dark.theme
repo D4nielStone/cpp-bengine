@@ -37,6 +37,36 @@ layout.align = center, center
 visual.visible = true
 visual.background.normal = 0.10, 0.10, 0.10, 1.0
 
+[class.debug-toolbar]
+visual.visible = true
+visual.background.normal = 0.075, 0.075, 0.075, 1.0
+visual.border.normal = 0.16, 0.16, 0.16, 1.0
+visual.border.size = 1
+layout.padding = 8, 4
+layout.align = start, center
+
+[class.debug-log-status]
+visual.text.normal = 0.62, 0.67, 0.72, 1.0
+layout.padding = 2, 0
+
+[class.debug-clear-button]
+visual.background.normal = 0.13, 0.13, 0.13, 1.0
+visual.background.hover = 0.20, 0.20, 0.20, 1.0
+visual.background.pressed = 0.24, 0.24, 0.24, 1.0
+visual.border.normal = 0.23, 0.23, 0.23, 1.0
+visual.border.size = 1
+visual.border.radius = 3
+layout.padding = 10, 3
+
+[class.debug-log-scroll]
+visual.visible = true
+visual.background.normal = 0.055, 0.055, 0.055, 1.0
+layout.padding = 8, 5
+
+[class.debug-log-text]
+visual.text.normal = 0.82, 0.84, 0.86, 1.0
+layout.padding = 0
+
 [class.editor-section]
 layout.margin = 0, 4
 visual.visible = true

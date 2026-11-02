@@ -2,10 +2,14 @@
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include "editor_ui.hpp"
+#include "game_view.hpp"
+#include "components_view.hpp"
 #include "undo_redo_shortcuts_system.hpp"
 #include <elem/button.hpp>
 #include <elem/checkbox.hpp>
+#include <elem/field.hpp>
 #include <elem/inputbox.hpp>
+#include <elem/window.hpp>
 #include <components/camera.hpp>
 #include <components/transform.hpp>
 #include <chrono>
@@ -144,6 +148,38 @@ TEST(PanelManagerTest, OwnsPanelsAndForwardsUpdates) {
     EXPECT_EQ(panel.update_count, 1);
 }
 
+TEST(GameViewTest, PreviewsRuntimeCameraAndHidesWhileTheRuntimeIsRunning) {
+    bgui::scoped_interface ui_scope;
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(1);
+    registry->add<commons::camera>(editor_camera);
+    auto game_camera = registry->create(2);
+    registry->add<commons::camera>(game_camera);
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->editor_camera_entity = editor_camera.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::game_view panel(context);
+    panel.build(dock);
+
+    EXPECT_TRUE(panel.needs_camera_render(game_camera.id));
+    EXPECT_FALSE(panel.needs_camera_render(editor_camera.id));
+    auto* window = find<bgui::window>(dock, [](auto& value) {
+        return value.get_title().get_buffer() == "Game";
+    });
+    ASSERT_NE(window, nullptr);
+    EXPECT_TRUE(window->is_enabled());
+
+    context->is_playing = true;
+    panel.update();
+    EXPECT_FALSE(window->is_enabled());
+    EXPECT_FALSE(panel.needs_camera_render(game_camera.id));
+
+    context->is_playing = false;
+    panel.update();
+    EXPECT_TRUE(window->is_enabled());
+    EXPECT_TRUE(panel.needs_camera_render(game_camera.id));
+}
+
 TEST_F(EditorMenuTest, UnsavedProjectRequiresConfirmationAndCancelKeepsEditorOpen) {
     bool exited = false;
     editor.set_exit_callback([&]() { exited = true; });
@@ -175,6 +211,79 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
     EXPECT_EQ(configuration.tab_groups.front().windows, (std::vector<std::string>{"Arquivos", "Debug"}));
     click("Layout: Standard");
     EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .24f);
+}
+
+TEST_F(EditorMenuTest, EditorCameraActionOpensSettingsModalAndAppliesProjection) {
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    context->editor_camera_entity = entity.id;
+    auto& components = editor.add_panel<editor::ui::components_view>(context);
+    auto* inspector = find<bgui::window>(dock, [](auto& window) {
+        return window.get_title().get_buffer() == "Inspector";
+    });
+    ASSERT_NE(inspector, nullptr);
+    auto& other = dock.add_window("Other", bgui::dock_area::right);
+    dock.merge_window_as_tab(*inspector, other);
+
+    click("Editor Camera...");
+
+    EXPECT_EQ(context->selected_entity, entity.id);
+    const auto configuration = dock.get_configuration();
+    ASSERT_EQ(configuration.tab_groups.size(), 1u);
+    EXPECT_EQ(configuration.tab_groups.front().active, "Inspector");
+    components.update();
+    EXPECT_NE(find<bgui::field>(dock, [](auto& field) {
+        return field.get_label().get_buffer() == "Field of View";
+    }), nullptr);
+
+    auto* camera_modal = find<bgui::modal>(bgui::get_layout(), [](auto& modal) {
+        return find<bgui::text>(modal, [](auto& text) {
+            return text.get_buffer() == "Editor Camera Settings";
+        }) != nullptr;
+    });
+    ASSERT_NE(camera_modal, nullptr);
+    auto* fov = find<bgui::field>(*camera_modal, [](auto& field) {
+        return field.get_label().get_buffer() == "Field of View";
+    });
+    ASSERT_NE(fov, nullptr);
+    fov->get_inputbox().set_buffer("200");
+    click("Apply");
+    EXPECT_FLOAT_EQ(camera->config.fov, 75.f);
+    EXPECT_NE(find<bgui::modal>(bgui::get_layout(), [](auto& modal) {
+        return find<bgui::text>(modal, [](auto& text) {
+            return text.get_buffer() == "Editor Camera Settings";
+        }) != nullptr;
+    }), nullptr);
+
+    fov->get_inputbox().set_buffer("90");
+    const auto set_camera_field = [camera_modal](const std::string& label, const std::string& value) {
+        auto* field = find<bgui::field>(*camera_modal, [&](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(field, nullptr) << label;
+        field->get_inputbox().set_buffer(value);
+    };
+    set_camera_field("Near Clip", "0.2");
+    set_camera_field("Far Clip", "500");
+    set_camera_field("Orthographic Scale", "10");
+    auto* orthographic = find<bgui::checkbox>(*camera_modal, [](auto& item) {
+        return item.get_label().get_buffer() == "Orthographic";
+    });
+    ASSERT_NE(orthographic, nullptr);
+    orthographic->on_clicked();
+    click("Apply");
+    EXPECT_FLOAT_EQ(camera->config.fov, 90.f);
+    EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.2f);
+    EXPECT_FLOAT_EQ(camera->config.corte_longo, 500.f);
+    EXPECT_FLOAT_EQ(camera->config.scale, 10.f);
+    EXPECT_TRUE(camera->config.flag_orth);
+    EXPECT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->config.fov, 75.f);
+    EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.1f);
+    EXPECT_FLOAT_EQ(camera->config.corte_longo, 300.f);
+    EXPECT_FLOAT_EQ(camera->config.scale, 5.f);
+    EXPECT_FALSE(camera->config.flag_orth);
 }
 
 TEST_F(EditorMenuTest, PreferencesApplyGridAndNavigationValues) {

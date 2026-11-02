@@ -95,6 +95,7 @@ private:
     bgui::modal* m_project_modal{nullptr};
     bgui::modal* m_new_project_modal{nullptr};
     bgui::modal* m_exit_modal{nullptr};
+    bgui::modal* m_editor_camera_modal{nullptr};
     bgui::modal* m_global_lighting_modal{nullptr};
     bgui::modal* m_global_physics_modal{nullptr};
     bgui::inputbox* m_project_directory_input{nullptr};
@@ -125,6 +126,7 @@ private:
     void create_new_project_modal();
     void create_exit_modal();
     void open_preferences_modal();
+    void open_editor_camera_modal();
     void apply_layout(bool wide);
     void open_global_lighting_modal();
     void open_global_physics_modal();

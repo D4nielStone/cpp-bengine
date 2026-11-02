@@ -93,10 +93,21 @@ TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
     auto config = dock.get_configuration();
     ASSERT_EQ(config.tab_groups.size(), 1u);
     EXPECT_EQ(config.tab_groups.front().windows, (std::vector<std::string>{"Arquivos", "Debug"}));
+    config.tab_groups.front().active = "Debug";
+    dock.apply_configuration(config);
     log.write(12, "script message");
-    debug.update();
+    bgui::on_update();
     EXPECT_NE(find<bgui::text>(dock, [](auto& text) {
         return text.get_buffer().find("[lua][12] script message") != std::string::npos;
+    }), nullptr);
+    EXPECT_NE(find<bgui::linear>(dock, [](auto& value) {
+        return value.has_class("debug-toolbar");
+    }), nullptr);
+    EXPECT_NE(find<bgui::linear>(dock, [](auto& value) {
+        return value.has_class("debug-log-scroll");
+    }), nullptr);
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) {
+        return text.get_buffer() == "1 registro";
     }), nullptr);
     auto* clear = find<bgui::button>(dock, [](auto& button) {
         return button.get_label().get_buffer() == "Limpar";
@@ -104,7 +115,7 @@ TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
     ASSERT_NE(clear, nullptr);
     clear->on_released();
     bgui::on_update();
-    debug.update();
+    bgui::on_update();
     EXPECT_TRUE(log.lines().empty());
     EXPECT_NE(find<bgui::text>(dock, [](auto& text) {
         return text.get_buffer() == "Nenhum log Lua.";

@@ -1,3 +1,6 @@
+#define GLFW_INCLUDE_NONE
+#include <glad.h>
+
 #include "panel.hpp"
 #include "../core/distribution_paths.hpp"
 #include "project_context_menu.hpp"
@@ -8,9 +11,11 @@
 
 #include <elem/checkbox.hpp>
 
+#include <components/camera.hpp>
 #include <components/directional_light.hpp>
 
 #include <elem/button.hpp>
+#include <elem/field.hpp>
 #include <elem/icon.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/menu_bar.hpp>
@@ -18,6 +23,7 @@
 #include <elem/progress_bar.hpp>
 #include <elem/text.hpp>
 #include <elem/vector_field.hpp>
+#include <elem/window.hpp>
 #include <lay/linear.hpp>
 
 #include <algorithm>
@@ -267,11 +273,7 @@ editor_ui::editor_ui(
     menu_bar.add_menu(
         "View", 0.3f,
         [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
-            menu.add_button("Editor Camera...", [this]() {
-                if (m_context && m_context->registry && m_context->editor_camera_entity &&
-                    m_context->registry->is_alive(*m_context->editor_camera_entity))
-                    m_context->selected_entity = m_context->editor_camera_entity;
-            });
+            menu.add_button("Editor Camera...", [this]() { open_editor_camera_modal(); });
             menu.add_button("Show/Hide Colliders    F3", [this]() {
                 if (m_commands)
                     m_commands->execute(editor_command::toggle_colliders);
@@ -906,6 +908,116 @@ void editor_ui::open_global_physics_modal() {
     for (std::size_t axis = 0; axis < m_gravity_inputs.size(); ++axis)
         m_gravity_inputs[axis]->set_buffer(format_number(gravity[axis]));
     m_global_physics_modal->set_enable(true);
+}
+
+void editor_ui::open_editor_camera_modal() {
+    if (!m_context || !m_context->registry || !m_context->editor_camera_entity ||
+        !m_context->registry->is_alive(*m_context->editor_camera_entity))
+        return;
+
+    const auto camera_id = *m_context->editor_camera_entity;
+    const auto camera = m_context->registry->get<commons::camera>(camera_id);
+    if (!camera)
+        return;
+
+    m_context->selected_entity = camera_id;
+    for (auto& [layer, elements] : m_dock.get_elements()) {
+        (void)layer;
+        for (const auto& element : elements) {
+            auto* window = dynamic_cast<bgui::window*>(element.get());
+            if (window && window->get_title().get_buffer() == "Inspector") {
+                m_dock.focus_window(window);
+                break;
+            }
+        }
+    }
+
+    if (m_editor_camera_modal) {
+        m_editor_camera_modal->set_enable(true);
+        return;
+    }
+
+    auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+    m_editor_camera_modal = &modal;
+    modal.add<bgui::text>("Editor Camera Settings", 0.4f);
+    modal.add<bgui::text>("Configure the editor camera projection.", 0.28f);
+
+    constexpr std::array labels{"Field of View", "Near Clip", "Far Clip", "Orthographic Scale"};
+    std::array<bgui::inputbox*, labels.size()> inputs{};
+    const std::array values{camera->config.fov, camera->config.corte_curto,
+        camera->config.corte_longo, camera->config.scale};
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        auto& field = panel::add_field(modal.content(), labels[i], format_number(values[i]), 0.28f);
+        inputs[i] = &field.get_inputbox();
+        inputs[i]->add_class("editor-input");
+    }
+    auto& orthographic = panel::add_checkbox(
+        modal.content(), "Orthographic", 0.29f, camera->config.flag_orth
+    );
+    auto& status = modal.add<bgui::text>("", 0.27f);
+    modal.set_confirmation_text("Cancel");
+    modal.set_on_confirm([this]() { m_editor_camera_modal = nullptr; });
+
+    modal.add<bgui::button>("Apply", 0.3f,
+        [this, camera, camera_id, inputs, orthographic = &orthographic,
+         status = &status, surface = &modal]() {
+            if (!m_context || !m_context->registry ||
+                !m_context->registry->is_alive(camera_id) ||
+                m_context->registry->get<commons::camera>(camera_id) != camera) {
+                status->set_buffer("The editor camera is no longer available.");
+                return;
+            }
+
+            std::array<float, 4> next{};
+            for (std::size_t i = 0; i < inputs.size(); ++i) {
+                if (!inputs[i] || !parse_number(inputs[i]->get_buffer(), next[i])) {
+                    status->set_buffer("Enter a valid finite number in every field.");
+                    return;
+                }
+            }
+            if (next[0] < 1.f || next[0] > 179.f ||
+                next[1] <= 0.f || next[2] <= next[1] || next[3] <= 0.f) {
+                status->set_buffer("Use FOV 1-179, near > 0 and below far, far > near, and scale > 0.");
+                return;
+            }
+
+            const std::array previous{
+                camera->config.fov, camera->config.corte_curto,
+                camera->config.corte_longo, camera->config.scale
+            };
+            const bool previous_orthographic = camera->config.flag_orth;
+            const bool next_orthographic = orthographic->checked();
+            camera->config.fov = next[0];
+            camera->config.corte_curto = next[1];
+            camera->config.corte_longo = next[2];
+            camera->config.scale = next[3];
+            camera->config.flag_orth = next_orthographic;
+            if (previous != next || previous_orthographic != next_orthographic) {
+                m_context->record_action(
+                    [camera, previous, previous_orthographic]() {
+                        camera->config.fov = previous[0];
+                        camera->config.corte_curto = previous[1];
+                        camera->config.corte_longo = previous[2];
+                        camera->config.scale = previous[3];
+                        camera->config.flag_orth = previous_orthographic;
+                    },
+                    [camera, next, next_orthographic]() {
+                        camera->config.fov = next[0];
+                        camera->config.corte_curto = next[1];
+                        camera->config.corte_longo = next[2];
+                        camera->config.scale = next[3];
+                        camera->config.flag_orth = next_orthographic;
+                    }
+                );
+            }
+
+            m_editor_camera_modal = nullptr;
+            surface->set_enable(false);
+            bgui::add_function([parent = surface->get_parent(), surface]() {
+                if (parent)
+                    parent->remove(surface);
+            });
+        });
 }
 
 void editor_ui::refresh_project_picker(const std::string& initial) {

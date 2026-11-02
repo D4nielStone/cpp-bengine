@@ -75,10 +75,14 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
 
     const auto editor_camera = registry->get<commons::camera>(editor_camera_entity.id);
     const auto scene_camera = registry->get<commons::camera>(scene_camera_entity.id);
-    editor_camera->skybox_image = "assets/editor-cross.png";
-    editor_camera->m_use_skybox = true;
-    editor_camera->atmosphere_zenith = {0.2f, 0.3f, 0.4f};
-    editor_camera->fov = 63.f;
+    editor_camera->config.skybox_image = "assets/editor-cross.png";
+    editor_camera->config.use_skybox = true;
+    editor_camera->config.atmosphere_zenith = {0.2f, 0.3f, 0.4f};
+    editor_camera->config.fog_enabled = true;
+    editor_camera->config.fog_color = {0.2f, 0.4f, 0.6f, 1.f};
+    editor_camera->config.fog_density = 0.035f;
+    editor_camera->config.fov = 63.f;
+    editor_camera->config.corte_curto = 0.25f;
     registry->get<commons::transform>(editor_camera_entity.id)->set_position(
         {2.f, 3.f, 4.f}
     );
@@ -123,14 +127,21 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
         {-2.f, -2.f, -2.f}
     );
 
-    editor_camera->skybox_image.clear();
-    editor_camera->m_use_skybox = false;
-    editor_camera->fov = 90.f;
+    editor_camera->config.skybox_image.clear();
+    editor_camera->config.use_skybox = false;
+    editor_camera->config.fog_enabled = false;
+    editor_camera->config.fog_density = 0.f;
+    editor_camera->config.fov = 90.f;
+    editor_camera->config.corte_curto = 0.1f;
     ASSERT_TRUE(persistence.load(path_string, error)) << error;
-    EXPECT_EQ(editor_camera->skybox_image, "assets/editor-cross.png");
-    EXPECT_TRUE(editor_camera->m_use_skybox);
-    EXPECT_FLOAT_EQ(editor_camera->fov, 63.f);
-    EXPECT_FLOAT_EQ(editor_camera->atmosphere_zenith.x, 0.2f);
+    EXPECT_EQ(editor_camera->config.skybox_image, "assets/editor-cross.png");
+    EXPECT_TRUE(editor_camera->config.use_skybox);
+    EXPECT_TRUE(editor_camera->config.fog_enabled);
+    EXPECT_FLOAT_EQ(editor_camera->config.fog_density, 0.035f);
+    EXPECT_FLOAT_EQ(editor_camera->config.fog_color.g, 0.4f);
+    EXPECT_FLOAT_EQ(editor_camera->config.fov, 63.f);
+    EXPECT_FLOAT_EQ(editor_camera->config.corte_curto, 0.25f);
+    EXPECT_FLOAT_EQ(editor_camera->config.atmosphere_zenith.x, 0.2f);
     EXPECT_EQ(editor_camera->skybox_asset_root, path.parent_path().string());
     EXPECT_EQ(registry->get<commons::camera>(editor_camera_entity.id), editor_camera);
     EXPECT_NE(registry->get<commons::camera>(scene_camera_entity.id), scene_camera);
@@ -269,6 +280,69 @@ TEST(ProjectCreationTest, CreatesAnEmptyProjectWithStandardFolders) {
 
     std::error_code ignored;
     std::filesystem::remove_all(project_folder, ignored);
+}
+
+TEST(ProjectCreationTest, CreatesAnFppProjectTemplateWithAPlayableScene) {
+    const auto unique_path = temporary_project_path();
+    const auto project_folder = unique_path.parent_path() / unique_path.stem();
+    struct cleanup {
+        std::filesystem::path path;
+        ~cleanup() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } cleanup{project_folder};
+    std::string error;
+
+    ASSERT_TRUE(editor::ui::create_project_files(
+        project_folder,
+        error,
+        editor::ui::project_template::fpp
+    )) << error;
+    EXPECT_TRUE(std::filesystem::is_regular_file(
+        project_folder / "scripts" / "fpp_player.lua"
+    ));
+    EXPECT_TRUE(std::filesystem::is_regular_file(
+        project_folder / "scripts" / "fpp_camera.lua"
+    ));
+
+    auto loaded_registry = std::make_shared<commons::ecs>();
+    auto editor_camera = loaded_registry->create();
+    loaded_registry->add<commons::camera>(editor_camera);
+    editor::ui::project_persistence_system persistence(
+        loaded_registry,
+        editor_camera.id
+    );
+    ASSERT_TRUE(persistence.load(
+        editor::ui::project_file_path(project_folder).string(),
+        error
+    )) << error;
+
+    const auto player = loaded_registry->find_by_name("Player");
+    const auto player_camera = loaded_registry->find_by_name("Player Camera");
+    const auto ground = loaded_registry->find_by_name("Ground");
+    ASSERT_TRUE(player);
+    ASSERT_TRUE(player_camera);
+    ASSERT_TRUE(ground);
+    EXPECT_EQ(
+        loaded_registry->get<commons::transform>(*player_camera)->parent_id,
+        *player
+    );
+    ASSERT_NE(loaded_registry->get<commons::physics>(*player), nullptr);
+    EXPECT_EQ(
+        loaded_registry->get<commons::physics>(*player)->type,
+        commons::physics::body_type::character
+    );
+    EXPECT_TRUE(loaded_registry->get<commons::physics>(*ground)->type ==
+        commons::physics::body_type::static_body);
+    EXPECT_EQ(
+        loaded_registry->get<commons::code>(*player)->file,
+        "scripts/fpp_player.lua"
+    );
+    EXPECT_EQ(
+        loaded_registry->get<commons::code>(*player_camera)->file,
+        "scripts/fpp_camera.lua"
+    );
 }
 
 TEST(ProjectPersistenceTest, KeepsLoadedEntityIdsInTheLiveRegistry) {
@@ -558,6 +632,37 @@ TEST(ProjectPersistenceTest, SavesAndLoadsPhysicsBodies) {
     );
     EXPECT_FLOAT_EQ(loaded_physics->m_massa, 2.5f);
 
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, SavesAndLoadsModelPhysicsShape) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto body_entity = registry->create(23);
+    registry->add<commons::physics>(
+        body_entity,
+        true,
+        commons::physics::shapes::mesh_shape
+    );
+    auto physics = registry->get<commons::physics>(body_entity.id);
+    physics->set_model_collider_type(
+        commons::physics::model_collider_type::concave
+    );
+
+    editor::ui::project_persistence_system persistence(registry, 17);
+    const auto path = temporary_project_path();
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+
+    const auto loaded = registry->get<commons::physics>(body_entity.id);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->e_forma, commons::physics::shapes::mesh_shape);
+    EXPECT_EQ(
+        loaded->model_collider,
+        commons::physics::model_collider_type::concave
+    );
     remove_project_files(path);
 }
 
@@ -873,7 +978,7 @@ TEST(ProjectPersistenceTest, CubemapCrossPathSurvivesTemporaryRuntimeSnapshot) {
     auto editor_camera = registry->create(999); registry->add<commons::camera>(editor_camera);
     auto scene_camera = registry->create(100); registry->add<commons::camera>(scene_camera);
     auto camera = registry->get<commons::camera>(scene_camera.id);
-    camera->m_use_skybox = true; camera->skybox_image = "assets/cross.png";
+    camera->config.use_skybox = true; camera->config.skybox_image = "assets/cross.png";
     editor::ui::project_persistence_system persistence(registry, editor_camera.id);
     std::string error;
     const auto project = directory / "project.bengine";
@@ -885,7 +990,7 @@ TEST(ProjectPersistenceTest, CubemapCrossPathSurvivesTemporaryRuntimeSnapshot) {
     ASSERT_TRUE(persistence.load(snapshot.string(), error)) << error;
     camera = registry->get<commons::camera>(scene_camera.id);
     ASSERT_NE(camera, nullptr);
-    EXPECT_EQ(std::filesystem::path(camera->skybox_image), (directory / "assets/cross.png").lexically_normal());
+    EXPECT_EQ(std::filesystem::path(camera->config.skybox_image), (directory / "assets/cross.png").lexically_normal());
     registry->entities.clear();
     std::filesystem::remove_all(directory);
 }

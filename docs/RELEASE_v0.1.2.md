@@ -1,52 +1,27 @@
-# Bubble Engine v0.1.2
+# Bubble Engine 0.1.2
 
-## Performance
+Esta página registra a linha de versão 0.1.2 documentada pelo código-fonte
+atual. Para instruções de build e exportação, veja o [README](../README.md).
 
-- Measure invalidated UI subtrees instead of measuring clean sibling elements.
-- Clear leaf layout invalidation after arranging geometry.
-- Emit text glyph commands only when they intersect the active clip. Preserve
-  partially visible glyphs, text selection, caret positions and editor guides.
-- Allocate guide position/indentation arrays only when editor guides are enabled.
-- Render the editor's game camera only while its preview is needed, and render
-  only the displayed camera in the standalone runtime.
-- Skip spotlight shading outside the light cone and reuse existing shadow maps
-  without an unnecessary texture-size query at each unchanged resolution.
-- Configure Release optimization correctly in the Linux/Windows build helpers.
+## Aplicações
 
-Local synchronized UI measurements on Intel ADL GT2 reduced the median long-text
-frame from 20.56 to 2.18 ms (static) and 70.67 to 13.64 ms (dynamic).
-The benchmark used three repetitions and 3,600 measured frames across ten
-scenarios. Widget/window timings varied and do not establish a general FPS gain.
+O repositório fornece `editor_app` e `runtime_app`. O editor salva os dados do
+projeto/cena, permite selecionar assets e componentes e abre o runtime em uma
+janela/processo separado pelo controle Play. O runtime pode carregar um projeto
+com `--project`.
 
-## Rendering and Windows compatibility
+## Formatos e recursos
 
-- Bound the Fresnel cosine to its physical range before exponentiation, avoiding
-  undefined negative-base `pow` results caused by floating-point rounding on
-  software OpenGL drivers.
-- Keep orthographic matrix headers compatible with the legacy `near`/`far`
-  qualifier macros from Windows headers; add a compile regression for that order.
+O manifesto de projeto usa o formato 2, com migração de formato 1. Os arquivos
+de cena mantêm seu formato/versionamento próprio. Scripts Lua podem declarar
+propriedades para o Inspector; câmera, iluminação e Rigidbody possuem bindings
+documentados em [API Lua](./lua-api/README.md).
 
-## Automated release benchmarks
+## Limites documentados
 
-An opt-in UI benchmark covers static/dynamic text, long documents, widget groups
-and overlapping windows. Each tag release generates Linux software-rendering
-reports, raw samples and logs alongside engine packages. Reports include frame
-percentiles, UI/submission/GPU times, workload counters and environment metadata.
-Comparisons require compatible hardware, drivers, builds and workload settings.
-Timing regressions are advisory on shared CI runners. See [BENCHMARKS.md](BENCHMARKS.md).
+O runtime e o painel Game do editor não compartilham a simulação: Play executa
+outro processo. A API Lua ainda não oferece um sistema de HUD, criação genérica
+de entidades/componentes ou controle de reprodução sonora.
 
-## Included editor, lighting and Lua changes
-
-- Spotlight components with editor controls, serialization, clipboard support,
-  Lua bindings and completion, including world position/direction and cone limits.
-- Point-light gizmos in the scene viewport.
-- Updated lighting examples and demo scene.
-- Preserve the public C++ `setUnityApi` entry point as a forwarding alias to
-  `setUpApi`; existing integrations continue to compile.
-
-Project/scene format versions remain unchanged. The included demo declares
-v0.1.2 as its minimum engine version because it contains spotlight components.
-
-Local validation and benchmark comparisons are recorded in STABILIZATION.md.
-Release packages are produced by the existing Linux/Windows tag workflow;
-software-rendered UI throughput is not a measurement of editor/game FPS.
+Este arquivo não substitui os checks, artefatos ou notas específicas publicados
+com uma distribuição binária.

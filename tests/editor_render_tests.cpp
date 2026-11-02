@@ -28,6 +28,7 @@
 #include <cstring>
 #include <iterator>
 #include <glm/gtc/matrix_transform.hpp>
+#include <limits>
 
 namespace {
 class EditorRenderTest : public testing::Test {
@@ -116,6 +117,31 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
         EXPECT_TRUE(enabled.valor.b);
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
     std::filesystem::remove_all(folder);
+}
+
+TEST_F(EditorRenderTest, FrustumCullingSkipsEntitiesOutsideCameraView) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera_entity = registry->create(1001u);
+    registry->add<commons::camera>(camera_entity);
+    registry->add<commons::transform>(camera_entity,
+        bgui::vec3{0.f, 0.f, 0.f},
+        bgui::vec3{0.f, -90.f, 0.f},
+        bgui::vec3{1.f, 1.f, 1.f});
+
+    auto visible = registry->create(1002u);
+    registry->add<commons::transform>(visible, bgui::vec3{0.f, 0.f, -3.f});
+    const auto visible_model = (std::filesystem::path(BENGINE_SOURCE_DIR) / "commons/assets/models/cube.obj").string();
+    registry->add<commons::renderer>(visible, visible_model.c_str());
+
+    auto hidden = registry->create(1003u);
+    registry->add<commons::transform>(hidden, bgui::vec3{0.f, 0.f, 6.f});
+    registry->add<commons::renderer>(hidden, visible_model.c_str());
+
+    registry->get<commons::camera>(camera_entity.id)->viewport({64, 64});
+    commons::render_system render;
+    render.update(registry);
+
+    EXPECT_EQ(render.last_rendered_entity_count(), 1u);
 }
 
 TEST_F(EditorRenderTest, KeepsEmbeddedModelTexturesWhenLoadingSavedScene) {
@@ -313,7 +339,7 @@ TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextC
     camera->createFB();
     auto& image = bgui::get_layout().add<bgui::image>();
     editor::ui::viewport_sync_system sync(camera, image);
-    camera->ceu = {1.f, 0.f, 0.f, 1.f};
+    camera->config.sky_solid_color = {1.f, 0.f, 0.f, 1.f};
     camera->drawFB();
     for (const bgui::vec2i size : {bgui::vec2i{40, 30}, {63, 47}, {29, 17}}) {
         image.set_final_rect(15, 20, size.x, size.y);
@@ -369,8 +395,8 @@ TEST_F(EditorRenderTest, SpotShadowsRespectCasterReceiverAndLightControls) {
     registry->get<commons::transform>(camera_entity.id)->set_rotation({-36.8699f,-90,0});
     camera->position = {0, 6, 8};
     camera->viewMatrix = glm::lookAt(glm::vec3{0,6,8}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
-    camera->flag_orth = true;
-    camera->scale = 5.f;
+    camera->config.flag_orth = true;
+    camera->config.scale = 5.f;
     camera->request_framebuffer_size({128,128});
     auto light_entity = registry->create();
     registry->add<commons::directional_light>(light_entity, bgui::vec3{0,-1,0}, bgui::vec3{0.02f}, bgui::vec3{0}, 1.f);
@@ -511,8 +537,8 @@ TEST_F(EditorRenderTest, DirectionalShadowsRespectCasterReceiverAndLightControls
     registry->get<commons::transform>(camera_entity.id)->set_rotation({-36.8699f,-90,0});
     camera->position = {0, 6, 8};
     camera->viewMatrix = glm::lookAt(glm::vec3{0,6,8}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
-    camera->flag_orth = true;
-    camera->scale = 5.f;
+    camera->config.flag_orth = true;
+    camera->config.scale = 5.f;
     camera->request_framebuffer_size({128,128});
     auto light_entity = registry->create();
     registry->add<commons::directional_light>(light_entity, bgui::vec3{1,-2,0}, bgui::vec3{0.1f}, bgui::vec3{1}, 1.f);
@@ -639,7 +665,7 @@ TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
     registry->get<commons::transform>(1)->set_rotation({0,-90,0});
     camera->viewport({64,64}); camera->createFB(); camera->getViewMatrix(); camera->obtProjectionMatrix();
     auto object = registry->create(2); registry->add<commons::physics>(object,true);
-    camera->ceu = {0,0,0,1}; camera->drawFB();
+    camera->config.sky_solid_color = {0,0,0,1}; camera->drawFB();
     glBindFramebuffer(GL_FRAMEBUFFER, camera->fbo);
     glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); glLineWidth(1.f);
     GLint before_fbo; glGetIntegerv(GL_FRAMEBUFFER_BINDING,&before_fbo);
@@ -669,7 +695,7 @@ TEST_F(EditorRenderTest, SoundPlayerAreaRendersAVisibleSphere) {
     camera->createFB();
     camera->viewMatrix = glm::mat4(1.f);
     camera->projMatriz = glm::mat4(1.f);
-    camera->ceu = {0.f, 0.f, 0.f, 1.f};
+    camera->config.sky_solid_color = {0.f, 0.f, 0.f, 1.f};
     camera->drawFB();
 
     editor::grid_gizmo overlay;
@@ -782,24 +808,40 @@ TEST_F(EditorRenderTest, TextureOffsetRepeatAndWorldProjectionChangePixelsAndRes
 
 TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
     commons::camera camera;
-    EXPECT_FALSE(camera.m_use_skybox);
+    EXPECT_FALSE(camera.config.use_skybox);
     rapidjson::Document data(rapidjson::kObjectType);
-    camera.m_use_skybox = true;
-    camera.skybox_image = "assets/cross.png";
+    camera.config.use_skybox = true;
+    camera.config.skybox_image = "assets/cross.png";
     camera.skybox_faces = {"right.png", "left.png", "top.png", "bottom.png", "front.png", "back.png"};
-    camera.atmosphere_zenith = {0.1f, 0.2f, 0.3f};
+    camera.config.atmosphere_zenith = {0.1f, 0.2f, 0.3f};
+    camera.config.fog_enabled = true;
+    camera.config.fog_color = {0.15f, 0.25f, 0.35f, 1.f};
+    camera.config.fog_density = 0.04f;
+    camera.config.corte_curto = 0.25f;
     ASSERT_TRUE(camera.serialize(data, data.GetAllocator()));
+    ASSERT_TRUE(data.HasMember("znear"));
+    EXPECT_FLOAT_EQ(data["znear"].GetFloat(), 0.25f);
     commons::camera loaded;
     ASSERT_TRUE(loaded.analyze(data));
-    EXPECT_TRUE(loaded.m_use_skybox);
+    EXPECT_FLOAT_EQ(loaded.config.corte_curto, 0.25f);
+    EXPECT_TRUE(loaded.config.use_skybox);
     EXPECT_EQ(loaded.skybox_faces, camera.skybox_faces);
-    EXPECT_EQ(loaded.skybox_image, camera.skybox_image);
-    EXPECT_FLOAT_EQ(loaded.atmosphere_zenith.y, 0.2f);
+    EXPECT_EQ(loaded.config.skybox_image, camera.config.skybox_image);
+    EXPECT_FLOAT_EQ(loaded.config.atmosphere_zenith.y, 0.2f);
+    EXPECT_TRUE(loaded.config.fog_enabled);
+    EXPECT_FLOAT_EQ(loaded.config.fog_color.g, 0.25f);
+    EXPECT_FLOAT_EQ(loaded.config.fog_density, 0.04f);
     EXPECT_EQ(loaded.m_skybox, nullptr); // Loading never allocates GPU resources.
     rapidjson::Document legacy(rapidjson::kObjectType);
-    ASSERT_TRUE(loaded.analyze(legacy));
-    EXPECT_FALSE(loaded.m_use_skybox);
-    EXPECT_TRUE(loaded.skybox_image.empty());
+    commons::camera legacy_loaded;
+    ASSERT_TRUE(legacy_loaded.analyze(legacy));
+    EXPECT_FLOAT_EQ(legacy_loaded.config.corte_curto, 0.1f);
+    EXPECT_FALSE(legacy_loaded.config.use_skybox);
+    EXPECT_TRUE(legacy_loaded.config.skybox_image.empty());
+    EXPECT_FALSE(legacy_loaded.config.fog_enabled);
+    rapidjson::Document invalid(rapidjson::kObjectType);
+    invalid.AddMember("znear", 300.f, invalid.GetAllocator());
+    EXPECT_FALSE(legacy_loaded.analyze(invalid));
 }
 
 TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
@@ -823,7 +865,7 @@ TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
     render.update(registry);
     glReadPixels(32, 60, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, fallback.data());
     EXPECT_EQ(top, fallback); // Background depends on rotation, never position.
-    camera->m_use_skybox = true;
+    camera->config.use_skybox = true;
     camera->skybox_faces.fill("/missing/cubemap.png");
     render.update(registry);
     glReadPixels(32, 60, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, fallback.data());
@@ -856,7 +898,7 @@ TEST_F(EditorRenderTest, CubemapOverridesAtmosphereAndDisableRestoresIt) {
     camera->viewportFBO = {64, 64};
     camera->createFB();
     camera->skybox_faces = paths;
-    camera->m_use_skybox = true;
+    camera->config.use_skybox = true;
     commons::render_system render;
     const bgui::vec3 rotations[] = {{0,0,0}, {0,180,0}, {90,0,0}, {-90,0,0}, {0,90,0}, {0,-90,0}};
     const std::array<unsigned char, 3> colors[] = {{255,0,0}, {0,255,0}, {0,0,255}, {255,255,0}, {255,0,255}, {0,255,255}};
@@ -867,7 +909,7 @@ TEST_F(EditorRenderTest, CubemapOverridesAtmosphereAndDisableRestoresIt) {
         glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
         for (unsigned c = 0; c < 3; ++c) EXPECT_NEAR(pixel[c], colors[i][c], 2) << "Face " << i;
     }
-    camera->m_use_skybox = false;
+    camera->config.use_skybox = false;
     render.update(registry);
     glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
     EXPECT_GT(pixel[1], 100);
@@ -881,8 +923,8 @@ TEST_F(EditorRenderTest, CrossCubemapMapsAllSixFacesAndRestoresUploadState) {
     registry->add<commons::camera>(entity);
     auto camera = registry->get<commons::camera>(entity.id);
     camera->viewportFBO = {64, 64}; camera->createFB();
-    camera->m_use_skybox = true;
-    camera->skybox_image = (std::filesystem::path(BENGINE_SOURCE_DIR) / "tests/fixtures/cubemap_cross.png").string();
+    camera->config.use_skybox = true;
+    camera->config.skybox_image = (std::filesystem::path(BENGINE_SOURCE_DIR) / "tests/fixtures/cubemap_cross.png").string();
     commons::render_system render;
     const bgui::vec3 rotations[] = {{0,0,0},{0,180,0},{90,0,0},{-90,0,0},{0,90,0},{0,-90,0}};
     const std::array<unsigned char, 3> colors[] = {{255,0,0},{0,255,0},{0,0,255},{255,255,0},{255,0,255},{0,255,255}};
@@ -926,9 +968,9 @@ TEST_F(EditorRenderTest, InvalidCrossImageFallsBackToAtmosphereWithoutGpuErrors)
     render.update(registry);
     std::array<unsigned char,4> atmosphere{}, fallback{};
     glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,atmosphere.data());
-    camera->m_use_skybox = true;
+    camera->config.use_skybox = true;
     for (const auto* path : {"external/cpp-bgui/tests/assets/rgb.jpg", "missing-cross.png"}) {
-        camera->skybox_image = (std::filesystem::path(BENGINE_SOURCE_DIR) / path).string();
+        camera->config.skybox_image = (std::filesystem::path(BENGINE_SOURCE_DIR) / path).string();
         render.update(registry);
         glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,fallback.data());
         EXPECT_EQ(atmosphere, fallback);
@@ -1015,15 +1057,33 @@ TEST_F(EditorRenderTest, FppSceneMovementFollowsCameraAndPickupIsSeparateFromAre
 
 TEST(CameraSettings, RejectsMalformedCrossPathsWithoutTruncatingThem) {
     commons::camera camera;
-    camera.skybox_image = "assets/original.png";
+    camera.config.skybox_image = "assets/original.png";
     for (const auto* json : {R"({"skybox_image":42})", R"({"skybox_image":"bad\u0000path"})"}) {
         rapidjson::Document data; data.Parse(json);
         EXPECT_FALSE(camera.analyze(data));
-        EXPECT_EQ(camera.skybox_image, "assets/original.png");
+        EXPECT_EQ(camera.config.skybox_image, "assets/original.png");
     }
-    camera.skybox_image = std::string("bad\0path", 8);
+    camera.config.skybox_image = std::string("bad\0path", 8);
     rapidjson::Document data(rapidjson::kObjectType);
     EXPECT_FALSE(camera.serialize(data, data.GetAllocator()));
+}
+
+TEST(CameraSettings, RejectsInvalidFogSettingsWithoutMutatingConfig) {
+    commons::camera camera;
+    camera.config.fog_enabled = true;
+    camera.config.fog_density = 0.2f;
+    camera.config.fog_color = {0.1f, 0.2f, 0.3f, 1.f};
+
+    rapidjson::Document invalid(rapidjson::kObjectType);
+    invalid.AddMember("fog_density", -1.f, invalid.GetAllocator());
+    EXPECT_FALSE(camera.analyze(invalid));
+    EXPECT_TRUE(camera.config.fog_enabled);
+    EXPECT_FLOAT_EQ(camera.config.fog_density, 0.2f);
+    EXPECT_FLOAT_EQ(camera.config.fog_color.g, 0.2f);
+
+    camera.config.fog_density = std::numeric_limits<float>::infinity();
+    rapidjson::Document output(rapidjson::kObjectType);
+    EXPECT_FALSE(camera.serialize(output, output.GetAllocator()));
 }
 
 TEST_F(EditorRenderTest, CameraFilterSkipsUnusedFramebuffersAndCanBeCleared) {

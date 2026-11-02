@@ -1,10 +1,13 @@
 #include "components/physics.hpp"
 #include "components/transform.hpp"
+#include <bullet/BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
+#include <bullet/BulletCollision/CollisionShapes/btTriangleMesh.h>
 #include <algorithm>
 #include <limits>
 
 #include <rapidjson/document.h>
 
+#include <memory>
 #include <stdexcept>
 #include <cmath>
 #include <string>
@@ -58,9 +61,8 @@ physics::physics(const bool is_static, const shapes shape)
         m_forma = new btStaticPlaneShape(btVector3(0.f, 1.f, 0.f), 0.f);
         break;
     case shapes::mesh_shape:
-        throw std::invalid_argument(
-            "Mesh physics shapes are not supported by project files."
-        );
+        m_forma = new btConvexHullShape();
+        break;
     }
 
     type = is_static ? body_type::static_body : body_type::rigid;
@@ -90,27 +92,107 @@ physics::~physics() {
     delete m_estado_de_movimento;
     delete collision_shape;
     delete m_forma;
+    delete m_triangle_mesh;
 }
 
 void physics::setModelo(model* model_value) {
     if (!model_value)
         throw std::invalid_argument("Physics model cannot be null.");
-    if (e_forma == shapes::mesh_shape)
+    if (e_forma == shapes::mesh_shape &&
+        model_collider == model_collider_type::concave && m_massa > 0.f)
         throw std::invalid_argument(
-            "Mesh physics shapes are not supported."
+            "Concave model colliders require a static body."
         );
     m_modelo = model_value;
     m_has_model_bounds = false;
     m_bounds_min = bgui::vec3(std::numeric_limits<float>::max());
     m_bounds_max = bgui::vec3(std::numeric_limits<float>::lowest());
+    std::unique_ptr<btTriangleMesh> triangle_mesh;
+    std::unique_ptr<btCollisionShape> model_shape;
+    if (e_forma == shapes::mesh_shape) {
+        if (model_collider == model_collider_type::concave) {
+            if (m_massa > 0.f)
+                throw std::invalid_argument(
+                    "Concave model colliders require a static body."
+                );
+            triangle_mesh = std::make_unique<btTriangleMesh>(true, false);
+            for (const auto& mesh : model_value->meshes) {
+                const auto vertices = mesh.getVertices();
+                const auto indices = mesh.getIndices();
+                const auto index_at = [&vertices, &indices](std::size_t index) {
+                    return indices.empty() ? index : static_cast<std::size_t>(indices[index]);
+                };
+                const auto triangle_count = indices.empty()
+                    ? vertices.size() / 3
+                    : indices.size() / 3;
+                for (std::size_t triangle = 0; triangle < triangle_count; ++triangle) {
+                    const auto a = index_at(triangle * 3);
+                    const auto b = index_at(triangle * 3 + 1);
+                    const auto c = index_at(triangle * 3 + 2);
+                    if (a >= vertices.size() || b >= vertices.size() ||
+                        c >= vertices.size())
+                        continue;
+                    const auto& p0 = vertices[a].position;
+                    const auto& p1 = vertices[b].position;
+                    const auto& p2 = vertices[c].position;
+                    if (!std::isfinite(p0.x) || !std::isfinite(p0.y) ||
+                        !std::isfinite(p0.z) || !std::isfinite(p1.x) ||
+                        !std::isfinite(p1.y) || !std::isfinite(p1.z) ||
+                        !std::isfinite(p2.x) || !std::isfinite(p2.y) ||
+                        !std::isfinite(p2.z))
+                        continue;
+                    triangle_mesh->addTriangle(
+                        btVector3(p0.x, p0.y, p0.z),
+                        btVector3(p1.x, p1.y, p1.z),
+                        btVector3(p2.x, p2.y, p2.z)
+                    );
+                }
+            }
+            model_shape = std::make_unique<btBvhTriangleMeshShape>(
+                triangle_mesh.get(), true, true
+            );
+        } else {
+            model_shape = std::make_unique<btConvexHullShape>();
+        }
+    }
     for (const auto& mesh : model_value->meshes)
         for (const auto& vertex : mesh.getVertices()) {
+            if (!std::isfinite(vertex.position.x) ||
+                !std::isfinite(vertex.position.y) ||
+                !std::isfinite(vertex.position.z))
+                continue;
             m_has_model_bounds = true;
             for (int axis = 0; axis < 3; ++axis) {
                 m_bounds_min[axis] = std::min(m_bounds_min[axis], vertex.position[axis]);
                 m_bounds_max[axis] = std::max(m_bounds_max[axis], vertex.position[axis]);
             }
+            if (auto* hull = dynamic_cast<btConvexHullShape*>(model_shape.get()))
+                hull->addPoint(btVector3(
+                    vertex.position.x, vertex.position.y, vertex.position.z
+                ), false);
         }
+    if (model_shape) {
+        if (auto* hull = dynamic_cast<btConvexHullShape*>(model_shape.get())) {
+            hull->setMargin(0.001f);
+            if (hull->getNumPoints() >= 4) {
+                hull->optimizeConvexHull();
+                hull->initializePolyhedralFeatures();
+            }
+        }
+        model_shape->setLocalScaling(m_forma->getLocalScaling());
+        const auto local_transform = collision_shape->getChildTransform(0);
+        collision_shape->removeChildShape(m_forma);
+        delete m_forma;
+        delete m_triangle_mesh;
+        m_forma = model_shape.release();
+        m_triangle_mesh = triangle_mesh.release();
+        collision_shape->addChildShape(local_transform, m_forma);
+        collision_shape->recalculateLocalAabb();
+        m_rigid_body->setCollisionShape(collision_shape);
+        ++collision_revision;
+        setMass(m_massa);
+        m_rigid_body->activate(true);
+    }
 }
 
 void physics::setForca(const bgui::vec3& vector) {
@@ -160,6 +242,11 @@ void physics::setRaioCCD(const float factor) {
 
 void physics::setMass(const float mass) {
     if (!std::isfinite(mass)) return;
+    if (mass > 0.f && e_forma == shapes::mesh_shape &&
+        model_collider == model_collider_type::concave)
+        throw std::invalid_argument(
+            "Concave model colliders require a static body."
+        );
     m_massa = mass > 0.f ? mass : 0.f;
     if (m_massa == 0.f) type = body_type::static_body;
     else if (type == body_type::static_body) type = body_type::rigid;
@@ -171,6 +258,11 @@ void physics::setMass(const float mass) {
 }
 
 void physics::set_body_type(body_type value) {
+    if (e_forma == shapes::mesh_shape && value != body_type::static_body &&
+        model_collider == model_collider_type::concave)
+        throw std::invalid_argument(
+            "Concave model colliders require a static body."
+        );
     setMass(value == body_type::static_body ? 0.f : (m_massa > 0.f ? m_massa : 1.f));
     type = value;
     setFatorAngular(value == body_type::character ? bgui::vec3(0.f) : bgui::vec3(1.f));
@@ -178,21 +270,46 @@ void physics::set_body_type(body_type value) {
     m_rigid_body->activate(true);
 }
 
+void physics::set_model_collider_type(model_collider_type value) {
+    if (value != model_collider_type::convex &&
+        value != model_collider_type::concave)
+        throw std::invalid_argument("Invalid model collider type.");
+    if (value == model_collider_type::concave &&
+        e_forma == shapes::mesh_shape && m_massa > 0.f)
+        throw std::invalid_argument(
+            "Concave model colliders require a static body."
+        );
+    if (value == model_collider)
+        return;
+    model_collider = value;
+    if (e_forma == shapes::mesh_shape && m_modelo)
+        setModelo(m_modelo);
+}
+
 void physics::configure_collision(shapes shape, const bgui::vec3& size,
     const bgui::vec3& offset, bool enabled, bool sensor) {
     for (int i = 0; i < 3; ++i)
         if (!std::isfinite(size[i]) || size[i] <= 0.f || !std::isfinite(offset[i]))
             throw std::invalid_argument("Invalid collider dimensions or offset.");
+    if (shape == shapes::mesh_shape &&
+        model_collider == model_collider_type::concave && m_massa > 0.f)
+        throw std::invalid_argument(
+            "Concave model colliders require a static body."
+        );
     if (shape != e_forma) {
         physics replacement(false, shape);
         collision_shape->removeChildShape(m_forma);
         delete m_forma;
+        delete m_triangle_mesh;
+        m_triangle_mesh = nullptr;
         m_forma = replacement.m_forma;
         replacement.collision_shape->removeChildShape(replacement.m_forma);
         replacement.m_forma = nullptr;
         btTransform local; local.setIdentity();
         collision_shape->addChildShape(local, m_forma);
         e_forma = shape;
+        if (shape == shapes::mesh_shape && m_modelo)
+            setModelo(m_modelo);
     }
     ++collision_revision;
     collision_size = size; collision_offset = offset;
@@ -207,7 +324,7 @@ void physics::refresh_collision(const bgui::vec3& entity_scale) {
     const auto previous_scale = m_forma->getLocalScaling();
     const auto previous_local = collision_shape->getChildTransform(0);
     bgui::vec3 base(1.f), center(0.f);
-    if (fit_to_model && m_has_model_bounds) {
+    if (fit_to_model && m_has_model_bounds && e_forma != shapes::mesh_shape) {
         for (int axis = 0; axis < 3; ++axis) {
             base[axis] = std::max(0.001f, m_bounds_max[axis] - m_bounds_min[axis]);
             center[axis] = (m_bounds_max[axis] + m_bounds_min[axis]) * 0.5f;
@@ -274,6 +391,32 @@ bool physics::analyze(const rapidjson::Value& value) {
     if (!value.IsObject())
         return false;
 
+    auto next_model_collider = model_collider;
+    if (value.HasMember("model_collider")) {
+        if (!value["model_collider"].IsString())
+            return false;
+        const std::string name = value["model_collider"].GetString();
+        if (name == "convex")
+            next_model_collider = model_collider_type::convex;
+        else if (name == "concave")
+            next_model_collider = model_collider_type::concave;
+        else
+            return false;
+    }
+    auto next_body_type = type;
+    if (value.HasMember("body_type")) {
+        if (!value["body_type"].IsString()) return false;
+        const std::string name = value["body_type"].GetString();
+        if (name != "rigid" && name != "character" && name != "static") return false;
+        next_body_type = name == "character" ? body_type::character :
+            name == "static" ? body_type::static_body : body_type::rigid;
+    }
+    if (e_forma == shapes::mesh_shape &&
+        next_model_collider == model_collider_type::concave &&
+        next_body_type != body_type::static_body &&
+        value.HasMember("body_type"))
+        return false;
+
     if (value.HasMember("mass")) {
         if (!value["mass"].IsNumber())
             return false;
@@ -307,12 +450,12 @@ bool physics::analyze(const rapidjson::Value& value) {
         !value.HasMember("collision_enabled") || value["collision_enabled"].GetBool(),
         value.HasMember("trigger") && value["trigger"].GetBool()); }
     catch (const std::invalid_argument&) { return false; }
-    if (value.HasMember("body_type")) {
-        if (!value["body_type"].IsString()) return false;
-        const std::string name = value["body_type"].GetString();
-        if (name != "rigid" && name != "character" && name != "static") return false;
-        set_body_type(name == "character" ? body_type::character :
-            name == "static" ? body_type::static_body : body_type::rigid);
+    try {
+        if (value.HasMember("body_type"))
+            set_body_type(next_body_type);
+        set_model_collider_type(next_model_collider);
+    } catch (const std::invalid_argument&) {
+        return false;
     }
     return true;
 }
@@ -330,6 +473,9 @@ bool physics::serialize(
         allocator
     );
     value.AddMember("shape", shape, allocator);
+    value.AddMember("model_collider", rapidjson::Value(
+        model_collider == model_collider_type::concave ? "concave" : "convex",
+        allocator), allocator);
     value.AddMember("static", m_massa <= 0.f, allocator);
     value.AddMember("body_type", rapidjson::Value(type == body_type::character ? "character" :
         type == body_type::static_body ? "static" : "rigid", allocator), allocator);

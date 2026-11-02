@@ -924,6 +924,71 @@ TEST_F(EditorInteractionTest, ColliderFitAndRotationOffsetsAreAvailableInTheInsp
     registry->remove(entity.id);
 }
 
+TEST_F(EditorInteractionTest, InspectorOffersModelColliderForEntitiesWithRenderer) {
+    auto entity = registry->create();
+    auto* geometry = new commons::model();
+    geometry->meshes.emplace_back(std::vector<commons::vertex>{
+        {{-1,-1,-1},{0,1,0},{0,0}}, {{1,-1,-1},{0,1,0},{1,0}},
+        {{0,1,-1},{0,1,0},{0.5f,1}}, {{0,0,1},{0,1,0},{0.5f,0.5f}}
+    }, std::vector<unsigned int>{}, commons::material{});
+    registry->add<commons::renderer>(entity, geometry);
+    registry->add<commons::physics>(entity, true);
+    auto physics = registry->get<commons::physics>(entity.id);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    auto* shape = find_element<bgui::combo_box>(dock, [](auto& item) {
+        return item.get_selected_option() == "Box";
+    });
+    ASSERT_NE(shape, nullptr);
+    shape->set_selected_index(6);
+    EXPECT_EQ(physics->e_forma, commons::physics::shapes::mesh_shape);
+    const auto* hull = dynamic_cast<const btConvexHullShape*>(physics->m_forma);
+    ASSERT_NE(hull, nullptr);
+    EXPECT_GT(hull->getNumPoints(), 0);
+    panel.refresh();
+    panel.update();
+    auto* model_collider = find_element<bgui::combo_box>(dock, [](auto& item) {
+        return item.get_selected_option() == "Convex Hull";
+    });
+    ASSERT_NE(model_collider, nullptr);
+    model_collider->set_selected_index(1);
+    EXPECT_EQ(
+        physics->model_collider,
+        commons::physics::model_collider_type::concave
+    );
+    EXPECT_NE(dynamic_cast<const btBvhTriangleMeshShape*>(physics->m_forma), nullptr);
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(
+        physics->model_collider,
+        commons::physics::model_collider_type::convex
+    );
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(
+        physics->model_collider,
+        commons::physics::model_collider_type::concave
+    );
+    panel.refresh();
+    panel.update();
+    model_collider = find_element<bgui::combo_box>(dock, [](auto& item) {
+        return item.get_selected_option() == "Concave Mesh";
+    });
+    ASSERT_NE(model_collider, nullptr);
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(
+        physics->model_collider,
+        commons::physics::model_collider_type::convex
+    );
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(physics->e_forma, commons::physics::shapes::box_shape);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(physics->e_forma, commons::physics::shapes::mesh_shape);
+    registry->remove(entity.id);
+}
+
 TEST_F(EditorInteractionTest, InspectorTextureMappingSupportsUndoAndRedo) {
     auto entity = registry->create();
     registry->add<commons::renderer>(entity, new commons::model());
@@ -1062,7 +1127,7 @@ TEST_F(EditorInteractionTest, DirectionGizmoTextureTracksRotationAndScale) {
 TEST_F(EditorInteractionTest, CameraInspectorUsesOneCubemapImageAndSupportsUndo) {
     auto entity = registry->create(); registry->add<commons::camera>(entity);
     auto camera = registry->get<commons::camera>(entity.id);
-    camera->skybox_image = "assets/original-cross.png";
+    camera->config.skybox_image = "assets/original-cross.png";
     context->selected_entity = entity.id;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::components_view panel(context); panel.build(dock); panel.update();
@@ -1074,9 +1139,9 @@ TEST_F(EditorInteractionTest, CameraInspectorUsesOneCubemapImageAndSupportsUndo)
         return text.get_buffer() == "Right (+X)";
     }), nullptr);
     image->m_enter_func("assets/new-cross.png");
-    EXPECT_EQ(camera->skybox_image, "assets/new-cross.png");
-    ASSERT_TRUE(context->undo()); EXPECT_EQ(camera->skybox_image, "assets/original-cross.png");
-    ASSERT_TRUE(context->redo()); EXPECT_EQ(camera->skybox_image, "assets/new-cross.png");
+    EXPECT_EQ(camera->config.skybox_image, "assets/new-cross.png");
+    ASSERT_TRUE(context->undo()); EXPECT_EQ(camera->config.skybox_image, "assets/original-cross.png");
+    ASSERT_TRUE(context->redo()); EXPECT_EQ(camera->config.skybox_image, "assets/new-cross.png");
     registry->entities.clear();
 }
 
@@ -1177,22 +1242,58 @@ TEST_F(EditorInteractionTest, EditorCameraInspectorExposesEnvironmentWithoutComp
     });
     ASSERT_NE(fov, nullptr);
     fov->get_inputbox().m_enter_func("200");
-    EXPECT_FLOAT_EQ(camera->fov, 179.f);
+    EXPECT_FLOAT_EQ(camera->config.fov, 179.f);
+    auto* near_clip = find_element<bgui::field>(dock, [](auto& field) {
+        return field.get_label().get_buffer() == "Near Clip";
+    });
+    ASSERT_NE(near_clip, nullptr);
+    near_clip->get_inputbox().m_enter_func("0.25");
+    EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.25f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.1f);
+    ASSERT_TRUE(context->redo());
+    EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.25f);
     auto* atmosphere = find_element<bgui::field>(dock, [](auto& field) {
         return field.get_label().get_buffer() == "Atmosphere Zenith R";
     });
     ASSERT_NE(atmosphere, nullptr);
     atmosphere->get_inputbox().m_enter_func("0.4");
-    EXPECT_FLOAT_EQ(camera->atmosphere_zenith.x, 0.4f);
+    EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.4f);
     ASSERT_TRUE(context->undo());
-    EXPECT_FLOAT_EQ(camera->atmosphere_zenith.x, 0.08f);
+    EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.08f);
     auto* image = find_element<bgui::inputbox>(dock, [](auto& field) {
         return field.get_buffer().empty();
     });
     ASSERT_NE(image, nullptr);
     image->m_enter_func("assets/editor-sky.png");
-    EXPECT_EQ(camera->skybox_image, "assets/editor-sky.png");
+    EXPECT_EQ(camera->config.skybox_image, "assets/editor-sky.png");
     ASSERT_TRUE(context->undo());
-    EXPECT_TRUE(camera->skybox_image.empty());
+    EXPECT_TRUE(camera->config.skybox_image.empty());
+    auto* fog_enabled = find_element<bgui::checkbox>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Enable Fog";
+    });
+    ASSERT_NE(fog_enabled, nullptr);
+    fog_enabled->on_clicked();
+    EXPECT_TRUE(camera->config.fog_enabled);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FALSE(camera->config.fog_enabled);
+    ASSERT_TRUE(context->redo());
+    EXPECT_TRUE(camera->config.fog_enabled);
+    auto* fog_density = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Fog Density";
+    });
+    ASSERT_NE(fog_density, nullptr);
+    fog_density->get_inputbox().m_enter_func("0.04");
+    EXPECT_FLOAT_EQ(camera->config.fog_density, 0.04f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->config.fog_density, 0.01f);
+    auto* fog_red = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Fog R";
+    });
+    ASSERT_NE(fog_red, nullptr);
+    fog_red->get_inputbox().m_enter_func("0.2");
+    EXPECT_FLOAT_EQ(camera->config.fog_color.r, 0.2f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->config.fog_color.r, 0.43f);
     registry->entities.clear();
 }

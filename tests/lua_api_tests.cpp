@@ -345,6 +345,9 @@ TEST(LuaApi, ComponentPropertiesAreWritable) {
         cam.orthographic = true
         cam.orthographicSize = 12
         cam.backgroundColor = Color(0.1, 0.2, 0.3, 1)
+        cam.fogEnabled = true
+        cam.fogColor = Color(0.4, 0.5, 0.6, 1)
+        cam.fogDensity = 0.025
         body.velocity = Vector3(1, 2, 3)
         local light = gameObject:GetComponent("DirectionalLight")
         light.intensity = 4
@@ -365,12 +368,15 @@ TEST(LuaApi, ComponentPropertiesAreWritable) {
     EXPECT_FLOAT_EQ(body->m_rigid_body->getRestitution(), .3f);
     EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->visible);
     const auto cam = registry->get<commons::camera>(entity.id);
-    EXPECT_FLOAT_EQ(cam->fov, 60.f);
-    EXPECT_FLOAT_EQ(cam->corte_curto, .2f);
-    EXPECT_FLOAT_EQ(cam->corte_longo, 500.f);
-    EXPECT_TRUE(cam->flag_orth);
-    EXPECT_FLOAT_EQ(cam->scale, 12.f);
-    EXPECT_FLOAT_EQ(cam->ceu.g, .2f);
+    EXPECT_FLOAT_EQ(cam->config.fov, 60.f);
+    EXPECT_FLOAT_EQ(cam->config.corte_curto, .2f);
+    EXPECT_FLOAT_EQ(cam->config.corte_longo, 500.f);
+    EXPECT_TRUE(cam->config.flag_orth);
+    EXPECT_FLOAT_EQ(cam->config.scale, 12.f);
+    EXPECT_FLOAT_EQ(cam->config.sky_solid_color.g, .2f);
+    EXPECT_TRUE(cam->config.fog_enabled);
+    EXPECT_FLOAT_EQ(cam->config.fog_color.b, .6f);
+    EXPECT_FLOAT_EQ(cam->config.fog_density, .025f);
     EXPECT_FLOAT_EQ(body->getVelocidade().y, 2.f);
     EXPECT_FLOAT_EQ(registry->get<commons::directional_light>(entity.id)->intensity, 4.f);
     EXPECT_FLOAT_EQ(registry->get<commons::point_light>(entity.id)->intensity, 8.f);

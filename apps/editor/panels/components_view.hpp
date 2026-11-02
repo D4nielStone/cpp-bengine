@@ -303,29 +303,96 @@ private:
             auto& types = content.add<bgui::combo_box>(
                 std::vector<std::string>{"Rigid Body", "Character Body", "Static Body"},
                 0.29f, static_cast<std::size_t>(physics->type));
-            types.set_on_change([this, physics](std::size_t index, const std::string&) {
+            types.set_on_change([this, physics, &types](std::size_t index, const std::string&) {
                 const auto before = physics->type;
-                const auto mass = physics->m_massa;
+                if (before == static_cast<commons::physics::body_type>(index))
+                    return;
                 const auto after = static_cast<commons::physics::body_type>(index);
+                if (physics->e_forma == commons::physics::shapes::mesh_shape &&
+                    physics->model_collider == commons::physics::model_collider_type::concave &&
+                    after != commons::physics::body_type::static_body) {
+                    if (m_edit_status)
+                        m_edit_status->set_buffer("Concave model colliders require a Static Body.");
+                    types.set_selected_index(static_cast<std::size_t>(before));
+                    return;
+                }
+                const auto mass = physics->m_massa;
                 physics->set_body_type(after);
                 m_context->record_action([physics, before, mass]() {
                     physics->setMass(mass); physics->set_body_type(before);
                 }, [physics, after]() { physics->set_body_type(after); });
             });
             content.add<bgui::text>("Collision Shape", 0.27f);
+            const auto visual = registry->get<commons::renderer>(id);
+            std::vector<std::string> shape_options{
+                "Box", "Capsule", "Sphere", "Cylinder", "Cone", "Plane"
+            };
+            if ((visual && visual->m_modelo) ||
+                physics->e_forma == commons::physics::shapes::mesh_shape)
+                shape_options.push_back("Model");
             auto& shapes = content.add<bgui::combo_box>(
-                std::vector<std::string>{"Box", "Capsule", "Sphere", "Cylinder", "Cone", "Plane"},
+                std::move(shape_options),
                 0.29f, static_cast<std::size_t>(physics->e_forma));
-            shapes.set_on_change([this, physics](std::size_t index, const std::string&) {
+            shapes.set_on_change([this, physics, visual](std::size_t index, const std::string&) {
                 const auto before = physics->e_forma;
                 const auto after = static_cast<commons::physics::shapes>(index);
-                auto apply = [physics](auto shape) { physics->configure_collision(shape,
-                    physics->collision_size, physics->collision_offset,
-                    physics->collision_enabled, physics->trigger); };
+                auto apply = [physics, visual](auto shape) {
+                    if (shape == commons::physics::shapes::mesh_shape &&
+                        visual && visual->m_modelo)
+                        physics->setModelo(visual->m_modelo);
+                    physics->configure_collision(shape,
+                        physics->collision_size, physics->collision_offset,
+                        physics->collision_enabled, physics->trigger);
+                };
                 apply(after);
                 m_context->record_action([apply, before]() { apply(before); },
                     [apply, after]() { apply(after); });
             });
+            if (physics->e_forma == commons::physics::shapes::mesh_shape) {
+                content.add<bgui::text>("Model Collider", 0.27f);
+                auto& model_colliders = content.add<bgui::combo_box>(
+                    std::vector<std::string>{"Convex Hull", "Concave Mesh"},
+                    0.29f,
+                    static_cast<std::size_t>(physics->model_collider)
+                );
+                model_colliders.set_on_change(
+                    [this, physics, &model_colliders](
+                        std::size_t index, const std::string&
+                    ) {
+                        const auto before = physics->model_collider;
+                        const auto after = static_cast<
+                            commons::physics::model_collider_type
+                        >(index);
+                        if (before == after)
+                            return;
+                        try {
+                            physics->set_model_collider_type(after);
+                        } catch (const std::invalid_argument&) {
+                            if (m_edit_status)
+                                m_edit_status->set_buffer(
+                                    "Concave model colliders require a Static Body."
+                                );
+                            model_colliders.set_selected_index(
+                                static_cast<std::size_t>(before)
+                            );
+                            return;
+                        }
+                        m_context->record_action(
+                            [physics, before]() {
+                                physics->set_model_collider_type(before);
+                            },
+                            [physics, after]() {
+                                physics->set_model_collider_type(after);
+                            }
+                        );
+                    }
+                );
+                if (physics->model_collider ==
+                        commons::physics::model_collider_type::concave)
+                    content.add<bgui::text>(
+                        "Concave mesh colliders require a Static Body.", 0.25f
+                    );
+            }
             auto toggle = [this, physics, &content](const char* label, bool commons::physics::*field) {
                 auto& checkbox = panel::add_checkbox(content, label, 0.29f, physics.get()->*field);
                 checkbox.set_on_change([this, physics, field](bool value) {
@@ -359,7 +426,19 @@ private:
                 [physics](float value) { physics->setRestituicao(std::clamp(value, 0.f, 1.f)); });
             add_float(section.children(), "Mass", physics->m_massa,
                 [physics]() { return physics->m_massa; },
-                [physics](float mass) { physics->setMass(std::max(0.f, mass)); });
+                [this, physics](float mass) {
+                    if (physics->e_forma == commons::physics::shapes::mesh_shape &&
+                        physics->model_collider ==
+                            commons::physics::model_collider_type::concave &&
+                        mass > 0.f) {
+                        if (m_edit_status)
+                            m_edit_status->set_buffer(
+                                "Concave model colliders require a Static Body."
+                            );
+                        return;
+                    }
+                    physics->setMass(std::max(0.f, mass));
+                });
         }
         add_script(id, registry->get<commons::code>(id));
         build_add_component(id);
@@ -1000,84 +1079,134 @@ private:
         add_float(
             content,
             "Field of View",
-            camera->fov,
-            [camera]() { return camera->fov; },
-            [camera](float value) { camera->fov = std::clamp(value, 1.f, 179.f); }
+            camera->config.fov,
+            [camera]() { return camera->config.fov; },
+            [camera](float value) { camera->config.fov = std::clamp(value, 1.f, 179.f); }
+        );
+        add_float(
+            content,
+            "Near Clip",
+            camera->config.corte_curto,
+            [camera]() { return camera->config.corte_curto; },
+            [camera](float value) {
+                if (value > 0.f && value < camera->config.corte_longo)
+                    camera->config.corte_curto = value;
+            }
         );
         add_float(
             content,
             "Far Clip",
-            camera->corte_longo,
-            [camera]() { return camera->corte_longo; },
+            camera->config.corte_longo,
+            [camera]() { return camera->config.corte_longo; },
             [camera](float value) {
-                if (value > camera->corte_curto) camera->corte_longo = value;
+                if (value > camera->config.corte_curto) camera->config.corte_longo = value;
             }
         );
         add_float(
             content,
             "Orthographic Scale",
-            camera->scale,
-            [camera]() { return camera->scale; },
-            [camera](float value) { if (value > 0.f) camera->scale = value; }
+            camera->config.scale,
+            [camera]() { return camera->config.scale; },
+            [camera](float value) { if (value > 0.f) camera->config.scale = value; }
         );
 
         content.add<bgui::text>("With skybox disabled, the atmosphere gradient is used.", 0.25f);
-        add_toggle(content, "Enable Skybox", camera, &commons::camera::m_use_skybox);
+        auto& skybox_enabled = panel::add_checkbox(content,
+            "Enable Skybox", 0.29f, camera->config.use_skybox);
+        skybox_enabled.set_on_change([this, camera](bool enabled) {
+            const bool previous = camera->config.use_skybox;
+            if (previous == enabled) return;
+            camera->config.use_skybox = enabled;
+            m_context->record_action(
+                [camera, previous]() { camera->config.use_skybox = previous; },
+                [camera, enabled]() { camera->config.use_skybox = enabled; });
+        });
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         configure_property_row(row);
         auto& label = row.add<bgui::text>("Cubemap image (4 x 3 cross)", 0.27f);
         configure_property_label(label);
-        auto& input = panel::add_input(row, camera->skybox_image, "Drop a horizontal cross image", 0.26f);
+        auto& input = panel::add_input(row, camera->config.skybox_image, "Drop a horizontal cross image", 0.26f);
         configure_property_input(input);
         auto assign = [this, camera](const std::filesystem::path& path) {
-            auto before = camera->skybox_image;
+            auto before = camera->config.skybox_image;
             auto after = path.generic_string();
             if (path.is_absolute() && !m_context->project_root.empty()) {
                 const auto relative = path.lexically_relative(m_context->project_root);
                 if (!relative.empty() && *relative.begin() != "..") after = relative.generic_string();
             }
             camera->skybox_asset_root = m_context->project_root.string();
-            camera->skybox_image = after;
+            camera->config.skybox_image = after;
             m_context->record_action(
-                [camera, before]() { camera->skybox_image = before; },
-                [camera, after]() { camera->skybox_image = after; });
+                [camera, before]() { camera->config.skybox_image = before; },
+                [camera, after]() { camera->config.skybox_image = after; });
         };
         input.m_enter_func = [assign](const std::string& path) { assign(path); };
         m_asset_targets.push_back({&input, assign});
-        if (camera->skybox_image.empty() && std::any_of(camera->skybox_faces.begin(), camera->skybox_faces.end(),
+        if (camera->config.skybox_image.empty() && std::any_of(camera->skybox_faces.begin(), camera->skybox_faces.end(),
                 [](const auto& path) { return !path.empty(); }))
             content.add<bgui::text>("Legacy six-face cubemap loaded; select a cross image to replace it.", 0.25f);
         const char* channels[] = {"Atmosphere Zenith R", "Atmosphere Zenith G", "Atmosphere Zenith B"};
         for (unsigned i = 0; i < 3; ++i) {
-            add_float(content, channels[i], camera->atmosphere_zenith[i],
-                [camera, i]() { return camera->atmosphere_zenith[i]; },
-                [camera, i](float v) { camera->atmosphere_zenith[i] = std::clamp(v, 0.f, 1.f); });
+            add_float(content, channels[i], camera->config.atmosphere_zenith[i],
+                [camera, i]() { return camera->config.atmosphere_zenith[i]; },
+                [camera, i](float v) { camera->config.atmosphere_zenith[i] = std::clamp(v, 0.f, 1.f); });
         }
 
         const char* horizon_labels[] = {"Atmosphere Horizon R", "Atmosphere Horizon G", "Atmosphere Horizon B"};
         for (unsigned i = 0; i < 3; ++i) {
-            auto read = [camera, i]() { return i == 0 ? camera->ceu.r : i == 1 ? camera->ceu.g : camera->ceu.b; };
+            auto read = [camera, i]() { return i == 0 ? camera->config.sky_solid_color.r :
+                i == 1 ? camera->config.sky_solid_color.g : camera->config.sky_solid_color.b; };
             add_float(content, horizon_labels[i], read(), read,
                 [camera, i](float value) {
-                    float& channel = i == 0 ? camera->ceu.r : i == 1 ? camera->ceu.g : camera->ceu.b;
+                    float& channel = i == 0 ? camera->config.sky_solid_color.r :
+                        i == 1 ? camera->config.sky_solid_color.g : camera->config.sky_solid_color.b;
                     channel = std::clamp(value, 0.f, 1.f);
                 });
+        }
+
+        auto& fog_enabled = panel::add_checkbox(content,
+            "Enable Fog", 0.29f, camera->config.fog_enabled);
+        fog_enabled.set_on_change([this, camera](bool enabled) {
+            const bool previous = camera->config.fog_enabled;
+            if (previous == enabled) return;
+            camera->config.fog_enabled = enabled;
+            m_context->record_action(
+                [camera, previous]() { camera->config.fog_enabled = previous; },
+                [camera, enabled]() { camera->config.fog_enabled = enabled; });
+        });
+        add_float(content, "Fog Density", camera->config.fog_density,
+            [camera]() { return camera->config.fog_density; },
+            [camera](float value) {
+                if (std::isfinite(value) && value >= 0.f)
+                    camera->config.fog_density = value;
+            });
+        const char* fog_channels[] = {"Fog R", "Fog G", "Fog B"};
+        for (unsigned i = 0; i < 3; ++i) {
+            auto read = [camera, i]() {
+                return i == 0 ? camera->config.fog_color.r :
+                    i == 1 ? camera->config.fog_color.g : camera->config.fog_color.b;
+            };
+            add_float(content, fog_channels[i], read(), read, [camera, i](float value) {
+                float& channel = i == 0 ? camera->config.fog_color.r :
+                    i == 1 ? camera->config.fog_color.g : camera->config.fog_color.b;
+                channel = std::clamp(value, 0.f, 1.f);
+            });
         }
 
         auto& orthographic = panel::add_checkbox(content,
             "Orthographic",
             0.29f,
-            camera->flag_orth
+            camera->config.flag_orth
         );
         orthographic.set_on_change(
             [this, camera](bool enabled) {
-                const bool previous = camera->flag_orth;
+                const bool previous = camera->config.flag_orth;
                 if (previous == enabled)
                     return;
-                camera->flag_orth = enabled;
+                camera->config.flag_orth = enabled;
                 m_context->record_action(
-                    [camera, previous]() { camera->flag_orth = previous; },
-                    [camera, enabled]() { camera->flag_orth = enabled; }
+                    [camera, previous]() { camera->config.flag_orth = previous; },
+                    [camera, enabled]() { camera->config.flag_orth = enabled; }
                 );
             }
         );

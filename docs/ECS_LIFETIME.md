@@ -1,22 +1,43 @@
-# ECS lifetime
+# Ciclo de vida do ECS
 
-The registry owns its components. `component::reg` is a `std::weak_ptr<ecs>`;
-components and Lua handles do not keep a scene alive. C++ callers that previously
-used `component->reg->...` must now hold a temporary owner for the operation:
+## Entidades
 
-```cpp
-if (const auto registry = component->reg.lock()) {
-    auto transform = registry->get<commons::transform>(component->my_object);
-}
-```
+`commons::ecs::create()` cria uma entidade e adiciona sua transformação padrão.
+IDs iguais a zero ou já em uso não são reutilizados literalmente: o ECS procura
+um ID disponível. `remove(id)` remove a entidade, os componentes, a máscara e
+o nome. `is_alive(id)` é a verificação de validade do identificador.
 
-Assignment from `shared_ptr<ecs>` and `reg.reset()` remain supported. Scene files
-and Lua APIs are unchanged. Stack-allocated registries still leave `reg` empty.
+`find_by_name(name)` retorna um ID apenas quando o nome identifica uma única
+entidade viva. Nome vazio, ausência ou duplicidade resulta em `nullopt`.
 
-Window destruction makes its OpenGL context current, releases systems, calls
-`release_graphics_resources()` on attached components, and clears the registry
-before shutting down BGUI and GLFW. Camera and renderer implement idempotent
-release so externally retained components can later be destroyed safely.
-Custom components owning GPU objects must implement the same hook. Components
-removed from the window's registry and standalone scenes remain their owner's
-responsibility: release their GPU resources while their context is current.
+## Componentes e referências
+
+O mapa do ECS é proprietário dos componentes por `shared_ptr`. Componentes
+guardam o registry como `weak_ptr`; uma referência compartilhada ao componente
+não mantém o ECS vivo. Referências ao componente podem deixar de representar
+uma entidade ativa depois de remoção, substituição de componente ou troca de
+projeto. Rebusque pelo ID e confira a validade antes de usar em callbacks
+assíncronos.
+
+Transformações guardam `parent_id`; relações entre pai e filho precisam apontar
+para entidades válidas. A remoção de entidade deve ser considerada ao percorrer
+hierarquias e ao reter referências de transformação.
+
+`validate_invariants()` verifica aspectos básicos entre entidades vivas,
+componentes e máscaras. Não é uma garantia contra todo estado inválido nem
+substitui encapsulamento de acesso aos mapas públicos.
+
+## Recursos gráficos
+
+Câmeras e componentes com recursos GPU devem liberar esses recursos enquanto o
+contexto OpenGL apropriado ainda estiver atual. Siga os pontos de liberação
+explícitos (`release_graphics_resources`) e o ciclo de vida de `commons::window`.
+Não retenha ou destrua recursos gráficos depois de fechar o contexto.
+
+## Lua
+
+`gameObject` e objetos retornados por `GameObject.Find` mantêm uma referência
+fraca ao ECS. Se o registry ou a entidade não estiver disponível,
+`GetComponent`/`transform` podem retornar `nil`. Não trate um userdata Lua
+previamente obtido como autorização para usar indefinidamente o componente.
+Consulte a [referência de objetos Lua](./lua-api/objects-and-transforms.md).

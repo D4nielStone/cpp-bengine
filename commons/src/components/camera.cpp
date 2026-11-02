@@ -3,6 +3,7 @@
 #include "components/camera.hpp"
 #include "components/transform.hpp"
 #include "core/ecs.hpp"
+#include <cmath>
 #include <unordered_set>
 
 using namespace COMMONS_NS;
@@ -46,14 +47,16 @@ void camera::drawFB() {
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glViewport(0, 0, viewportFBO.x, viewportFBO.y);
 
-        glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
+        glClearColor(config.sky_solid_color.r, config.sky_solid_color.g,
+            config.sky_solid_color.b, config.sky_solid_color.a);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         return;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClearColor(ceu.r, ceu.g, ceu.b, ceu.a);
+    glClearColor(config.sky_solid_color.r, config.sky_solid_color.g,
+        config.sky_solid_color.b, config.sky_solid_color.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
@@ -72,52 +75,96 @@ void camera::release_graphics_resources() {
 }
 
 camera::camera(const bool orth)
-    : flag_orth(orth) {
+	: config{} {
+	config.flag_orth = orth;
 }
 
 bool camera::analyze(const rapidjson::Value& value)
 {
-    if(value.HasMember("fov"))
-        fov = value["fov"].GetFloat();
-    if(value.HasMember("zfar"))
-        corte_longo = value["zfar"].GetFloat();
-	if (value.HasMember("scale"))
-		scale = value["scale"].GetFloat();
-	if (value.HasMember("ortho"))
-		flag_orth = value["ortho"].GetBool();
-	if (value.HasMember("ceu"))
-	{
-		auto _ceu = value["ceu"].GetArray();
-		ceu =
-		{
-			_ceu[0].GetFloat() / 255,
-			_ceu[1].GetFloat() / 255,
-			_ceu[2].GetFloat() / 255,
-			_ceu[3].GetFloat() / 255,
+    camera_config next = config;
+    next.use_skybox = false;
+    next.skybox_image.clear();
+    next.fog_enabled = false;
+    next.fog_density = 0.01f;
+    next.fog_color = {0.43f, 0.78f, 0.86f, 1.f};
+    auto next_skybox_faces = skybox_faces;
+    const float near_clip = value.HasMember("znear")
+        ? (value["znear"].IsNumber() ? value["znear"].GetFloat() : 0.f)
+        : config.corte_curto;
+    const float far_clip = value.HasMember("zfar")
+        ? (value["zfar"].IsNumber() ? value["zfar"].GetFloat() : 0.f)
+        : config.corte_longo;
+    if (!std::isfinite(near_clip) || !std::isfinite(far_clip) ||
+        near_clip <= 0.f || far_clip <= near_clip)
+        return false;
+
+    const auto read_float = [&](const char* name, float& output) {
+        if (!value.HasMember(name)) return true;
+        if (!value[name].IsNumber()) return false;
+        const float parsed = value[name].GetFloat();
+        if (!std::isfinite(parsed)) return false;
+        output = parsed;
+        return true;
+    };
+    const auto read_bool = [&](const char* name, bool& output) {
+        if (!value.HasMember(name)) return true;
+        if (!value[name].IsBool()) return false;
+        output = value[name].GetBool();
+        return true;
+    };
+    if (!read_float("fov", next.fov) || !read_float("scale", next.scale) ||
+        !read_float("fog_density", next.fog_density) ||
+        !read_bool("ortho", next.flag_orth) || !read_bool("skybox", next.use_skybox) ||
+        !read_bool("fog_enabled", next.fog_enabled))
+        return false;
+    next.corte_curto = near_clip;
+    next.corte_longo = far_clip;
+    if (next.fov < 1.f || next.fov > 179.f || next.scale <= 0.f || next.fog_density < 0.f)
+        return false;
+	if (value.HasMember("ceu")) {
+		const auto& sky_color = value["ceu"];
+		if (!sky_color.IsArray() || sky_color.Size() != 4) return false;
+        for (rapidjson::SizeType index = 0; index < 4; ++index)
+            if (!sky_color[index].IsNumber() || !std::isfinite(sky_color[index].GetFloat()) ||
+                sky_color[index].GetFloat() < 0.f || sky_color[index].GetFloat() > 255.f) return false;
+		next.sky_solid_color = {
+			sky_color[0].GetFloat() / 255.f, sky_color[1].GetFloat() / 255.f,
+			sky_color[2].GetFloat() / 255.f, sky_color[3].GetFloat() / 255.f
 		};
+	}
+    if (value.HasMember("fog_color")) {
+        const auto& fog_color = value["fog_color"];
+        if (!fog_color.IsArray() || (fog_color.Size() != 3 && fog_color.Size() != 4)) return false;
+        for (rapidjson::SizeType index = 0; index < fog_color.Size(); ++index)
+            if (!fog_color[index].IsNumber() || !std::isfinite(fog_color[index].GetFloat()) ||
+                fog_color[index].GetFloat() < 0.f || fog_color[index].GetFloat() > 1.f) return false;
+        next.fog_color = {
+            fog_color[0].GetFloat(), fog_color[1].GetFloat(), fog_color[2].GetFloat(),
+            fog_color.Size() == 4 ? fog_color[3].GetFloat() : 1.f
+        };
 	}
     if (value.HasMember("skybox_image") && (!value["skybox_image"].IsString() ||
         value["skybox_image"].GetStringLength() != std::char_traits<char>::length(value["skybox_image"].GetString()))) return false;
-    skybox_image = value.HasMember("skybox_image") ? value["skybox_image"].GetString() : "";
-    m_use_skybox = value.HasMember("skybox") && value["skybox"].GetBool();
-    skybox_faces = {};
+    if (value.HasMember("skybox_image")) next.skybox_image = value["skybox_image"].GetString();
+    next_skybox_faces = {};
     if (value.HasMember("skybox_faces")) {
         const auto& faces = value["skybox_faces"];
         if (!faces.IsArray() || faces.Size() != 6) return false;
         for (unsigned i = 0; i < 6; ++i) {
             if (!faces[i].IsString()) return false;
-            skybox_faces[i] = faces[i].GetString();
+            next_skybox_faces[i] = faces[i].GetString();
         }
     }
     if (value.HasMember("atmosphere_zenith")) {
         const auto& c = value["atmosphere_zenith"];
         if (!c.IsArray() || c.Size() != 3) return false;
         for (unsigned i = 0; i < 3; ++i) {
-            if (!c[i].IsNumber()) return false;
-            atmosphere_zenith[i] = c[i].GetFloat();
+            if (!c[i].IsNumber() || !std::isfinite(c[i].GetFloat())) return false;
+            next.atmosphere_zenith[i] = c[i].GetFloat();
         }
     }
-
+	config = std::move(next);
+	skybox_faces = std::move(next_skybox_faces);
 	return true;
 }
 
@@ -244,37 +291,62 @@ void camera::viewport(const bgui::vec2i& viewp) {
 }
 bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const
 {
-    if (skybox_image.find('\0') != std::string::npos) return false;
+    const auto valid_channel = [](float channel) {
+        return std::isfinite(channel) && channel >= 0.f && channel <= 1.f;
+    };
+    if (config.skybox_image.find('\0') != std::string::npos ||
+        !std::isfinite(config.fov) || config.fov < 1.f || config.fov > 179.f ||
+        !std::isfinite(config.corte_curto) || !std::isfinite(config.corte_longo) ||
+        !std::isfinite(config.scale) || config.scale <= 0.f ||
+        !std::isfinite(config.fog_density) || config.fog_density < 0.f ||
+        config.corte_curto <= 0.f || config.corte_longo <= config.corte_curto ||
+        !valid_channel(config.sky_solid_color.r) || !valid_channel(config.sky_solid_color.g) ||
+        !valid_channel(config.sky_solid_color.b) || !valid_channel(config.sky_solid_color.a) ||
+        !valid_channel(config.fog_color.r) || !valid_channel(config.fog_color.g) ||
+        !valid_channel(config.fog_color.b) || !valid_channel(config.fog_color.a))
+        return false;
+    for (unsigned index = 0; index < 3; ++index)
+        if (!std::isfinite(config.atmosphere_zenith[index])) return false;
     // fov
-    value.AddMember("fov", fov, allocator);
+    value.AddMember("fov", config.fov, allocator);
 
     // zfar
-    value.AddMember("zfar", corte_longo, allocator);
+    value.AddMember("zfar", config.corte_longo, allocator);
+    value.AddMember("znear", config.corte_curto, allocator);
 
     // scale
-    value.AddMember("scale", scale, allocator);
+    value.AddMember("scale", config.scale, allocator);
 
     // ortho flag
-    value.AddMember("ortho", flag_orth, allocator);
+    value.AddMember("ortho", config.flag_orth, allocator);
 
     // ceu (vector RGBA)
     rapidjson::Value cor_ceu(rapidjson::kArrayType);
-    cor_ceu.PushBack(static_cast<int>(ceu.r * 255), allocator);
-    cor_ceu.PushBack(static_cast<int>(ceu.g * 255), allocator);
-    cor_ceu.PushBack(static_cast<int>(ceu.b * 255), allocator);
-    cor_ceu.PushBack(static_cast<int>(ceu.a * 255), allocator);
+    cor_ceu.PushBack(static_cast<int>(config.sky_solid_color.r * 255), allocator);
+    cor_ceu.PushBack(static_cast<int>(config.sky_solid_color.g * 255), allocator);
+    cor_ceu.PushBack(static_cast<int>(config.sky_solid_color.b * 255), allocator);
+    cor_ceu.PushBack(static_cast<int>(config.sky_solid_color.a * 255), allocator);
     value.AddMember("ceu", cor_ceu, allocator);
 
-    value.AddMember("skybox_image", rapidjson::Value(skybox_image.c_str(), allocator), allocator);
+    value.AddMember("skybox_image", rapidjson::Value(config.skybox_image.c_str(), allocator), allocator);
     rapidjson::Value faces(rapidjson::kArrayType);
     for (const auto& path : skybox_faces)
         faces.PushBack(rapidjson::Value(path.c_str(), allocator), allocator);
     value.AddMember("skybox_faces", faces, allocator);
     rapidjson::Value zenith(rapidjson::kArrayType);
-    for (unsigned i = 0; i < 3; ++i) zenith.PushBack(atmosphere_zenith[i], allocator);
+    for (unsigned i = 0; i < 3; ++i) zenith.PushBack(config.atmosphere_zenith[i], allocator);
     value.AddMember("atmosphere_zenith", zenith, allocator);
     // skybox (flag)
-    value.AddMember("skybox", m_use_skybox, allocator);
+    value.AddMember("skybox", config.use_skybox, allocator);
+
+    value.AddMember("fog_enabled", config.fog_enabled, allocator);
+    value.AddMember("fog_density", config.fog_density, allocator);
+    rapidjson::Value fog_color(rapidjson::kArrayType);
+    fog_color.PushBack(config.fog_color.r, allocator);
+    fog_color.PushBack(config.fog_color.g, allocator);
+    fog_color.PushBack(config.fog_color.b, allocator);
+    fog_color.PushBack(config.fog_color.a, allocator);
+    value.AddMember("fog_color", fog_color, allocator);
 
     return true;
 }
@@ -357,28 +429,28 @@ glm::mat4 camera::obtProjectionMatrix() {
     const float width = static_cast<float>(viewp.x);
     const float height = static_cast<float>(viewp.y);
 
-    aspecto = width / height;
+    config.aspecto = width / height;
 
-    if (flag_orth) {
-        left = -scale * aspecto;
-        right_limit = scale * aspecto;
-        bottom = -scale;
-        top = scale;
+    if (config.flag_orth) {
+        config.left = -config.scale * config.aspecto;
+        config.right_limit = config.scale * config.aspecto;
+        config.bottom = -config.scale;
+        config.top = config.scale;
 
         projMatriz = glm::ortho(
-            left,
-            right_limit,
-            bottom,
-            top,
-            corte_curto,
-            corte_longo
+            config.left,
+            config.right_limit,
+            config.bottom,
+            config.top,
+            config.corte_curto,
+            config.corte_longo
         );
     } else {
         projMatriz = glm::perspective(
-            glm::radians(fov),
-            aspecto,
-            corte_curto,
-            corte_longo
+            glm::radians(config.fov),
+            config.aspecto,
+            config.corte_curto,
+            config.corte_longo
         );
     }
 

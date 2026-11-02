@@ -1,35 +1,43 @@
-# Editor panels
+# Painéis do editor
 
-Implement `editor::ui::editor_panel` from `apps/editor/core/panel.hpp` and implement
-`build(bgui::dock&)` and `update()`. Widgets remain owned by their BGUI parent;
-helpers return references for additional styling and callbacks.
-`editor::ui::panel` remains an alias for source compatibility. The
-`panel_manager` owns registered panels, builds them against the editor dock,
-and forwards the editor update cycle to them.
+Os painéis do editor implementam `editor::ui::editor_panel` e fornecem
+`build(bgui::dock&)` e `update()`. `panel_manager` possui os painéis
+registrados, cria seus widgets no dock e encaminha atualizações. Os widgets
+continuam pertencendo às árvores de elementos do BGUI.
 
-The application startup is split into default-panel registration, workspace
-loading, and the window run loop. `editor_workspace` persists the BGUI dock
-layout together with open-document session state per project. BGUI remains the
-visual/widget layer; editor context and commands carry editor state and
-user-intent actions between the UI and engine.
+## Painéis principais
 
-- `add_float(parent, label, float*)`: compact labeled numeric input.
-- `add_vec_field(parent, label, bgui::vec3*)`: compact X/Y/Z inputs.
-- `add_color(parent, bgui::color*)`: color picker that writes to the supplied color.
-- `add_color(parent, initial_color)`: picker with a caller-defined change callback.
-- `add_field`, `add_input`, `add_checkbox`: factories accepting the existing
-  BGUI constructor arguments, so specialized layouts can retain their styling.
+- **Project Manager**: oferece `Empty Project` e `FPP - First Person`. O
+  template FPP cria uma cena inicial com jogador cápsula, câmera, física e
+  scripts Lua de movimento e controle de câmera; os arquivos gerados ficam
+  dentro do novo projeto.
+- **Scene**: viewport de edição, seleção, gizmos, grade e navegação da câmera
+  do editor.
+- **Game**: prévia da primeira câmera de cena, seguindo a escolha do
+  `runtime_app`; usa a câmera do editor como alternativa quando não há câmera
+  de cena. O framebuffer acompanha o tamanho do painel.
+- **Hierarchy**: lista e seleção de entidades.
+- **Inspector**: transforma, câmera, iluminação e componentes suportados.
+- **Arquivos**: arquivos do projeto, documentos Lua/texto e importação de
+  assets.
+- **Debug**: log de scripts Lua.
+- **Editor Diagnostics**: métricas locais de frame e renderização.
 
-Numeric helpers also accept an initial value, getter and setter instead of a
-pointer. Prefer these overloads for ECS components: capture the component's
-existing shared ownership and use its setters. Vector setters take an axis and
-a float. Numeric inputs reject nonfinite, overflowing and partially parsed values.
+O painel **Game** é ocultado enquanto o runtime externo está executando. O
+runtime roda em outro processo, portanto a prévia não mostra a simulação desse
+processo; ela renderiza o ECS de edição. O runtime atual não fornece sistema de
+HUD de jogo. O painel indica essa ausência em seu status.
 
-Override `record_edit(undo, redo)` to integrate numeric edits with an existing
-history system. The setter runs before the history hook. The default hook does
-nothing. Custom color/checkbox callbacks retain responsibility for history.
+## Persistência e navegação
 
-Pointer overloads do not own storage: it must outlive the widgets and any undo
-actions. For transient entities, use getter/setter callbacks with appropriate
-ownership and lifecycle checks. Null bindings throw `std::invalid_argument`.
-The numeric getter is read for each edit so undo records the current model value.
+O layout do dock e as sessões de documentos são guardados por projeto por meio
+de `editor_workspace`. A interface BGUI é responsável por widgets/layout; o
+`editor_context` e comandos do editor mantêm estado e ações.
+
+Para adicionar painel, prefira `editor_ui::add_panel<T>(...)`. Não faça o painel
+manter referências de componentes ECS sem considerar remoção/substituição;
+widgets ligados a componentes devem usar ownership/callbacks e validar o
+ciclo de vida apropriado.
+
+Convenções de layout, helpers de campos e integração com histórico devem seguir
+os padrões de `apps/editor/core/panel.hpp` e dos painéis existentes.

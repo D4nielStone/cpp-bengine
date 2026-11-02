@@ -15,15 +15,20 @@ namespace editor::ui {
 // Only the view rotation affects directions; camera translation is irrelevant.
 inline std::array<glm::vec3, 3> direction_gizmo_axes(const glm::mat4& view) {
     const glm::mat3 rotation(view);
-    return {rotation * glm::vec3(1, 0, 0), rotation * glm::vec3(0, 1, 0),
-        rotation * glm::vec3(0, 0, 1)};
+    std::array<glm::vec3, 3> axes{rotation * glm::vec3(1, 0, 0),
+        rotation * glm::vec3(0, 1, 0), rotation * glm::vec3(0, 0, 1)};
+    for (auto& axis : axes)
+        axis = glm::normalize(axis);
+    return axes;
 }
 
 inline bgui::vec4i direction_gizmo_rect(bgui::vec4i viewport, float scale) {
+    const int width = std::max(0, viewport.z);
+    const int height = std::max(0, viewport.w);
     const int margin = std::max(1, int(12 * scale));
-    const int size = std::max(0, std::min({int(100 * scale),
-        viewport.z - 2 * margin, viewport.w - 2 * margin}));
-    return {viewport.x + viewport.z - margin - size, viewport.y + margin, size, size};
+    const int size = std::max(0, std::min({int(100 * scale), width - 2 * margin,
+        height - 2 * margin}));
+    return {viewport.x + width - margin - size, viewport.y + margin, size, size};
 }
 
 class direction_gizmo final : public bgui::element {
@@ -42,7 +47,7 @@ public:
 
     void get_requires(bgui::draw_data* data) override {
         const auto rect = processed_rect();
-        if (rect.z < 24 || !m_camera) return;
+        if (rect.z < 24 || rect.w < 24 || !m_camera) return;
         if (m_material.m_texture.m_buffer.empty() || m_last_size != rect.z ||
             m_last_axes != direction_gizmo_axes(m_camera->viewMatrix)) {
             // Submit through the regular image queue so later windows cover the gizmo.
@@ -51,7 +56,7 @@ public:
             const auto color = draw.get_color();
             const float unit = rect.z / 100.f;
             const bgui::vec2 center{rect.x + rect.z * .5f, rect.y + rect.w * .5f};
-            draw.set_color({.08f, .09f, .12f, .72f});
+            draw.set_color({.1f, .1f, .1f, .5f});
             draw.add_circle_filled(center, 49 * unit);
             const auto axes = direction_gizmo_axes(m_camera->viewMatrix);
             std::array<int, 3> order{0, 1, 2};

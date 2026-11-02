@@ -22,6 +22,7 @@
 #include "editor/panels/debug_view.hpp"
 #include "editor/panels/scene_view.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
+#include "editor/panels/game_view.hpp"
 #include "editor/panels/entities_view.hpp"
 #include "editor/panels/components_view.hpp"
 #include "editor/systems/ui_persistence_system.hpp"
@@ -114,7 +115,8 @@ project_choice show_project_manager(
     auto& project_dock = root.add<bgui::dock>();
     project_dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
     bgui::dock::configuration dock_layout;
-    dock_layout.left_ratio = 0.32f;
+    dock_layout.left_ratio = 0.27f;
+    dock_layout.right_ratio = 0.25f;
     project_dock.apply_configuration(dock_layout);
     auto& recent = project_dock.add_window("Recent Projects", bgui::dock_area::left);
     auto& actions = project_dock.add_window("Project Setup", bgui::dock_area::center);
@@ -123,6 +125,8 @@ project_choice show_project_manager(
     recent_title.style.layout.set_margin(0, 8);
 
     bgui::text* status = nullptr;
+    bgui::text* template_selection_label = nullptr;
+    auto selected_template = editor::ui::project_template::empty;
     std::vector<std::string> recent_projects;
     std::ifstream recent_file("editor-recent-projects.cfg");
     for (std::string line; std::getline(recent_file, line);) {
@@ -207,6 +211,11 @@ project_choice show_project_manager(
 
     auto& create_label = actions.add<bgui::text>("Create a new project", 0.32f);
     create_label.style.layout.set_margin(0, 8);
+    template_selection_label = &actions.add<bgui::text>(
+        "Template: Empty Project",
+        0.28f
+    );
+    template_selection_label->add_class("project-manager-muted");
     auto& name_input = actions.add<bgui::inputbox>("New Project", "Project name", 0.36f);
     name_input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     std::error_code current_path_error;
@@ -261,7 +270,11 @@ project_choice show_project_manager(
         const auto project_folder =
             std::filesystem::path(location_input.get_buffer()) / project_name;
         std::string error;
-        if (!editor::ui::create_project_files(project_folder, error)) {
+        if (!editor::ui::create_project_files(
+                project_folder,
+                error,
+                selected_template
+            )) {
             status->set_buffer(error);
             return;
         }
@@ -271,6 +284,54 @@ project_choice show_project_manager(
     create_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     create_button.style.layout.set_padding(6, 4);
     status = &actions.add<bgui::text>("", 0.28f);
+
+    auto& templates = project_dock.add_window("Templates", bgui::dock_area::right);
+    templates.style.layout.padding = bgui::vec4i{16, 12, 16, 16};
+    auto& templates_title = templates.add<bgui::text>("Project templates", 0.42f);
+    templates_title.style.layout.set_margin(0, 8);
+    templates.add<bgui::text>(
+        "Empty Project",
+        0.34f
+    );
+    templates.add<bgui::text>(
+        "A clean scene with the standard project folders.",
+        0.28f
+    ).add_class("project-manager-muted");
+    auto& empty_template_button = templates.add<bgui::button>(
+        "Use Empty Project",
+        0.32f,
+        [&]() {
+            selected_template = editor::ui::project_template::empty;
+            template_selection_label->set_buffer("Template: Empty Project");
+            status->set_buffer("");
+        }
+    );
+    empty_template_button.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::wrap_content
+    );
+    empty_template_button.style.layout.set_margin(0, 4);
+
+    templates.add<bgui::text>("FPP - First Person", 0.34f)
+        .style.layout.set_margin(0, 12);
+    templates.add<bgui::text>(
+        "A capsule player with mouse look, WASD movement, and a physics floor.",
+        0.28f
+    ).add_class("project-manager-muted");
+    auto& fpp_template_button = templates.add<bgui::button>(
+        "Use FPP Template",
+        0.32f,
+        [&]() {
+            selected_template = editor::ui::project_template::fpp;
+            template_selection_label->set_buffer("Template: FPP - First Person");
+            status->set_buffer("");
+        }
+    );
+    fpp_template_button.style.layout.require_mode(
+        bgui::mode::match_parent,
+        bgui::mode::wrap_content
+    );
+    fpp_template_button.style.layout.set_margin(0, 4);
 
     window.loop();
     window.reopen();
@@ -353,6 +414,7 @@ public:
         m_scene = &m_editor->add_panel<editor::ui::scene_view>(
             m_window, m_camera, m_context
         );
+        m_game_view = &m_editor->add_panel<editor::ui::game_view>(m_context);
         m_entities = &m_editor->add_panel<editor::ui::entities_view>(
             m_context,
             [](std::uint32_t id) { return "Entity " + std::to_string(id); }
@@ -495,7 +557,8 @@ public:
 
         m_render_system = m_window.add<commons::render_system>();
         m_render_system->set_camera_filter([this](std::uint32_t entity) {
-            return m_scene->needs_camera_render(entity);
+            return m_scene->needs_camera_render(entity) ||
+                m_game_view->needs_camera_render(entity);
         });
         m_runtime_tools = &m_editor->add_panel<editor::ui::runtime_tools_view>(
             m_window, m_context, m_render_system
@@ -619,6 +682,7 @@ private:
     bgui::dock* m_dock{nullptr};
     std::unique_ptr<editor::ui::editor_ui> m_editor;
     editor::ui::scene_view* m_scene{nullptr};
+    editor::ui::game_view* m_game_view{nullptr};
     editor::ui::entities_view* m_entities{nullptr};
     editor::ui::components_view* m_components{nullptr};
     editor::ui::files_view* m_files{nullptr};

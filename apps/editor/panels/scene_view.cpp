@@ -203,7 +203,7 @@ public:
             if (!m_camera_movement.is_orbital() || selected != m_selected_orbit) {
                 auto renderer = m_context->registry->get<commons::renderer>(selected->my_object);
                 m_camera_movement.focus_orbit_target(selected,
-                    selected_orbit_distance(*selected, renderer.get(), m_camera->fov));
+                    selected_orbit_distance(*selected, renderer.get(), m_camera->config.fov));
             }
             m_selected_orbit = selected;
         } else {

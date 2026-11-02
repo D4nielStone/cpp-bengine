@@ -31,7 +31,7 @@ namespace COMMONS_NS {
         // constructor reads and builds the shader when an OpenGL context is available
         shader() : ID(0) {
             if (glad_glCreateProgram != nullptr)
-                compilar("phong.vert", "phong.frag");
+                compilar("pbr.vert", "pbr.frag");
         }
         shader(const char* vertexPath, const char* fragmentPath);
         // use/activate the shader

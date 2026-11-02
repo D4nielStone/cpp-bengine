@@ -858,7 +858,7 @@ TEST_F(EditorAssetWorkflowTest, PrimitivesHaveValidGeometryAndCreationSupportsUn
     EXPECT_EQ(registry->entities.size(), count);
 }
 
-TEST_F(EditorAssetWorkflowTest, PrimitiveMenuIsAvailableFromHierarchyToolbar) {
+TEST_F(EditorAssetWorkflowTest, PrimitiveMenuOpensOnLeftClick) {
     auto registry = std::make_shared<commons::ecs>();
     auto context = std::make_shared<editor::ui::editor_context>(registry);
     auto& dock = bgui::get_layout().add<bgui::dock>();
@@ -866,6 +866,7 @@ TEST_F(EditorAssetWorkflowTest, PrimitiveMenuIsAvailableFromHierarchyToolbar) {
     entities.build(dock);
     auto* button = find<bgui::button>(dock, [](auto& value) { return value.has_class("entities-primitives-button"); });
     ASSERT_NE(button, nullptr);
+    EXPECT_EQ(button->get_label().get_buffer(), "Primitivas");
     button->on_released(); bgui::on_update();
     auto* popup = find<bgui::linear>(bgui::get_layout(), [](auto& value) { return value.has_class("editor-context-actions") && value.is_enabled(); });
     ASSERT_NE(popup, nullptr);

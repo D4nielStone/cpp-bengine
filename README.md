@@ -98,6 +98,13 @@ Both helpers configure and build the editor and runtime in `build/` by default.
 Pass a build directory to use another location. Add `--test` on Linux or
 `-RunTests` on Windows to also build and run the test suite.
 
+## Documentation
+
+The [documentation index](docs/README.md) links to the engine guides and
+reference pages. The [Lua API reference](docs/lua-api/README.md) covers the
+registered runtime bindings, script lifecycle, Inspector properties, and
+current limitations.
+
 For performance measurements, use an optimized build with debug symbols:
 
 ```sh

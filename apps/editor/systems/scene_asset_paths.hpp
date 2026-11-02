@@ -39,7 +39,7 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
             if (!value.empty() && absolute(value) == from)
                 value = std::filesystem::path(value).is_absolute() ? to.string() : to.lexically_relative(root).generic_string();
         };
-        relocate(camera->skybox_image);
+        relocate(camera->config.skybox_image);
         for (auto& face : camera->skybox_faces) relocate(face);
     });
     context->registry->cada<commons::renderer>([&](auto id) {

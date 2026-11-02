@@ -59,6 +59,11 @@ uniform mat4 lightSpaceMatrix;
 uniform float shadowBias;
 uniform float shadowStrength;
 
+// Fog
+uniform bool fogEnabled;
+uniform vec3 fogColor;
+uniform float fogDensity;
+
 float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D depthMap,
                        mat4 matrix, float depthBias, float strength, vec2 offset, float scale) {
     if (!enabled) return 1.0;
@@ -241,6 +246,13 @@ void main() {
         result += visibility * calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
     }
 
+    // Cálculo da densidade da névoa
+    if (fogEnabled) {
+        float distanceToCamera = length(viewPos - Position);
+        float visibility = exp(-fogDensity * distanceToCamera);
+        result = mix(fogColor, result, clamp(visibility, 0.0, 1.0));
+    }
+    // Conversão gamma
     float gamma = 2.2;
     FragColor = vec4(pow(result.rgb, vec3(1.0 / gamma)), albedo.a);
 }

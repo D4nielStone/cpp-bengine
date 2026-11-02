@@ -1,53 +1,44 @@
 # Física e colisão
 
-Adicione **Physics** pelo Inspector. O seletor **Body Type** oferece:
+O engine usa Bullet para corpos e colisores. O componente `physics` mantém o
+corpo Bullet, forma de colisão e estado de contato; o sistema de física aplica
+gravidade e atualiza os corpos. A cena salva parâmetros do componente, não
+ponteiros Bullet.
 
-- **Character Body**: corpo dinâmico afetado pela gravidade, forças e contatos, com
-  rotação física travada. A orientação do Transform continua controlada pelo script.
-- **Static Body**: massa zero; não cai nem recebe impulsos. Seu Transform define a posição.
-- **Rigid Body**: corpo dinâmico com translação e rotação físicas.
+## Tipos de corpo
 
-Novos componentes usam **Fit to Model**: os limites locais de todas as malhas
-fornecem dimensões e centro de referência. Posição, rotação e escala do Transform
-(incluindo pais) são aplicadas sobre essa base. Caixa ajusta os limites; esfera,
-cápsula, cilindro e cone usam aproximações primitivas desses limites. Esferas usam
-um raio conservador quando a escala do objeto é não uniforme. Sem malha, usa-se a
-forma unitária abaixo. Cenas antigas mantêm seus tamanhos gravados; marque
-**Fit to Model** para ativar o ajuste nelas.
+- `rigid`: corpo dinâmico; massa positiva.
+- `character`: corpo dinâmico configurado para controle de personagem, com
+  rotação angular bloqueada pelo setter atual.
+- `static`: massa zero.
 
-**Collision Shape** seleciona caixa, cápsula (eixo Y), esfera, cilindro (eixo Y),
-cone (eixo Y) ou plano infinito (normal Y). Use o plano com Static Body.
+Os tipos de forma incluem box, capsule, sphere, cylinder, cone, plane e mesh.
+Seleção de forma e opções de colisão são configuradas no Inspector/projeto;
+Lua atualmente controla somente as operações de Rigidbody descritas em
+[componentes Lua](./lua-api/components.md#rigidbody).
 
-**Collider Scale** é um multiplicador local sobre as dimensões de referência e a
-escala do Transform; seu padrão é `(1,1,1)`. **Rotation Offset** acrescenta rotação
-local em graus (padrão zero). **Collider Offset** acrescenta deslocamento local ao
-centro de referência (padrão zero). Esses ajustes não alteram o Transform visual.
-Rotações locais sob escalas não uniformes são aproximadas pelos primitivos Bullet;
-transformações com cisalhamento não são representadas exatamente.
-As formas unitárias têm: caixa/cilindro com dimensões 1×1×1, esfera de raio 0,5,
-cone de raio 0,5 e altura 1, cápsula de raio 0,5 e trecho cilíndrico de altura 1,8
-(altura total 2,8). As dimensões devem ser positivas. Esferas usam escala uniforme;
-para elas, ajuste os três eixos igualmente. O plano é infinito e não possui tamanho.
-**Collider Offset** desloca o colisor em coordenadas locais da entidade, também
-sujeitas à sua escala e rotação.
+Colisores de malha côncava exigem corpo estático. O engine valida esse
+combinação ao carregar/configurar as opções relevantes; objetos de personagem
+devem usar um shape primitivo adequado.
 
-**Collision Enabled** desativa contatos e consultas por raio quando desmarcado,
-sem desativar a gravidade. **Trigger** mantém a detecção de contatos no Bullet,
-mas elimina a resposta que bloqueia os corpos. Esta alteração não adiciona callbacks
-Lua de entrada/saída de trigger. **Mass**, **Friction** e **Restitution** controlam
-massa, atrito e restituição. Alterar a massa de zero para positiva converte um corpo
-estático em dinâmico; massa zero torna o corpo estático, preservando a API existente.
+## Ajustes usuais
 
-Todos os campos são salvos na cena. Arquivos antigos continuam aceitos com suas
-formas, massa e material existentes; colisão começa ativada, sem trigger, com
-escala unitária e deslocamento zero. Colisão por malha não está incluída.
+O Inspector permite ajustar forma, dimensões, offset/rotação do colisor,
+colisão ativa, trigger, tipo de corpo, massa, atrito e restituição. `fit_to_model`
+permite ajustar o shape à geometria quando suportado. Dimensões e offsets são
+valores locais da configuração do colisor.
 
-No exemplo FPP, PlayerCapsule usa Character Body com cápsula deslocada para cima
-em relação aos pés. O script controla a velocidade horizontal, preservando a
-velocidade vertical da gravidade. Chão e paredes usam Static Body e colisores
-ajustados às dimensões das malhas do cenário.
+Em Lua, `Rigidbody.velocity`, `AddForce`, `SetLinearFactor`,
+`SetAngularFactor`, `mass`, `friction` e `restitution` operam em um componente
+já criado. `Destroy(rigidbody)` remove esse componente; não remove a entidade.
 
+## Limites de uso
 
-No editor, **View → Show/Hide Colliders (F3)** alterna os contornos na cena. O F3
-também funciona no runtime. Verde indica colisão ativa, azul indica trigger e
-cinza indica colisor desativado. A opção é temporária e não modifica o projeto.
+- Um corpo deve ter transform válido e permanecer associado à entidade durante
+  a simulação.
+- Configurações de shape e corpo côncavo dependem da geometria e do tipo do
+  corpo.
+- Remover física durante atualizações deve respeitar as garantias do ECS e do
+  sistema; não retenha referências após a remoção.
+- A documentação não promete valores universais de estabilidade ou desempenho
+  para todo timestep, escala e shape.

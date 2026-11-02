@@ -8,6 +8,8 @@
 #include "systems/code_system.hpp"
 #include "guizmo/collision_debug.hpp"
 #include "components/renderer.hpp"
+#include <bullet/BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
+#include <bullet/BulletCollision/CollisionShapes/btTriangleMesh.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -282,10 +284,10 @@ TEST_P(PhysicsShapeContract, CreatesUsableBodyAndSerializesMaterialProperties) {
 INSTANTIATE_TEST_SUITE_P(SupportedShapes, PhysicsShapeContract, testing::Values(
     physics::shapes::box_shape, physics::shapes::forma_capsula,
     physics::shapes::forma_esfera, physics::shapes::forma_cilindro,
-    physics::shapes::forma_cone, physics::shapes::forma_plano));
+    physics::shapes::forma_cone, physics::shapes::forma_plano,
+    physics::shapes::mesh_shape));
 
 TEST(EnginePhysics, InvalidInputsAreRejected) {
-    EXPECT_THROW(physics(false, physics::shapes::mesh_shape), std::invalid_argument);
     physics body;
     EXPECT_THROW(body.setModelo(nullptr), std::invalid_argument);
     for (const auto* json : {"null", "[]", R"({"mass":"heavy"})",
@@ -296,6 +298,100 @@ TEST(EnginePhysics, InvalidInputsAreRejected) {
         ASSERT_FALSE(document.HasParseError());
         EXPECT_FALSE(body.analyze(document));
     }
+}
+
+TEST(EnginePhysics, ModelColliderUsesRendererVerticesAndEntityScale) {
+    model geometry;
+    geometry.meshes.emplace_back(std::vector<vertex>{
+        vertex({-2,-1,-3},{0,1,0},{0,0}),
+        vertex({4,-1,-3},{0,1,0},{0,0}),
+        vertex({-2,3,-3},{0,1,0},{0,0}),
+        vertex({-2,-1,5},{0,1,0},{0,0})
+    }, std::vector<unsigned int>{}, material{});
+    physics collider(true);
+    collider.setModelo(&geometry);
+    collider.configure_collision(physics::shapes::mesh_shape,
+        {1,1,1}, {0,0,0}, true, false);
+    collider.refresh_collision({2,3,4});
+
+    btVector3 minimum, maximum;
+    collider.m_rigid_body->getAabb(minimum, maximum);
+    EXPECT_NEAR(minimum.x(), -4.f, 0.003f);
+    EXPECT_NEAR(minimum.y(), -3.f, 0.003f);
+    EXPECT_NEAR(minimum.z(), -12.f, 0.003f);
+    EXPECT_NEAR(maximum.x(), 8.f, 0.003f);
+    EXPECT_NEAR(maximum.y(), 9.f, 0.003f);
+    EXPECT_NEAR(maximum.z(), 20.f, 0.003f);
+}
+
+TEST(EnginePhysics, ModelColliderCanUseConcaveTriangleMeshForStaticBodies) {
+    model geometry;
+    geometry.meshes.emplace_back(std::vector<vertex>{
+        vertex({-2,-1,0},{0,1,0},{0,0}),
+        vertex({2,-1,0},{0,1,0},{1,0}),
+        vertex({2,1,0},{0,1,0},{1,1}),
+        vertex({-2,1,0},{0,1,0},{0,1})
+    }, std::vector<unsigned int>{0,1,2,0,2,3}, material{});
+
+    physics collider(true, physics::shapes::mesh_shape);
+    collider.set_model_collider_type(physics::model_collider_type::concave);
+    collider.setModelo(&geometry);
+    const auto* triangle_shape =
+        dynamic_cast<const btBvhTriangleMeshShape*>(collider.m_forma);
+    ASSERT_NE(triangle_shape, nullptr);
+    ASSERT_NE(collider.m_triangle_mesh, nullptr);
+    EXPECT_EQ(collider.m_triangle_mesh->getNumTriangles(), 2);
+    EXPECT_THROW(collider.setMass(1.f), std::invalid_argument);
+    EXPECT_THROW(
+        collider.set_body_type(physics::body_type::rigid),
+        std::invalid_argument
+    );
+
+    rapidjson::Document data;
+    ASSERT_TRUE(collider.serialize(data, data.GetAllocator()));
+    EXPECT_STREQ(data["model_collider"].GetString(), "concave");
+    physics restored(true, physics::shapes::mesh_shape);
+    ASSERT_TRUE(restored.analyze(data));
+    EXPECT_EQ(
+        restored.model_collider,
+        physics::model_collider_type::concave
+    );
+}
+
+TEST_F(Foundations, ModelColliderIsVisibleInF3AndUsedByRuntimePhysics) {
+    auto entity = body(1, true);
+    auto* geometry = new model();
+    geometry->meshes.emplace_back(std::vector<vertex>{
+        vertex({-1,-1,-1},{0,1,0},{0,0}),
+        vertex({1,-1,-1},{0,1,0},{1,0}),
+        vertex({0,1,-1},{0,1,0},{0.5f,1}),
+        vertex({0,0,1},{0,1,0},{0.5f,0.5f})
+    }, std::vector<unsigned int>{}, material{});
+    registry->add<renderer>(entity, geometry);
+    registry->remove<physics>(entity.id);
+    registry->add<physics>(entity, true, physics::shapes::mesh_shape);
+    auto collider = registry->get<physics>(entity.id);
+    auto overlapping = body(2, false);
+    registry->get<physics>(overlapping.id)->configure_collision(
+        physics::shapes::forma_esfera, {0.5f, 0.5f, 0.5f}, {}, true, false);
+
+    physics_system system;
+    system.setup(registry);
+    EXPECT_EQ(system.world()->getNumCollisionObjects(), 2);
+    system.world()->performDiscreteCollisionDetection();
+    EXPECT_GT(system.world()->getDispatcher()->getNumManifolds(), 0);
+    const auto hit = system.cast_ray({{0,0,5}, {0,0,-1}});
+    ASSERT_TRUE(hit.atingiu);
+    EXPECT_EQ(hit.objetoAtingido, collider->m_rigid_body);
+
+    const auto lines = editor::collision_lines(registry);
+    EXPECT_GE(lines.size(), 6u);
+    for (const auto& line : lines)
+        for (const auto& point : {line.from, line.to}) {
+            EXPECT_TRUE(std::isfinite(point.x));
+            EXPECT_TRUE(std::isfinite(point.y));
+            EXPECT_TRUE(std::isfinite(point.z));
+        }
 }
 
 TEST(EnginePhysics, ForcesVelocityAndAxisLocksReachBullet) {

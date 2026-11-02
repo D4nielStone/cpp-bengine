@@ -1,7 +1,9 @@
 #pragma once
+#include <array>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <memory>
+#include <string>
 #include "commons_namespace.hpp"
 #include "component.hpp"
 #include "transform.hpp"
@@ -10,24 +12,33 @@
 #include "util/ray.hpp"
 
 namespace COMMONS_NS {
+	struct camera_config {
+		bgui::vec3 atmosphere_zenith{0.08f, 0.25f, 0.55f};
+		color sky_solid_color		{0.43F, 0.78F, 0.86F, 1.0F};
+        std::string skybox_image;
+		bool use_skybox		{ false };
+		bool fog_enabled	{ false };
+		color fog_color		{ 0.43F, 0.78F, 0.86F, 1.0F };
+		float fog_density	{ 0.01f };
+		float fov			{ 75.f };
+		float aspecto		{ 0.f };
+		float corte_curto	{ 0.1f };
+		float corte_longo	{ 300.f };
+		float scale			{ 5.f };
+
+		float left{0.f}, top{0.f}, bottom{0.f}, right_limit{0.f};
+
+		bool flag_orth		{ false };
+	};
 	/**
 	 * @class camera
 	 * @brief component que facilita a manipuacao da matriz de visualizacao e projeco
 	 */
 	class camera : public component {
     public:
-		/**
-		 * @enum camera_config
-		 * @brief configuracao da camera;
-		 */
-
         skybox* m_skybox{nullptr};
-        bool m_use_skybox { false };
-        std::string skybox_image;
         std::array<std::string, 6> skybox_faces{};
         std::string skybox_asset_root; // Resolved project directory, not serialized.
-        bgui::vec3 atmosphere_zenith{0.08f, 0.25f, 0.55f};
-		color ceu				{0.43F, 0.78F, 0.86F, 1.0F};
 
 		bgui::vec3 forward, right, up, position;
 		transform* m_transform{ nullptr };
@@ -36,15 +47,7 @@ namespace COMMONS_NS {
 
 		unsigned int fbo, texture, rbo;
 
-		float fov			{ 75.f };
-		float aspecto		{ 0.f };
-		float corte_curto	{ 0.1f };
-		float corte_longo	{ 300.f };
-		float scale		{ 5.f };
-
-		float left, top, bottom, right_limit;
-
-		bool flag_orth		{ false };
+		camera_config config{};
 		bool flag_fb		{ false };
 
 		static constexpr mask mask = COMPONENTE_CAM;

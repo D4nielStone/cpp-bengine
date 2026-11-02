@@ -1,33 +1,17 @@
 {
-  "version": 2,
-  "configurePresets": [
-    {
-      "name": "performance",
-      "displayName": "Optimized build with debug symbols",
-      "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/out/performance",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "BUILD_TESTING": "ON",
-        "BENGINE_BUILD_BENCHMARKS": "ON"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "performance",
-      "configurePreset": "performance",
-      "jobs": 2
-    }
-  ],
-  "testPresets": [
-    {
-      "name": "performance",
-      "configurePreset": "performance",
-      "output": {
-        "outputOnFailure": true
-      }
-    }
-  ]
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "Debug",
+            "displayName": "GCC 13.3.0 x86_64-linux-gnu",
+            "description": "Usando compiladores: C = /usr/bin/gcc, CXX = /usr/bin/g++",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/gcc",
+                "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ]
 }

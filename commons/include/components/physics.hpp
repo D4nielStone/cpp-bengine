@@ -29,6 +29,8 @@
 #include <bullet/btBulletDynamicsCommon.h>
 #include <rapidjson/document.h>
 
+class btTriangleMesh;
+
 namespace COMMONS_NS {
     class transform;
     struct physics : component {
@@ -45,7 +47,9 @@ namespace COMMONS_NS {
         };
 
         enum class body_type { rigid, character, static_body };
+        enum class model_collider_type : uint8_t { convex, concave };
         body_type type{body_type::rigid};
+        model_collider_type model_collider{model_collider_type::convex};
         bgui::vec3 collision_size{1.f, 1.f, 1.f};
         bgui::vec3 collision_offset{0.f, 0.f, 0.f};
         bool fit_to_model{true};
@@ -54,6 +58,7 @@ namespace COMMONS_NS {
         bool collision_enabled{true};
         bool trigger{false};
         void set_body_type(body_type value);
+        void set_model_collider_type(model_collider_type value);
         void configure_collision(shapes shape, const bgui::vec3& size,
             const bgui::vec3& offset, bool enabled, bool sensor);
         void refresh_collision(const bgui::vec3& entity_scale);
@@ -86,6 +91,7 @@ namespace COMMONS_NS {
         bgui::vec3 m_bounds_min{0.f}, m_bounds_max{0.f};
         bool m_has_model_bounds{false};
         btCollisionShape* m_forma{ nullptr };
+        btTriangleMesh* m_triangle_mesh{ nullptr };
         btDefaultMotionState* m_estado_de_movimento{ nullptr };
         btRigidBody* m_rigid_body{ nullptr };
     };

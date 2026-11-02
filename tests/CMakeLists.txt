@@ -115,6 +115,7 @@ gtest_discover_tests(ui_scale_tests)
 
 add_executable(editor_menu_tests
     editor_menu_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels/game_view.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/panels/editor_ui.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/ui_persistence_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
