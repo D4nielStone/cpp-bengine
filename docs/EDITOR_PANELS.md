@@ -1,8 +1,17 @@
 # Editor panels
 
-Extend `editor::ui::panel` from `apps/editor/core/panel.hpp` and implement
+Implement `editor::ui::editor_panel` from `apps/editor/core/panel.hpp` and implement
 `build(bgui::dock&)` and `update()`. Widgets remain owned by their BGUI parent;
 helpers return references for additional styling and callbacks.
+`editor::ui::panel` remains an alias for source compatibility. The
+`panel_manager` owns registered panels, builds them against the editor dock,
+and forwards the editor update cycle to them.
+
+The application startup is split into default-panel registration, workspace
+loading, and the window run loop. `editor_workspace` persists the BGUI dock
+layout together with open-document session state per project. BGUI remains the
+visual/widget layer; editor context and commands carry editor state and
+user-intent actions between the UI and engine.
 
 - `add_float(parent, label, float*)`: compact labeled numeric input.
 - `add_vec_field(parent, label, bgui::vec3*)`: compact X/Y/Z inputs.

@@ -25,9 +25,11 @@
 #include "editor/panels/entities_view.hpp"
 #include "editor/panels/components_view.hpp"
 #include "editor/systems/ui_persistence_system.hpp"
+#include "editor/systems/editor_workspace.hpp"
 #include "editor/systems/runtime_process.hpp"
 #include "editor/systems/undo_redo_shortcuts_system.hpp"
 #include "editor/systems/ui_scale_system.hpp"
+#include "editor/core/editor_commands.hpp"
 
 #include <lay/linear.hpp>
 #include <lay/dock.hpp>
@@ -43,6 +45,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -279,9 +282,355 @@ project_choice show_project_manager(
 
 }
 
+namespace bubble {
+
+class editor_application final {
+public:
+    editor_application(
+        commons::window& window,
+        std::string project_path,
+        std::filesystem::path build_directory,
+        std::filesystem::path executable,
+        std::shared_future<std::string> release_check
+    )
+        : m_window(window),
+          m_project_path(std::move(project_path)),
+          m_executable(std::move(executable)),
+          m_release_check(std::move(release_check)),
+          m_registry(window.get_ecs()) {
+        auto camera_entity = m_registry->create();
+        auto cube_entity = m_registry->create();
+        m_camera_entity = camera_entity.id;
+        m_registry->add<commons::camera>(camera_entity);
+        m_registry->add<commons::renderer>(cube_entity, "assets/models/cube.obj");
+        m_camera = m_registry->get<commons::camera>(camera_entity.id);
+        m_registry->get<commons::transform>(cube_entity.id)->set_position({0.f, 0.f, 0.f});
+        m_registry->get<commons::transform>(camera_entity.id)->set_position({0.f, 0.f, 5.f});
+        m_registry->get<commons::transform>(camera_entity.id)->set_rotation({0.f, -90.f, 0.f});
+
+        m_context = std::make_shared<editor::ui::editor_context>(m_registry);
+        m_context->editor_camera_entity = m_camera_entity;
+        m_context->project_root = std::filesystem::absolute(m_project_path).parent_path();
+        m_commands = std::make_shared<editor::ui::editor_commands>(m_context);
+        m_project_persistence = std::make_unique<editor::ui::project_persistence_system>(
+            m_registry,
+            m_camera_entity,
+            &m_context->entity_names,
+            &m_context->hidden_entities,
+            &m_context->locked_entities
+        );
+
+        auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
+        root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+        root.add<editor::ui::release_indicator>(m_release_check);
+        m_menu_bar = &root.add<bgui::menu_bar>(root);
+        m_dock = &root.add<bgui::dock>();
+        m_dock->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+
+        m_editor = std::make_unique<editor::ui::editor_ui>(
+            *m_dock,
+            *m_menu_bar,
+            m_ui_persistence,
+            *m_project_persistence,
+            m_registry,
+            m_project_path,
+            std::move(build_directory)
+        );
+        m_editor->set_editor_context(m_context);
+        m_editor->set_editor_commands(m_commands);
+        m_editor->set_exit_callback([this]() { m_window.close(); });
+        m_window.set_close_request_callback([this]() { m_editor->confirm_exit(); });
+    }
+
+    bool load_project(std::string& error) {
+        if (!m_project_persistence->load(m_project_path, error))
+            return false;
+        remember_recent_project();
+        return true;
+    }
+
+    void register_default_panels() {
+        m_scene = &m_editor->add_panel<editor::ui::scene_view>(
+            m_window, m_camera, m_context
+        );
+        m_entities = &m_editor->add_panel<editor::ui::entities_view>(
+            m_context,
+            [](std::uint32_t id) { return "Entity " + std::to_string(id); }
+        );
+        m_components = &m_editor->add_panel<editor::ui::components_view>(m_context);
+
+        auto drop_asset = [this](
+            const std::filesystem::path& asset,
+            const bgui::vec2i& mouse_position
+        ) {
+            if (m_context->is_playing || editor::ui::viewport_input_blocked_by_modal())
+                return;
+            try {
+                if (editor::ui::is_lua_script(asset)) {
+                    auto target = m_entities->entity_at(mouse_position);
+                    if (!target && m_scene->is_open() &&
+                        editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position))
+                        target = m_scene->entity_at(mouse_position);
+                    if (target) {
+                        std::string error;
+                        if (editor::ui::attach_lua_script(m_context, *target, asset, error)) {
+                            m_context->selected_entity = target;
+                            m_components->refresh();
+                            if (m_files)
+                                m_files->set_asset_status("Script associado à entidade.");
+                        } else if (m_files) {
+                            m_files->set_asset_status(error);
+                        }
+                    } else if (!m_components->drop_asset(asset, mouse_position) && m_files) {
+                        m_files->set_asset_status(
+                            "Solte o script sobre um objeto na cena ou na lista de entidades."
+                        );
+                    }
+                    return;
+                }
+                if (editor::ui::files_view::supports_image(asset) && m_scene->is_open() &&
+                    editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position)) {
+                    const auto target = m_scene->entity_at(mouse_position);
+                    std::string error;
+                    if (target && editor::ui::apply_dropped_albedo(m_context, *target, asset, error)) {
+                        m_context->selected_entity = target;
+                        m_components->refresh();
+                        if (m_files) m_files->set_asset_status("Textura aplicada ao objeto.");
+                    } else if (m_files) {
+                        m_files->set_asset_status(
+                            error.empty() ? "Solte a imagem sobre um objeto." : error
+                        );
+                    }
+                    return;
+                }
+                if (editor::ui::files_view::supports_model(asset))
+                    (void)editor::ui::asset_dependencies(std::filesystem::canonical(asset), true);
+                if (m_components->drop_asset(asset, mouse_position) ||
+                    !editor::ui::files_view::supports_model(asset) || !m_scene->is_open() ||
+                    !editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position))
+                    return;
+
+                const auto position = editor::ui::scene_drop_position(
+                    *m_camera, m_scene->image(), mouse_position
+                );
+                if (!position)
+                    return;
+                auto model = std::make_unique<commons::model>(asset.string());
+                if (model->meshes.empty()) {
+                    if (m_files)
+                        m_files->show_model_importer(
+                            asset, {}, "O carregador não conseguiu importar este modelo."
+                        );
+                    return;
+                }
+                auto entity = m_context->registry->create();
+                m_context->registry->add<commons::renderer>(entity, model.release());
+                m_context->registry->get<commons::transform>(entity.id)->set_position(*position);
+                m_context->entity_names[entity.id] = asset.stem().string();
+                m_context->record_entity_creation(entity.id);
+                m_context->selected_entity = entity.id;
+                m_entities->refresh();
+                m_components->refresh();
+                if (m_files) m_files->set_asset_status("Modelo adicionado à cena.");
+            } catch (const std::exception& error) {
+                if (m_files) {
+                    m_files->set_asset_status(error.what());
+                    if (editor::ui::files_view::supports_model(asset))
+                        m_files->show_model_importer(asset, {}, error.what());
+                }
+            }
+        };
+
+        m_files = &m_editor->add_panel<editor::ui::files_view>(m_project_path, drop_asset);
+        m_components->set_model_import_error_callback(
+            [this](const auto& path, const auto& error) {
+                bgui::add_function([this, path, error]() {
+                    m_files->show_model_importer(path, {}, error);
+                });
+            }
+        );
+        m_files->set_model_imported_callback([this](const auto& path) {
+            m_context->registry->cada<commons::renderer>([this, &path](auto id) {
+                auto renderer = m_context->registry->get<commons::renderer>(id);
+                if (renderer->m_modelo &&
+                    std::filesystem::path(renderer->m_modelo->get_source_path()) == path)
+                    renderer->m_modelo->load_model(path.string());
+            });
+            m_components->refresh();
+        });
+        m_files->set_file_operation_guard([this]() { return !m_context->is_playing; });
+        m_files->set_file_moved_callback([this](const auto& from, const auto& to) {
+            editor::ui::relocate_scene_asset(m_context, from, to);
+            m_components->refresh();
+        });
+        m_window.set_file_drop_callback([this, drop_asset](const auto& paths, int x, int y) {
+            if (m_context->is_playing || editor::ui::viewport_input_blocked_by_modal())
+                return;
+            const auto directory = m_files->folder_at({x, y});
+            for (const auto& path : paths) {
+                try {
+                    const auto imported = m_files->import_file(
+                        path, directory.value_or(std::filesystem::path{})
+                    );
+                    m_files->set_asset_status(
+                        "Arquivo importado: " + imported.filename().string()
+                    );
+                    drop_asset(imported, {x, y});
+                } catch (const std::exception& error) {
+                    m_files->set_asset_status(error.what());
+                    if (editor::ui::files_view::supports_model(path))
+                        m_files->show_model_importer(
+                            path, directory.value_or(std::filesystem::path{}), error.what(),
+                            [drop_asset, x, y](const auto& imported) {
+                                drop_asset(imported, {x, y});
+                            }
+                        );
+                }
+            }
+        });
+        bgui::get_layout().add<editor::ui::asset_drop_overlay, bgui::layer::overlay>(
+            [this]() { return m_window.file_drag_hovered(); }, m_context
+        );
+        m_editor->add_panel<editor::ui::debug_view>();
+
+        m_render_system = m_window.add<commons::render_system>();
+        m_render_system->set_camera_filter([this](std::uint32_t entity) {
+            return m_scene->needs_camera_render(entity);
+        });
+        m_runtime_tools = &m_editor->add_panel<editor::ui::runtime_tools_view>(
+            m_window, m_context, m_render_system
+        );
+        register_runtime_commands();
+        bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(m_commands);
+    }
+
+    bool load_workspace(std::string& error) {
+        m_workspace = std::make_unique<editor::ui::editor_workspace>(m_ui_persistence);
+        m_workspace->set_project_file(m_project_path);
+        m_editor->set_project_loaded_callback([this](const std::string& path) {
+            m_context->clear_history();
+            m_context->selected_entity.reset();
+            m_context->project_root = std::filesystem::absolute(path).parent_path();
+            m_entities->refresh();
+            m_components->refresh();
+            std::string error;
+            if (!m_workspace->save_workspace(*m_files, error))
+                std::cerr << "[editor] " << error << '\n';
+            m_files->set_project_file(path);
+            m_editor->reset_ui();
+            m_project_path = path;
+            m_workspace->set_project_file(path);
+            if (!m_workspace->load_workspace(*m_files, error))
+                std::cerr << "[editor] " << error << '\n';
+        });
+        return m_workspace->load_workspace(*m_files, error);
+    }
+
+    int run() {
+        m_window.loop();
+        m_window.set_file_drop_callback({});
+
+        std::string error;
+        if (!m_workspace->save_workspace(*m_files, error))
+            std::cerr << "[editor] " << error << '\n';
+        std::string preview_error;
+        if (!editor::ui::save_project_preview(m_project_path, m_camera, preview_error))
+            std::cerr << "[editor] Could not save project preview: "
+                      << preview_error << '\n';
+        return 0;
+    }
+
+private:
+    void remember_recent_project() const {
+        std::vector<std::string> projects{m_project_path};
+        std::ifstream previous("editor-recent-projects.cfg");
+        for (std::string path; std::getline(previous, path);) {
+            if (!path.empty() && path != m_project_path && projects.size() < 12)
+                projects.push_back(path);
+        }
+        std::ofstream recent("editor-recent-projects.cfg", std::ios::trunc);
+        for (const auto& path : projects)
+            recent << path << '\n';
+    }
+
+    void register_runtime_commands() {
+        m_runtime_process = std::make_shared<editor::ui::runtime_process>();
+        const auto runtime_executable = m_executable.parent_path() /
+#ifdef _WIN32
+            "runtime_app.exe";
+#else
+            "runtime_app";
+#endif
+        m_editor->set_play_state_callback(
+            [this, runtime_executable](const bool playing, std::string& error) {
+                if (!playing) {
+                    if (!m_runtime_process->stop(error))
+                        return false;
+                    m_context->is_playing = false;
+                    return true;
+                }
+                std::error_code filesystem_error;
+                const auto temp_directory =
+                    std::filesystem::temp_directory_path(filesystem_error);
+                if (filesystem_error) {
+                    error = "Could not locate the temporary directory: " +
+                        filesystem_error.message();
+                    return false;
+                }
+                const auto project_file = temp_directory /
+                    ("cpp-bengine-runtime-" +
+                     std::to_string(std::chrono::steady_clock::now()
+                         .time_since_epoch().count()) + ".bengine");
+                if (!m_project_persistence->save(project_file.string(), error)) {
+                    std::filesystem::remove(project_file, filesystem_error);
+                    return false;
+                }
+                const bool started = m_runtime_process->start(
+                    runtime_executable, project_file, error
+                );
+                if (started)
+                    m_context->is_playing = true;
+                return started;
+            }
+        );
+        m_editor->set_runtime_running_callback([this](std::string& error) {
+            return m_runtime_process->running(error);
+        });
+        m_editor->set_runtime_pause_callback(
+            [this](const bool paused, std::string& error) {
+                return m_runtime_process->set_paused(paused, error);
+            }
+        );
+    }
+
+    commons::window& m_window;
+    std::string m_project_path;
+    std::filesystem::path m_executable;
+    std::shared_future<std::string> m_release_check;
+    std::shared_ptr<commons::ecs> m_registry;
+    std::uint32_t m_camera_entity{0};
+    std::shared_ptr<commons::camera> m_camera;
+    std::shared_ptr<editor::ui::editor_context> m_context;
+    std::shared_ptr<editor::ui::editor_commands> m_commands;
+    editor::ui::ui_persistence_system m_ui_persistence;
+    std::unique_ptr<editor::ui::project_persistence_system> m_project_persistence;
+    std::unique_ptr<editor::ui::editor_workspace> m_workspace;
+    bgui::menu_bar* m_menu_bar{nullptr};
+    bgui::dock* m_dock{nullptr};
+    std::unique_ptr<editor::ui::editor_ui> m_editor;
+    editor::ui::scene_view* m_scene{nullptr};
+    editor::ui::entities_view* m_entities{nullptr};
+    editor::ui::components_view* m_components{nullptr};
+    editor::ui::files_view* m_files{nullptr};
+    editor::ui::runtime_tools_view* m_runtime_tools{nullptr};
+    std::shared_ptr<commons::render_system> m_render_system;
+    std::shared_ptr<editor::ui::runtime_process> m_runtime_process;
+};
+
+}
+
 int main(int argc, char** argv) {
     std::string project_path = "project.bengine";
-    bool create_project = false;
     if (argc == 3 && std::string(argv[1]) == "--project") {
         project_path = argv[2];
     } else if (argc != 1) {
@@ -289,348 +638,40 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    auto release_check = std::async(std::launch::async, editor::ui::check_latest_release).share();
-    commons::window window("Bubble Engine " BUBBLE_VERSION_COMPLETA_STR " - Editor", argc == 1 ? 980 : 1200, 600);
+    auto release_check = std::async(
+        std::launch::async, editor::ui::check_latest_release
+    ).share();
+    commons::window window(
+        "Bubble Engine " BUBBLE_VERSION_COMPLETA_STR " - Editor",
+        argc == 1 ? 980 : 1200,
+        600
+    );
     window.add<commons::ui_system>();
     bgui::get_layout().add<editor::ui::ui_scale_system>();
-
     if (argc == 1) {
         bgui::linear* manager_root = nullptr;
         const auto choice = show_project_manager(window, manager_root, release_check);
         if (choice.path.empty())
             return 0;
         project_path = choice.path;
-        create_project = choice.create;
-        if (create_project)
+        if (choice.create)
             project_path = editor::ui::project_file_path(project_path).string();
     }
 
-    auto registry = window.get_ecs();
-
-    auto camera_entity = registry->create();
-    auto cube_entity = registry->create();
-
-    registry->add<commons::camera>(camera_entity);
-    registry->add<commons::renderer>(cube_entity, "assets/models/cube.obj");
-
-    auto camera = registry->get<commons::camera>(camera_entity.id);
-
-    registry->get<commons::transform>(cube_entity.id)->set_position({0.f, 0.f, 0.f});
-    registry->get<commons::transform>(camera_entity.id)->set_position({0.f, 0.f, 5.f});
-    registry->get<commons::transform>(camera_entity.id)->set_rotation({0.f, -90.f, 0.f});
-
-    auto editor_context = std::make_shared<editor::ui::editor_context>(registry);
-    editor_context->editor_camera_entity = camera_entity.id;
-    editor_context->project_root = std::filesystem::absolute(project_path).parent_path();
-
-    auto& editor_root = bgui::get_layout().add<bgui::linear>(
-        bgui::orientation::vertical
-    );
-    editor_root.style.layout.require_mode(
-        bgui::mode::match_parent,
-        bgui::mode::match_parent
-    );
-    editor_root.add<editor::ui::release_indicator>(release_check);
-    auto& menu_bar = editor_root.add<bgui::menu_bar>(editor_root);
-    auto& dock = editor_root.add<bgui::dock>();
-    dock.style.layout.require_mode(
-        bgui::mode::match_parent,
-        bgui::mode::match_parent
-    );
-
-    editor::ui::ui_persistence_system ui_persistence;
-    editor::ui::project_persistence_system project_persistence(
-        registry,
-        camera_entity.id,
-        &editor_context->entity_names,
-        &editor_context->hidden_entities,
-        &editor_context->locked_entities
-    );
-    if (argc == 3 || argc == 1) {
-        std::string error;
-        if (!project_persistence.load(project_path, error)) {
-            std::cerr << "[editor] Could not load project: " << error << '\n';
-            return 1;
-        }
-    }
-    {
-        std::vector<std::string> recent_projects{project_path};
-        std::ifstream previous_recent_file("editor-recent-projects.cfg");
-        for (std::string path; std::getline(previous_recent_file, path);) {
-            if (!path.empty() && path != project_path && recent_projects.size() < 12)
-                recent_projects.push_back(path);
-        }
-        std::ofstream recent_file("editor-recent-projects.cfg", std::ios::trunc);
-        for (const auto& path : recent_projects)
-            recent_file << path << '\n';
-    }
-    editor::ui::editor_ui editor(
-        dock,
-        menu_bar,
-        ui_persistence,
-        project_persistence,
-        registry,
-        project_path,
-        locate_build_directory(argv[0])
-    );
-    editor.set_editor_context(editor_context);
-    editor.set_history_callbacks(
-        [editor_context]() { editor_context->undo(); },
-        [editor_context]() { editor_context->redo(); }
-    );
-    editor.set_exit_callback([&window]() { window.close(); });
-    window.set_close_request_callback(
-        [&editor]() { editor.confirm_exit(); }
-    );
-
-    auto& scene = editor.add_panel<editor::ui::scene_view>(
+    bubble::editor_application application(
         window,
-        camera,
-        editor_context
+        project_path,
+        locate_build_directory(argv[0]),
+        std::filesystem::absolute(argv[0]),
+        std::move(release_check)
     );
-    auto& entities_panel = editor.add_panel<editor::ui::entities_view>(
-        editor_context,
-        [](std::uint32_t id) {
-            return "Entity " + std::to_string(id);
-        }
-    );
-    auto& components_panel = editor.add_panel<editor::ui::components_view>(
-        editor_context
-    );
-    editor::ui::files_view* asset_browser = nullptr;
-    auto drop_asset = [&scene, camera, editor_context, &entities_panel, &components_panel, &asset_browser](
-            const std::filesystem::path& asset,
-            const bgui::vec2i& mouse_position
-        ) {
-            if (editor_context->is_playing || editor::ui::viewport_input_blocked_by_modal()) return;
-            try {
-                if (editor::ui::is_lua_script(asset)) {
-                    auto target = entities_panel.entity_at(mouse_position);
-                    if (!target && scene.is_open()) {
-                        if (editor::ui::viewport_contains_drop(&scene.image(), mouse_position)) {
-                            target = scene.entity_at(mouse_position);
-                        }
-                    }
-                    if (target) {
-                        std::string error;
-                        if (editor::ui::attach_lua_script(editor_context, *target, asset, error)) {
-                            editor_context->selected_entity = target;
-                            components_panel.refresh();
-                            if (asset_browser) asset_browser->set_asset_status("Script associado à entidade.");
-                        } else if (asset_browser) asset_browser->set_asset_status(error);
-                    } else if (!components_panel.drop_asset(asset, mouse_position) && asset_browser) {
-                        asset_browser->set_asset_status("Solte o script sobre um objeto na cena ou na lista de entidades.");
-                    }
-                    return;
-                }
-                if (editor::ui::files_view::supports_image(asset) && scene.is_open() &&
-                    editor::ui::viewport_contains_drop(&scene.image(), mouse_position)) {
-                    const auto target = scene.entity_at(mouse_position);
-                    std::string error;
-                    if (target && editor::ui::apply_dropped_albedo(editor_context, *target, asset, error)) {
-                        editor_context->selected_entity = target;
-                        components_panel.refresh();
-                        if (asset_browser) asset_browser->set_asset_status("Textura aplicada ao objeto.");
-                    } else if (asset_browser) {
-                        asset_browser->set_asset_status(error.empty() ? "Solte a imagem sobre um objeto." : error);
-                    }
-                    return;
-                }
-                if (editor::ui::files_view::supports_model(asset))
-                    (void)editor::ui::asset_dependencies(std::filesystem::canonical(asset), true);
-                if (components_panel.drop_asset(asset, mouse_position))
-                    return;
-                if (!editor::ui::files_view::supports_model(asset))
-                    return;
-                if (!scene.is_open())
-                    return;
-
-                if (!editor::ui::viewport_contains_drop(&scene.image(), mouse_position))
-                    return;
-
-                const auto position = editor::ui::scene_drop_position(*camera, scene.image(), mouse_position);
-                if (!position) return;
-                auto model = std::make_unique<commons::model>(asset.string());
-                if (model->meshes.empty()) {
-                    if (asset_browser) asset_browser->show_model_importer(asset, {}, "O carregador não conseguiu importar este modelo.");
-                    return;
-                }
-                auto entity = editor_context->registry->create();
-                editor_context->registry->add<commons::renderer>(entity, model.release());
-                editor_context->registry->get<commons::transform>(entity.id)->set_position(*position);
-                editor_context->entity_names[entity.id] = asset.stem().string();
-                editor_context->record_entity_creation(entity.id);
-                editor_context->selected_entity = entity.id;
-                entities_panel.refresh();
-                components_panel.refresh();
-                if (asset_browser) asset_browser->set_asset_status("Modelo adicionado à cena.");
-            } catch (const std::exception& error) {
-                if (asset_browser) {
-                    asset_browser->set_asset_status(error.what());
-                    if (editor::ui::files_view::supports_model(asset)) asset_browser->show_model_importer(asset, {}, error.what());
-                }
-            }
-        };
-    auto& files_panel = editor.add_panel<editor::ui::files_view>(project_path, drop_asset);
-    asset_browser = &files_panel;
-    components_panel.set_model_import_error_callback([&files_panel](const auto& path, const auto& error) {
-        bgui::add_function([&files_panel, path, error]() { files_panel.show_model_importer(path, {}, error); });
-    });
-    files_panel.set_model_imported_callback([editor_context, &components_panel](const auto& path) {
-        editor_context->registry->cada<commons::renderer>([&](auto id) {
-            auto renderer = editor_context->registry->get<commons::renderer>(id);
-            if (renderer->m_modelo && std::filesystem::path(renderer->m_modelo->get_source_path()) == path)
-                renderer->m_modelo->load_model(path.string());
-        });
-        components_panel.refresh();
-    });
-    files_panel.set_file_operation_guard([editor_context]() { return !editor_context->is_playing; });
-    files_panel.set_file_moved_callback([editor_context, &components_panel](const auto& from, const auto& to) {
-        editor::ui::relocate_scene_asset(editor_context, from, to);
-        components_panel.refresh();
-    });
-    window.set_file_drop_callback([&files_panel, drop_asset, editor_context](const auto& paths, int x, int y) {
-        if (editor_context->is_playing || editor::ui::viewport_input_blocked_by_modal()) return;
-        const auto directory = files_panel.folder_at({x, y});
-        for (const auto& path : paths) {
-            try {
-                const auto imported = files_panel.import_file(path, directory.value_or(std::filesystem::path{}));
-                files_panel.set_asset_status("Arquivo importado: " + imported.filename().string());
-                drop_asset(imported, {x, y});
-            } catch (const std::exception& error) {
-                files_panel.set_asset_status(error.what());
-                if (editor::ui::files_view::supports_model(path))
-                    files_panel.show_model_importer(path, directory.value_or(std::filesystem::path{}), error.what(),
-                        [drop_asset, x, y](const auto& imported) { drop_asset(imported, {x, y}); });
-            }
-        }
-    });
-    bgui::get_layout().add<editor::ui::asset_drop_overlay, bgui::layer::overlay>([&window]() { return window.file_drag_hovered(); }, editor_context);
-    editor.add_panel<editor::ui::debug_view>();
-    auto render_system = window.add<commons::render_system>();
-    render_system->set_camera_filter([&scene](std::uint32_t entity) {
-        return scene.needs_camera_render(entity);
-    });
-    auto& runtime_tools_panel =
-        editor.add_panel<editor::ui::runtime_tools_view>(
-            window,
-            editor_context,
-            render_system
-        );
-    auto runtime_process = std::make_shared<editor::ui::runtime_process>();
-    auto runtime_executable = std::filesystem::absolute(argv[0]).parent_path() /
-#ifdef _WIN32
-        "runtime_app.exe";
-#else
-        "runtime_app";
-#endif
-    editor.set_play_state_callback(
-        [runtime_process, runtime_executable, &project_persistence, editor_context](
-            const bool playing,
-            std::string& error
-        ) {
-            if (!playing) {
-                if (!runtime_process->stop(error))
-                    return false;
-                editor_context->is_playing = false;
-                return true;
-            }
-
-            std::error_code filesystem_error;
-            const auto temp_directory =
-                std::filesystem::temp_directory_path(filesystem_error);
-            if (filesystem_error) {
-                error = "Could not locate the temporary directory: " +
-                    filesystem_error.message();
-                return false;
-            }
-
-            const auto project_file = temp_directory /
-                ("cpp-bengine-runtime-" +
-                 std::to_string(
-                     std::chrono::steady_clock::now()
-                         .time_since_epoch()
-                         .count()
-                 ) +
-                 ".bengine");
-            if (!project_persistence.save(project_file.string(), error)) {
-                std::filesystem::remove(project_file, filesystem_error);
-                return false;
-            }
-
-            const bool started = runtime_process->start(
-                runtime_executable,
-                project_file,
-                error
-            );
-            if (started)
-                editor_context->is_playing = true;
-            return started;
-        }
-    );
-    editor.set_runtime_running_callback(
-        [runtime_process](std::string& error) {
-            return runtime_process->running(error);
-        }
-    );
-    editor.set_runtime_pause_callback(
-        [runtime_process](const bool paused, std::string& error) {
-            return runtime_process->set_paused(paused, error);
-        }
-    );
-    // Recreate file windows first so configuration can resolve their titles.
-    auto ui_state_root = std::filesystem::absolute(project_path).parent_path();
-    auto session_path = ui_state_root / ".editor-session.cfg";
-    auto layout_path = ui_state_root / ".editor-ui.cfg";
-    files_panel.restore_session(session_path);
-    std::string ui_error;
-    if (std::filesystem::exists(layout_path) && !ui_persistence.load(layout_path.string(), ui_error))
-        std::cerr << "[editor] " << ui_error << '\n';
-
-    editor.set_project_loaded_callback(
-        [&entities_panel, &components_panel, &files_panel, &ui_persistence,
-         &ui_state_root, &session_path, &layout_path, &editor, editor_context](
-            const std::string& loaded_project_path
-        ) {
-        editor_context->clear_history();
-        editor_context->selected_entity.reset();
-        editor_context->project_root = std::filesystem::absolute(loaded_project_path).parent_path();
-        entities_panel.refresh();
-        components_panel.refresh();
-        std::string error;
-        if (!files_panel.save_session(session_path))
-            std::cerr << "[editor] Could not save open documents.\n";
-        if (!ui_persistence.save(layout_path.string(), error))
-            std::cerr << "[editor] " << error << '\n';
-        files_panel.set_project_file(loaded_project_path);
-        editor.reset_ui();
-        ui_state_root = std::filesystem::absolute(loaded_project_path).parent_path();
-        session_path = ui_state_root / ".editor-session.cfg";
-        layout_path = ui_state_root / ".editor-ui.cfg";
-        files_panel.restore_session(session_path);
-        if (std::filesystem::exists(layout_path) && !ui_persistence.load(layout_path.string(), error))
-            std::cerr << "[editor] " << error << '\n';
-    });
-
-    (void)scene;
-    (void)entities_panel;
-    (void)components_panel;
-    (void)files_panel;
-    (void)runtime_tools_panel;
-
-    bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(editor_context);
-
-    window.loop();
-    window.set_file_drop_callback({});
-
-    if (!files_panel.save_session(session_path))
-        std::cerr << "[editor] Could not save open documents.\n";
-    if (!ui_persistence.save(layout_path.string(), ui_error))
-        std::cerr << "[editor] " << ui_error << '\n';
-
-    std::string preview_error;
-    if (!editor::ui::save_project_preview(project_path, camera, preview_error))
-        std::cerr << "[editor] Could not save project preview: " << preview_error << '\n';
-
-    return 0;
+    std::string error;
+    if (!application.load_project(error)) {
+        std::cerr << "[editor] Could not load project: " << error << '\n';
+        return 1;
+    }
+    application.register_default_panels();
+    if (!application.load_workspace(error))
+        std::cerr << "[editor] " << error << '\n';
+    return application.run();
 }

@@ -5,6 +5,8 @@
 #include "project_persistence_system.hpp"
 #include "ui_persistence_system.hpp"
 #include "editor_context.hpp"
+#include "editor_commands.hpp"
+#include "panel_manager.hpp"
 
 #include <bgui.hpp>
 #include <lay/dock.hpp>
@@ -14,7 +16,6 @@
 #include <array>
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace bgui {
 class linear;
@@ -55,17 +56,14 @@ public:
         std::function<void()> undo_callback,
         std::function<void()> redo_callback
     );
+    void set_editor_commands(std::shared_ptr<editor_commands> commands);
     void set_exit_callback(std::function<void()> callback);
     void confirm_exit();
     void set_editor_context(std::shared_ptr<editor_context> context);
 
     template <typename T, typename... Args>
     T& add_panel(Args&&... args) {
-        auto panel = std::make_unique<T>(std::forward<Args>(args)...);
-        auto& result = *panel;
-        result.build(m_dock);
-        m_panels.push_back(std::move(panel));
-        return result;
+        return m_panel_manager.add<T>(std::forward<Args>(args)...);
     }
 
     void update();
@@ -73,7 +71,9 @@ public:
 
 private:
     bgui::dock& m_dock;
+    panel_manager m_panel_manager;
     std::shared_ptr<editor_context> m_context;
+    std::shared_ptr<editor_commands> m_commands;
     project_persistence_system& m_project_persistence;
     std::shared_ptr<commons::ecs> m_registry;
     std::string m_project_path;
@@ -117,7 +117,6 @@ private:
     std::filesystem::path m_repository_root;
     std::unique_ptr<build_process> m_build_process;
     std::function<void()> m_exit_callback;
-    std::vector<std::unique_ptr<panel>> m_panels;
 
     void create_project_modal(
         const std::string& selected_path,

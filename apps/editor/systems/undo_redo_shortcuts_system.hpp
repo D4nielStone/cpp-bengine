@@ -1,6 +1,7 @@
 #pragma once
 
 #include "editor_context.hpp"
+#include "editor_commands.hpp"
 #include "entity_clipboard.hpp"
 #include "viewport_input_state.hpp"
 
@@ -18,15 +19,22 @@ public:
     explicit undo_redo_shortcuts_system(
         std::shared_ptr<editor_context> context
     )
-        : m_context(std::move(context)) {
+        : undo_redo_shortcuts_system(
+              std::make_shared<editor_commands>(std::move(context))
+          ) {}
+
+    explicit undo_redo_shortcuts_system(
+        std::shared_ptr<editor_commands> commands
+    )
+        : m_commands(std::move(commands)) {
         receives_input(false);
         set_flex(false);
     }
 
     void on_update() override {
         const bool f3_down = bgui::get_pressed(bgui::input_key::f3);
-        if (m_context && f3_down && !m_f3_was_down)
-            m_context->show_colliders = !m_context->show_colliders;
+        if (m_commands && f3_down && !m_f3_was_down)
+            m_commands->execute(editor_command::toggle_colliders);
         m_f3_was_down = f3_down;
 
         const bool control_down =
@@ -41,21 +49,22 @@ public:
             bgui::get_pressed(bgui::input_key::right_shift);
 
         const bool editing_text = dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) != nullptr;
-        if (!editing_text && m_context && z_down && !m_z_was_down) {
+        if (!editing_text && m_commands && z_down && !m_z_was_down) {
             if (shift_down)
-                m_context->redo();
+                m_commands->execute(editor_command::redo);
             else
-                m_context->undo();
+                m_commands->execute(editor_command::undo);
         }
-        if (!editing_text && m_context && y_down && !m_y_was_down)
-            m_context->redo();
+        if (!editing_text && m_commands && y_down && !m_y_was_down)
+            m_commands->execute(editor_command::redo);
 
         const bool copy_down = control_down && bgui::get_pressed(bgui::input_key::c);
         const bool paste_down = control_down && bgui::get_pressed(bgui::input_key::v);
-        if (!editing_text && m_context && !m_context->is_playing && !viewport_input_blocked_by_modal()) {
+        const auto context = m_context();
+        if (!editing_text && context && !context->is_playing && !viewport_input_blocked_by_modal()) {
             std::string error;
-            if (copy_down && !m_c_was_down) m_clipboard.copy(m_context, error);
-            if (paste_down && !m_v_was_down) m_clipboard.paste(m_context, error);
+            if (copy_down && !m_c_was_down) m_clipboard.copy(context, error);
+            if (paste_down && !m_v_was_down) m_clipboard.paste(context, error);
             if (!error.empty()) {
                 bgui::add_function([error]() {
                     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
@@ -71,7 +80,11 @@ public:
     }
 
 private:
-    std::shared_ptr<editor_context> m_context;
+    std::shared_ptr<editor_context> m_context() const {
+        return m_commands ? m_commands->context() : nullptr;
+    }
+
+    std::shared_ptr<editor_commands> m_commands;
     entity_clipboard m_clipboard;
     bool m_c_was_down{false}, m_v_was_down{false};
     bool m_z_was_down{false};

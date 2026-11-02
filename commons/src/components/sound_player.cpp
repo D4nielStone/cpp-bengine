@@ -1,7 +1,7 @@
 #include "components/sound_player.hpp"
 
 #include <cmath>
-#include <string_view>
+#include <utility>
 
 using namespace COMMONS_NS;
 
@@ -10,7 +10,9 @@ bool sound_player::analyze(const rapidjson::Value& value) {
         return false;
 
     if (value.HasMember("clip")) {
-        if (!value["clip"].IsString())
+        if (!value["clip"].IsString() ||
+            value["clip"].GetStringLength() !=
+                std::char_traits<char>::length(value["clip"].GetString()))
             return false;
         clip = value["clip"].GetString();
     }
@@ -43,7 +45,8 @@ bool sound_player::serialize(
     rapidjson::Value& value,
     rapidjson::Document::AllocatorType& allocator
 ) const {
-    if (!value.IsObject() || !std::isfinite(volume) || !std::isfinite(pitch) ||
+    if (!value.IsObject() || clip.find('\0') != std::string::npos ||
+        !std::isfinite(volume) || !std::isfinite(pitch) ||
         !std::isfinite(radius) || volume < 0.f || volume > 1.f ||
         pitch < 0.1f || pitch > 3.f || radius < 0.1f || radius > 10000.f)
         return false;

@@ -203,6 +203,7 @@ editor_ui::editor_ui(
     std::filesystem::path build_directory
 )
     : m_dock(dock),
+      m_panel_manager(dock),
       m_project_persistence(project_persistence),
       m_registry(std::move(registry)),
       m_project_path(std::move(project_path)),
@@ -250,11 +251,15 @@ editor_ui::editor_ui(
         0.3f,
         [this](bgui::context_menu& menu) {
             menu.add_button("Undo", [this]() {
-                if (m_undo_callback)
+                if (m_commands)
+                    m_commands->execute(editor_command::undo);
+                else if (m_undo_callback)
                     m_undo_callback();
             });
             menu.add_button("Redo", [this]() {
-                if (m_redo_callback)
+                if (m_commands)
+                    m_commands->execute(editor_command::redo);
+                else if (m_redo_callback)
                     m_redo_callback();
             });
         }
@@ -268,7 +273,10 @@ editor_ui::editor_ui(
                     m_context->selected_entity = m_context->editor_camera_entity;
             });
             menu.add_button("Show/Hide Colliders    F3", [this]() {
-                if (m_context) m_context->show_colliders = !m_context->show_colliders;
+                if (m_commands)
+                    m_commands->execute(editor_command::toggle_colliders);
+                else if (m_context)
+                    m_context->show_colliders = !m_context->show_colliders;
             });
             menu.add_separator();
             menu.add_button("Zoom In     Ctrl +", []() { change_ui_scale(1); });
@@ -723,6 +731,12 @@ void editor_ui::set_history_callbacks(
 ) {
     m_undo_callback = std::move(undo_callback);
     m_redo_callback = std::move(redo_callback);
+}
+
+void editor_ui::set_editor_commands(
+    std::shared_ptr<editor_commands> commands
+) {
+    m_commands = std::move(commands);
 }
 
 void editor_ui::create_global_lighting_modal() {
@@ -1345,9 +1359,7 @@ void editor_ui::confirm_exit() {
 }
 
 void editor_ui::update() {
-    for (auto& panel : m_panels)
-        if (panel)
-            panel->update();
+    m_panel_manager.update();
 }
 
 }

@@ -452,7 +452,7 @@ void editor::grid_gizmo::draw_sound_player_area(
 {
     if (!viewport_camera.flag_fb || viewport_camera.viewportFBO.x <= 0 ||
         viewport_camera.viewportFBO.y <= 0 || viewport.z <= 0 || viewport.w <= 0 ||
-        !std::isfinite(radius) || radius <= 0.f ||
+        !std::isfinite(radius) || radius <= 0.f || radius > 10000.f ||
         !std::isfinite(position.x) || !std::isfinite(position.y) ||
         !std::isfinite(position.z))
         return;

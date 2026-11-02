@@ -13,6 +13,15 @@
 #include <functional>
 
 namespace {
+class counting_panel final : public editor::ui::editor_panel {
+public:
+    void build(bgui::dock&) override { ++build_count; }
+    void update() override { ++update_count; }
+
+    int build_count{0};
+    int update_count{0};
+};
+
 template<class T, class Predicate>
 T* find(bgui::element& root, Predicate predicate) {
     if (auto* item = dynamic_cast<T*>(&root); item && predicate(*item))
@@ -99,6 +108,40 @@ TEST_F(EditorMenuTest, SavedProjectExitsWithoutOpeningSaveConfirmation) {
     auto scene = path;
     scene.replace_extension(".scene");
     std::filesystem::remove(scene);
+}
+
+TEST(EditorCommandsTest, DispatchesHistoryAndColliderCommands) {
+    auto context = std::make_shared<editor::ui::editor_context>(
+        std::make_shared<commons::ecs>()
+    );
+    editor::ui::editor_commands commands(context);
+    int undo_count = 0;
+    int redo_count = 0;
+    context->record_action(
+        [&]() { ++undo_count; },
+        [&]() { ++redo_count; }
+    );
+
+    EXPECT_TRUE(commands.execute(editor::ui::editor_command::undo));
+    EXPECT_TRUE(commands.execute(editor::ui::editor_command::redo));
+    EXPECT_EQ(undo_count, 1);
+    EXPECT_EQ(redo_count, 1);
+    EXPECT_FALSE(context->show_colliders);
+    EXPECT_TRUE(commands.execute(editor::ui::editor_command::toggle_colliders));
+    EXPECT_TRUE(context->show_colliders);
+}
+
+TEST(PanelManagerTest, OwnsPanelsAndForwardsUpdates) {
+    bgui::scoped_interface ui_scope;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::panel_manager panels(dock);
+
+    auto& panel = panels.add<counting_panel>();
+    EXPECT_EQ(panel.build_count, 1);
+    EXPECT_EQ(panel.update_count, 0);
+
+    panels.update();
+    EXPECT_EQ(panel.update_count, 1);
 }
 
 TEST_F(EditorMenuTest, UnsavedProjectRequiresConfirmationAndCancelKeepsEditorOpen) {

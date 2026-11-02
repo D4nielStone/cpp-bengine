@@ -17,9 +17,9 @@
 
 namespace editor::ui {
 
-class panel {
+class editor_panel {
 public:
-    virtual ~panel() = default;
+    virtual ~editor_panel() = default;
 
     virtual void build(bgui::dock& parent) = 0;
     virtual void update() = 0;
@@ -237,5 +237,7 @@ protected:
         std::function<std::string()>
     ) {}
 };
+
+using panel = editor_panel;
 
 }
