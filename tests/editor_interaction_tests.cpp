@@ -621,10 +621,10 @@ TEST_F(EditorInteractionTest, SelectedOrbitUsesWorldPivotAndObjectRelativeDistan
     registry->get<commons::transform>(parent.id)->set_position({20.f, 0.f, 0.f});
     target->set_parent(parent.id, false);
     target->set_position({3.f, 4.f, 5.f});
-    const auto small = editor::ui::selected_orbit_distance(*target, nullptr, 45.f);
+    const auto initial_distance = editor::ui::selected_orbit_distance(*target, nullptr, 45.f);
     target->set_scale({4.f, 4.f, 4.f});
     const auto large = editor::ui::selected_orbit_distance(*target, nullptr, 45.f);
-    EXPECT_NEAR(large, small * 4.f, 0.001f);
+    EXPECT_NEAR(large, initial_distance * 4.f, 0.001f);
     float time = 0.f;
     editor::ui::camera_movement_system movement(camera, image, {}, [&] { return time; });
     movement.setup(registry);
@@ -1040,9 +1040,9 @@ TEST(DirectionGizmo, FitsTopRightWithScalingAndSmallViewports) {
     EXPECT_EQ(rect.x, 596);
     EXPECT_EQ(rect.y, 54);
     EXPECT_EQ(rect.z, 200);
-    const auto small = editor::ui::direction_gizmo_rect({0, 0, 70, 60}, 1.f);
-    EXPECT_EQ(small.z, 36);
-    EXPECT_EQ(small.x + small.z, 58);
+    const auto small_viewport = editor::ui::direction_gizmo_rect({0, 0, 70, 60}, 1.f);
+    EXPECT_EQ(small_viewport.z, 36);
+    EXPECT_EQ(small_viewport.x + small.z, 58);
     EXPECT_EQ(editor::ui::direction_gizmo_rect({0, 0, 0, 0}, 1.f).z, 0);
 }
 
