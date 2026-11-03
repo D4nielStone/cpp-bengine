@@ -101,6 +101,27 @@ bool parse_mesh(
             face.push_back(index.GetUint());
         }
     }
+    if (value.HasMember("face_groups")) {
+        const auto& groups = value["face_groups"];
+        if (!groups.IsArray() || groups.Size() > max_faces) {
+            error = "Invalid face groups."; return false;
+        }
+        for (const auto& group : groups.GetArray()) {
+            if (!group.IsObject() || !group.HasMember("name") || !group["name"].IsString() ||
+                !group.HasMember("faces") || !group["faces"].IsArray() || group["faces"].Size() > max_faces) {
+                error = "Invalid face group."; return false;
+            }
+            editable_face_group loaded;
+            loaded.name.assign(group["name"].GetString(), group["name"].GetStringLength());
+            for (const auto& index : group["faces"].GetArray()) {
+                if (!index.IsUint() || index.GetUint() >= mesh.faces.size()) {
+                    error = "Face group references an invalid face."; return false;
+                }
+                loaded.faces.push_back(index.GetUint());
+            }
+            mesh.face_groups.push_back(std::move(loaded));
+        }
+    }
     mesh.recalculate_normals();
     return mesh.validate(error);
 }
@@ -130,6 +151,14 @@ bool editable_mesh_data::validate(std::string& error) const {
                 error = "Editable mesh face references an invalid vertex.";
                 return false;
             }
+        }
+    }
+    for (const auto& group : face_groups) {
+        if (group.name.empty() || group.faces.empty()) {
+            error = "Face group must have a name and faces."; return false;
+        }
+        for (auto face : group.faces) if (face >= faces.size()) {
+            error = "Face group references an invalid face."; return false;
         }
     }
     return true;
@@ -279,10 +308,30 @@ bool save_editable_model(
             writer.EndArray();
         }
         writer.EndArray();
+        writer.Key("face_groups");
+        writer.StartArray();
+        for (const auto& group : mesh.face_groups) {
+            writer.StartObject();
+            writer.Key("name"); writer.String(group.name.c_str());
+            writer.Key("faces"); writer.StartArray();
+            for (auto face : group.faces) writer.Uint(face);
+            writer.EndArray(); writer.EndObject();
+        }
+        writer.EndArray();
         writer.EndObject();
     }
     writer.EndArray();
     writer.EndObject();
+
+    {
+        std::ifstream existing(path, std::ios::binary | std::ios::ate);
+        if (existing && existing.tellg() == std::streamoff(buffer.GetSize())) {
+            std::string contents(buffer.GetSize(), '\0');
+            if (existing.seekg(0).read(contents.data(), contents.size()) &&
+                contents.compare(0, contents.size(), buffer.GetString(), buffer.GetSize()) == 0)
+                return true;
+        }
+    }
 
     static std::atomic_uint64_t next_temp{0};
     auto temporary = path;

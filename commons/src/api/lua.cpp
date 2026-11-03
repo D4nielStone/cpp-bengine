@@ -9,6 +9,7 @@
 #include "components/sound_listener.hpp"
 #include "components/sound_player.hpp"
 #include "core/ecs.hpp"
+#include "components/hud.hpp"
 
 namespace commons::api {
 
@@ -40,6 +41,19 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
             []() { return bgui::vec3{0.f, 0.f, 0.f}; },
             [](float x, float y, float z) { return bgui::vec3{x, y, z}; }),
         "x", &bgui::vec3::x, "y", &bgui::vec3::y, "z", &bgui::vec3::z);
+    lua.new_usertype<hud_element>("HudElement", sol::no_constructor,
+        "text", &hud_element::text, "width", &hud_element::width,
+        "height", &hud_element::height, "scale", &hud_element::scale,
+        "visible", &hud_element::visible, "position", &hud_element::position,
+        "rotation", &hud_element::rotation, "world_scale", &hud_element::world_scale,
+        "depth", &hud_element::depth, "ConsumeClick", &hud_element::consume_click);
+    lua.new_usertype<hud>("HUD", sol::no_constructor,
+        "enabled", &hud::enabled, "Add", &hud::add,
+        "count", sol::property([](const hud& h) { return h.elements.size(); }),
+        "Get", [](const hud& h, int index) -> std::shared_ptr<hud_element> {
+            return index >= 0 && static_cast<size_t>(index) < h.elements.size()
+                ? h.elements[index] : nullptr;
+        });
     lua.new_usertype<transform>("Transform", sol::no_constructor,
         "position", sol::property(&transform::get_world_position, &transform::set_world_position),
         "localPosition", sol::property(&transform::get_position, &transform::set_position),
@@ -139,10 +153,20 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
     lua.new_usertype<game_object>("GameObject", sol::no_constructor,
         "id", sol::readonly(&game_object::id),
         "transform", sol::property(&game_object::get_transform),
+        "AddHUD", [](const game_object& object) -> std::shared_ptr<hud> {
+            auto owner = object.registry.lock();
+            if (!owner || !owner->is_alive(object.id)) return nullptr;
+            if (!owner->has<hud>(object.id)) {
+                entity ent; ent.id = object.id;
+                owner->add<hud>(ent);
+            }
+            return owner->get<hud>(object.id);
+        },
         "GetComponent", [](const game_object& object, const std::string& name, sol::this_state state) -> sol::object {
             auto owner = object.registry.lock();
             if (!owner) return sol::make_object(state, sol::nil);
             if (name == "Transform") return sol::make_object(state, object.get_transform());
+            if (name == "HUD") return sol::make_object(state, owner->get<hud>(object.id));
             if (name == "Renderer") return sol::make_object(state, owner->get<renderer>(object.id));
             if (name == "Camera") return sol::make_object(state, owner->get<camera>(object.id));
             if (name == "DirectionalLight") return sol::make_object(state, owner->get<directional_light>(object.id));

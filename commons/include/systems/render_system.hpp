@@ -5,10 +5,14 @@
 #include <cstdint>
 #include <functional>
 #include <utility>
+#include <string>
+#include <vector>
+#include <unordered_map>
 
 namespace COMMONS_NS {
     class camera;
     class renderer;
+    struct hud_element;
   /**
    * @brief Classe responsável por gerenciar o sistema de renderização do jogo.
    * @brief Atualiza os framebuffers das câmeras, configura as luzes e renderiza os objetos na tela.
@@ -51,6 +55,14 @@ namespace COMMONS_NS {
         int resolution{0};
       };
       shadow_map m_directional_shadow, m_spot_shadow;
+      struct text_mesh {
+        std::weak_ptr<hud_element> owner;
+        std::string text;
+        unsigned int vao{0}, buffer{0};
+        int vertices{0};
+      };
+      std::unordered_map<const hud_element*, text_mesh> m_text_meshes;
+      void draw_world_text(const std::shared_ptr<ecs>&, camera&);
       bool prepare_shadow_map(shadow_map& map, int resolution);
       double m_last_render_time_ms{0.0};
       std::size_t m_last_camera_count{0};

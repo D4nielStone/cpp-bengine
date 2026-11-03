@@ -222,6 +222,8 @@ TEST_F(EditorRenderTest, KeepsEmbeddedModelTexturesWhenLoadingSavedScene) {
         nullptr
     );
 
+    EXPECT_NE(renderer->m_modelo->meshes[0].getMaterial()
+        .getTextura("tex_albedo").embedded->m_revision, 0u);
     editor::ui::project_persistence_system persistence(registry, camera.id);
     const auto project_path = folder / "project.bengine";
     std::string error;
@@ -233,6 +235,7 @@ TEST_F(EditorRenderTest, KeepsEmbeddedModelTexturesWhenLoadingSavedScene) {
     const auto loaded_texture = loaded_renderer->m_modelo->meshes[0]
         .getMaterial().getTextura("tex_albedo");
     ASSERT_NE(loaded_texture.embedded, nullptr);
+    EXPECT_NE(loaded_texture.embedded->m_revision, 0u);
     loaded_texture.bind(0);
     GLint binding{};
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);
@@ -1183,6 +1186,53 @@ TEST_F(EditorRenderTest, ExplicitViewPreservesGlStateAndUsesFullScene) {
     EXPECT_EQ(glGetError(),GL_NO_ERROR);
 }
 
+#include "game_view.hpp"
+
+TEST_F(EditorRenderTest, GamePanelRendersToItsOwnFramebuffer) {
+    bgui::scoped_interface scope;
+    bgui::get_context().m_size = {900, 650};
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto source = registry->get<commons::camera>(entity.id);
+    source->viewportFBO = {180, 100};
+    source->createFB();
+    ASSERT_TRUE(source->flag_fb);
+
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    editor::ui::game_view panel(context);
+    panel.build(dock);
+    const auto find_image = [](auto&& self, bgui::element& element) -> bgui::image* {
+        if (auto* image = dynamic_cast<bgui::image*>(&element);
+            image && image->has_class("editor-viewport-surface")) return image;
+        if (auto* layout = element.as_layout())
+            for (auto& [layer, children] : layout->get_elements())
+                for (auto& child : children)
+                    if (auto* image = self(self, *child)) return image;
+        return nullptr;
+    };
+    auto* image = find_image(find_image, dock);
+    ASSERT_NE(image, nullptr);
+    for (const auto size : {bgui::vec2i{900, 650}, bgui::vec2i{740, 500}}) {
+        bgui::get_context().m_size = size;
+        for (int i = 0; i < 3; ++i) bgui::on_update();
+        const auto texture = image->get_texture();
+        ASSERT_NE(texture.m_id, 0u);
+        EXPECT_NE(texture.m_id, source->framebuffer_texture());
+        EXPECT_EQ(source->viewportFBO, (bgui::vec2i{180, 100}));
+        glBindTexture(GL_TEXTURE_2D, texture.m_id);
+        GLint width = 0, height = 0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+        EXPECT_EQ(width, image->processed_width());
+        EXPECT_EQ(height, image->processed_height());
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
 TEST_F(EditorRenderTest, ModelModesCacheDenseGeometryAndUseGpuPreview) {
     bgui::scoped_interface scope;
     bgui::get_context().m_size={1000,700};
@@ -1221,4 +1271,36 @@ TEST_F(EditorRenderTest, ModelModesCacheDenseGeometryAndUseGpuPreview) {
         EXPECT_NE(panel.preview_camera().framebuffer_texture(),0u);
         EXPECT_EQ(glGetError(),GL_NO_ERROR);
     }
+    context->model_view_mode = 0;
+    const auto original_size = panel.preview_camera().viewportFBO;
+    bgui::get_context().m_size = {750, 510};
+    for (int i = 0; i < 3; ++i) bgui::on_update();
+    const auto& camera = panel.preview_camera();
+    EXPECT_NE(camera.viewportFBO, original_size);
+    glBindTexture(GL_TEXTURE_2D, camera.framebuffer_texture());
+    GLint width = 0, height = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+    EXPECT_EQ(width, camera.viewportFBO.x);
+    EXPECT_EQ(height, camera.viewportFBO.y);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST_F(EditorRenderTest, CameraReleaseClearsHandlesAndAllowsRecreation) {
+    commons::camera camera;
+    camera.viewportFBO = {16, 16};
+    camera.createFB();
+    ASSERT_TRUE(camera.flag_fb);
+    ASSERT_NE(camera.framebuffer_texture(), 0u);
+    camera.deleteFB();
+    EXPECT_FALSE(camera.flag_fb);
+    EXPECT_EQ(camera.fbo, 0u);
+    EXPECT_EQ(camera.rbo, 0u);
+    EXPECT_EQ(camera.framebuffer_texture(), 0u);
+    camera.deleteFB();
+    camera.createFB();
+    EXPECT_TRUE(camera.flag_fb);
+    EXPECT_NE(camera.framebuffer_texture(), 0u);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
 }

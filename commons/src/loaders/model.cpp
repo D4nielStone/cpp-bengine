@@ -74,11 +74,13 @@ void model::draw() {
         update_animation(std::chrono::duration<double>(std::chrono::steady_clock::now() - m_animation_start).count());
     for(auto& mesh : meshes) {
         if (!mesh.isLoaded()) mesh.load();
-        mesh.draw(m_shader);
+        mesh.draw(getShader());
     }
 }
 
 shader& model::getShader() {
+    if (!m_shader.ID)
+        m_shader.compilar("pbr.vert", "pbr.frag");
     return m_shader;
 }
 
@@ -114,7 +116,18 @@ bool model::source_available() const {
     return available;
 }
 
-void model::load_model_data(const std::string& path) {
+std::unique_ptr<model> model::prepare(const std::string& path) {
+    return prepare(path, nullptr);
+}
+
+std::unique_ptr<model> model::prepare(const std::string& path, const model_import_options* options) {
+    auto result = std::unique_ptr<model>(new model(shader::deferred_t{}));
+    result->load_model_data(path, false, options);
+    if (result->meshes.empty()) throw std::runtime_error("Model has no geometry: " + path);
+    return result;
+}
+
+void model::load_model_data(const std::string& path, bool upload, const model_import_options* options) {
     meshes.clear();
     m_pose.reset();
     m_source_missing = false;
@@ -128,6 +141,7 @@ void model::load_model_data(const std::string& path) {
         editable_model_data editable;
         std::string error;
         if (!load_editable_model(resolved_path, editable, error)) {
+            if (!upload) throw std::runtime_error(error);
             debugging::emit(erro, error);
             return;
         }
@@ -160,11 +174,12 @@ void model::load_model_data(const std::string& path) {
     }
 
     auto pose = std::make_shared<model_pose>();
-    pose->options = read_model_import_options(resolved_path);
+    pose->options = options ? *options : read_model_import_options(resolved_path);
     if (bgui::resource_files::embedded()) pose->importer->SetIOHandler(new resource_io());
     pose->scene = pose->importer->ReadFile(resolved_string, pose->options.flags());
     if (!pose->scene || !pose->scene->mRootNode || !pose->scene->HasMeshes() ||
         (pose->scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) {
+        if (!upload) throw std::runtime_error(resolved_string + ": " + pose->importer->GetErrorString());
         debugging::emit(erro, pose->importer->GetErrorString());
         return;
     }
@@ -175,10 +190,11 @@ void model::load_model_data(const std::string& path) {
     m_animation_clip = 0;
     while (m_animation_clip < m_pose->scene->mNumAnimations &&
         m_pose->options.excluded_animations.contains(m_animation_clip)) ++m_animation_clip;
+    embedded_textures decoded;
     for (const auto& instance : m_pose->instances)
-        meshes.push_back(process_mesh(m_pose->scene->mMeshes[instance.mesh], m_pose->scene));
+        meshes.push_back(process_mesh(m_pose->scene->mMeshes[instance.mesh], m_pose->scene, decoded));
     update_animation(0);
-    for (auto& mesh : meshes) mesh.load();
+    if (upload) for (auto& mesh : meshes) mesh.load();
     m_animation_start = std::chrono::steady_clock::now();
 }
 
@@ -219,6 +235,11 @@ void model::process_node(aiNode* node, const aiScene* scene) {
 }
 
 mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
+    embedded_textures decoded;
+    return process_mesh(mesh, scene, decoded);
+}
+
+mesh model::process_mesh(aiMesh* mesh, const aiScene* scene, embedded_textures& decoded) {
     std::vector<vertex> vertices;
     std::vector<unsigned int> indices;
 
@@ -267,24 +288,24 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
     commons::material bmat;
 
     if(hasTextura(ai_material, aiTextureType_BASE_COLOR))
-        bmat.set_texture("tex_albedo", load_texture(ai_material, aiTextureType_BASE_COLOR));
+        bmat.set_texture("tex_albedo", load_texture(ai_material, aiTextureType_BASE_COLOR, decoded));
     else if(hasTextura(ai_material, aiTextureType_DIFFUSE))
-        bmat.set_texture("tex_albedo", load_texture(ai_material, aiTextureType_DIFFUSE));
+        bmat.set_texture("tex_albedo", load_texture(ai_material, aiTextureType_DIFFUSE, decoded));
 
     if(hasTextura(ai_material, aiTextureType_METALNESS))
-        bmat.set_texture("tex_metallic", load_texture(ai_material, aiTextureType_METALNESS));
+        bmat.set_texture("tex_metallic", load_texture(ai_material, aiTextureType_METALNESS, decoded));
 
     if(hasTextura(ai_material, aiTextureType_DIFFUSE_ROUGHNESS))
-        bmat.set_texture("tex_roughness", load_texture(ai_material, aiTextureType_DIFFUSE_ROUGHNESS));
+        bmat.set_texture("tex_roughness", load_texture(ai_material, aiTextureType_DIFFUSE_ROUGHNESS, decoded));
 
     if(hasTextura(ai_material, aiTextureType_NORMALS))
-        bmat.set_texture("tex_normal", load_texture(ai_material, aiTextureType_NORMALS));
+        bmat.set_texture("tex_normal", load_texture(ai_material, aiTextureType_NORMALS, decoded));
 
     if(hasTextura(ai_material, aiTextureType_AMBIENT_OCCLUSION))
-        bmat.set_texture("tex_ao", load_texture(ai_material, aiTextureType_AMBIENT_OCCLUSION));
+        bmat.set_texture("tex_ao", load_texture(ai_material, aiTextureType_AMBIENT_OCCLUSION, decoded));
 
     if(hasTextura(ai_material, aiTextureType_HEIGHT))
-        bmat.set_texture("tex_height", load_texture(ai_material, aiTextureType_HEIGHT));
+        bmat.set_texture("tex_height", load_texture(ai_material, aiTextureType_HEIGHT, decoded));
 
     bmat.set_uniform("use_tex_albedo", false);
     bmat.set_uniform("use_tex_metallic", false);
@@ -315,6 +336,11 @@ mesh model::process_mesh(aiMesh* mesh, const aiScene* scene) {
 
 // Carrega Textura assimp2bubble
 texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
+    embedded_textures decoded;
+    return load_texture(mat, type, decoded);
+}
+
+texture model::load_texture(aiMaterial* mat, const aiTextureType& type, embedded_textures& decoded) {
     texture tex;
     if (m_pose) tex.filtering = m_pose->options.filtering;
     if (hasTextura(mat, type)) {
@@ -324,8 +350,15 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
         auto reference = std::string(str.C_Str());
         std::replace(reference.begin(), reference.end(), '\\', '/');
         if (m_pose) if (const auto* embedded = m_pose->scene->GetEmbeddedTexture(reference.c_str())) {
-            tex.embedded = std::make_shared<bgui::texture>();
             tex.path = source_path + "#" + reference;
+            if (const auto found = decoded.find(reference); found != decoded.end()) {
+                tex.embedded = found->second.embedded;
+                tex.imported_image = found->second.imported_image;
+                tex.imported_image_revision = found->second.imported_image_revision;
+                return tex;
+            }
+            tex.embedded = std::make_shared<bgui::texture>();
+            std::shared_ptr<std::vector<unsigned char>> bytes;
             if (embedded->mHeight) {
                 tex.embedded->m_size = {float(embedded->mWidth), float(embedded->mHeight)};
                 tex.embedded->m_buffer.reserve(size_t(embedded->mWidth) * embedded->mHeight * 4);
@@ -336,9 +369,14 @@ texture model::load_texture(aiMaterial* mat, const aiTextureType& type) {
                 tex.embedded->m_has_alpha = true;
             } else {
                 const auto* first = reinterpret_cast<const unsigned char*>(embedded->pcData);
-                *tex.embedded = bgui::decode_texture_memory({first, first + embedded->mWidth}, tex.path);
+                bytes = std::make_shared<std::vector<unsigned char>>(first, first + embedded->mWidth);
+                *tex.embedded = bgui::decode_texture_memory(*bytes, tex.path);
             }
             tex.embedded->m_path = tex.path;
+            tex.update_embedded_revision();
+            tex.imported_image = std::move(bytes);
+            tex.imported_image_revision = tex.embedded->m_revision;
+            decoded.emplace(reference, tex);
             return tex;
         }
         tex.path = resolve_model_texture(source_path, reference).string();

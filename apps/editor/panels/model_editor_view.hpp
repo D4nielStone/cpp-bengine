@@ -9,6 +9,7 @@
 #include "viewport_input_state.hpp"
 #include "../tools/camera_movement.hpp"
 #include "mesh_material_editor.hpp"
+#include "../tools/direction_gizmo.hpp"
 #include "loaders/material_asset.hpp"
 #include "systems/render_system.hpp"
 #include <chrono>
@@ -61,33 +62,48 @@ public:
         auto& root = m_window->add<model_surface>(*this);
         root.add_class("editor-surface");
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-        root.style.layout.padding = bgui::vec4i{10};
+        root.style.layout.padding = bgui::vec4i{0};
 
-        m_selection_label = &root.add<bgui::text>("Nenhum objeto selecionado", .36f);
-        m_selection_label->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        auto& identity = root.add<bgui::linear>(bgui::orientation::horizontal);
+        identity.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+        identity.style.layout.require_height(bgui::mode::pixel, 30.f);
+        identity.style.layout.padding = bgui::vec4i{4};
+        identity.style.visual.background.normal = bgui::color{.12f, .12f, .12f, 1.f};
+        m_selection_label = &identity.add<bgui::text>("Nenhum objeto selecionado", .30f);
+        m_selection_label->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
+        m_selection_label->set_wrap(false);
         m_selection_label->receives_input(false);
-        m_source_label = &root.add<bgui::text>("Selecione um objeto na cena ou na Hierarquia.", .25f);
-        m_source_label->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        m_source_label = &identity.add<bgui::text>("Selecione um objeto na Hierarquia.", .25f);
+        m_source_label->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
+        m_source_label->set_wrap(false);
         m_source_label->style.visual.text.normal = bgui::color{.6f, .6f, .6f, 1.f};
         m_source_label->receives_input(false);
 
         auto& modes = root.add<bgui::linear>(bgui::orientation::horizontal);
+        modes.add_class("model-selection-toolbar");
         modes.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
-        modes.style.layout.require_height(bgui::mode::pixel, 36.f);
-        modes.style.layout.padding = bgui::vec4i{0};
+        modes.style.layout.require_height(bgui::mode::pixel, 34.f);
+        modes.style.layout.padding = bgui::vec4i{2};
+        modes.style.visual.background.normal = bgui::color{.16f, .16f, .16f, 1.f};
         add_mode_button(modes, "Objeto", model_selection_mode::object);
         add_mode_button(modes, "Faces", model_selection_mode::faces);
         add_mode_button(modes, "Vértices", model_selection_mode::vertices);
         add_mode_button(modes, "Arestas", model_selection_mode::edges);
 
         auto& views = root.add<bgui::linear>(bgui::orientation::horizontal);
-        views.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
-        views.style.layout.require_height(bgui::mode::pixel,32.f);
-        for (int mode=0;mode<3;++mode) {
-            const char* names[]{"Basic","Material","Render"};
-            auto& button=views.add<bgui::button>(names[mode],.28f,[this,mode] { m_context->model_view_mode=mode; });
-            button.style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);
-            button.style.layout.require_size(96.f,28.f);
+        views.add_class("model-shading-toolbar");
+        views.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+        views.style.layout.require_height(bgui::mode::pixel, 30.f);
+        views.style.layout.padding = bgui::vec4i{2};
+        views.style.visual.background.normal = bgui::color{.13f, .13f, .13f, 1.f};
+        for (int mode = 0; mode < 3; ++mode) {
+            const char* names[]{"Sólido", "Material", "Render"};
+            auto& button = views.add<bgui::button>(names[mode], .26f, [this, mode] {
+                m_context->model_view_mode = mode;
+            });
+            button.style.layout.require_mode(bgui::mode::stretch, bgui::mode::pixel);
+            button.style.layout.require_height(bgui::mode::pixel, 26.f);
+            button.style.layout.margin = bgui::vec4i{0, 2, 0, 2};
             m_view_buttons.push_back(&button);
         }
         auto& body = root.add<bgui::linear>(bgui::orientation::horizontal);
@@ -95,6 +111,7 @@ public:
         body.style.layout.padding = bgui::vec4i{0};
         m_image = &body.add<bgui::image>();
         m_image->add_class("model-editor-preview");
+        m_image->add_class("editor-viewport-surface");
         m_image->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
         m_image->style.visual.background.normal = bgui::color{.055f, .06f, .07f, 1.f};
         m_image->receives_input(false);
@@ -107,7 +124,7 @@ public:
         tools.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         tools.style.layout.padding = bgui::vec4i{12, 8, 4, 8};
         tools.set_scrollable(true);
-        tools.add<bgui::text>("Ferramentas da malha", .3f).receives_input(false);
+        tools.add<bgui::text>("GEOMETRIA", .28f).receives_input(false);
         m_mesh_label = &tools.add<bgui::text>("Nenhum modelo", .26f);
         m_mesh_label->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         m_mesh_label->receives_input(false);
@@ -117,16 +134,29 @@ public:
         m_extrude_distance->style.layout.require_height(bgui::mode::pixel, 28.f);
         m_extrude_distance->style.layout.limit_min = {0, 28};
         m_extrude_distance->style.layout.limit_max = {10000, 28};
-        m_extrude_button = &tools.add<bgui::button>("Extrudar face", .28f, [this] { extrude(); });
-        m_loop_button = &tools.add<bgui::button>("Loop Cut", .28f, [this] { loop_cut(); });
-        m_save_button = &tools.add<bgui::button>("Salvar .bmodel", .28f, [this] { save(); });
-        for (auto* button : {m_extrude_button, m_loop_button, m_save_button}) {
+        auto& actions = tools.add<bgui::linear>(bgui::orientation::vertical);
+        actions.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        actions.style.layout.padding = bgui::vec4i{0};
+        m_extrude_button = &actions.add<bgui::button>("Extrudar face", .28f, [this] { extrude(); });
+        auto& group_button = actions.add<bgui::button>("Agrupar faces", .28f, [this] {
+            if (!is_native_model(m_source_path) || m_selected_faces.empty() || m_active_mesh >= m_model.meshes.size()) return;
+            auto& groups = m_model.meshes[m_active_mesh].face_groups;
+            groups.push_back({"Grupo " + std::to_string(groups.size() + 1),
+                {m_selected_faces.begin(), m_selected_faces.end()}});
+            m_dirty = true;
+            m_material_revision = std::numeric_limits<std::size_t>::max();
+            set_status("Grupo de faces criado. Salve o modelo.");
+        });
+        m_loop_button = &actions.add<bgui::button>("Loop Cut", .28f, [this] { loop_cut(); });
+        m_save_button = &actions.add<bgui::button>("Salvar .bmodel", .28f, [this] { save(); });
+        for (auto* button : {m_extrude_button, &group_button, m_loop_button, m_save_button}) {
             button->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
             button->style.layout.require_height(bgui::mode::pixel, 30.f);
-            button->style.layout.margin = bgui::vec4i{0, 4, 0, 0};
+            button->style.layout.margin = bgui::vec4i{2, 0, 2, 0};
         }
+        tools.add<bgui::text>("NAVEGAÇÃO", .28f).receives_input(false);
         m_navigation_button = &tools.add<bgui::button>("Visão: Normal (O)", .28f, [this] {
-            m_context->model_orbital_view = !m_context->model_orbital_view;
+            m_context->orbital_view = !m_context->orbital_view;
         });
         m_navigation_button->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
         m_navigation_button->style.layout.require_height(bgui::mode::pixel,30.f);
@@ -152,6 +182,7 @@ public:
         m_navigation = std::make_unique<camera_movement_system>(m_preview_camera, *m_image, m_navigation_input);
         m_navigation->set_primary_drag_enabled(false);
         m_navigation->setup(m_preview_registry);
+        m_window->add<direction_gizmo, bgui::layer::overlay>(m_preview_camera, *m_image);
         refresh_mode_buttons();
         refresh_preview();
     }
@@ -211,18 +242,24 @@ public:
                 if (bgui::get_keyboard_focus() != input) input->set_buffer(read());
         }
         if (m_navigation && !m_model.meshes.empty()) {
+            const auto& preferences = m_context->preferences;
+            m_navigation->set_movement_speed(preferences.movement_speed);
+            m_navigation->set_sprint_multiplier(preferences.sprint_multiplier);
+            m_navigation->set_mouse_sensitivity(preferences.mouse_sensitivity);
+            m_navigation->set_zoom_sensitivity(preferences.zoom_sensitivity);
+            m_navigation->set_smoothing_speed(preferences.smoothing_speed);
             const bool over = mouse_over_viewport(m_image) && !viewport_input_blocked_by_modal() &&
                 !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus());
             const bool key = bgui::get_pressed(bgui::input_key::o);
-            if (key && !m_orbit_key_down && over) m_context->model_orbital_view = !m_context->model_orbital_view;
+            if (key && !m_orbit_key_down && over) m_context->orbital_view = !m_context->orbital_view;
             m_orbit_key_down = key;
-            if (m_navigation->is_orbital() != m_context->model_orbital_view) {
-                if (m_context->model_orbital_view) {
+            if (m_navigation->is_orbital() != m_context->orbital_view) {
+                if (m_context->orbital_view) {
                     auto eye = m_preview_registry->get<commons::transform>(m_preview_camera->my_object);
                     m_navigation->focus_orbit_target(m_orbit_pivot, (eye->get_position()-m_orbit_pivot->get_position()).length());
                 } else m_navigation->set_orbital(false);
             }
-            m_navigation_button->get_label().set_buffer(m_context->model_orbital_view ? "Visão: Orbital (O)" : "Visão: Normal (O)");
+            m_navigation_button->get_label().set_buffer(m_context->orbital_view ? "Visão: Orbital (O)" : "Visão: Normal (O)");
             auto eye = m_preview_registry->get<commons::transform>(m_preview_camera->my_object);
             const auto before = eye->get_model_matrix();
             m_navigation_input->gizmo_active = m_gizmo.is_dragging();
@@ -417,7 +454,29 @@ private:
             for (std::size_t i = 0; i < m_model.meshes.size(); ++i) {
                 auto& group = m_mesh_controls->add<bgui::tree>("Malha " + std::to_string(i+1), .28f, i<expansion.size() && expansion[i]);
                 group.add_class("model-mesh-section");
+                group.children().add<bgui::button>("Selecionar malha", .26f, [this, i] {
+                    m_active_mesh = i;
+                    m_mode = model_selection_mode::faces;
+                    m_context->model_selection = static_cast<int>(m_mode);
+                    m_selected_faces.clear();
+                    for (std::size_t face = 0; face < m_model.meshes[i].faces.size(); ++face) m_selected_faces.insert(face);
+                    m_gizmo_selection_dirty = true;
+                    mark_preview_dirty();
+                });
                 group.children().style.layout.padding = bgui::vec4i{6,4,6,4};
+                for (std::size_t g = 0; g < m_model.meshes[i].face_groups.size(); ++g) {
+                    const auto& faces = m_model.meshes[i].face_groups[g];
+                    group.children().add<bgui::button>(faces.name, .26f, [this, i, g] {
+                        if (m_active_mesh != i || !bgui::get_pressed(bgui::input_key::left_control)) m_selected_faces.clear();
+                        m_active_mesh = i;
+                        const auto& indices = m_model.meshes[i].face_groups[g].faces;
+                        m_selected_faces.insert(indices.begin(), indices.end());
+                        m_mode = model_selection_mode::faces;
+                        m_context->model_selection = static_cast<int>(m_mode);
+                        m_gizmo_selection_dirty = true;
+                        mark_preview_dirty();
+                    });
+                }
                 build_mesh_material_editor(*this, group.children(), m_context, renderer, i,
                     [this](auto* element, auto assign) { m_material_targets.emplace_back(element,std::move(assign)); },
                     [this](std::string message) { set_status(std::move(message)); mark_preview_dirty(); });
@@ -433,6 +492,7 @@ private:
     bool m_frame_preview{true};
 
     void draw_gizmo() {
+        if (!is_native_model(m_source_path)) return;
         const auto mouse = bgui::get_mouse_position();
         const bool blocked = !m_context || m_context->is_playing || viewport_input_blocked_by_modal();
         const bool down = !blocked && bgui::get_pressed(bgui::input_key::mouse_left);
@@ -574,42 +634,28 @@ private:
             : selected_path.filename().string());
         commons::editable_model_data imported;
         std::string error;
-        // Preserve polygon topology when the asset matches the live geometry.
-        bool loaded = false;
-        auto extension = selected_path.extension().string();
-        std::transform(extension.begin(), extension.end(), extension.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (!selected_path.empty()) {
-            loaded = extension == ".bmodel"
-                ? commons::load_editable_model(selected_path, imported, error)
-                : import_editable_model(selected_path, imported, error);
-            if (loaded && imported.meshes.size() == renderer->m_modelo->meshes.size()) {
-                for (std::size_t i = 0; i < imported.meshes.size() && loaded; ++i) {
-                    const auto vertices = renderer->m_modelo->meshes[i].getVertices();
-                    loaded = vertices.size() == imported.meshes[i].vertices.size() &&
-                        renderer->m_modelo->meshes[i].getIndices() == imported.meshes[i].triangulated_indices();
-                    for (std::size_t v = 0; v < vertices.size() && loaded; ++v)
-                        loaded = vertices[v].position == imported.meshes[i].vertices[v].position;
-                }
-            } else loaded = false;
-        }
-        if (!loaded) {
-            imported.meshes.clear();
-            error.clear();
+        if (is_native_model(selected_path)) {
+            if (!commons::load_editable_model(selected_path, imported, error)) {
+                set_status(error);
+                return;
+            }
+        } else {
             for (const auto& source : renderer->m_modelo->meshes) {
+                const auto& indices = source.indices();
+                if (indices.size() % 3 != 0) {
+                    set_status("A malha contém índices incompletos.");
+                    return;
+                }
                 commons::editable_mesh_data mesh;
-                mesh.vertices = source.getVertices();
-                const auto indices = source.getIndices();
-                if (indices.size() % 3 != 0) { error = "A malha contém índices incompletos."; break; }
+                mesh.vertices = source.vertices();
                 for (std::size_t i = 0; i < indices.size(); i += 3)
                     mesh.faces.push_back({indices[i], indices[i + 1], indices[i + 2]});
                 imported.meshes.push_back(std::move(mesh));
             }
-            loaded = error.empty() && imported.validate(error);
-        }
-        if (!loaded) {
-            set_status(error);
-            return;
+            if (!imported.validate(error)) {
+                set_status(error);
+                return;
+            }
         }
         m_model = std::move(imported);
         m_geometry_dirty=true;m_material_dirty=true;m_projection_dirty=true;
@@ -620,7 +666,9 @@ private:
         m_selected_edge.reset();
         m_object_selected = true;
         update_mesh_label();
-        set_status("Modelo do objeto selecionado. Escolha um modo de edição.");
+        set_status(is_native_model(selected_path)
+            ? "Modelo do objeto selecionado. Escolha um modo de edição."
+            : "Prévia da geometria da cena. Importe como .bmodel para editar e salvar.");
         mark_preview_dirty();
     }
 
@@ -639,8 +687,8 @@ private:
             refresh_mode_buttons();
             mark_preview_dirty();
         });
-        button.style.layout.require_mode(bgui::mode::pixel, bgui::mode::pixel);
-        button.style.layout.require_size(96.f, 26.f);
+        button.style.layout.require_mode(bgui::mode::stretch, bgui::mode::pixel);
+        button.style.layout.require_height(bgui::mode::pixel, 26.f);
         button.style.layout.margin = bgui::vec4i{2};
         m_mode_buttons.push_back(&button);
     }
@@ -744,8 +792,8 @@ private:
             m_preview_camera->config.corte_longo = std::max(300.f,distance+radius*4.f);
             m_preview_camera->config.corte_curto = std::max(1e-6f,distance*1e-4f);
             m_navigation->set_orbit_distance_limits(.01f,std::max(1000.f,distance*100.f));
-            m_navigation->set_movement_speed(radius*2.f);
-            m_navigation->set_zoom_sensitivity(radius*.1f);
+
+
             const float yaw = .65f - 1.57079632679f, pitch = -.4f;
             const bgui::vec3 forward{std::cos(pitch)*std::cos(yaw),std::sin(pitch),std::cos(pitch)*std::sin(yaw)};
             auto eye = m_preview_registry->get<commons::transform>(m_preview_camera->my_object);
@@ -753,12 +801,14 @@ private:
             eye->set_rotation({glm::degrees(pitch),glm::degrees(yaw),0.f});
             m_orbit_pivot->set_position(center);
             m_navigation->set_orbital(false);
-            if (m_context->model_orbital_view) m_navigation->focus_orbit_target(m_orbit_pivot,distance);
+            if (m_context->orbital_view) m_navigation->focus_orbit_target(m_orbit_pivot,distance);
             m_frame_preview = false;
         }
+        const auto framebuffer_size = m_preview_camera->viewportFBO;
         m_preview_camera->viewportFBO = {width,height};
         m_preview_camera->getViewMatrix();
         m_preview_camera->obtProjectionMatrix();
+        if (m_preview_camera->flag_fb) m_preview_camera->viewportFBO = framebuffer_size;
         const auto matrix = m_preview_camera->projMatriz*m_preview_camera->viewMatrix;
 
         for (std::size_t mesh=0; mesh<m_model.meshes.size(); ++mesh) {
@@ -911,8 +961,10 @@ private:
                 }
             }
             if(selected.first==std::numeric_limits<std::size_t>::max())return;
+            if (m_active_mesh != selected.first || !bgui::get_pressed(bgui::input_key::left_control))
+                m_selected_faces.clear();
             m_active_mesh = selected.first;
-            m_selected_faces = {selected.second};
+            if (!m_selected_faces.erase(selected.second)) m_selected_faces.insert(selected.second);
             set_status("Face " + std::to_string(selected.second + 1) +
                 " selecionada.");
         } else if (m_mode == model_selection_mode::vertices) {
@@ -948,8 +1000,10 @@ private:
         }
         if (!best)
             return false;
+        if (m_active_mesh != best->first || !bgui::get_pressed(bgui::input_key::left_control))
+            m_selected_vertices.clear();
         m_active_mesh = best->first;
-        m_selected_vertices = {best->second};
+        if (!m_selected_vertices.erase(best->second)) m_selected_vertices.insert(best->second);
         set_status("Vértice " + std::to_string(best->second + 1) +
             " selecionado.");
         return true;
@@ -1016,6 +1070,10 @@ private:
     }
 
     void extrude() {
+        if (!is_native_model(m_source_path)) {
+            set_status("Importe o modelo como .bmodel para editar a geometria.");
+            return;
+        }
         if (m_mode != model_selection_mode::faces ||
             m_selected_faces.empty() || m_active_mesh >= m_model.meshes.size()) {
             set_status("Selecione uma face no modo Faces para extrudar.");
@@ -1039,11 +1097,15 @@ private:
         m_selected_faces.clear();
         m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         update_mesh_label();
-        set_status("Extrusão aplicada. Salve o modelo como .bmodel.");
+        set_status("Extrusão aplicada. Salve o arquivo .bmodel.");
         mark_preview_dirty();
     }
 
     void loop_cut() {
+        if (!is_native_model(m_source_path)) {
+            set_status("Importe o modelo como .bmodel para editar a geometria.");
+            return;
+        }
         if (m_mode != model_selection_mode::edges || !m_selected_edge ||
             m_active_mesh >= m_model.meshes.size()) {
             set_status("Loop Cut requer uma aresta selecionada no modo Edges.");
@@ -1061,7 +1123,7 @@ private:
         m_selected_edge.reset();
         m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         update_mesh_label();
-        set_status("Loop Cut aplicado. Salve o modelo como .bmodel.");
+        set_status("Loop Cut aplicado. Salve o arquivo .bmodel.");
         mark_preview_dirty();
     }
 
@@ -1070,27 +1132,10 @@ private:
             set_status("Selecione uma entidade com modelo antes de salvar.");
             return;
         }
-        auto destination = m_source_path;
-        std::error_code filesystem_error;
-        if (destination.empty()) {
-            if (!m_context || m_context->project_root.empty()) {
-                set_status("Abra um projeto para salvar a geometria deste objeto.");
-                return;
-            }
-            const auto directory = m_context->project_root / "models";
-            std::filesystem::create_directories(directory, filesystem_error);
-            if (filesystem_error) { set_status(filesystem_error.message()); return; }
-            destination = directory / ("object-" + std::to_string(*m_model_entity) + ".bmodel");
-        } else if (destination.extension() != ".bmodel") {
-            destination.replace_extension(".bmodel");
-        }
-        if (destination != m_source_path) {
-            const auto base = destination;
-            unsigned int suffix = 2;
-            while (std::filesystem::exists(destination, filesystem_error) && !filesystem_error)
-                destination = base.parent_path() / (base.stem().string() + "-" +
-                    std::to_string(suffix++) + ".bmodel");
-            if (filesystem_error) { set_status(filesystem_error.message()); return; }
+        const auto& destination = m_source_path;
+        if (!is_native_model(destination) || !std::filesystem::is_regular_file(destination)) {
+            set_status("O arquivo .bmodel existente é necessário para salvar.");
+            return;
         }
         std::string error;
         if (auto renderer=m_source_renderer.lock(); renderer && renderer->m_modelo && renderer->m_modelo->meshes.size()==m_model.meshes.size()) {
@@ -1119,15 +1164,22 @@ private:
                 }
                 for (std::size_t i = 0; i < m_model.meshes.size(); ++i) {
                     auto& live = renderer->m_modelo->meshes[i];
+                    const auto& vertices = m_model.meshes[i].vertices;
+                    const auto indices = m_model.meshes[i].triangulated_indices();
+                    if (live.indices() == indices &&
+                        std::equal(vertices.begin(), vertices.end(), live.vertices().begin(), live.vertices().end(),
+                            [](const auto& a, const auto& b) {
+                                return a.position == b.position && a.normal == b.normal && a.uvcoords == b.uvcoords;
+                            }))
+                        continue;
                     if (live.isLoaded()) live.unload();
-                    live.set_vertices(m_model.meshes[i].vertices);
-                    live.set_indices(m_model.meshes[i].triangulated_indices());
+                    live.set_vertices(vertices);
+                    live.set_indices(indices);
                 }
                 renderer->m_modelo->relocate_source_path(destination);
                 updated_entity = true;
             }
         }
-        m_source_path = destination;
         m_dirty = false;
         update_mesh_label();
         if (m_source_label) m_source_label->set_buffer(destination.filename().string());

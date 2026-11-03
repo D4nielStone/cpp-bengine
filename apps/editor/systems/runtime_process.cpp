@@ -1,6 +1,7 @@
 #include "runtime_process.hpp"
 #include "debugging/script_log.hpp"
 
+#include <chrono>
 #include <iostream>
 
 #ifdef _WIN32
@@ -115,6 +116,34 @@ runtime_process::~runtime_process() {
     std::string error;
     if (!stop(error))
         std::cerr << "[editor] Could not stop runtime process: " << error << '\n';
+    else if (!m_snapshot_directory.empty()) {
+        std::error_code ignored;
+        std::filesystem::remove_all(m_snapshot_directory, ignored);
+    }
+}
+
+std::filesystem::path runtime_process::snapshot_path(std::string& error) {
+    error.clear();
+    if (m_snapshot_directory.empty()) {
+        std::error_code ec;
+        const auto temporary = std::filesystem::temp_directory_path(ec);
+        if (!ec) {
+            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+            for (unsigned suffix = 0; !ec; ++suffix) {
+                const auto candidate = temporary /
+                    ("cpp-bengine-runtime-" + std::to_string(stamp) + "-" + std::to_string(suffix));
+                if (std::filesystem::create_directory(candidate, ec)) {
+                    m_snapshot_directory = candidate;
+                    break;
+                }
+            }
+        }
+        if (ec) {
+            error = "Could not create runtime snapshot directory: " + ec.message();
+            return {};
+        }
+    }
+    return m_snapshot_directory / "runtime.bengine";
 }
 
 bool runtime_process::start(

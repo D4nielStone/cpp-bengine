@@ -1,3 +1,4 @@
+#include "components/hud.hpp"
 #include "project_migration_manager.hpp"
 #include <os/resource_files.hpp>
 #include "project_persistence_system.hpp"
@@ -214,6 +215,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
         return listener.analyze(value);
     }
 
+    if (name == "hud") { commons::hud h; return h.analyze(value); }
+
     if (name == "sound_player") {
         commons::sound_player player;
         return player.analyze(value);
@@ -240,6 +243,7 @@ std::string component_name(const component_mask mask) {
         return "spot_light";
     case commons::component::COMPONENTE_SOUND_LISTENER:
         return "sound_listener";
+    case commons::component::COMPONENTE_HUD: return "hud";
     case commons::component::COMPONENTE_SOUND_PLAYER:
         return "sound_player";
     default:
@@ -273,6 +277,7 @@ bool serialize_component(
         return std::static_pointer_cast<commons::spot_light>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_SOUND_LISTENER:
         return std::static_pointer_cast<commons::sound_listener>(component)->serialize(destination, allocator);
+    case commons::component::COMPONENTE_HUD: return std::static_pointer_cast<commons::hud>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_SOUND_PLAYER:
         return std::static_pointer_cast<commons::sound_player>(component)->serialize(destination, allocator);
     default:
@@ -285,7 +290,8 @@ bool parse_component(
     const rapidjson::Value& data,
     commons::ecs& registry,
     commons::entity& entity,
-    const std::filesystem::path& project_directory
+    const std::filesystem::path& project_directory,
+    const project_persistence_system::asset_loading_hooks* hooks = nullptr
 ) {
     if (name == "transform") {
         return registry.get<commons::transform>(entity.id)->analyze(data);
@@ -299,7 +305,14 @@ bool parse_component(
                 model_path = project_directory / model_path;
             model_path = model_path.lexically_normal();
             const auto model_path_string = model_path.string();
-            try { registry.add<commons::renderer>(entity, model_path_string.c_str()); }
+            try {
+                if (hooks && hooks->instantiate) {
+                    auto prepared = hooks->instantiate(model_path_string);
+                    if (!prepared) return false;
+                    registry.add<commons::renderer>(entity);
+                    registry.get<commons::renderer>(entity.id)->m_modelo = prepared.release();
+                } else registry.add<commons::renderer>(entity, model_path_string.c_str());
+            }
             catch (const std::exception&) { return false; }
         } else {
             registry.add<commons::renderer>(entity, new commons::model());
@@ -320,8 +333,11 @@ bool parse_component(
                 if (materials[index].HasMember("file")) {
                     const std::filesystem::path reference(materials[index]["file"].GetString());
                     commons::material loaded; std::string error;
-                    if (!commons::load_material_asset(reference.is_absolute()?reference:project_directory/reference,loaded,error))
-                        return false;
+                    const auto resolved = reference.is_absolute() ? reference : project_directory / reference;
+                    try {
+                        if (hooks && hooks->material) loaded = hooks->material(resolved);
+                        else if (!commons::load_material_asset(resolved, loaded, error)) return false;
+                    } catch (const std::exception&) { return false; }
                     renderer->m_modelo->meshes[index].setMaterial(loaded);
                     continue;
                 }
@@ -452,6 +468,10 @@ bool parse_component(
         return registry.get<commons::sound_listener>(entity.id)->analyze(data);
     }
 
+    if (name == "hud") {
+        registry.add<commons::hud>(entity);
+        return registry.get<commons::hud>(entity.id)->analyze(data);
+    }
     if (name == "sound_player") {
         registry.add<commons::sound_player>(entity);
         return registry.get<commons::sound_player>(entity.id)->analyze(data);
@@ -868,7 +888,8 @@ bool project_persistence_system::serialize_project(
                     }
                     rapidjson::Value maps(rapidjson::kObjectType);
                     for (const auto& map : commons::pbr_maps) {
-                        std::filesystem::path texture_path(source_material.getTextura(map.name).path);
+                        const auto texture = source_material.getTextura(map.name);
+                        std::filesystem::path texture_path(texture.embedded ? std::string{} : texture.path);
                         if (!texture_path.empty() && saving_in_project) {
                             const auto relative = texture_path.lexically_relative(m_asset_root);
                             if (!relative.empty() && *relative.begin() != "..")
@@ -881,9 +902,14 @@ bool project_persistence_system::serialize_project(
                     material.AddMember("maps", maps, allocator);
                     try {
                         const auto directory=absolute_target.parent_path()/(absolute_target.stem().string()+".materials");
-                        const auto contents=commons::encode_material_asset(source_material,directory);
-                        auto file=commons::material_asset_path(directory,contents);
-                        if (write_files && !commons::store_material_asset(directory,source_material,file,error)) return false;
+                        std::filesystem::path file;
+                        if (write_files) {
+                            if (m_material_save_hook) file = m_material_save_hook(source_material, directory);
+                            else if (!commons::store_material_asset(directory,source_material,file,error)) return false;
+                        } else {
+                            const auto contents=commons::encode_material_asset(source_material,directory);
+                            file=commons::material_asset_path(directory,contents);
+                        }
                         const auto reference=saving_in_project ? file.lexically_relative(m_asset_root) : file;
                         material.AddMember("file",rapidjson::Value(reference.generic_string().c_str(),allocator),allocator);
                     } catch (const std::exception& e) { error=e.what();return false; }
@@ -1107,6 +1133,20 @@ bool project_persistence_system::load(
         break;
     }
 
+    if (m_asset_hooks.prepare) {
+        std::vector<std::string> paths;
+        for (const auto& item : (*scene_data)["entities"].GetArray()) {
+            if (item["id"].GetUint() == m_editor_camera_id) continue;
+            const auto& components = item["components"];
+            if (!components.HasMember("renderer")) continue;
+            const auto& renderer = components["renderer"];
+            if (!renderer.HasMember("model") || !renderer["model"].IsString() || !renderer["model"].GetStringLength()) continue;
+            paths.push_back((project_directory / renderer["model"].GetString()).lexically_normal().string());
+        }
+        try { m_asset_hooks.prepare(paths); }
+        catch (const std::exception& failure) { error = failure.what(); return false; }
+    }
+
     auto staged_registry = std::make_shared<commons::ecs>();
     entity_name_map staged_entity_names;
     entity_state_set staged_hidden_entities;
@@ -1174,13 +1214,19 @@ bool project_persistence_system::load(
                     component->value,
                     *staged_registry,
                     entity,
-                    project_directory
+                    project_directory,
+                    &m_asset_hooks
                 )) {
                 error = "Could not load component '" + name +
                     "' on entity " + std::to_string(id) + ".";
                 return false;
             }
         }
+    }
+
+    if (m_asset_hooks.finish) {
+        try { m_asset_hooks.finish(staged_registry); }
+        catch (const std::exception& failure) { error = failure.what(); return false; }
     }
 
     for (const auto& entity_data : (*scene_data)["entities"].GetArray()) {

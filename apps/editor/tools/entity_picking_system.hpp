@@ -45,7 +45,7 @@ public:
         const bool just_pressed = left_down && !m_left_was_down;
         const bool released = !left_down && m_left_was_down;
         m_left_was_down = left_down;
-        if (viewport_input_blocked_by_modal() || viewport_camera_modifier() ||
+        if (viewport_input_blocked_by_modal() || bgui::get_pressed(bgui::input_key::mouse_right) ||
             (m_input_state && m_input_state->gizmo_active)) {
             m_pending_pick.reset();
             return;
@@ -60,7 +60,7 @@ public:
         }
         if (released && m_pending_pick) {
             if (mouse_over_viewport(m_image))
-                m_context->selected_entity = pick_at(*m_pending_pick);
+                m_context->select_entity(pick_at(*m_pending_pick), bgui::get_pressed(bgui::input_key::left_control));
             m_pending_pick.reset();
         }
     }

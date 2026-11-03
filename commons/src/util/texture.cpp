@@ -5,6 +5,17 @@
 #include <os/resource_files.hpp>
 #include <bgui_backend_gl3.hpp>
 #include <stdexcept>
+#include <cstdint>
+
+void commons::texture::update_embedded_revision() {
+    if (!embedded) return;
+    std::uint64_t revision = 14695981039346656037ull;
+    for (unsigned char byte : embedded->m_buffer) {
+        revision ^= byte;
+        revision *= 1099511628211ull;
+    }
+    embedded->m_revision = revision ? revision : 1;
+}
 
 void commons::texture::bind(int slot) const {
     unsigned int texture_id = id;

@@ -28,6 +28,9 @@ namespace COMMONS_NS {
         // the program ID
         unsigned int ID;
 
+        struct deferred_t {};
+        explicit shader(deferred_t) noexcept : ID(0) {}
+
         // constructor reads and builds the shader when an OpenGL context is available
         shader() : ID(0) {
             if (glad_glCreateProgram != nullptr)

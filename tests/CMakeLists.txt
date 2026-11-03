@@ -90,6 +90,7 @@ gtest_discover_tests(editor_asset_workflow_tests)
 
 add_executable(editor_render_tests
     editor_render_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels/game_view.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
@@ -267,3 +268,9 @@ if(TARGET runtime_app)
     add_dependencies(runtime_process_tests runtime_app)
 endif()
 gtest_discover_tests(runtime_process_tests)
+
+add_executable(scene_asset_loader_tests scene_asset_loader_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
+target_include_directories(scene_asset_loader_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(scene_asset_loader_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(scene_asset_loader_tests PROPERTIES TIMEOUT 30)

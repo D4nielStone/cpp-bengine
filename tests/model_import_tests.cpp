@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include "opengl_test_support.hpp"
 #include "loaders/model.hpp"
+#include "loaders/material_asset.hpp"
 #include "loaders/model_pose.hpp"
 #include "model_import_dialog.hpp"
 #include <chrono>
@@ -209,6 +210,7 @@ TEST_F(ImportDialogTest, InvalidScaleKeepsDialogOpenAndPreservesSettings) {
 #include <GLFW/glfw3.h>
 #include "os/window.hpp"
 #include "loaders/model.hpp"
+#include "loaders/material_asset.hpp"
 
 TEST(ModelImportGpuTest, LoadsEmbeddedGlbTextureAndAnimatesThroughExistingRenderer) {
     const auto folder = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) / ("bengine-glb-" +
@@ -240,11 +242,37 @@ TEST(ModelImportGpuTest, LoadsEmbeddedGlbTextureAndAnimatesThroughExistingRender
     texture->pcData = new aiTexel[(bytes.size() + sizeof(aiTexel)-1) / sizeof(aiTexel)];
     std::memcpy(texture->pcData, bytes.data(), bytes.size());
     std::strcpy(texture->achFormatHint, "jpg");
+    auto* root = f.scene.mRootNode;
+    auto* animated = root->mChildren[0];
+    auto* second = new aiNode("second");
+    second->mParent = root;
+    second->mNumMeshes = 1;
+    second->mMeshes = new unsigned[1]{0};
+    delete[] root->mChildren;
+    root->mChildren = new aiNode*[2]{animated, second};
+    root->mNumChildren = 2;
     const auto path = folder / "animated.glb";
     Assimp::Exporter exporter;
     ASSERT_EQ(exporter.Export(&f.scene, "glb2", path.string()), AI_SUCCESS) << exporter.GetErrorString();
     commons::model_import_options options;
     options.filtering = commons::texture_filter::trilinear;
+    const auto prepared = commons::model::prepare(path.string());
+    ASSERT_EQ(prepared->meshes.size(), 2u);
+    const auto first_image = prepared->meshes[0].getMaterial().getTextura("tex_albedo").embedded;
+    ASSERT_NE(first_image, nullptr);
+    std::filesystem::path saved_material;
+    std::string material_error;
+    ASSERT_TRUE(commons::store_material_asset(folder, prepared->meshes[0].getMaterial(),
+        saved_material, material_error)) << material_error;
+    std::vector<std::filesystem::path> images;
+    ASSERT_TRUE(commons::material_asset_dependencies(saved_material, images, material_error)) << material_error;
+    ASSERT_EQ(images.size(), 1u);
+    EXPECT_EQ(images.front().extension(), ".jpg");
+    std::ifstream exported_image(images.front(), std::ios::binary);
+    const std::string exported_bytes{std::istreambuf_iterator<char>(exported_image), {}};
+    EXPECT_EQ(exported_bytes, bytes);
+    EXPECT_EQ(first_image, prepared->meshes[1].getMaterial().getTextura("tex_albedo").embedded);
+    options.excluded_nodes.insert("0/1");
     std::ofstream(commons::model_import_settings_path(path)) << commons::serialize_model_import_options(options);
     commons::model model(path.string());
     ASSERT_EQ(model.meshes.size(), 1u);

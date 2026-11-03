@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+namespace commons { struct hud_element; }
+
 namespace editor::ui {
 
 struct editor_context {
@@ -32,6 +34,38 @@ struct editor_context {
     std::vector<history_action> undo_stack;
     std::vector<history_action> redo_stack;
     std::optional<entity_id> selected_entity;
+    std::weak_ptr<commons::hud_element> selected_hud_widget;
+    std::unordered_set<entity_id> selected_entities;
+
+    void synchronize_selection() {
+        if (!selected_entity || !registry || !registry->is_alive(*selected_entity) ||
+            locked_entities.contains(*selected_entity)) {
+            selected_entity.reset();
+            selected_entities.clear();
+            return;
+        }
+        if (!selected_entities.contains(*selected_entity)) selected_entities.clear();
+        std::erase_if(selected_entities, [this](auto id) {
+            return !registry->is_alive(id) || locked_entities.contains(id);
+        });
+        selected_entities.insert(*selected_entity);
+    }
+
+    void select_entity(std::optional<entity_id> id, bool additive = false) {
+        synchronize_selection();
+        if (!additive) selected_entities.clear();
+        else if (selected_entity) selected_entities.insert(*selected_entity);
+        if (id && registry && registry->is_alive(*id) && !locked_entities.contains(*id)) {
+            if (additive && selected_entities.erase(*id)) {
+                selected_entity = selected_entities.empty() ? std::nullopt
+                    : std::optional<entity_id>{*selected_entities.begin()};
+                return;
+            }
+            selected_entities.insert(*id);
+            selected_entity = id;
+        } else if (!additive) selected_entity.reset();
+    }
+
     std::optional<entity_id> editor_camera_entity;
     bool is_playing{false};
     bool show_colliders{false};

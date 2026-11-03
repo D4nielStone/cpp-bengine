@@ -1,3 +1,4 @@
+#include "ui/hud_view.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
 #include "os/window.hpp"
@@ -25,6 +26,7 @@
 #include <utility>
 
 #include "runtime/game_bootstrap.hpp"
+#include "editor/systems/scene_loading_modal.hpp"
 #include "editor/systems/runtime_scene_preview.hpp"
 #include <chrono>
 
@@ -199,6 +201,7 @@ int main(const int argc, char** argv) {
 
     commons::window window("Bubble Engine - Runtime");
     auto registry = window.get_ecs();
+    auto ui = window.add<commons::ui_system>();
 
     auto camera_entity = registry->create();
     registry->add<commons::camera>(camera_entity);
@@ -223,7 +226,7 @@ int main(const int argc, char** argv) {
         );
         project.set_migration_writes_enabled(false);
         std::string error;
-        if (!project.load(project_path, error)) {
+        if (!editor::ui::load_project_with_modal(project, project_path, error)) {
             std::cerr << "[runtime] Could not load project: " << error << '\n';
             return 1;
         }
@@ -276,6 +279,7 @@ int main(const int argc, char** argv) {
             static_cast<float>(game_camera->viewportFBO.y)
         }
     );
+    root.add<commons::hud_view, bgui::layer::overlay>(registry, game_camera, game_view);
     window.add<runtime_viewport_sync_system>(game_camera, game_view);
     window.add<commons::code_system>();
     auto physics_system = std::make_shared<commons::physics_system>();
@@ -288,7 +292,6 @@ int main(const int argc, char** argv) {
         std::cerr << "[runtime] Could not create the game camera framebuffer.\n";
         return 1;
     }
-    window.add<commons::ui_system>();
     window.loop();
 
     return 0;

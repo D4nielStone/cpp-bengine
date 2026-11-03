@@ -1,7 +1,6 @@
 #pragma once
 #include "../core/panel.hpp"
-#include "../systems/asset_import.hpp"
-#include "../systems/project_file_transaction.hpp"
+#include "../systems/editable_model_import.hpp"
 #include "loaders/model_import.hpp"
 #include <bgui.hpp>
 #include <elem/modal.hpp>
@@ -154,7 +153,7 @@ public:
         settings.add<bgui::text>("Materiais: " + std::to_string(scene->mNumMaterials) +
             "; texturas embutidas: " + std::to_string(scene->mNumTextures) +
             ". Câmeras, luzes e morph targets não são convertidos em entidades.", .27f);
-        modal.add<bgui::button>("Importar / Reimportar", .30f,
+        modal.add<bgui::button>("Importar como .bmodel", .30f,
             [this, source, project, destination, complete, scale = &scale, status = &status]() {
             try {
                 if (!std::filesystem::is_regular_file(source)) throw std::runtime_error("Arquivo de origem ausente.");
@@ -162,15 +161,7 @@ public:
                 m_options.scale = std::stod(scale->get_buffer(), &consumed);
                 if (consumed != scale->get_buffer().size() || !std::isfinite(m_options.scale) ||
                     m_options.scale <= 0 || m_options.scale > 1000000) throw std::runtime_error("Escala inválida.");
-                Assimp::Importer validation;
-                const auto* checked = validation.ReadFile(source.string(), m_options.flags());
-                if (!checked || !checked->mRootNode) throw std::runtime_error(validation.GetErrorString());
-                commons::validate_model_selection(*checked, m_options);
-                (void)asset_dependencies(std::filesystem::canonical(source), true);
-                const auto imported = import_asset(source, project, true, destination, m_another_copy, &m_options);
-                const auto path = commons::model_import_settings_path(imported);
-                project_files::stage({path, commons::serialize_model_import_options(m_options)});
-                project_files::replace(path);
+                const auto imported = import_native_model(source, project, destination, m_another_copy, &m_options);
                 status->set_buffer("Importação concluída: " + imported.filename().string());
                 // Finish outside the click dispatch so callbacks can safely rebuild UI.
                 bgui::add_function([this, imported, complete]() { close(); if (complete) complete(imported); });

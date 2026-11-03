@@ -51,6 +51,7 @@ inline bool extrude_faces(
     std::string& error
 ) {
     error.clear();
+    if (!mesh.validate(error)) return false;
     if (selected_faces.empty() || !std::isfinite(distance) ||
         std::abs(distance) < 1e-6f) {
         error = "Selecione faces e informe uma distância de extrusão válida.";
@@ -106,13 +107,17 @@ inline bool extrude_faces(
         result.vertices.push_back(value);
     }
 
+    std::vector<unsigned int> face_map(mesh.faces.size());
     std::vector<std::vector<unsigned int>> faces;
     faces.reserve(mesh.faces.size() + selected_faces.size() + edges.size());
     for (std::size_t index = 0; index < mesh.faces.size(); ++index) {
-        if (!selected_faces.contains(index))
+        if (!selected_faces.contains(index)) {
+            face_map[index] = static_cast<unsigned int>(faces.size());
             faces.push_back(mesh.faces[index]);
+        }
     }
     for (const auto face_index : selected_faces) {
+        face_map[face_index] = static_cast<unsigned int>(faces.size());
         auto top = mesh.faces[face_index];
         for (auto& vertex : top)
             vertex = extruded_vertices.at(vertex);
@@ -129,6 +134,8 @@ inline bool extrude_faces(
             extruded_vertices.at(edge.first)
         });
     }
+    for (auto& group : result.face_groups)
+        for (auto& face : group.faces) face = face_map[face];
     result.faces = std::move(faces);
     result.recalculate_normals();
     if (!result.validate(error))
@@ -143,6 +150,7 @@ inline bool loop_cut(
     std::string& error
 ) {
     error.clear();
+    if (!mesh.validate(error)) return false;
     const auto seed = ordered_mesh_edge(selected_edge.first, selected_edge.second);
     if (seed.first == seed.second || seed.second >= mesh.vertices.size()) {
         error = "Selecione uma aresta válida para aplicar Loop Cut.";
@@ -197,7 +205,10 @@ inline bool loop_cut(
 
     std::vector<std::vector<unsigned int>> split_faces;
     split_faces.reserve(mesh.faces.size() * 2);
-    for (const auto& face : mesh.faces) {
+    std::vector<std::vector<unsigned int>> face_map(mesh.faces.size());
+    for (std::size_t face_index = 0; face_index < mesh.faces.size(); ++face_index) {
+        const auto& face = mesh.faces[face_index];
+        face_map[face_index].push_back(static_cast<unsigned int>(split_faces.size()));
         if (face.size() != 4) {
             split_faces.push_back(face);
             continue;
@@ -217,6 +228,7 @@ inline bool loop_cut(
             error = "Loop Cut encontrou uma face sem duas arestas opostas.";
             return false;
         }
+        face_map[face_index].push_back(static_cast<unsigned int>(split_faces.size() + 1));
         const auto first_cut = cuts[0];
         const auto opposite_cut = cuts[1];
         const auto midpoint_a = midpoint_indices.at(ordered_mesh_edge(
@@ -241,6 +253,11 @@ inline bool loop_cut(
     if (split_faces.size() == mesh.faces.size()) {
         error = "A aresta selecionada não pertence a um loop quadrilátero.";
         return false;
+    }
+    for (auto& group : result.face_groups) {
+        std::vector<unsigned int> mapped;
+        for (auto face : group.faces) mapped.insert(mapped.end(), face_map[face].begin(), face_map[face].end());
+        group.faces = std::move(mapped);
     }
     result.faces = std::move(split_faces);
     result.recalculate_normals();

@@ -79,6 +79,30 @@ TEST_F(RuntimeProcessTest, PlayPauseResumeStopAndPlayAgain) {
     }
 }
 
+TEST_F(RuntimeProcessTest, PlayKeepsMaterialFilesUntilEditorSessionEnds) {
+    fs::path directory;
+    {
+        editor::ui::runtime_process process;
+        std::string error;
+        const auto snapshot = process.snapshot_path(error);
+        ASSERT_FALSE(snapshot.empty()) << error;
+        directory = snapshot.parent_path();
+        const auto materials = directory / "runtime.materials";
+        fs::create_directory(materials);
+        const auto material = materials / "unchanged.bmat";
+        std::ofstream(material) << "material";
+        for (int run = 0; run < 2; ++run) {
+            EXPECT_EQ(process.snapshot_path(error), snapshot);
+            std::ofstream(snapshot) << "wait";
+            ASSERT_TRUE(process.start(RUNTIME_PROCESS_HELPER, snapshot, error)) << error;
+            ASSERT_TRUE(process.stop(error)) << error;
+            EXPECT_FALSE(fs::exists(snapshot));
+            EXPECT_TRUE(fs::exists(material));
+        }
+    }
+    EXPECT_FALSE(fs::exists(directory));
+}
+
 TEST_F(RuntimeProcessTest, NaturalExitCollectsLogsAndCleansSnapshot) {
     snapshot("exit");
     editor::ui::runtime_process process;

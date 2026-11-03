@@ -359,6 +359,7 @@ void camera::deleteFB()
     glDeleteFramebuffers(1, &fbo);
     glDeleteTextures(1, &texture);
     glDeleteRenderbuffers(1, &rbo);
+    fbo = texture = rbo = 0;
 }
 
 glm::mat4 camera::getViewMatrix() {

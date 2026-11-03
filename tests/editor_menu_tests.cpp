@@ -676,7 +676,7 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
 
 #include "model_editor_view.hpp"
 
-TEST(ModelEditorLayout, KeepsToolsInSidebarBesidePreview) {
+TEST(ModelEditorLayout, KeepsToolsInSidebarAndHeadersOutsidePreview) {
     bgui::scoped_interface ui_scope;
     bgui::get_context().m_size = {1000, 700};
     auto registry = std::make_shared<commons::ecs>();
@@ -691,10 +691,19 @@ TEST(ModelEditorLayout, KeepsToolsInSidebarBesidePreview) {
     EXPECT_LE(distance->processed_height(), 30 * bgui::get_global_scale());
     auto* extrude = find<bgui::button>(dock, [](auto& button) { return button.get_label().get_buffer() == "Extrudar face"; });
     ASSERT_NE(extrude, nullptr);
-    EXPECT_GE(extrude->processed_y(), distance->processed_y() + distance->processed_height());
     auto* image = find<bgui::image>(dock, [](auto& image) { return image.has_class("model-editor-preview"); });
     ASSERT_NE(image, nullptr);
     EXPECT_GE(distance->processed_x(), image->processed_x() + image->processed_width());
+    EXPECT_GE(extrude->processed_x(), image->processed_x() + image->processed_width());
+    for (const auto* label : {"Objeto", "Faces", "Vértices", "Arestas", "Sólido", "Material", "Render"}) {
+        auto* button = find<bgui::button>(dock, [label](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(button, nullptr) << label;
+        EXPECT_LE(button->processed_y() + button->processed_height(), image->processed_y());
+        EXPECT_GE(button->processed_x(), image->processed_x());
+        EXPECT_LE(button->processed_x() + button->processed_width(), image->processed_x() + image->processed_width());
+    }
     EXPECT_GT(image->processed_height(), 200);
 }
 
@@ -741,7 +750,13 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
             model->meshes.emplace_back(vertices, std::vector<unsigned int>{0,1,2}, commons::material{});
         return model;
     };
-    registry->add<commons::renderer>(first, make_model(1).release());
+    std::filesystem::create_directories(context->project_root);
+    const auto native = context->project_root / "triangle.bmodel";
+    commons::editable_model_data geometry;
+    geometry.meshes.push_back({vertices, {{0, 1, 2}}});
+    std::string save_error;
+    ASSERT_TRUE(commons::save_editable_model(native, geometry, save_error)) << save_error;
+    registry->add<commons::renderer>(first, new commons::model(native.string()));
     registry->add<commons::renderer>(second, make_model(2).release());
     context->entity_names[first.id] = "Triângulo em cena";
     context->entity_names[second.id] = "Outro objeto";
@@ -786,7 +801,7 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     bgui::on_update();
     bgui::on_update();
     const auto saved_path = registry->get<commons::renderer>(first.id)->m_modelo->get_source_path();
-    EXPECT_TRUE(std::filesystem::exists(saved_path));
+    EXPECT_EQ(std::filesystem::path(saved_path), native);
     commons::editable_model_data saved;
     std::string error;
     ASSERT_TRUE(commons::load_editable_model(saved_path, saved, error)) << error;
@@ -839,9 +854,9 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     bgui::on_update();
     io.m_input_map[bgui::input_key::o]=bgui::input_action::press;
     bgui::on_update();
-    EXPECT_TRUE(context->model_orbital_view);
+    EXPECT_TRUE(context->orbital_view);
     bgui::on_update();
-    EXPECT_TRUE(context->model_orbital_view);
+    EXPECT_TRUE(context->orbital_view);
     io.m_input_map.clear(); bgui::on_update();
     const auto orbit_eye=panel.preview_camera().position;
     io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;
@@ -852,7 +867,7 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     io.m_input_map.clear(); bgui::on_update();
     io.m_input_map[bgui::input_key::o]=bgui::input_action::press;
     bgui::on_update();
-    EXPECT_FALSE(context->model_orbital_view);
+    EXPECT_FALSE(context->orbital_view);
     io.m_input_map.clear(); bgui::on_update();
     const auto normal_eye=panel.preview_camera().position;
     const auto normal_view=panel.preview_camera().viewMatrix;
@@ -881,4 +896,87 @@ TEST(EditorInvisibleControllers, ShortcutsNeverEmitCornerQuads) {
     history.set_final_rect(0, 0, 100, 100);
     history.get_requires(&data);
     EXPECT_TRUE(data.m_quad_requires.empty());
+}
+
+TEST_F(EditorMenuTest, PlayDispatchesAfterClickAndAllowsRetryAfterFailure) {
+    std::function<void()> pending;
+    editor.set_load_dispatcher([&](auto action) { pending = std::move(action); });
+    int calls = 0;
+    editor.set_play_state_callback([&](bool playing, std::string& error) {
+        EXPECT_TRUE(playing);
+        ++calls;
+        error = "snapshot failed";
+        return false;
+    });
+    auto* play = find<bgui::button>(bgui::get_layout(), [](auto& item) {
+        return item.has_class("runtime-play-button");
+    });
+    ASSERT_NE(play, nullptr);
+    for (int attempt = 1; attempt <= 2; ++attempt) {
+        play->on_pressed();
+        play->on_released();
+        bgui::on_update();
+        ASSERT_TRUE(pending);
+        EXPECT_EQ(calls, attempt - 1);
+        EXPECT_FALSE(play->is_enabled());
+        auto action = std::move(pending);
+        action();
+        EXPECT_EQ(calls, attempt);
+        EXPECT_TRUE(play->is_enabled());
+    }
+}
+
+TEST(HudEditor, SelectedWidgetPropertiesAppearInInspector) {
+    bgui::scoped_interface ui;
+    auto registry=std::make_shared<commons::ecs>();
+    auto entity=registry->create(); registry->add<commons::hud>(entity);
+    auto h=registry->get<commons::hud>(entity.id);
+    auto widget=h->add("button","Use");
+    auto context=std::make_shared<editor::ui::editor_context>(registry);
+    context->select_entity(entity.id); context->selected_hud_widget=widget;
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view inspector(context); inspector.build(dock); inspector.update();
+    EXPECT_NE(find<bgui::inputbox>(dock,[&](auto& input){return input.get_buffer()==widget->id;}),nullptr);
+    EXPECT_NE(find<bgui::text>(dock,[](auto& text){return text.get_buffer()=="Lua callback";}),nullptr);
+    auto* title=find<bgui::inputbox>(dock,[](auto& input){return input.get_buffer()=="Use";});
+    ASSERT_NE(title,nullptr); title->m_enter_func("Interact");
+    EXPECT_EQ(widget->text,"Interact");
+    EXPECT_TRUE(context->undo()); EXPECT_EQ(widget->text,"Use");
+    registry->remove(entity.id); EXPECT_NO_THROW(inspector.update());
+}
+
+TEST(HudEditor, RightClickAddsWidgetToGameCamera) {
+    bgui::scoped_interface ui;
+    auto& io=bgui::get_context(); io.m_size={900,600}; io.m_input_map.clear();
+    io.m_last_mouse_left=false;
+    auto registry=std::make_shared<commons::ecs>();
+    auto context=std::make_shared<editor::ui::editor_context>(registry);
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    const auto other = registry->create();
+    context->selected_entity = other.id;
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::match_parent);
+    editor::ui::game_view panel(context); panel.build(dock);
+    for(int i=0;i<3;++i) bgui::on_update();
+    auto* image=find<bgui::image>(dock,[](auto& value){return value.has_class("editor-viewport-surface");});
+    ASSERT_NE(image,nullptr); ASSERT_GT(image->processed_width(),0);
+    io.m_mouse_position={image->processed_x()+80,image->processed_y()+80};
+    io.m_input_map[bgui::input_key::mouse_left]=bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_left]=bgui::input_action::release;
+    bgui::on_update(); bgui::on_update();
+    EXPECT_EQ(find<editor::ui::action_popup>(bgui::get_layout(), [](auto&) { return true; }), nullptr);
+    io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;
+    bgui::on_update();
+    auto* option=find<bgui::button>(bgui::get_layout(),[](auto& button){return button.get_label().get_buffer()=="Add text";});
+    ASSERT_NE(option,nullptr);
+    option->on_pressed(); option->on_released(); bgui::on_update(); bgui::on_update();
+    auto widget=context->selected_hud_widget.lock(); ASSERT_NE(widget,nullptr);
+    EXPECT_EQ(widget->kind,"text"); EXPECT_TRUE(widget->absolute);
+    EXPECT_EQ(context->selected_entity, camera.id);
+    ASSERT_TRUE(registry->get<commons::hud>(camera.id));
+    EXPECT_FALSE(registry->get<commons::hud>(other.id));
 }

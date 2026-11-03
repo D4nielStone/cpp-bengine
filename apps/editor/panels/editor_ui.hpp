@@ -49,6 +49,7 @@ public:
         std::filesystem::path build_directory
     );
 
+    void set_load_dispatcher(std::function<void(std::function<void()>)> dispatch) { m_load_dispatcher = std::move(dispatch); }
     void set_project_loaded_callback(
         std::function<void(const std::string&)> callback
     );
@@ -88,6 +89,8 @@ public:
     void reset_ui();
 
 private:
+    std::function<void(std::function<void()>)> m_load_dispatcher;
+    bool dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete);
     bgui::dock& m_dock;
     bgui::dock& m_model_dock;
     bgui::dock& m_management_dock;

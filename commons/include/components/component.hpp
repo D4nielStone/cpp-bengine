@@ -36,13 +36,15 @@ namespace COMMONS_NS {
 			COMPONENTE_LUZ_HOLOFOTE = 1 << 10,
 			COMPONENTE_TERRENO = 1 << 11,
 			COMPONENTE_SOUND_LISTENER = 1 << 12,
-			COMPONENTE_SOUND_PLAYER = 1 << 13
+			COMPONENTE_SOUND_PLAYER = 1 << 13,
+            COMPONENTE_HUD = 1 << 14
 		};
 		//  Mapeamento de nomes e mask
         inline static std::unordered_map<mask, std::string> mapa_nomes_componentes = {
             {mask::COMPONENTE_LUZ_DIRECIONAL            ,"Iluminacao"},
             {mask::COMPONENTE_LUZ_PONTUAL               ,"Iluminacao"},
             {mask::COMPONENTE_LUZ_HOLOFOTE              ,"Iluminacao"},
+            {mask::COMPONENTE_HUD                       ,"HUD"},
             {mask::COMPONENTE_RENDER                    ,"Renderizador"},
             {mask::COMPONENTE_TRANSFORMACAO             ,"Transformacao"},
             {mask::COMPONENTE_CODIGO                    ,"Codigo"},

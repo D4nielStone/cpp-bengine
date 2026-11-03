@@ -11,6 +11,7 @@
 #include "components/transform.hpp"
 #include "components/physics.hpp"
 #include "components/renderer.hpp"
+#include "components/hud.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -487,6 +488,24 @@ bool code::serialize(
 }
 
 void code::update() {
+    if (auto registry=reg.lock()) if(auto h=registry->get<hud>(my_object)) {
+        // Snapshot callbacks before invoking Lua, which may modify the HUD or ECS.
+        std::vector<std::pair<std::string,std::string>> callbacks;
+        if(h->enabled) for(const auto& e:h->elements) {
+            if(e->kind=="button" && e->visible && e->clicked && !e->callback.empty()) {
+                callbacks.emplace_back(e->callback,e->id); e->clicked=false;
+            }
+        }
+        for(const auto& [name,id]:callbacks) {
+            if(registry->get<hud>(my_object)!=h) break;
+            sol::object object=estado_lua[name];
+            if(!object.is<sol::protected_function>()) {
+                script_log::instance().write(my_object,"HUD callback not found: "+name); continue;
+            }
+            auto result=object.as<sol::protected_function>()(id);
+            if(!result.valid()) { sol::error error=result; script_log::instance().write(my_object,error.what()); }
+        }
+    }
     if (f_update.valid()) {
         sol::protected_function callback = f_update;
         const auto result = callback();

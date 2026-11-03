@@ -42,6 +42,8 @@ namespace COMMONS_NS {
         double delta_time() const noexcept;
         void refresh();
         void loop();
+        // Execute once between UI frames, on the context owner thread.
+        void defer(std::function<void()> task) { m_deferred.push_back(std::move(task)); }
         void set_close_request_callback(std::function<void()> callback);
         void close();
         void reopen();
@@ -69,5 +71,6 @@ namespace COMMONS_NS {
         std::vector<pending_drop> m_pending_drops;
         time m_time;
         bool m_looping{false};
+        std::vector<std::function<void()>> m_deferred;
     };
 }

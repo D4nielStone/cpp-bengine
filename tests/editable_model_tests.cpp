@@ -93,6 +93,24 @@ TEST_F(EditableModelTest, NativeModelRoundTripsAndPreservesPolygonTopology) {
         (std::vector<unsigned int>{0, 1, 2, 0, 2, 3}));
 }
 
+TEST_F(EditableModelTest, IdenticalSavePreservesFileTimestamp) {
+    commons::editable_model_data source;
+    source.meshes.push_back(quad_mesh());
+    const auto path = folder / "unchanged.bmodel";
+    std::string error;
+    ASSERT_TRUE(commons::save_editable_model(path, source, error)) << error;
+    std::filesystem::last_write_time(path,
+        std::filesystem::last_write_time(path) - std::chrono::hours(1));
+    const auto previous_write = std::filesystem::last_write_time(path);
+
+    ASSERT_TRUE(commons::save_editable_model(path, source, error)) << error;
+    EXPECT_EQ(std::filesystem::last_write_time(path), previous_write);
+
+    source.meshes[0].vertices[0].position.x -= 1;
+    ASSERT_TRUE(commons::save_editable_model(path, source, error)) << error;
+    EXPECT_NE(std::filesystem::last_write_time(path), previous_write);
+}
+
 TEST_F(EditableModelTest, RejectsInvalidNativeModelWithoutChangingOutput) {
     const auto path = folder / "invalid.bmodel";
     std::ofstream(path) << R"({"format":"bengine-model","version":1,"meshes":[{"vertices":[[0,0,0,0,0]],"faces":[[0,1,9]]}]})";
@@ -110,6 +128,8 @@ TEST_F(EditableModelTest, RejectsInvalidNativeModelWithoutChangingOutput) {
 #include "loaders/model.hpp"
 #include "util/material.hpp"
 #include <utils/texture.hpp>
+#include <os/asset_manager.hpp>
+#include <os/resource_files.hpp>
 
 TEST_F(EditableModelTest, NativeModelLoadsMaterialWithoutGraphicsContext) {
     commons::material material;
@@ -130,6 +150,15 @@ TEST_F(EditableModelTest, NativeModelLoadsMaterialWithoutGraphicsContext) {
     std::string error;
     ASSERT_TRUE(commons::store_material_asset(folder/"materials",material,reference,error)) << error;
     EXPECT_EQ(reference.extension(), ".bmat");
+    std::vector<std::filesystem::path> dependencies;
+    ASSERT_TRUE(commons::material_asset_dependencies(reference, dependencies, error)) << error;
+    ASSERT_EQ(dependencies.size(), 1u);
+    EXPECT_EQ(dependencies.front().extension(), ".png");
+    std::ifstream material_file(reference);
+    const std::string json{std::istreambuf_iterator<char>(material_file), {}};
+    EXPECT_EQ(json.find("\"rgba\""), std::string::npos);
+    EXPECT_NE(json.find(dependencies.front().filename().string()), std::string::npos);
+
     std::filesystem::path repeated;
     ASSERT_TRUE(commons::store_material_asset(folder/"materials",material,repeated,error)) << error;
     EXPECT_EQ(reference,repeated);
@@ -148,15 +177,40 @@ TEST_F(EditableModelTest, NativeModelLoadsMaterialWithoutGraphicsContext) {
     EXPECT_TRUE(result.getUniforme("enabled").valor.b);
     EXPECT_EQ(result.getUniforme("count").valor.i,7);
     EXPECT_FLOAT_EQ(result.getUniforme("matrix").valor.mat4[2][2],2.f);
-    const auto embedded=result.getTextura("tex_albedo").embedded;
-    ASSERT_TRUE(embedded);
-    EXPECT_EQ(embedded->m_buffer,image->m_buffer);
+    const auto texture_path = result.getTextura("tex_albedo").path;
+    EXPECT_EQ(std::filesystem::path(texture_path), dependencies.front());
+    EXPECT_EQ(bgui::decode_texture_memory(bgui::resource_files::read(texture_path), texture_path).m_buffer,
+        image->m_buffer);
     material.set_uniform("material.roughness",.9f);
     ASSERT_TRUE(commons::store_material_asset(folder/"materials",material,repeated,error)) << error;
     EXPECT_NE(reference,repeated);
     commons::material original;
     ASSERT_TRUE(commons::load_material_asset(reference,original,error));
     EXPECT_FLOAT_EQ(original.getUniforme("material.roughness").valor.f,.37f);
+    std::vector<std::filesystem::path> updated_dependencies;
+    ASSERT_TRUE(commons::material_asset_dependencies(repeated, updated_dependencies, error)) << error;
+    EXPECT_EQ(updated_dependencies, dependencies);
+
+}
+
+TEST_F(EditableModelTest, LegacyEmbeddedTextureIsExternalizedOnSave) {
+    const auto legacy = folder / "legacy.bmat";
+    std::ofstream(legacy) <<
+        R"({"format":"bengine-material","version":1,"uniforms":{},"textures":{"tex_albedo":{"path":"","filtering":0,"width":1,"height":1,"rgba":"ff8040ff"}}})";
+    commons::material material;
+    std::string error;
+    ASSERT_TRUE(commons::load_material_asset(legacy, material, error)) << error;
+    std::filesystem::path saved;
+    ASSERT_TRUE(commons::store_material_asset(folder, material, saved, error)) << error;
+    std::vector<std::filesystem::path> dependencies;
+    ASSERT_TRUE(commons::material_asset_dependencies(saved, dependencies, error)) << error;
+    ASSERT_EQ(dependencies.size(), 1u);
+    EXPECT_EQ(dependencies.front().extension(), ".png");
+    commons::material loaded;
+    ASSERT_TRUE(commons::load_material_asset(saved, loaded, error)) << error;
+    const auto path = loaded.getTextura("tex_albedo").path;
+    EXPECT_EQ(bgui::decode_texture_memory(bgui::resource_files::read(path), path).m_buffer,
+        (std::vector<unsigned char>{255, 128, 64, 255}));
 }
 
 TEST_F(EditableModelTest, RejectsInvalidMaterialWithoutReplacingExistingState) {
@@ -175,4 +229,24 @@ TEST_F(EditableModelTest, RejectsInvalidMaterialWithoutReplacingExistingState) {
         EXPECT_FALSE(error.empty());
         EXPECT_FLOAT_EQ(output.getUniforme("preserved").valor.f,.42f);
     }
+}
+
+TEST_F(EditableModelTest, FaceGroupsRoundTripAndFollowTopologyEdits) {
+    commons::editable_model_data source;
+    source.meshes.push_back(quad_mesh());
+    source.meshes[0].face_groups.push_back({"Front", {0}});
+    std::string error;
+    const auto path = folder / "groups.bmodel";
+    ASSERT_TRUE(commons::save_editable_model(path, source, error)) << error;
+    commons::editable_model_data loaded;
+    ASSERT_TRUE(commons::load_editable_model(path, loaded, error)) << error;
+    ASSERT_EQ(loaded.meshes[0].face_groups.size(), 1u);
+    EXPECT_EQ(loaded.meshes[0].face_groups[0].name, "Front");
+    ASSERT_TRUE(editor::ui::extrude_faces(loaded.meshes[0], {0}, .25f, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].face_groups[0].faces, (std::vector<unsigned int>{0}));
+    auto mesh = source.meshes[0];
+    ASSERT_TRUE(editor::ui::loop_cut(mesh, {0, 1}, error)) << error;
+    EXPECT_EQ(mesh.face_groups[0].faces, (std::vector<unsigned int>{0, 1}));
+    mesh.face_groups[0].faces = {999};
+    EXPECT_FALSE(mesh.validate(error));
 }

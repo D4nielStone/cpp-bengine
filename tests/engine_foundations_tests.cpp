@@ -882,3 +882,13 @@ TEST(EcsLifetime, CameraResolvesRemovedAndReplacedTransform) {
     camera_component->getViewMatrix();
     EXPECT_EQ(camera_component->m_transform, registry->get<transform>(object.id).get());
 }
+
+TEST(CameraLifetime, FramebufferHandlesStartEmptyWithoutGraphicsContext) {
+    camera view;
+    EXPECT_EQ(view.fbo, 0u);
+    EXPECT_EQ(view.texture, 0u);
+    EXPECT_EQ(view.rbo, 0u);
+    EXPECT_EQ(view.framebuffer_texture(), 0u);
+    view.release_graphics_resources();
+    EXPECT_EQ(view.framebuffer_texture(), 0u);
+}

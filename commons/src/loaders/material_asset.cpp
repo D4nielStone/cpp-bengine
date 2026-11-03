@@ -14,7 +14,9 @@
 #include <sstream>
 #include <map>
 #include <stdexcept>
+#include <string_view>
 #include <utils/texture.hpp>
+#include <zlib.h>
 
 namespace commons {
 namespace {
@@ -38,15 +40,112 @@ std::string path_string(const std::string& path, const std::filesystem::path& di
     }
     return result.generic_string();
 }
+bool matches_file(const std::filesystem::path& path, std::string_view contents) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return false;
+    char block[8192];
+    std::size_t offset = 0;
+    while (input) {
+        input.read(block, sizeof(block));
+        const auto count = static_cast<std::size_t>(input.gcount());
+        if (count > contents.size() - offset || std::memcmp(block, contents.data() + offset, count)) return false;
+        offset += count;
+    }
+    return input.eof() && offset == contents.size();
+}
 bool valid_string(const value& v) { return v.IsString() && v.GetStringLength()==std::strlen(v.GetString()); }
 void require(bool condition) { if (!condition) throw std::runtime_error("Malformed .bmat material."); }
 void read_numbers(const value& v, unsigned count, float* out) {
     require(v.IsArray() && v.Size()==count);
     for (unsigned i=0;i<count;++i) { require(v[i].IsNumber() && std::isfinite(v[i].GetFloat())); out[i]=v[i].GetFloat(); }
 }
+std::filesystem::path content_path(const std::filesystem::path& directory,
+    std::string_view contents, std::string_view extension) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (unsigned char byte : contents) { hash ^= byte; hash *= 1099511628211ull; }
+    std::ostringstream name;
+    name << std::hex << std::setfill('0') << std::setw(16) << hash;
+    const auto stem = name.str();
+    auto path = directory / (stem + std::string(extension));
+    for (unsigned suffix = 2; std::filesystem::exists(path); ++suffix) {
+        if (matches_file(path, contents)) return path;
+        path = directory / (stem + "-" + std::to_string(suffix) + std::string(extension));
+    }
+    return path;
 }
 
-std::string encode_material_asset(const material& source, const std::filesystem::path& directory) {
+void publish_asset(const std::filesystem::path& path, std::string_view contents) {
+    if (std::filesystem::exists(path)) {
+        if (!matches_file(path, contents))
+            throw std::runtime_error("Existing asset differs; preserved: " + path.string());
+        return;
+    }
+    const auto directory = path.parent_path();
+    std::filesystem::create_directories(directory);
+    static std::atomic_uint64_t next{0};
+    std::filesystem::path staging;
+    while (staging.empty()) {
+        const auto candidate = directory / (".bmat-save-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+            "-" + std::to_string(next.fetch_add(1)));
+        if (std::filesystem::create_directory(candidate)) staging = candidate;
+    }
+    struct cleanup {
+        const std::filesystem::path& staging;
+        ~cleanup() { std::error_code ignored; std::filesystem::remove_all(staging, ignored); }
+    } guard{staging};
+    const auto temp = staging / "asset";
+    {
+        std::ofstream output(temp, std::ios::binary | std::ios::trunc);
+        output.write(contents.data(), contents.size());
+        output.close();
+        if (!output) throw std::runtime_error("Could not write asset: " + path.string());
+    }
+    std::error_code ec;
+    std::filesystem::create_hard_link(temp, path, ec);
+    if (ec && !matches_file(path, contents))
+        throw std::filesystem::filesystem_error("Could not publish asset", path, ec);
+}
+
+std::string png_from_pixels(const bgui::texture& image, unsigned width, unsigned height) {
+    const auto row_size = std::size_t(width) * 4;
+    std::string rows((row_size + 1) * height, '\0');
+    for (unsigned row = 0; row < height; ++row)
+        std::memcpy(rows.data() + row * (row_size + 1) + 1,
+            image.m_buffer.data() + row * row_size, row_size);
+
+    auto size = compressBound(rows.size());
+    std::string compressed(size, '\0');
+    if (compress2(reinterpret_cast<Bytef*>(compressed.data()), &size,
+        reinterpret_cast<const Bytef*>(rows.data()), rows.size(), Z_BEST_SPEED) != Z_OK)
+        throw std::runtime_error("Could not encode material texture as PNG.");
+    compressed.resize(size);
+
+    const auto append_number = [](std::string& bytes, std::uint32_t number) {
+        for (int shift = 24; shift >= 0; shift -= 8)
+            bytes.push_back(static_cast<char>((number >> shift) & 0xff));
+    };
+    std::string png("\x89PNG\r\n\x1a\n", 8);
+    const auto append_chunk = [&](std::string_view type, std::string_view bytes) {
+        append_number(png, static_cast<std::uint32_t>(bytes.size()));
+        const auto start = png.size();
+        png.append(type);
+        png.append(bytes);
+        append_number(png, crc32(0, reinterpret_cast<const Bytef*>(png.data() + start),
+            static_cast<uInt>(type.size() + bytes.size())));
+    };
+    std::string header;
+    append_number(header, width);
+    append_number(header, height);
+    header.append("\x08\x06\0\0\0", 5);
+    append_chunk("IHDR", header);
+    append_chunk("IDAT", compressed);
+    append_chunk("IEND", {});
+    return png;
+}
+
+std::string encode_material(const material& source, const std::filesystem::path& directory,
+    bool publish_textures) {
     rapidjson::Document doc(rapidjson::kObjectType); auto& a=doc.GetAllocator();
     doc.AddMember("format","bengine-material",a); doc.AddMember("version",1,a);
     value uniforms(rapidjson::kObjectType);
@@ -86,7 +185,7 @@ std::string encode_material_asset(const material& source, const std::filesystem:
     for (const auto& [name,t] : maps) {
         value entry(rapidjson::kObjectType);
         require(static_cast<int>(t.filtering)>=0 && static_cast<int>(t.filtering)<=2);
-        entry.AddMember("path",string(t.embedded ? "" : path_string(t.path,directory),a),a);
+        auto reference = t.embedded ? std::string{} : path_string(t.path, directory);
         entry.AddMember("filtering",static_cast<int>(t.filtering),a);
         if (t.embedded) {
             const auto& image=*t.embedded;
@@ -95,11 +194,24 @@ std::string encode_material_asset(const material& source, const std::filesystem:
                 image.m_size.x <= 16'777'216 && image.m_size.y <= 16'777'216);
             const auto width=static_cast<int>(image.m_size.x), height=static_cast<int>(image.m_size.y);
             require(width>0 && height>0 && static_cast<std::uint64_t>(width)*height<=16'777'216 && image.m_buffer.size()==static_cast<std::size_t>(width)*height*4);
-            static constexpr char hex[]="0123456789abcdef";
-            std::string bytes; bytes.reserve(image.m_buffer.size()*2);
-            for (unsigned char byte : image.m_buffer) { bytes+=hex[byte>>4];bytes+=hex[byte&15]; }
-            entry.AddMember("width",width,a);entry.AddMember("height",height,a);entry.AddMember("rgba",string(bytes,a),a);
+            std::string generated;
+            std::string_view bytes;
+            if (t.imported_image && !t.imported_image->empty() && t.imported_image_revision == image.m_revision)
+                bytes = {reinterpret_cast<const char*>(t.imported_image->data()), t.imported_image->size()};
+            std::string_view extension = ".png";
+            if (bytes.starts_with(std::string_view("\xff\xd8", 2))) {
+                extension = ".jpg";
+            } else if (bytes.empty()) {
+                generated = png_from_pixels(image, width, height);
+                bytes = generated;
+            } else if (!bytes.starts_with(std::string_view("\x89PNG\r\n\x1a\n", 8))) {
+                extension = ".img";
+            }
+            const auto file = content_path(directory, bytes, extension);
+            if (publish_textures) publish_asset(file, bytes);
+            reference = file.filename().generic_string();
         } else if (t.id && t.path.empty()) throw std::runtime_error("GPU-only material texture has no recoverable source.");
+        entry.AddMember("path", string(reference, a), a);
         textures.AddMember(string(name,a),entry,a);
     }
     doc.AddMember("textures",textures,a);
@@ -108,52 +220,27 @@ std::string encode_material_asset(const material& source, const std::filesystem:
     require(buffer.GetSize()<=256u*1024u*1024u);
     return {buffer.GetString(),buffer.GetSize()};
 }
+}
+
+std::string encode_material_asset(const material& source, const std::filesystem::path& directory) {
+    return encode_material(source, directory, false);
+}
 
 std::filesystem::path material_asset_path(const std::filesystem::path& directory, const std::string& contents) {
-    std::uint64_t hash=14695981039346656037ull;
-    for (unsigned char c : contents) { hash^=c;hash*=1099511628211ull; }
-    std::ostringstream name; name<<std::hex<<std::setfill('0')<<std::setw(16)<<hash<<".bmat";
-    auto path=directory/name.str();
-    for(unsigned suffix=2;std::filesystem::exists(path);++suffix) {
-        std::ifstream input(path,std::ios::binary);const std::string existing{std::istreambuf_iterator<char>(input),{}};
-        if(input && existing==contents)return path;
-        path=directory/(name.str()+"-"+std::to_string(suffix)+".bmat");
-    }
-    return path;
+    return content_path(directory, contents, ".bmat");
 }
 
 bool store_material_asset(const std::filesystem::path& directory, const material& source, std::filesystem::path& result, std::string& error) {
-    std::filesystem::path temp, staging;
     try {
-        const auto contents=encode_material_asset(source,directory);
-        const auto path=material_asset_path(directory,contents);
-        if (std::filesystem::exists(path)) {
-            std::ifstream input(path,std::ios::binary); const std::string existing{std::istreambuf_iterator<char>(input),{}};
-            if (!input || existing!=contents) throw std::runtime_error("Existing .bmat file differs; preserved: "+path.string());
-            result=path;error.clear();return true;
-        }
-        std::filesystem::create_directories(directory);
-        static std::atomic_uint64_t next{0};
-        while (staging.empty()) {
-            const auto candidate=directory/(".bmat-save-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(next.fetch_add(1)));
-            if (std::filesystem::create_directory(candidate)) staging=candidate;
-        }
-        temp=staging/"material";
-        { std::ofstream output(temp,std::ios::binary|std::ios::trunc);output.write(contents.data(),contents.size());output.flush();
-          if (!output) throw std::runtime_error("Could not write material: "+path.string()); }
-        // Publish without replacing an existing material, including another writer's file.
-        std::error_code publication_error;
-        std::filesystem::create_hard_link(temp,path,publication_error);
-        if (publication_error) {
-            std::ifstream input(path,std::ios::binary);
-            const std::string existing{std::istreambuf_iterator<char>(input),{}};
-            if (!input || existing!=contents) throw std::filesystem::filesystem_error("Could not publish material",path,publication_error);
-        }
-        std::filesystem::remove(temp);std::filesystem::remove(staging);result=path;error.clear();return true;
+        const auto contents = encode_material(source, directory, true);
+        const auto path = material_asset_path(directory, contents);
+        publish_asset(path, contents);
+        result = path;
+        error.clear();
+        return true;
     } catch (const std::exception& e) {
-        if (!temp.empty()) { std::error_code ignored;std::filesystem::remove(temp,ignored); }
-        if (!staging.empty()) { std::error_code ignored;std::filesystem::remove(staging,ignored); }
-        error=e.what();return false;
+        error = e.what();
+        return false;
     }
 }
 
@@ -163,7 +250,8 @@ bool load_material_asset(const std::filesystem::path& path, material& result, st
         std::string text;char block[8192];
         while (input) { input.read(block,sizeof(block));text.append(block,static_cast<std::size_t>(input.gcount()));require(text.size()<=256u*1024u*1024u); }
         require(input.eof());rapidjson::Document doc;doc.Parse(text.data(),text.size());
-        require(!doc.HasParseError() && doc.IsObject() && doc.HasMember("format") && valid_string(doc["format"]) && std::string_view(doc["format"].GetString())=="bengine-material" && doc.HasMember("version") && doc["version"].IsInt() && doc["version"].GetInt()==1);
+        require(!doc.HasParseError() && doc.IsObject() && doc.HasMember("format") && valid_string(doc["format"]) && std::string_view(doc["format"].GetString())=="bengine-material" && doc.HasMember("version") && doc["version"].IsInt());
+        require(doc["version"].GetInt() == 1);
         require(doc.HasMember("uniforms") && doc["uniforms"].IsObject() && doc.HasMember("textures") && doc["textures"].IsObject());
         material loaded;
         for (auto it=doc["uniforms"].MemberBegin();it!=doc["uniforms"].MemberEnd();++it) {
@@ -187,16 +275,30 @@ bool load_material_asset(const std::filesystem::path& path, material& result, st
             const int filtering=entry["filtering"].GetInt();require(filtering>=0 && filtering<=2);
             const std::filesystem::path reference(entry["path"].GetString());
             texture t{0,reference.empty()?std::string{}:(reference.is_absolute()?reference:path.parent_path()/reference).lexically_normal().string()};t.filtering=static_cast<texture_filter>(filtering);
-            if (entry.HasMember("rgba")) {
-                require(entry.HasMember("width") && entry["width"].IsUint() && entry.HasMember("height") && entry["height"].IsUint() && valid_string(entry["rgba"]));
-                const auto w=entry["width"].GetUint(),h=entry["height"].GetUint();
-                require(w && h && std::uint64_t(w)*h<=16'777'216);
-                const std::uint64_t size=std::uint64_t(w)*h*4;
-                require(entry["rgba"].GetStringLength()==size*2);
-                auto image=std::make_shared<bgui::texture>();image->m_size={float(w),float(h)};image->m_has_alpha=true;image->m_buffer.reserve(size);
-                const auto digit=[](char c)->unsigned { if(c>='0' && c<='9')return c-'0';if(c>='a' && c<='f')return c-'a'+10;throw std::runtime_error("Invalid embedded texture bytes."); };
-                const char* bytes=entry["rgba"].GetString();for(std::size_t i=0;i<size;++i)image->m_buffer.push_back((digit(bytes[2*i])<<4)|digit(bytes[2*i+1]));
-                image->m_path=path.string()+"#"+it->name.GetString();t.embedded=std::move(image);t.path=t.embedded->m_path;
+            const bool legacy_pixels = entry.HasMember("rgba");
+            if (legacy_pixels) {
+                require(entry.HasMember("width") && entry["width"].IsUint() &&
+                    entry.HasMember("height") && entry["height"].IsUint());
+                const auto w = entry["width"].GetUint(), h = entry["height"].GetUint();
+                require(w && h && std::uint64_t(w) * h <= 16'777'216);
+                const auto size = std::size_t(w) * h * 4;
+                require(valid_string(entry["rgba"]) && entry["rgba"].GetStringLength() == size * 2);
+                auto image = std::make_shared<bgui::texture>();
+                image->m_size = {float(w), float(h)};
+                image->m_has_alpha = true;
+                image->m_buffer.resize(size);
+                const auto digit = [](char c) -> unsigned {
+                    if (c >= '0' && c <= '9') return c - '0';
+                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                    throw std::runtime_error("Invalid embedded texture bytes.");
+                };
+                const char* bytes = entry["rgba"].GetString();
+                for (std::size_t i = 0; i < size; ++i)
+                    image->m_buffer[i] = (digit(bytes[2*i]) << 4) | digit(bytes[2*i+1]);
+                t.path = path.string() + "#" + it->name.GetString();
+                image->m_path = t.path;
+                t.embedded = std::move(image);
+                t.update_embedded_revision();
             }
             loaded.set_texture(it->name.GetString(),t);
         }
@@ -204,13 +306,15 @@ bool load_material_asset(const std::filesystem::path& path, material& result, st
     } catch (const std::exception& e) { error="Could not load material '"+path.string()+"': "+e.what();return false; }
 }
 bool material_asset_dependencies(const std::filesystem::path& path, std::vector<std::filesystem::path>& result, std::string& error) {
-    material value; if (!load_material_asset(path,value,error)) return false;
+    material value;
+    if (!load_material_asset(path, value, error)) return false;
     std::vector<std::filesystem::path> loaded;
-    for (const auto& [name,texture] : value.textures) {
+    for (const auto& [name, texture] : value.textures) {
         (void)name;
         if (!texture.embedded && !texture.path.empty()) loaded.emplace_back(texture.path);
     }
-    result=std::move(loaded);return true;
+    result = std::move(loaded);
+    return true;
 }
 
 }

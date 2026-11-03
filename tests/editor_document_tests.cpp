@@ -1,3 +1,5 @@
+#include <glad.h>
+#define GLFW_INCLUDE_NONE
 #include <gtest/gtest.h>
 #include "files_view.hpp"
 #include "debug_view.hpp"

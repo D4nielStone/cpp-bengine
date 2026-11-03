@@ -269,18 +269,27 @@ TEST_F(EditorAssetWorkflowTest, ModelImportKeepsMaterialsAndRelativeTexturesAfte
     write_test_png(source / "textures/color.png");
     editor::ui::files_view files(project);
     const auto imported = files.import_file(source / "model.obj");
-    EXPECT_TRUE(std::filesystem::exists(imported.parent_path() / "model.mtl"));
+    EXPECT_EQ(imported.extension(), ".bmodel");
     EXPECT_TRUE(std::filesystem::exists(imported.parent_path() / "textures/color.png"));
-    const auto second = files.import_file(source / "model.obj");
-    EXPECT_EQ(imported, second);
+    EXPECT_EQ(imported, files.import_file(source / "model.obj"));
+    commons::model_import_options options;
+    options.scale = 2;
+    const auto scaled = editor::ui::import_native_model(source / "model.obj", project, {}, false, &options);
+    EXPECT_NE(scaled, imported);
+    EXPECT_EQ(scaled, editor::ui::import_native_model(source / "model.obj", project, {}, false, &options));
+    const auto scaled_model = commons::model::prepare(scaled.string());
+    ASSERT_EQ(scaled_model->meshes.size(), 1u);
+    EXPECT_FLOAT_EQ(scaled_model->meshes.front().vertices()[1].position.x, 2.f);
+
     std::filesystem::remove_all(source);
-    Assimp::Importer importer;
-    const auto* scene = importer.ReadFile(imported.string(), 0);
-    ASSERT_NE(scene, nullptr);
-    ASSERT_EQ(scene->mNumMeshes, 1u);
-    aiString texture;
-    ASSERT_EQ(scene->mMaterials[scene->mMeshes[0]->mMaterialIndex]->GetTexture(aiTextureType_DIFFUSE, 0, &texture), AI_SUCCESS);
-    const auto texture_path = imported.parent_path() / texture.C_Str();
+    std::filesystem::remove(imported.parent_path() / "model.obj");
+    std::filesystem::remove(imported.parent_path() / "model.mtl");
+
+    const auto model = commons::model::prepare(imported.string());
+    ASSERT_EQ(model->meshes.size(), 1u);
+    EXPECT_EQ(model->get_source_path(), imported.string());
+    const auto texture_path = std::filesystem::path(
+        model->meshes.front().getMaterial().getTextura("tex_albedo").path);
     EXPECT_TRUE(std::filesystem::is_regular_file(texture_path));
     EXPECT_TRUE(editor::ui::path_inside(std::filesystem::canonical(texture_path), std::filesystem::canonical(project)));
 }

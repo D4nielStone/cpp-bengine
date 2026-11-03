@@ -5,7 +5,7 @@ std::unique_ptr<model> model::clone() const {
     auto result = std::make_unique<model>();
     result->directory = directory;
     result->source_path = source_path;
-    result->m_shader = m_shader;
+    if (m_shader.ID) result->m_shader = m_shader;
     result->m_animation_clip = m_animation_clip;
     result->m_animation_start = m_animation_start;
     if (m_pose) result->m_pose = std::make_shared<model_pose>(*m_pose);
@@ -28,7 +28,7 @@ std::unique_ptr<model> model::clone() const {
                 default: break;
             }
         }
-        result->meshes.emplace_back(source.getVertices(), source.getIndices(), material);
+        result->meshes.emplace_back(source.vertices(), source.indices(), material);
         std::vector<transform> instances(source.instances().size());
         for (size_t i = 0; i < instances.size(); ++i) {
             instances[i] = source.instances()[i];

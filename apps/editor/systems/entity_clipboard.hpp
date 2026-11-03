@@ -1,3 +1,4 @@
+#include "components/hud.hpp"
 #pragma once
 #include "editor_context.hpp"
 #include "components/transform.hpp"
@@ -90,6 +91,7 @@ public:
                     case commons::directional_light::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::directional_light>(component))); break;
                     case commons::spot_light::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::spot_light>(component))); break;
                     case commons::sound_listener::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::sound_listener>(component))); break;
+                    case commons::hud::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::hud>(component))); break;
                     case commons::sound_player::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::sound_player>(component))); break;
                     case commons::renderer::mask: {
                         const auto source = std::static_pointer_cast<commons::renderer>(component);

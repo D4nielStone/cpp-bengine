@@ -44,6 +44,7 @@ target_include_directories(commons
 target_compile_features(commons PUBLIC cxx_std_20)
 
 # Link the bundled GUI library and system dependencies used by the engine.
+find_package(Threads REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(Bullet REQUIRED)
@@ -75,6 +76,7 @@ target_include_directories(commons
 
 target_link_libraries(commons
     PUBLIC
+        Threads::Threads
         ZLIB::ZLIB
         OpenGL::GL
         glfw

@@ -45,7 +45,7 @@ namespace COMMONS_NS {
 
 		glm::mat4 viewMatrix = glm::mat4(1.f), projMatriz = glm::mat4(1.f);
 
-		unsigned int fbo, texture, rbo;
+		unsigned int fbo{0}, texture{0}, rbo{0};
 
 		camera_config config{};
 		bool flag_fb		{ false };

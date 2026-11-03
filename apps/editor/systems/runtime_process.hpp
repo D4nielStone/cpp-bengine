@@ -13,6 +13,7 @@ public:
     runtime_process(const runtime_process&) = delete;
     runtime_process& operator=(const runtime_process&) = delete;
 
+    std::filesystem::path snapshot_path(std::string& error);
     bool start(
         const std::filesystem::path& executable,
         const std::filesystem::path& project,
@@ -26,6 +27,7 @@ public:
 private:
     void cleanup_project_file();
 
+    std::filesystem::path m_snapshot_directory;
     std::filesystem::path m_project_file;
     std::filesystem::path m_log_file;
     std::uintmax_t m_log_offset{0};

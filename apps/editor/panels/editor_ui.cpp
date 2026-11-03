@@ -1,3 +1,4 @@
+#include "scene_loading_modal.hpp"
 #define GLFW_INCLUDE_NONE
 #include <glad.h>
 
@@ -365,23 +366,30 @@ editor_ui::editor_ui(
 
     m_play_button = &play_container.add<runtime_play_button>(
         [this]() {
-            const bool should_play = !m_is_playing;
-            std::string error;
-            if (m_play_state_callback &&
-                !m_play_state_callback(should_play, error)) {
-                report_result(
-                    should_play ? "Starting runtime" : "Stopping runtime",
-                    false,
-                    error
-                );
-                return;
-            }
+            m_play_button->set_enable(false);
+            auto action = [this]() {
+                const bool should_play = !m_is_playing;
+                std::string error;
+                if (m_play_state_callback &&
+                    !m_play_state_callback(should_play, error)) {
+                    m_play_button->set_enable(true);
+                    report_result(
+                        should_play ? "Starting runtime" : "Stopping runtime",
+                        false,
+                        error
+                    );
+                    return;
+                }
 
-            m_is_playing = should_play;
-            m_is_paused = false;
-            apply_play_visual(*m_play_button, *m_play_icon, m_is_playing);
-            apply_pause_visual(*m_pause_button, *m_pause_icon, false);
-            m_pause_button->set_enable(m_is_playing);
+                m_play_button->set_enable(true);
+                m_is_playing = should_play;
+                m_is_paused = false;
+                apply_play_visual(*m_play_button, *m_play_icon, m_is_playing);
+                apply_pause_visual(*m_pause_button, *m_pause_icon, false);
+                m_pause_button->set_enable(m_is_playing);
+            };
+            if (m_load_dispatcher) m_load_dispatcher(std::move(action));
+            else action();
         }
     );
     m_play_icon = &m_play_button->add<bgui::icon>("play", 0.28f);
@@ -1214,18 +1222,32 @@ bool editor_ui::load_project_selection() {
     if (m_project_unloading_callback && !m_project_unloading_callback(load_error)) {
         report_result("Saving workspace", false, load_error); return false;
     }
-    if (!m_project_persistence.load(selected_path.string(), load_error)) {
-        report_result("Loading project", false, load_error);
-        m_project_picker_status->set_buffer(load_error);
-        return false;
-    }
+    return dispatch_load(selected_path.string(), [this, selected_path](bool success, const std::string& load_error) {
+        if (!success) {
+            report_result("Loading project", false, load_error);
+            m_project_picker_status->set_buffer(load_error);
+            return;
+        }
+        m_project_path = selected_path.string();
+        remember_project(m_project_path);
+        report_result("Loading project", true, {});
+        if (m_project_loaded_callback) m_project_loaded_callback(m_project_path);
+        m_project_modal->set_enable(false);
+    });
+}
 
-    m_project_path = selected_path.string();
-    remember_project(m_project_path);
-    report_result("Loading project", true, {});
-    if (m_project_loaded_callback)
-        m_project_loaded_callback(m_project_path);
-    m_project_modal->set_enable(false);
+bool editor_ui::dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete) {
+    if (!m_load_dispatcher) {
+        std::string error;
+        const bool result = m_project_persistence.load(path, error);
+        complete(result, error);
+        return result;
+    }
+    m_load_dispatcher([this, path, complete = std::move(complete)] {
+        std::string error;
+        const bool result = load_project_with_modal(m_project_persistence, path, error);
+        complete(result, error);
+    });
     return true;
 }
 
@@ -1396,18 +1418,15 @@ void editor_ui::create_new_project_modal() {
         const auto project_file = project_file_path(folder).string();
         if (!stop_runtime_for_edit(error)) { status.set_buffer(error); return; }
         if (m_project_unloading_callback && !m_project_unloading_callback(error)) { status.set_buffer(error); return; }
-        if (!m_project_persistence.load(project_file, error)) {
-            status.set_buffer(error);
-            return;
-        }
-        m_project_path = project_file;
-        remember_project(m_project_path);
-        if (m_project_loaded_callback)
-            m_project_loaded_callback(m_project_path);
-        m_new_project_modal->set_enable(false);
-        if (m_project_modal)
-            m_project_modal->set_enable(false);
-        report_result("Creating project", true, {});
+        dispatch_load(project_file, [this, project_file, status_ptr = &status](bool success, const std::string& error) {
+            if (!success) { status_ptr->set_buffer(error); return; }
+            m_project_path = project_file;
+            remember_project(m_project_path);
+            if (m_project_loaded_callback) m_project_loaded_callback(m_project_path);
+            m_new_project_modal->set_enable(false);
+            if (m_project_modal) m_project_modal->set_enable(false);
+            report_result("Creating project", true, {});
+        });
     });
 }
 

@@ -154,11 +154,17 @@ TEST_F(ExecutableArchiveTest, LoadsThemeDirectlyFromExecutable) {
 #include "loaders/editable_model.hpp"
 #include "loaders/material_asset.hpp"
 #include "loaders/model.hpp"
+#include <utils/texture.hpp>
 
 TEST_F(ExecutableArchiveTest, RuntimeLoadsNativeModelAndMaterialFromPackedResources) {
     commons::material material;
     material.set_uniform("material.roughness",.26f);
     material.set_uniform("material.albedo",commons::color{.1f,.3f,.7f,1.f});
+    commons::texture texture;
+    texture.embedded = std::make_shared<bgui::texture>();
+    texture.embedded->m_size = {1, 1};
+    texture.embedded->m_buffer = {16, 32, 64, 255};
+    material.set_texture("tex_albedo", texture);
     fs::path reference;std::string error;
     ASSERT_TRUE(commons::store_material_asset(data/"game/assets/materials",material,reference,error)) << error;
     commons::editable_mesh_data mesh;
@@ -173,5 +179,9 @@ TEST_F(ExecutableArchiveTest, RuntimeLoadsNativeModelAndMaterialFromPackedResour
     ASSERT_EQ(model.meshes.size(),1u);
     EXPECT_FLOAT_EQ(model.meshes[0].getMaterial().getUniforme("material.roughness").valor.f,.26f);
     EXPECT_EQ(model.meshes[0].indices().size(),3u);
+    const auto loaded_texture = model.meshes[0].getMaterial().getTextura("tex_albedo");
+    EXPECT_EQ(bgui::decode_texture_memory(bgui::resource_files::read(loaded_texture.path),
+        loaded_texture.path).m_buffer, texture.embedded->m_buffer);
+    EXPECT_FALSE(fs::exists(loaded_texture.path));
     EXPECT_FALSE(fs::exists(output.parent_path()/"game/assets/native.bmodel"));
 }

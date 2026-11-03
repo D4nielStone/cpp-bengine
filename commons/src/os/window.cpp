@@ -1,5 +1,6 @@
 #include "os/window.hpp"
 #include "file_drop_bridge.hpp"
+#include "loaders/shader.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -122,6 +123,7 @@ window::~window() {
     m_ecs->live_entities.clear();
     m_ecs->entity_names.clear();
     m_ecs.reset();
+    desload_shaders();
     m_interface.reset();
 
     if (m_window) {
@@ -222,6 +224,9 @@ void window::loop() {
     auto& refresh_callback = bgui::get_context().m_refresh_func;
     const auto previous_callback = refresh_callback;
     refresh_callback = [this, previous_callback] {
+        auto deferred = std::move(m_deferred);
+        m_deferred.clear();
+        for (auto& task : deferred) task();
         refresh();
         if (previous_callback) {
             previous_callback();

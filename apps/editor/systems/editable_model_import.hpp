@@ -1,7 +1,12 @@
 #pragma once
 
 #include "loaders/editable_model.hpp"
-#include "loaders/model_import.hpp"
+#include "loaders/model.hpp"
+#include "loaders/material_asset.hpp"
+#include "asset_import.hpp"
+#include "project_file_transaction.hpp"
+
+#include <cstdint>
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -15,10 +20,11 @@ namespace editor::ui {
 inline bool import_editable_model(
     const std::filesystem::path& path,
     commons::editable_model_data& result,
-    std::string& error
+    std::string& error,
+    const commons::model_import_options* settings = nullptr
 ) {
     error.clear();
-    const auto options = commons::read_model_import_options(path);
+    const auto options = settings ? *settings : commons::read_model_import_options(path);
     Assimp::Importer importer;
     const auto* scene = importer.ReadFile(
         path.string(),
@@ -65,8 +71,6 @@ inline bool import_editable_model(
                 if (source->mTextureCoords[0]) {
                     uv.x = source->mTextureCoords[0][vertex_index].x;
                     uv.y = source->mTextureCoords[0][vertex_index].y;
-                    if (options.flip_uvs)
-                        uv.y = 1.f - uv.y;
                 }
                 mesh.vertices.emplace_back(
                     bgui::vec3{position.x, position.y, position.z},
@@ -111,6 +115,55 @@ inline bool import_editable_model(
         return false;
     result = std::move(imported);
     return true;
+}
+
+inline bool is_native_model(const std::filesystem::path& path) {
+    auto extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    return extension == ".bmodel";
+}
+
+inline std::filesystem::path import_native_model(const std::filesystem::path& source,
+    const std::filesystem::path& project, const std::filesystem::path& destination = {},
+    bool another_copy = false, const commons::model_import_options* settings = nullptr) {
+    const auto imported = import_asset(source, project, true, destination, another_copy, settings);
+    if (is_native_model(imported)) return imported;
+
+    const auto options = settings ? *settings : commons::read_model_import_options(imported);
+    auto native = imported;
+    const auto encoded = commons::serialize_model_import_options(options);
+    if (encoded != commons::serialize_model_import_options({})) {
+        std::uint64_t hash = 14695981039346656037ull;
+        for (unsigned char byte : encoded) { hash ^= byte; hash *= 1099511628211ull; }
+        native += "." + std::to_string(hash);
+    }
+    native += ".bmodel";
+    if (std::filesystem::is_regular_file(native)) return native;
+
+    commons::editable_model_data data;
+    std::string error;
+    if (!import_editable_model(imported, data, error, &options))
+        throw std::runtime_error(error);
+    const auto model = commons::model::prepare(imported.string(), &options);
+    if (model->meshes.size() != data.meshes.size())
+        throw std::runtime_error("A topologia importada não corresponde às malhas do modelo.");
+    const auto materials = native.parent_path() / (native.stem().string() + ".materials");
+    for (std::size_t i = 0; i < data.meshes.size(); ++i) {
+        std::filesystem::path material;
+        if (!commons::store_material_asset(materials, model->meshes[i].getMaterial(), material, error))
+            throw std::runtime_error(error);
+        data.meshes[i].material_path = material.lexically_relative(native.parent_path()).generic_string();
+    }
+    if (!commons::save_editable_model(native, data, error))
+        throw std::runtime_error(error);
+    if (settings && imported != std::filesystem::canonical(source) &&
+        encoded != commons::serialize_model_import_options(commons::read_model_import_options(imported))) {
+        const auto sidecar = commons::model_import_settings_path(imported);
+        project_files::stage({sidecar, encoded});
+        project_files::replace(sidecar);
+    }
+    return native;
 }
 
 }

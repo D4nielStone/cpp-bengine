@@ -1,3 +1,4 @@
+#include "editor/systems/scene_loading_modal.hpp"
 #include "editor/systems/runtime_scene_preview.hpp"
 #include "editor/systems/release_indicator.hpp"
 #include "components/camera.hpp"
@@ -409,6 +410,7 @@ public:
             m_project_path,
             std::move(build_directory)
         );
+        m_editor->set_load_dispatcher([this](auto task) { m_window.defer(std::move(task)); });
         m_editor->set_editor_context(m_context);
         m_editor->set_editor_commands(m_commands);
         m_editor->set_exit_callback([this]() { m_window.close(); });
@@ -416,7 +418,7 @@ public:
     }
 
     bool load_project(std::string& error) {
-        if (!m_project_persistence->load(m_project_path, error))
+        if (!editor::ui::load_project_with_modal(*m_project_persistence, m_project_path, error))
             return false;
         remember_recent_project();
         return true;
@@ -426,7 +428,7 @@ public:
         m_scene = &m_editor->add_panel<editor::ui::scene_view>(
             m_window, m_camera, m_context
         );
-        m_game_view = &m_editor->add_panel<editor::ui::game_view>(m_context);
+        m_editor->add_panel<editor::ui::game_view>(m_context);
         m_entities = &m_editor->add_panel<editor::ui::entities_view>(
             m_context,
             [](std::uint32_t id) { return "Entity " + std::to_string(id); }
@@ -477,8 +479,6 @@ public:
                     }
                     return;
                 }
-                if (editor::ui::files_view::supports_model(asset))
-                    (void)editor::ui::asset_dependencies(std::filesystem::canonical(asset), true);
                 if ((m_model_editor && m_model_editor->drop_asset(asset, mouse_position)) ||
                     m_components->drop_asset(asset, mouse_position) ||
                     !editor::ui::files_view::supports_model(asset) || !m_scene->is_open() ||
@@ -490,7 +490,9 @@ public:
                 );
                 if (!position)
                     return;
-                auto model = std::make_unique<commons::model>(asset.string());
+                const auto native = editor::ui::is_native_model(asset) ? asset :
+                    editor::ui::import_native_model(asset, m_context->project_root);
+                auto model = std::make_unique<commons::model>(native.string());
                 if (model->meshes.empty()) {
                     if (m_files)
                         m_files->show_model_importer(
@@ -525,13 +527,15 @@ public:
                 });
             }
         );
-        m_files->set_model_imported_callback([this](const auto& path) {
-            m_context->registry->cada<commons::renderer>([this, &path](auto id) {
-                auto renderer = m_context->registry->get<commons::renderer>(id);
-                if (renderer->m_modelo &&
-                    std::filesystem::path(renderer->m_modelo->get_source_path()) == path)
-                    renderer->m_modelo->load_model(path.string());
-            });
+        m_files->set_model_imported_callback([this](const auto& source, const auto& native) {
+            const auto original = std::filesystem::canonical(source);
+            if (original != native) {
+                m_context->registry->cada<commons::renderer>([this, &original, &native](auto id) {
+                    auto renderer = m_context->registry->get<commons::renderer>(id);
+                    if (renderer->m_modelo && std::filesystem::path(renderer->m_modelo->get_source_path()) == original)
+                        renderer->m_modelo->load_model(native.string());
+                });
+            }
             m_components->refresh();
         });
         m_files->set_file_operation_guard([this]() { return !m_context->is_playing; });
@@ -571,8 +575,7 @@ public:
 
         m_render_system = m_window.add<commons::render_system>();
         m_render_system->set_camera_filter([this](std::uint32_t entity) {
-            return m_scene->needs_camera_render(entity) ||
-                m_game_view->needs_camera_render(entity);
+            return m_scene->needs_camera_render(entity);
         });
         m_runtime_tools = &m_editor->add_panel<editor::ui::runtime_tools_view>(
             m_window, m_context, m_render_system
@@ -668,18 +671,10 @@ private:
                     return true;
                 }
                 std::error_code filesystem_error;
-                const auto temp_directory =
-                    std::filesystem::temp_directory_path(filesystem_error);
-                if (filesystem_error) {
-                    error = "Could not locate the temporary directory: " +
-                        filesystem_error.message();
+                const auto project_file = m_runtime_process->snapshot_path(error);
+                if (project_file.empty())
                     return false;
-                }
-                const auto project_file = temp_directory /
-                    ("cpp-bengine-runtime-" +
-                     std::to_string(std::chrono::steady_clock::now()
-                         .time_since_epoch().count()) + ".bengine");
-                if (!m_project_persistence->save(project_file.string(), error)) {
+                if (!editor::ui::save_project_with_modal(*m_project_persistence, project_file.string(), error)) {
                     std::filesystem::remove(project_file, filesystem_error);
                     return false;
                 }
@@ -736,7 +731,6 @@ private:
     std::unique_ptr<editor::ui::editor_ui> m_editor;
     editor::ui::scene_view* m_scene{nullptr};
     editor::ui::model_editor_view* m_model_editor{nullptr};
-    editor::ui::game_view* m_game_view{nullptr};
     editor::ui::entities_view* m_entities{nullptr};
     editor::ui::components_view* m_components{nullptr};
     editor::ui::files_view* m_files{nullptr};

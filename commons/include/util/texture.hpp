@@ -27,6 +27,8 @@ SOFTWARE.
 #pragma once
 #include <string>
 #include <memory>
+#include <vector>
+#include <cstdint>
 namespace bgui { struct texture; }
 
 namespace COMMONS_NS {
@@ -37,9 +39,13 @@ namespace COMMONS_NS {
         unsigned int id{0};
         std::string path{""};
         std::shared_ptr<bgui::texture> embedded;
+        std::shared_ptr<const std::vector<unsigned char>> imported_image;
+        std::uint64_t imported_image_revision{0};
 
         texture() = default;
         texture(unsigned int id, std::string path) : id(id), path(path) {}
+        // Call after preparing/changing embedded CPU pixels, before rendering.
+        void update_embedded_revision();
         void bind(int slot) const;
 
         bool operator==(const texture& other) const {

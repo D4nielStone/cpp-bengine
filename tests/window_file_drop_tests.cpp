@@ -11,6 +11,8 @@
 #include "asset_drop_overlay.hpp"
 #include "systems/ui_system.hpp"
 #include <bgui_backend_gl3.hpp>
+#include <bgui_backend_glfw.hpp>
+#include <gl3/gl3_shader.hpp>
 #include <array>
 #include <chrono>
 #include <fstream>
@@ -231,4 +233,40 @@ TEST(WindowLifetimeTest, ReleasesAttachedGraphicsBeforeContextEvenWithExternalOw
     EXPECT_EQ(glfwGetCurrentContext(), nullptr);
     camera.reset();
     renderer.reset();
+}
+
+TEST(WindowFileDropTest, RecreatesCursorsAfterWindowShutdown) {
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for cursor lifetime verification";
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        commons::window window("Cursor lifetime test", 100, 100);
+        auto& io = bgui::get_context();
+        for (auto cursor : {bgui::cursor::arrow, bgui::cursor::hand, bgui::cursor::ibeam,
+                 bgui::cursor::resize_horizontal, bgui::cursor::resize_vertical,
+                 bgui::cursor::resize_nwse, bgui::cursor::resize_nesw}) {
+            io.m_actual_cursor = cursor;
+            bgui::glfw_update(io);
+            EXPECT_EQ(glfwGetError(nullptr), GLFW_NO_ERROR) << "cycle " << cycle;
+        }
+    }
+}
+
+TEST(WindowLifetimeTest, RecreatesEngineAndUiShadersAfterContextShutdown) {
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for shader lifetime verification";
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        {
+            commons::window window("Shader lifetime test", 100, 100);
+            window.add<commons::ui_system>();
+            EXPECT_TRUE(commons::shaders.empty());
+            commons::shader engine_shader("pbr.vert", "pbr.frag");
+            ASSERT_TRUE(glIsProgram(engine_shader.ID));
+            auto* text_shader = bgl::get_text_gl3_shader();
+            text_shader->bind();
+            GLint program{};
+            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+            EXPECT_GE(glGetUniformLocation(program, "text_color"), 0);
+            text_shader->unbind();
+            EXPECT_EQ(glGetError(), GL_NO_ERROR) << "cycle " << cycle;
+        }
+        EXPECT_TRUE(commons::shaders.empty());
+    }
 }

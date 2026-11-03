@@ -1018,3 +1018,34 @@ TEST(RuntimeScenePreview, MirrorsTransformsAndRestoresWithoutMovingEditorCamera)
     registry->remove(object.id);
     EXPECT_TRUE(editor::ui::apply_runtime_preview(during, registry, editor_entity.id));
 }
+
+#include "components/hud.hpp"
+TEST(ProjectPersistenceTest, RoundTripsHudLayoutAndWorldLabels) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto owner = registry->create(106);
+    registry->add<commons::hud>(owner);
+    auto h = registry->get<commons::hud>(owner.id);
+    h->add("column", "", -1);
+    h->add("button", "Continue", 0)->width=120;
+    const auto text = h->add("text3d", "Target", -1);
+    text->position = {1, 2, 3};
+    text->rotation = {20, 30, 40};
+    text->world_scale = {2, 3, 4};
+    text->depth = .25f;
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const auto path = temporary_project_path(); std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    auto restored = registry->get<commons::hud>(106);
+    ASSERT_NE(restored,nullptr);
+    ASSERT_EQ(restored->elements.size(),3u);
+    EXPECT_EQ(restored->elements[1]->text,"Continue");
+    EXPECT_EQ(restored->elements[1]->parent,0);
+    EXPECT_EQ(restored->elements[2]->position.y,2);
+    EXPECT_EQ(restored->elements[2]->rotation, (bgui::vec3{20, 30, 40}));
+    EXPECT_EQ(restored->elements[2]->world_scale, (bgui::vec3{2, 3, 4}));
+    EXPECT_FLOAT_EQ(restored->elements[2]->depth, .25f);
+    remove_project_files(path);
+}

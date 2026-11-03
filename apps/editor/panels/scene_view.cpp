@@ -1,3 +1,4 @@
+#include "ui/hud_view.hpp"
 #include "scene_view.hpp"
 
 #include "camera_movement.hpp"
@@ -302,6 +303,10 @@ void scene_view::build(bgui::dock& dock) {
         m_input_state,
         m_state
     );
+
+    scene_window.add<commons::hud_view, bgui::layer::overlay>(
+        m_window.get_ecs(), m_camera, image,
+        [weak = std::weak_ptr<editor_context>(m_context)] { auto c = weak.lock(); return c && c->is_playing; });
 
     scene_window.add<guizmo_system, bgui::layer::overlay>(
         m_camera,

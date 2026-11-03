@@ -1344,3 +1344,51 @@ TEST_F(EditorInteractionTest, GizmoKeepsNearCameraDepthAxisAtFixedScreenSize) {
     }
     EXPECT_NEAR(radius,82.f,2.f);
 }
+
+TEST(EditorSelection, AdditiveSelectionTogglesAndReplacementClears) {
+    auto registry = std::make_shared<commons::ecs>();
+    editor::ui::editor_context context(registry);
+    auto first = registry->create();
+    auto second = registry->create();
+    context.select_entity(first.id);
+    context.select_entity(second.id, true);
+    EXPECT_EQ(context.selected_entities.size(), 2u);
+    context.select_entity(second.id, true);
+    EXPECT_EQ(context.selected_entity, first.id);
+    context.select_entity(second.id);
+    EXPECT_EQ(context.selected_entities.size(), 1u);
+    context.select_entity(std::nullopt);
+    EXPECT_TRUE(context.selected_entities.empty());
+    EXPECT_FALSE(context.selected_entity);
+}
+
+TEST_F(EditorInteractionTest, HierarchyGroupsSelectionAndUndoesInOneStep) {
+    auto first = registry->create();
+    auto second = registry->create();
+    registry->add<commons::transform>(first);
+    registry->add<commons::transform>(second);
+    registry->get<commons::transform>(first.id)->set_position({2.f, 3.f, 4.f});
+    context->select_entity(first.id);
+    context->select_entity(second.id, true);
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::entities_view panel(context);
+    panel.build(dock);
+    bgui::on_update();
+    auto* button = find_element<bgui::button>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Agrupar";
+    });
+    ASSERT_NE(button, nullptr);
+    button->on_pressed(); button->on_released();
+    bgui::on_update();
+    ASSERT_TRUE(context->selected_entity);
+    const auto group = *context->selected_entity;
+    EXPECT_EQ(registry->get<commons::transform>(first.id)->parent_id, group);
+    EXPECT_EQ(registry->get<commons::transform>(second.id)->parent_id, group);
+    EXPECT_EQ(registry->get<commons::transform>(first.id)->get_position(), (bgui::vec3{2.f, 3.f, 4.f}));
+    ASSERT_TRUE(context->undo());
+    EXPECT_FALSE(registry->is_alive(group));
+    EXPECT_EQ(registry->get<commons::transform>(first.id)->parent_id, 0u);
+    ASSERT_TRUE(context->redo());
+    EXPECT_TRUE(registry->is_alive(group));
+    EXPECT_EQ(registry->get<commons::transform>(first.id)->parent_id, group);
+}

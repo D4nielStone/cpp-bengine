@@ -291,6 +291,40 @@ private:
         select(entity.id);
     }
 
+    void group_selected_entities() {
+        if (!m_context || !m_context->registry) return;
+        m_context->synchronize_selection();
+        auto ids = m_context->selected_entities;
+        if (m_context->selected_entity) ids.insert(*m_context->selected_entity);
+        std::vector<entity_id> roots;
+        for (auto id : ids) {
+            if (!m_context->registry->is_alive(id) || m_context->locked_entities.contains(id) ||
+                m_context->editor_camera_entity == id) continue;
+            bool nested = false;
+            std::unordered_set<entity_id> visited;
+            for (auto parent = parent_of(id); parent && visited.insert(parent).second; parent = parent_of(parent))
+                if (ids.contains(parent)) { nested = true; break; }
+            if (!nested) roots.push_back(id);
+        }
+        if (roots.empty()) return;
+        const auto history_start = m_context->undo_stack.size();
+        auto group = m_context->registry->create();
+        m_context->registry->add<commons::transform>(group);
+        m_context->entity_names[group.id] = "Grupo";
+        m_context->record_entity_creation(group.id);
+        for (auto id : roots) reparent_entity(id, group.id);
+        std::vector<editor_context::history_action> actions;
+        while (m_context->undo_stack.size() > history_start) {
+            actions.push_back(std::move(m_context->undo_stack.back()));
+            m_context->undo_stack.pop_back();
+        }
+        m_context->record_action(
+            [actions] { for (const auto& action : actions) action.undo(); },
+            [actions] { for (auto it = actions.rbegin(); it != actions.rend(); ++it) it->redo(); });
+        m_context->select_entity(group.id);
+        refresh();
+    }
+
     void delete_selected_entity() {
         if (!m_context || !m_context->registry || !m_context->selected_entity)
             return;
@@ -341,7 +375,7 @@ private:
         context->entity_names.erase(id);
         context->hidden_entities.erase(id);
         context->locked_entities.erase(id);
-        context->selected_entity.reset();
+        context->select_entity(std::nullopt);
         const std::weak_ptr<editor_context> weak_context = context;
         context->record_action(
             [registry, weak_context, id, removed_components, removed_mask,
@@ -372,7 +406,7 @@ private:
                 context->entity_names.erase(id);
                 context->hidden_entities.erase(id);
                 context->locked_entities.erase(id);
-                context->selected_entity.reset();
+                context->select_entity(std::nullopt);
             }
         );
     }
@@ -430,8 +464,8 @@ private:
                 continue;
 
             const bool is_selected =
-                m_context && m_context->selected_entity &&
-                *m_context->selected_entity == item.id;
+                m_context && (m_context->selected_entity == item.id ||
+                m_context->selected_entities.contains(item.id));
             if (is_selected) {
                 item.selection->add_class(selected_class);
                 item.selection->add_class(selected_class_legacy);
@@ -479,12 +513,11 @@ private:
     }
 
     void select(const entity_id id) {
-        if (!m_context || m_context->locked_entities.contains(id) ||
-            m_context->selected_entity == id)
+        if (!m_context || m_context->locked_entities.contains(id))
             return;
 
-        m_context->selected_entity = id;
-        m_last_selection = id;
+        m_context->select_entity(id, bgui::get_pressed(bgui::input_key::left_control));
+        m_last_selection = m_context->selected_entity;
         update_row_styles();
     }
 
@@ -661,6 +694,9 @@ public:
         };
         add_entity.set_function([button = &add_entity]() { button->open_context(); });
 
+        auto& group_entities = m_toolbar->add<bgui::button>("Agrupar", .26f,
+            [this] { group_selected_entities(); });
+        group_entities.style.layout.require_size(76.f, 28.f);
         auto& remove_entity = m_toolbar->add<bgui::button>(
             "",
             0.28f,
@@ -775,9 +811,9 @@ public:
             parentage != m_last_parentage)
             refresh(entries);
 
+        if (m_context) m_context->synchronize_selection();
         const auto selection = m_context ? m_context->selected_entity : std::nullopt;
-        if (selection != m_last_selection)
-            update_row_styles();
+        update_row_styles();
 
         m_last_selection = selection;
     }

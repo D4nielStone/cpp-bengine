@@ -740,3 +740,147 @@ TEST(LuaApi, SetupAndUpdateFailuresLeaveOtherScriptsRunning) {
     commons::script_log::instance().clear();
     std::filesystem::remove_all(folder);
 }
+
+#include "components/hud.hpp"
+TEST(Hud, LuaCreationPersistenceAndLifetime) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    sol::state lua; lua.open_libraries(sol::lib::base);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+    ASSERT_NO_THROW(lua.script(R"(
+        h = gameObject:AddHUD()
+        assert(h == gameObject:GetComponent("HUD"))
+        row = h:Add("row", "", -1)
+        label = h:Add("text", "Vida: 100", 0)
+        button = h:Add("button", "Usar", 0)
+        world = h:Add("text3d", "Objetivo", -1)
+        world.position = Vector3(1, 2, 3)
+        world.rotation = Vector3(10, 20, 30)
+        world.world_scale = Vector3(2, 3, 4)
+        world.depth = 0.125
+        assert(h.count == 4); assert(h:Get(1).text == "Vida: 100"); assert(h:Get(-1) == nil)
+        assert(not button:ConsumeClick())
+    )"));
+    auto h=registry->get<commons::hud>(entity.id);
+    ASSERT_EQ(h->elements.size(),4u);
+    h->elements[2]->clicked=true;
+    EXPECT_NO_THROW(lua.script("assert(button:ConsumeClick()); assert(not button:ConsumeClick())"));
+    rapidjson::Document doc;
+    ASSERT_TRUE(h->serialize(doc,doc.GetAllocator()));
+    commons::hud restored;
+    ASSERT_TRUE(restored.analyze(doc));
+    ASSERT_EQ(restored.elements.size(),4u);
+    EXPECT_EQ(restored.elements[1]->parent,0);
+    EXPECT_EQ(restored.elements[3]->position.z,3.f);
+    EXPECT_EQ(restored.elements[3]->rotation.y, 20.f);
+    EXPECT_EQ(restored.elements[3]->world_scale.z, 4.f);
+    EXPECT_FLOAT_EQ(restored.elements[3]->depth, .125f);
+    auto& old_label = doc["elements"][3];
+    old_label.RemoveMember("rotation");
+    old_label.RemoveMember("world_scale");
+    old_label.RemoveMember("depth");
+    ASSERT_TRUE(restored.analyze(doc));
+    EXPECT_EQ(restored.elements[3]->world_scale, (bgui::vec3{1, 1, 1}));
+    EXPECT_FLOAT_EQ(restored.elements[3]->depth, 0.f);
+    doc["elements"][0]["parent"].SetInt(0);
+    EXPECT_FALSE(restored.analyze(doc));
+    EXPECT_EQ(restored.elements.size(),4u);
+    EXPECT_THROW(h->add("window","",-1),std::invalid_argument);
+    registry->remove(entity.id);
+    EXPECT_NO_THROW(lua.script("assert(gameObject:AddHUD() == nil); assert(gameObject:GetComponent('HUD') == nil); label.text='safe'"));
+}
+
+#include "ui/hud_view.hpp"
+TEST(Hud, WidgetsReflectDataAndDisappearAfterEntityRemoval) {
+    bgui::scoped_interface ui;
+    auto registry=std::make_shared<commons::ecs>();
+    auto entity=registry->create();
+    registry->add<commons::hud>(entity);
+    auto h=registry->get<commons::hud>(entity.id);
+    auto label=h->add("text","before",-1);
+    auto button=h->add("button","Use",-1);
+    bgui::element viewport;
+    viewport.set_final_rect(20,30,640,480);
+    commons::hud_view view(registry,nullptr,viewport);
+    view.on_update();
+    auto& children=view.get_elements()[bgui::layer::base];
+    ASSERT_EQ(children.size(),2u);
+    auto* widget=dynamic_cast<bgui::text*>(children[0].get());
+    ASSERT_NE(widget,nullptr);
+    label->text="after";
+    view.on_update();
+    EXPECT_EQ(widget->get_buffer(),"after");
+    auto* action=dynamic_cast<bgui::button*>(children[1].get());
+    ASSERT_NE(action,nullptr);
+    action->on_pressed();
+    action->on_released();
+    bgui::on_update();
+    EXPECT_TRUE(button->consume_click());
+    registry->remove(entity.id);
+    view.on_update();
+    EXPECT_TRUE(children.empty());
+    EXPECT_EQ(view.processed_width(),0);
+}
+
+TEST(Hud, EditorPropertiesPersistAndRejectDuplicateIdsAtomically) {
+    commons::hud h;
+    auto a=h.add("text","Title");
+    auto b=h.add("button","Use");
+    EXPECT_NE(a->id,b->id);
+    a->id="health"; a->absolute=true; a->position={25,35,0};
+    a->width=180; a->height=45; a->padding=4; a->margin=2;
+    a->alignment=2; a->color={.1f,.2f,.3f,1}; b->callback="use";
+    rapidjson::Document doc;
+    ASSERT_TRUE(h.serialize(doc,doc.GetAllocator()));
+    commons::hud restored;
+    ASSERT_TRUE(restored.analyze(doc));
+    EXPECT_EQ(restored.elements[0]->id,"health");
+    EXPECT_TRUE(restored.elements[0]->absolute);
+    EXPECT_EQ(restored.elements[0]->padding,4);
+    EXPECT_EQ(restored.elements[0]->alignment,2);
+    EXPECT_EQ(restored.elements[0]->color,a->color);
+    EXPECT_EQ(restored.elements[1]->callback,"use");
+    doc["elements"][1]["id"].SetString("health",doc.GetAllocator());
+    EXPECT_FALSE(restored.analyze(doc));
+    EXPECT_EQ(restored.elements[1]->callback,"use");
+    for(auto& item:doc["elements"].GetArray())
+        for(auto key:{"id","callback","absolute","padding","margin","alignment","color"}) item.RemoveMember(key);
+    ASSERT_TRUE(restored.analyze(doc));
+    EXPECT_FALSE(restored.elements[0]->absolute);
+    EXPECT_NE(restored.elements[0]->id,restored.elements[1]->id);
+}
+
+TEST(Hud, AbsoluteWidgetUsesViewportOriginAndScale) {
+    bgui::scoped_interface ui;
+    auto registry=std::make_shared<commons::ecs>();
+    auto entity=registry->create(); registry->add<commons::hud>(entity);
+    auto e=registry->get<commons::hud>(entity.id)->add("text","Placed");
+    e->absolute=true; e->position={30,40,0}; e->width=160; e->height=40;
+    bgui::element viewport; viewport.set_final_rect(20,50,640,480);
+    commons::hud_view view(registry,nullptr,viewport); view.on_update();
+    auto r=view.element_rect(e); const auto unit=bgui::get_global_scale();
+    EXPECT_EQ(r.x,20+int(30*unit)); EXPECT_EQ(r.y,50+int(40*unit));
+    EXPECT_EQ(r.z,int(160*unit)); EXPECT_EQ(r.w,int(40*unit));
+}
+
+TEST(Hud, ButtonCallbacksRunDuringScriptUpdateAndReportErrors) {
+    auto registry=std::make_shared<commons::ecs>();
+    auto entity=registry->create(); registry->add<commons::hud>(entity);
+    auto e=registry->get<commons::hud>(entity.id)->add("button","Use");
+    commons::code script;
+    script.reg=registry; script.my_object=entity.id;
+    script.estado_lua.open_libraries(sol::lib::base);
+    script.estado_lua.script("calls=0; function use(id) calls=calls+1; last=id end; function broken() error('failed') end");
+    e->callback="use"; e->clicked=true;
+    EXPECT_EQ(script.estado_lua["calls"].get<int>(),0);
+    EXPECT_NO_THROW(script.update());
+    EXPECT_EQ(script.estado_lua["calls"].get<int>(),1);
+    EXPECT_EQ(script.estado_lua["last"].get<std::string>(),e->id);
+    EXPECT_FALSE(e->clicked);
+    e->callback="broken"; e->clicked=true;
+    EXPECT_NO_THROW(script.update());
+    e->callback=""; e->clicked=true; script.update();
+    EXPECT_TRUE(e->consume_click());
+}

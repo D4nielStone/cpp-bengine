@@ -68,7 +68,9 @@ public:
 
     std::filesystem::path import_file(const std::filesystem::path& source,
         const std::filesystem::path& directory = {}) {
-        const auto imported = import_asset(source, m_project_root, supports_model(source), directory, m_import_another_copy);
+        const auto imported = supports_model(source)
+            ? import_native_model(source, m_project_root, directory, m_import_another_copy)
+            : import_asset(source, m_project_root, false, directory, m_import_another_copy);
         m_current_directory = imported.parent_path();
         m_expanded_directories.insert(m_current_directory);
         m_selected_file = imported;
@@ -85,23 +87,23 @@ public:
         if (extension==".bmodel") {
             try {
                 const auto imported=import_file(source,destination);
-                if (m_on_model_imported) m_on_model_imported(imported);
+                if (m_on_model_imported) m_on_model_imported(source, imported);
                 if (complete) complete(imported);
                 set_asset_status("Modelo nativo importado: "+imported.filename().string());
             } catch (const std::exception& error) { set_asset_status(error.what()); }
             return;
         }
         m_model_importer.show(source, m_project_root, destination, diagnostic,
-            [this, complete](const auto& imported) {
+            [this, source, complete](const auto& imported) {
                 m_current_directory = imported.parent_path(); m_selected_file = imported;
                 set_asset_status("Modelo importado: " + imported.filename().string());
                 request_refresh();
-                try { if (m_on_model_imported) m_on_model_imported(imported); if (complete) complete(imported); }
+                try { if (m_on_model_imported) m_on_model_imported(source, imported); if (complete) complete(imported); }
                 catch (const std::exception& e) { set_asset_status(e.what()); }
             });
     }
 
-    void set_model_imported_callback(std::function<void(const std::filesystem::path&)> callback) {
+    void set_model_imported_callback(std::function<void(const std::filesystem::path&, const std::filesystem::path&)> callback) {
         m_on_model_imported = std::move(callback);
     }
     using file_moved_callback = std::function<void(const std::filesystem::path&, const std::filesystem::path&)>;
@@ -400,7 +402,7 @@ private:
     bgui::modal* m_script_modal{nullptr};
     bool m_import_another_copy{false};
     model_import_dialog m_model_importer;
-    std::function<void(const std::filesystem::path&)> m_on_model_imported;
+    std::function<void(const std::filesystem::path&, const std::filesystem::path&)> m_on_model_imported;
     std::vector<std::pair<bgui::element*, std::filesystem::path>> m_folder_targets;
     std::string m_asset_status;
     std::string m_new_script_name{"NewScript.lua"};

@@ -9,6 +9,10 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "components/camera.hpp"
+#include "components/hud.hpp"
+#include <os/font.hpp>
+#include <codecvt>
+#include <locale>
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
 #include "components/spot_light.hpp"
@@ -129,6 +133,10 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
 render_system::~render_system() {
     // Systems may outlive the window during application shutdown.
     if (glad_glGetString && glGetString(GL_VERSION)) {
+        for (auto& [widget, mesh] : m_text_meshes) {
+            glDeleteBuffers(1, &mesh.buffer);
+            glDeleteVertexArrays(1, &mesh.vao);
+        }
         for (auto* map : {&m_directional_shadow, &m_spot_shadow}) {
             if (map->texture) glDeleteTextures(1, &map->texture);
             if (map->fbo) glDeleteFramebuffers(1, &map->fbo);
@@ -183,12 +191,13 @@ void render_system::update(const std::shared_ptr<ecs>& reg) { render(reg,nullptr
 void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
     std::uint32_t replacement_entity, std::shared_ptr<renderer> replacement) {
     struct state_guard {
-        GLint draw_fb,read_fb,viewport[4],program,vao,array_buffer,active,depth_func,scissor[4];
+        GLint draw_fb,read_fb,renderbuffer,viewport[4],program,vao,array_buffer,active,depth_func,scissor[4];
         std::array<GLint,16> textures{},cubemaps{};
         GLboolean depth,blend,cull,scissor_test,srgb,depth_mask,color_mask[4];
         GLfloat clear_color[4];
         state_guard() {
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw_fb);glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read_fb);
+            glGetIntegerv(GL_RENDERBUFFER_BINDING, &renderbuffer);
             glGetIntegerv(GL_VIEWPORT,viewport);glGetIntegerv(GL_CURRENT_PROGRAM,&program);glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao);
             glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&array_buffer);glGetIntegerv(GL_ACTIVE_TEXTURE,&active);glGetIntegerv(GL_DEPTH_FUNC,&depth_func);
             glGetIntegerv(GL_SCISSOR_BOX,scissor);glGetFloatv(GL_COLOR_CLEAR_VALUE,clear_color);
@@ -200,6 +209,7 @@ void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
         }
         ~state_guard() {
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw_fb);glBindFramebuffer(GL_READ_FRAMEBUFFER,read_fb);glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+            glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
             glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,array_buffer);glDepthFunc(depth_func);glDepthMask(depth_mask);
             glColorMask(color_mask[0],color_mask[1],color_mask[2],color_mask[3]);glClearColor(clear_color[0],clear_color[1],clear_color[2],clear_color[3]);
             glScissor(scissor[0],scissor[1],scissor[2],scissor[3]);
@@ -213,6 +223,125 @@ void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
     render(reg,&view,replacement_entity,replacement);
 }
 
+namespace {
+std::vector<float> text_geometry(const bgui::font& font, const std::string& text) {
+    std::u32string codepoints;
+    try {
+        codepoints = std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.from_bytes(text);
+    } catch (const std::range_error&) { return {}; }
+    const int atlas_width = static_cast<int>(font.atlas.m_size.x);
+    const int atlas_height = static_cast<int>(font.atlas.m_size.y);
+    if (!font.atlas.m_use_red_channel || atlas_width <= 0 || atlas_height <= 0 ||
+        font.atlas.m_buffer.size() != std::size_t(atlas_width) * atlas_height) return {};
+    std::vector<float> vertices;
+    const auto quad = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d, float shade) {
+        for (const auto& point : {a, b, c, a, c, d})
+            vertices.insert(vertices.end(), {point.x, point.y, point.z, shade});
+    };
+    float pen_x = 0.f, pen_y = 0.f;
+    const float line_height = font.ascent + font.descent + font.line_gap;
+    for (const auto codepoint : codepoints) {
+        if (vertices.size() >= 1'000'000) break;
+        if (codepoint == U'\n') { pen_x = 0.f; pen_y -= line_height; continue; }
+        auto found = font.chs.find(codepoint);
+        if (found == font.chs.end()) found = font.chs.find(U'?');
+        if (found == font.chs.end()) continue;
+        const auto& glyph = found->second;
+        const int atlas_x = std::lround(glyph.uv_min.x * atlas_width);
+        const int atlas_y = std::lround(glyph.uv_max.y * atlas_height);
+        const int width = glyph.size.x, height = glyph.size.y;
+        const auto filled = [&](int x, int y) {
+            return x >= 0 && x < width && y >= 0 && y < height &&
+                font.atlas.m_buffer[std::size_t(atlas_y + y) * atlas_width + atlas_x + x] >= 128;
+        };
+        if (atlas_x >= 0 && atlas_y >= 0 && atlas_x + width <= atlas_width && atlas_y + height <= atlas_height)
+            for (int y = 0; y < height; ++y) {
+                const float top = pen_y + glyph.bearing.y - y, bottom = top - 1.f;
+                for (int x = 0; x < width;) {
+                    if (!filled(x, y)) { ++x; continue; }
+                    const int start = x;
+                    while (filled(x, y)) ++x;
+                    const float left = pen_x + glyph.bearing.x + start, right = left + x - start;
+                    quad({left,bottom,0}, {right,bottom,0}, {right,top,0}, {left,top,0}, 1.f);
+                    quad({left,bottom,-1}, {right,bottom,-1}, {right,top,-1}, {left,top,-1}, .8f);
+                    quad({left,bottom,0}, {left,top,0}, {left,top,-1}, {left,bottom,-1}, .6f);
+                    quad({right,bottom,0}, {right,top,0}, {right,top,-1}, {right,bottom,-1}, .7f);
+                    for (int column = start; column < x; ++column) {
+                        const float edge = left + column - start;
+                        if (!filled(column, y - 1))
+                            quad({edge,top,0}, {edge+1,top,0}, {edge+1,top,-1}, {edge,top,-1}, .85f);
+                        if (!filled(column, y + 1))
+                            quad({edge,bottom,0}, {edge+1,bottom,0}, {edge+1,bottom,-1}, {edge,bottom,-1}, .55f);
+                    }
+                }
+            }
+        pen_x += glyph.advance;
+    }
+    return vertices;
+}
+}
+
+void render_system::draw_world_text(const std::shared_ptr<ecs>& registry, camera& view) {
+    auto& fonts = bgui::font_manager::get_instance();
+    if (!fonts.has_font("default")) return;
+    const auto& font = fonts.get_font("default");
+    bool drawing = false;
+    shader program(shader::deferred_t{});
+    GLint vao = 0, buffer = 0, previous_program = 0;
+    GLboolean culling = GL_FALSE;
+    registry->cada<hud>([&](std::uint32_t id) {
+        const auto overlay = registry->get<hud>(id);
+        if (!overlay->enabled) return;
+        for (const auto& item : overlay->elements) {
+            if (item->kind != "text3d" || !item->visible || item->text.empty() ||
+                item->scale <= 0.f || item->color.w <= 0.f) continue;
+            if (!drawing) {
+                program.compilar("world_text.vert", "world_text.frag");
+                glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
+                glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+                glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &buffer);
+                culling = glIsEnabled(GL_CULL_FACE);
+                glDisable(GL_CULL_FACE);
+                program.use();
+                drawing = true;
+            }
+            auto& mesh = m_text_meshes[item.get()];
+            if (!mesh.vao || mesh.owner.lock() != item || mesh.text != item->text) {
+                const auto vertices = text_geometry(font, item->text);
+                if (!mesh.vao) {
+                    glGenVertexArrays(1, &mesh.vao);
+                    glGenBuffers(1, &mesh.buffer);
+                }
+                glBindVertexArray(mesh.vao);
+                glBindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
+                glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+                glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+                glEnableVertexAttribArray(0);
+                mesh.owner = item;
+                mesh.text = item->text;
+                mesh.vertices = static_cast<int>(vertices.size() / 4);
+            }
+            transform placement;
+            placement.set_position(item->position);
+            placement.set_rotation(item->rotation);
+            placement.set_scale(item->world_scale);
+            const float size = item->scale / std::max(1u, font.resolution);
+            const auto matrix = view.projMatriz * view.viewMatrix * placement.get_world_model_matrix() *
+                glm::scale(glm::mat4(1.f), glm::vec3(size, size, item->depth));
+            program.setMat4("mvp", glm::value_ptr(matrix));
+            program.setVec4("ink", item->color);
+            glBindVertexArray(mesh.vao);
+            glDrawArrays(GL_TRIANGLES, 0, mesh.vertices);
+        }
+    });
+    if (drawing) {
+        if (culling) glEnable(GL_CULL_FACE);
+        glUseProgram(previous_program);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    }
+}
+
 void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_view,
     std::uint32_t replacement_entity, const std::shared_ptr<renderer>& replacement) {
     const auto start_time = std::chrono::steady_clock::now();
@@ -223,6 +352,13 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         m_last_render_time_ms = 0.0;
         return;
     }
+
+    std::erase_if(m_text_meshes, [](const auto& entry) {
+        if (!entry.second.owner.expired()) return false;
+        glDeleteBuffers(1, &entry.second.buffer);
+        glDeleteVertexArrays(1, &entry.second.vao);
+        return true;
+    });
 
     directional_light global_direction_light{
         {-0.2f, -1.0f, -0.3f},
@@ -381,7 +517,8 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             camera_component->config.atmosphere_zenith, camera_component->config.skybox_image);
 
         auto direction_light = global_direction_light;
-        if (auto camera_light = explicit_view ? std::shared_ptr<directional_light>{} : reg->get<directional_light>(camera_component->my_object)) {
+        if (auto camera_light = (!explicit_view || camera_component->reg.lock() == reg) ?
+            reg->get<directional_light>(camera_component->my_object) : nullptr) {
             direction_light = *camera_light;
             direction_light.direction = camera_light->get_world_direction();
         }
@@ -495,6 +632,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             glBindTexture(GL_TEXTURE_2D, shadow_binding);
             glActiveTexture(active_texture);
         }
+        draw_world_text(reg, *camera_component);
     };
     if (explicit_view) draw_camera(explicit_view);
     else reg->cada<camera>([&](const std::uint32_t entity) {

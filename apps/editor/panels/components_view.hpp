@@ -1,5 +1,5 @@
 #pragma once
-#include "../systems/asset_import.hpp"
+#include "../systems/editable_model_import.hpp"
 
 #include "editor_context.hpp"
 #include "panel.hpp"
@@ -12,6 +12,7 @@
 #include "components/spot_light.hpp"
 #include "components/sound_listener.hpp"
 #include "components/sound_player.hpp"
+#include "components/hud.hpp"
 #include "util/pbr_material.hpp"
 #include "script_tools.hpp"
 
@@ -196,6 +197,8 @@ private:
         m_property_inputs.push_back({&input, std::move(read_value)});
     }
 
+    std::weak_ptr<commons::hud_element> m_rendered_hud;
+
     void update_inspector() {
         refresh_if_needed();
         for (const auto& binding : m_property_inputs) {
@@ -248,6 +251,8 @@ private:
 
         const auto mask = selected ? m_context->registry->get_components(*selected)
             : commons::component::COMPONENTE_NONE;
+        const auto widget = m_context->selected_hud_widget.lock();
+        if (widget != m_rendered_hud.lock()) { m_refresh_requested=true; m_rendered_hud=widget; }
         const auto history_revision = m_context ? m_context->history_revision : 0;
         if (!m_refresh_requested && selected == m_rendered_selection &&
             mask == m_rendered_mask && history_revision == m_history_revision)
@@ -308,6 +313,58 @@ private:
         if (auto listener = registry->get<commons::sound_listener>(id))
             add_sound_listener(id, listener);
 
+        if (auto h = registry->get<commons::hud>(id)) {
+            auto& section = add_section("HUD", true,
+                [this, id]() { remove_component<commons::hud>(id); });
+            add_toggle(section.children(), "Enabled", h, &commons::hud::enabled);
+            for (const auto& widget : h->elements) {
+                if (widget->kind != "text3d") continue;
+                section.children().add<bgui::button>("3D: " + widget->id, .27f, [this, widget] {
+                    m_context->selected_hud_widget = widget;
+                });
+            }
+            auto e=m_context->selected_hud_widget.lock();
+            if(e && std::find(h->elements.begin(),h->elements.end(),e)!=h->elements.end()) {
+                auto& content=section.children();
+                auto string_field=[&](const std::string& label, std::string commons::hud_element::* member) {
+                    content.add<bgui::text>(label,.27f);
+                    auto& input=content.add<bgui::inputbox>(e.get()->*member,"",.27f);
+                    configure_property_input(input);
+                    track_property_input(input,[e,member]{return e.get()->*member;});
+                    input.m_enter_func=[this,h,e,member](const std::string& next) {
+                        if(member==&commons::hud_element::id && (next.empty() || std::any_of(h->elements.begin(),h->elements.end(),[&](const auto& other){return other!=e && other->id==next;}))) {
+                            if(m_edit_status) m_edit_status->set_buffer("Widget ID must be nonempty and unique in this HUD."); return;
+                        }
+                        const auto old=e.get()->*member; e.get()->*member=next;
+                        m_context->record_action([e,member,old]{e.get()->*member=old;},[e,member,next]{e.get()->*member=next;});
+                    };
+                };
+                string_field("Widget ID",&commons::hud_element::id);
+                string_field("Title",&commons::hud_element::text);
+                if(e->kind=="button") string_field("Lua callback",&commons::hud_element::callback);
+                auto number=[&](const std::string& label,float commons::hud_element::* member) {
+                    add_float(content,label,e.get()->*member,[e,member]{return e.get()->*member;},[e,member](float n){e.get()->*member=std::clamp(n,0.f,10000.f);});
+                };
+                number("Font size", &commons::hud_element::scale);
+                if (e->kind == "text3d") {
+                    number("Depth", &commons::hud_element::depth);
+                    add_vec_field(content, "Rotation", e->rotation, [e] { return e->rotation; },
+                        [e](size_t axis, float n) { e->rotation[axis] = n; });
+                    add_vec_field(content, "Scale", e->world_scale, [e] { return e->world_scale; },
+                        [e](size_t axis, float n) { e->world_scale[axis] = n; });
+                } else {
+                    number("Width", &commons::hud_element::width);
+                    number("Height", &commons::hud_element::height);
+                    number("Padding", &commons::hud_element::padding);
+                    number("Margin", &commons::hud_element::margin);
+                }
+                add_vec_field(content,"Position",e->position,[e]{return e->position;},[e](size_t axis,float n){e->position[axis]=n;});
+                auto& color=panel::add_color(content,e->color);
+                color.set_on_change([this,e](const bgui::color& n){auto old=e->color;e->color=n;m_context->record_action([e,old]{e->color=old;},[e,n]{e->color=n;});});
+                auto& align=content.add<bgui::combo_box>(std::vector<std::string>{"Start","Center","End"},.27f,size_t(e->alignment));
+                align.set_on_change([this,e](size_t n,const std::string&){auto old=e->alignment;e->alignment=int(n);m_context->record_action([e,old]{e->alignment=old;},[e,n]{e->alignment=int(n);});});
+            } else section.children().add<bgui::text>("Select a widget in Game to edit it.",.27f);
+        }
         if (auto player = registry->get<commons::sound_player>(id))
             add_sound_player(id, player);
 
@@ -595,6 +652,9 @@ private:
         if (can_add_sound_listener)
             m_component_options->add<bgui::button>("Sound Listener", 0.28f,
                 [this, id]() { add_component<commons::sound_listener>(id); });
+        if (!registry->get<commons::hud>(id))
+            m_component_options->add<bgui::button>("HUD", 0.28f,
+                [this, id]() { add_component<commons::hud>(id); });
         if (can_add_sound_player)
             m_component_options->add<bgui::button>("Sound Player", 0.28f,
                 [this, id]() { add_component<commons::sound_player>(id); });
@@ -746,7 +806,7 @@ private:
             auto path = requested.is_absolute() ? requested : m_context->project_root / requested;
             try {
                 if (commons::supports_model_import(path) && std::filesystem::is_regular_file(path))
-                    (void)asset_dependencies(std::filesystem::canonical(path), true);
+                    path = import_native_model(path, m_context->project_root);
                 auto model = std::make_unique<commons::model>(path.string());
                 if (model->meshes.empty()) {
                     m_edit_status->set_buffer("Could not load model: " + requested.string());

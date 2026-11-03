@@ -3,6 +3,9 @@
 #include "core/ecs.hpp"
 
 #include <array>
+#include <functional>
+#include <vector>
+#include "loaders/model.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -25,10 +28,20 @@ public:
         entity_state_set* locked_entities = nullptr
     );
 
+    struct asset_loading_hooks {
+        std::function<void(const std::vector<std::string>&)> prepare;
+        std::function<std::unique_ptr<commons::model>(const std::string&)> instantiate;
+        std::function<void(const std::shared_ptr<commons::ecs>&)> finish;
+        std::function<commons::material(const std::filesystem::path&)> material;
+    };
+    void set_asset_loading_hooks(asset_loading_hooks hooks) { m_asset_hooks = std::move(hooks); }
+
     void set_entity_names(entity_name_map* entity_names);
     const std::array<float, 3>& global_gravity() const noexcept;
     void set_global_gravity(const std::array<float, 3>& gravity) noexcept;
 
+    using material_save_hook = std::function<std::filesystem::path(const commons::material&, const std::filesystem::path&)>;
+    void set_material_save_hook(material_save_hook hook) { m_material_save_hook = std::move(hook); }
     bool save(const std::string& path, std::string& error) const;
     bool load(const std::string& path, std::string& error) const;
     void set_migration_writes_enabled(bool enabled) noexcept { m_migration_writes_enabled = enabled; }
@@ -47,6 +60,8 @@ private:
     entity_name_map* m_entity_names;
     entity_state_set* m_hidden_entities;
     entity_state_set* m_locked_entities;
+    material_save_hook m_material_save_hook;
+    asset_loading_hooks m_asset_hooks;
     bool m_migration_writes_enabled{true};
     mutable std::string m_project_version{"0.1.0"};
     mutable std::filesystem::path m_asset_root;

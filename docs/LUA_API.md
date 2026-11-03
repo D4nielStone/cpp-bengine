@@ -39,3 +39,8 @@ Consulte:
 Luzes direcionais e holofotes expõem propriedades de sombra listadas na
 [referência de componentes](./lua-api/components.md). A API Lua
 reflete os componentes que existem no código; ela não cria luzes nem entidades.
+
+## HUD e texto 3D
+
+`gameObject:AddHUD()` cria ou recupera a HUD; `GetComponent("HUD")` consulta.
+Veja [HUD modular e texto 3D](HUD.md) para tipos, layout, botões e exemplos.
