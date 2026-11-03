@@ -1,12 +1,78 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
+import tempfile
+import zipfile
 import sys
 sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location('release_package', Path(__file__).resolve().parents[1] / 'tools/release/package.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+updater_spec = importlib.util.spec_from_file_location('release_updater', module.ROOT / 'tools/release/updater.py')
+updater = importlib.util.module_from_spec(updater_spec)
+updater_spec.loader.exec_module(updater)
+
+
+class UpdateTests(unittest.TestCase):
+    def test_trial_changes_active_version_only_after_readiness(self):
+        for ready_to_commit in (False, True):
+            with self.subTest(ready=ready_to_commit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                active = root / 'active'
+                active.write_text('old')
+                ready = root / 'ready'
+                if ready_to_commit:
+                    ready.touch()
+                process = mock.Mock()
+                process.poll.return_value = None if ready_to_commit else 1
+                candidate = root / 'new'
+                with mock.patch.object(updater, 'launch', return_value=process):
+                    result = updater.try_update(candidate, root, [], ready, active)
+                self.assertEqual(active.read_text(), 'new' if ready_to_commit else 'old')
+                if ready_to_commit:
+                    self.assertIs(result, process)
+                    process.kill.assert_not_called()
+                else:
+                    self.assertIsNone(result)
+                    process.wait.assert_called_once()
+
+    def test_downloaded_update_is_tried_during_the_same_launch(self):
+        for starts in (False, True):
+            with self.subTest(starts=starts), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'release.json').write_text('{"engine_version": "1.2.3"}')
+                process = mock.Mock()
+                process.wait.return_value = 0
+
+                def download(current, staging, report):
+                    candidate = staging / 'release'
+                    candidate.mkdir()
+                    return candidate
+
+                with mock.patch.object(updater, 'download', side_effect=download) as fetch, \
+                     mock.patch.object(updater, 'try_update', return_value=process if starts else None) as trial, \
+                     mock.patch.object(updater, 'launch', return_value=process) as fallback:
+                    self.assertEqual(updater.run(root, []), 0)
+                fetch.assert_called_once()
+                trial.assert_called_once()
+                self.assertTrue(trial.call_args.args[0].is_dir())
+                if starts:
+                    fallback.assert_not_called()
+                else:
+                    fallback.assert_called_once_with(root, root, [])
+
+    def test_archive_cannot_write_outside_version_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / 'package.zip'
+            with zipfile.ZipFile(archive, 'w') as package:
+                package.writestr('release/../user-project', 'unexpected')
+            with self.assertRaises(ValueError):
+                updater.extract(archive, root, 'release', '1.2.3')
+            self.assertFalse((root / 'user-project').exists())
 
 
 class ReleaseTests(unittest.TestCase):

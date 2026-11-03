@@ -10,6 +10,14 @@
 
 An experimental C++ engine for windowing, rendering, physics, and component-based entities. The project is still under development and provides both runtime and editor applications.
 
+## Portable updates
+
+Open `editor_app` (Linux) or `editor_app.exe` (Windows) from the official
+portable package. At startup, the editor checks for stable releases, verifies
+any available update, and opens the new version. If it fails to render its
+first frame, the previous version opens automatically. Updates require write
+access to the extracted package directory.
+
 # GUI
 
 The engine uses Bubble GUI to provide a simple and easy-to-use interface for the editor application. The GUI supports native docking and windowing.

@@ -3,6 +3,7 @@
 #include "util/version.hpp"
 #include <rapidjson/document.h>
 #include <string>
+#include <optional>
 
 namespace editor::ui {
 inline std::string release_status(const std::string& response) {
@@ -21,6 +22,7 @@ inline std::string release_status(const std::string& response) {
         return "Update available: " + tag;
     return "Engine is up to date";
 }
+std::optional<int> launch_managed_editor(int argc, char** argv);
 std::string check_latest_release();
 void open_engine_releases();
 }

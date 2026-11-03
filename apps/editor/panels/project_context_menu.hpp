@@ -1,6 +1,7 @@
 #pragma once
 #include "context_action_button.hpp"
 #include "project_catalog.hpp"
+#include "../../editor/core/distribution_paths.hpp"
 
 namespace editor::ui {
 class project_delete_confirmation final : public bgui::modal {
@@ -33,7 +34,7 @@ inline void configure_project_context_menu(context_action_button& button,
         return context_actions{
             {"Abrir projeto", open},
             {"Remover da lista", [project, removed, report_error]() {
-                try { forget_project("editor-recent-projects.cfg", project); removed(); }
+                try { forget_project(editor::distribution::user_path("editor-recent-projects.cfg"), project); removed(); }
                 catch (const std::exception& e) { report_error(e.what()); }
             }},
             {"Apagar pasta do disco...", [project, active, removed, report_error, alive]() {
@@ -44,7 +45,7 @@ inline void configure_project_context_menu(context_action_button& button,
                 confirmation.set_confirmation_text("Apagar pasta definitivamente");
                 confirmation.set_on_confirm([project, active, removed, report_error, alive]() {
                     if (alive.expired()) return;
-                    try { erase_project(project, active()); forget_project("editor-recent-projects.cfg", project); removed(); }
+                    try { erase_project(project, active()); forget_project(editor::distribution::user_path("editor-recent-projects.cfg"), project); removed(); }
                     catch (const std::exception& e) { report_error(e.what()); }
                 });
                 confirmation.add<bgui::button>("Cancelar", .3f, [surface = &confirmation]() {

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 
 #include <glad.h>
 #include <bgui.hpp>
@@ -212,7 +213,7 @@ void window::handle_close_request() {
     m_close_request_callback();
 }
 
-void window::loop() {
+void window::loop(std::function<void()> first_frame) {
     if (!m_window) {
         throw std::logic_error("The window is not initialized.");
     }
@@ -223,7 +224,7 @@ void window::loop() {
 
     auto& refresh_callback = bgui::get_context().m_refresh_func;
     const auto previous_callback = refresh_callback;
-    refresh_callback = [this, previous_callback] {
+    refresh_callback = [this, previous_callback, first_frame = std::move(first_frame)]() mutable {
         auto deferred = std::move(m_deferred);
         m_deferred.clear();
         for (auto& task : deferred) task();
@@ -232,6 +233,7 @@ void window::loop() {
             previous_callback();
         }
         bgui::swap_glfw();
+        if (auto callback = std::exchange(first_frame, {})) callback();
     };
     m_looping = true;
     bgui::glfw_event_observer previous_event_observer;

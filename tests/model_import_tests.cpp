@@ -153,7 +153,8 @@ protected:
     bgui::scoped_interface ui_scope;
     std::filesystem::path folder = std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) / ("bengine-import-ui-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    void SetUp() override { std::filesystem::create_directories(folder); bgui::get_context().m_size = {1200,800}; }
+    std::filesystem::path project = folder / "project";
+    void SetUp() override { std::filesystem::create_directories(project); bgui::get_context().m_size = {1200,800}; }
     void TearDown() override { std::filesystem::remove_all(folder); }
     void triangle() { std::ofstream(folder / "test.obj") << "o triangle\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
     bgui::button* button(const std::string& label) {
@@ -164,46 +165,46 @@ protected:
 TEST_F(ImportDialogTest, ImportsSettingsAndCompletesOutsideClickDispatch) {
     triangle(); editor::ui::model_import_dialog dialog;
     bool complete = false;
-    dialog.show(folder / "test.obj", folder, {}, {}, [&](const auto& p) { complete = p == folder / "test.obj"; });
+    dialog.show(folder / "test.obj", project, {}, {}, [&](const auto& p) { complete = p.extension() == ".bmodel" && std::filesystem::is_regular_file(p); });
     ASSERT_TRUE(dialog.open());
-    auto* import = button("Importar / Reimportar"); ASSERT_NE(import, nullptr);
+    auto* import = button("Importar como .bmodel"); ASSERT_NE(import, nullptr);
     import->on_pressed(); import->on_released();
     bgui::on_update();
     EXPECT_TRUE(complete); EXPECT_FALSE(dialog.open());
-    EXPECT_TRUE(std::filesystem::exists(commons::model_import_settings_path(folder / "test.obj")));
+    EXPECT_TRUE(std::filesystem::is_regular_file(project / "assets/test.obj.bmodel"));
 }
 TEST_F(ImportDialogTest, PersistsSelectedTextureFiltering) {
     triangle();
     editor::ui::model_import_dialog dialog;
-    dialog.show(folder / "test.obj", folder);
+    dialog.show(folder / "test.obj", project);
     auto* filter = button("Trilinear");
     ASSERT_NE(filter, nullptr);
     filter->on_pressed(); filter->on_released();
-    auto* import = button("Importar / Reimportar");
+    auto* import = button("Importar como .bmodel");
     ASSERT_NE(import, nullptr);
     import->on_pressed(); import->on_released();
     bgui::on_update();
-    EXPECT_EQ(commons::read_model_import_options(folder / "test.obj").filtering,
+    EXPECT_EQ(commons::read_model_import_options(project / "assets/test.obj").filtering,
               commons::texture_filter::trilinear);
 }
 TEST_F(ImportDialogTest, FailedImportShowsDiagnosticAndAllowsRetry) {
     std::ofstream(folder / "test.obj") << "invalid";
     editor::ui::model_import_dialog dialog;
-    dialog.show(folder / "test.obj", folder, {}, "Falha de importação");
-    EXPECT_TRUE(dialog.open()); EXPECT_EQ(button("Importar / Reimportar"), nullptr);
+    dialog.show(folder / "test.obj", project, {}, "Falha de importação");
+    EXPECT_TRUE(dialog.open()); EXPECT_EQ(button("Importar como .bmodel"), nullptr);
     auto* retry = button("Tentar novamente"); ASSERT_NE(retry, nullptr);
     triangle(); retry->on_pressed(); retry->on_released(); bgui::on_update();
-    EXPECT_NE(button("Importar / Reimportar"), nullptr);
-    EXPECT_FALSE(std::filesystem::exists(commons::model_import_settings_path(folder / "test.obj")));
+    EXPECT_NE(button("Importar como .bmodel"), nullptr);
+    EXPECT_FALSE(std::filesystem::exists(commons::model_import_settings_path(project / "assets/test.obj")));
 }
 TEST_F(ImportDialogTest, InvalidScaleKeepsDialogOpenAndPreservesSettings) {
-    triangle(); editor::ui::model_import_dialog dialog; dialog.show(folder / "test.obj", folder);
+    triangle(); editor::ui::model_import_dialog dialog; dialog.show(folder / "test.obj", project);
     auto* scale = find_import_element<bgui::inputbox>(bgui::get_layout(), [](auto&) { return true; });
     ASSERT_NE(scale, nullptr); scale->set_buffer("nan");
-    auto* import = button("Importar / Reimportar"); ASSERT_NE(import, nullptr);
+    auto* import = button("Importar como .bmodel"); ASSERT_NE(import, nullptr);
     import->on_pressed(); import->on_released(); bgui::on_update();
     EXPECT_TRUE(dialog.open());
-    EXPECT_FALSE(std::filesystem::exists(commons::model_import_settings_path(folder / "test.obj")));
+    EXPECT_FALSE(std::filesystem::exists(commons::model_import_settings_path(project / "assets/test.obj")));
 }
 
 #include <assimp/Exporter.hpp>

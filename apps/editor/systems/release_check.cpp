@@ -2,6 +2,9 @@
 #include <curl/curl.h>
 #include <memory>
 #include <cerrno>
+#include <cstdlib>
+#include <filesystem>
+#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
@@ -19,6 +22,62 @@ std::size_t receive(char* data, std::size_t size, std::size_t count, void* targe
     return count;
 }
 }
+std::optional<int> launch_managed_editor(int argc, char** argv) {
+    if (std::getenv("BENGINE_MANAGED_UPDATE")) return std::nullopt;
+
+    std::error_code error;
+#ifdef _WIN32
+    std::wstring executable(32768, L'\0');
+    const auto length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length == executable.size()) return std::nullopt;
+    executable.resize(length);
+    auto root = std::filesystem::path(executable).parent_path();
+    constexpr auto updater_name = L"engine_updater.exe";
+#else
+    const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
+    if (error) return std::nullopt;
+    auto root = executable.parent_path();
+    constexpr auto updater_name = "engine_updater";
+#endif
+    if (root.parent_path().filename() == ".engine-updates")
+        root = root.parent_path().parent_path();
+    const auto updater = root / updater_name;
+    if (!std::filesystem::is_regular_file(root / "release.json", error) ||
+        !std::filesystem::is_regular_file(updater, error))
+        return std::nullopt;
+
+#ifdef _WIN32
+    // Preserve the original Unicode arguments and their Windows quoting.
+    static_cast<void>(argc);
+    static_cast<void>(argv);
+    const std::wstring original = GetCommandLineW();
+    const auto end = original.starts_with(L'"')
+        ? original.find(L'"', 1) : original.find_first_of(L" \t");
+    const auto arguments = end == std::wstring::npos ? L"" :
+        original.substr(end + (original.starts_with(L'"') ? 1 : 0));
+    auto command = L'"' + updater.native() + L'"' + arguments;
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(updater.c_str(), command.data(), nullptr, nullptr, FALSE,
+                        0, nullptr, nullptr, &startup, &process))
+        return std::nullopt;
+    CloseHandle(process.hThread);
+    DWORD result = 1;
+    if (WaitForSingleObject(process.hProcess, INFINITE) == WAIT_OBJECT_0)
+        GetExitCodeProcess(process.hProcess, &result);
+    CloseHandle(process.hProcess);
+    return static_cast<int>(result);
+#else
+    auto program = updater.string();
+    std::vector<char*> arguments{program.data()};
+    arguments.insert(arguments.end(), argv + 1, argv + argc);
+    arguments.push_back(nullptr);
+    execv(program.c_str(), arguments.data());
+    return std::nullopt;
+#endif
+}
+
 std::string check_latest_release() {
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return "Update check unavailable";
     struct cleanup { ~cleanup() { curl_global_cleanup(); } } guard;

@@ -41,7 +41,7 @@ namespace COMMONS_NS {
         std::shared_ptr<ecs> get_ecs() const noexcept;
         double delta_time() const noexcept;
         void refresh();
-        void loop();
+        void loop(std::function<void()> first_frame = {});
         // Execute once between UI frames, on the context owner thread.
         void defer(std::function<void()> task) { m_deferred.push_back(std::move(task)); }
         void set_close_request_callback(std::function<void()> callback);

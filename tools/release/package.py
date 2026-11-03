@@ -23,7 +23,7 @@ def validate_version(tag):
     return match[1]
 
 
-def package(build, output, tag, library_dir=None):
+def package(build, output, tag, library_dir=None, updater=None):
     version = validate_version(tag)
     windows = sys.platform == 'win32'
     platform = 'windows-x64' if windows else 'linux-x64'
@@ -67,11 +67,12 @@ def package(build, output, tag, library_dir=None):
                 shutil.copy2(source, destination)
         shutil.copy2(ROOT / 'LICENSE', stage / 'LICENSE')
         (stage / 'release.json').write_text(json.dumps({'engine_version': version, 'platform': platform}, indent=2))
+        shutil.copy2(updater, stage / ('engine_updater' + suffix))
         if windows:
-            (stage / 'BubbleEngine.cmd').write_text('@echo off\nset "BENGINE_HOME=%~dp0"\ncd /d "%~dp0"\n"%~dp0editor_app.exe" %*\n')
+            (stage / 'BubbleEngine.cmd').write_text('@echo off\n"%~dp0engine_updater.exe" %*\n')
         else:
             launcher = stage / 'BubbleEngine.sh'
-            launcher.write_text('#!/bin/sh\nBENGINE_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport BENGINE_HOME\ncd "$BENGINE_HOME" || exit 1\nexec "$BENGINE_HOME/editor_app" "$@"\n')
+            launcher.write_text('#!/bin/sh\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1\nexec "$root/engine_updater" "$@"\n')
             launcher.chmod(0o755)
         archive = output / (name + '.zip')
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
@@ -89,10 +90,13 @@ def main():
     parser.add_argument('--build', type=Path, default=Path('release-build'))
     parser.add_argument('--output', type=Path, default=Path('release'))
     parser.add_argument('--library-dir', type=Path)
+    parser.add_argument('--updater', type=Path)
     args = parser.parse_args()
     validate_version(args.version)
     if not args.validate_only:
-        package(args.build, args.output, args.version, args.library_dir)
+        if args.updater is None:
+            parser.error('--updater is required for packaging')
+        package(args.build, args.output, args.version, args.library_dir, args.updater)
 
 
 if __name__ == '__main__':

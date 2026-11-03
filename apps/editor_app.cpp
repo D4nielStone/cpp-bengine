@@ -1,3 +1,4 @@
+#include "editor/core/distribution_paths.hpp"
 #include "editor/systems/scene_loading_modal.hpp"
 #include "editor/systems/runtime_scene_preview.hpp"
 #include "editor/systems/release_indicator.hpp"
@@ -53,6 +54,16 @@
 #include <vector>
 
 namespace {
+void signal_update_ready() {
+#ifdef _WIN32
+    const auto* marker = _wgetenv(L"BENGINE_UPDATE_READY");
+#else
+    const auto* marker = std::getenv("BENGINE_UPDATE_READY");
+#endif
+    if (marker)
+        std::ofstream{std::filesystem::path(marker)} << "ready\n";
+}
+
 
 std::filesystem::path locate_build_directory(
     const std::filesystem::path& executable
@@ -131,7 +142,7 @@ project_choice show_project_manager(
     bgui::text* template_selection_label = nullptr;
     auto selected_template = editor::ui::project_template::empty;
     std::vector<std::string> recent_projects;
-    std::ifstream recent_file("editor-recent-projects.cfg");
+    std::ifstream recent_file(editor::distribution::user_path("editor-recent-projects.cfg"));
     for (std::string line; std::getline(recent_file, line);) {
         if (!line.empty() && std::filesystem::is_regular_file(line))
             recent_projects.push_back(line);
@@ -222,7 +233,7 @@ project_choice show_project_manager(
     auto& name_input = actions.add<bgui::inputbox>("New Project", "Project name", 0.36f);
     name_input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     std::error_code current_path_error;
-    auto default_location = std::filesystem::current_path(current_path_error);
+    auto default_location = std::filesystem::absolute(editor::distribution::user_path("."), current_path_error);
     if (current_path_error)
         default_location = std::filesystem::path(".");
     auto& location_label = actions.add<bgui::text>("Location", 0.28f);
@@ -336,7 +347,7 @@ project_choice show_project_manager(
     );
     fpp_template_button.style.layout.set_margin(0, 4);
 
-    window.loop();
+    window.loop(signal_update_ready);
     window.reopen();
     bgui::get_layout().remove(manager_root);
     manager_root = nullptr;
@@ -624,7 +635,7 @@ public:
     }
 
     int run() {
-        m_window.loop();
+        m_window.loop(signal_update_ready);
         m_window.set_file_drop_callback({});
 
         std::string error;
@@ -641,12 +652,12 @@ public:
 private:
     void remember_recent_project() const {
         std::vector<std::string> projects{m_project_path};
-        std::ifstream previous("editor-recent-projects.cfg");
+        std::ifstream previous(editor::distribution::user_path("editor-recent-projects.cfg"));
         for (std::string path; std::getline(previous, path);) {
             if (!path.empty() && path != m_project_path && projects.size() < 12)
                 projects.push_back(path);
         }
-        std::ofstream recent("editor-recent-projects.cfg", std::ios::trunc);
+        std::ofstream recent(editor::distribution::user_path("editor-recent-projects.cfg"), std::ios::trunc);
         for (const auto& path : projects)
             recent << path << '\n';
     }
@@ -757,9 +768,12 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    auto release_check = std::async(
-        std::launch::async, editor::ui::check_latest_release
-    ).share();
+    if (const auto result = editor::ui::launch_managed_editor(argc, argv))
+        return *result;
+
+    std::shared_future<std::string> release_check;
+    if (!std::getenv("BENGINE_MANAGED_UPDATE"))
+        release_check = std::async(std::launch::async, editor::ui::check_latest_release).share();
     commons::window window(
         "Bubble Engine " BUBBLE_VERSION_COMPLETA_STR " - Editor",
         argc == 1 ? 980 : 1200,

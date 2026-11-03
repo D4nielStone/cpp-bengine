@@ -234,8 +234,10 @@ TEST_F(EditorRenderTest, KeepsEmbeddedModelTexturesWhenLoadingSavedScene) {
     ASSERT_NE(loaded_renderer, nullptr);
     const auto loaded_texture = loaded_renderer->m_modelo->meshes[0]
         .getMaterial().getTextura("tex_albedo");
-    ASSERT_NE(loaded_texture.embedded, nullptr);
-    EXPECT_NE(loaded_texture.embedded->m_revision, 0u);
+    std::ifstream saved_image(loaded_texture.path, std::ios::binary);
+    ASSERT_TRUE(saved_image.is_open());
+    const std::string saved_bytes{std::istreambuf_iterator<char>(saved_image), {}};
+    EXPECT_EQ(saved_bytes, image_bytes);
     loaded_texture.bind(0);
     GLint binding{};
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);

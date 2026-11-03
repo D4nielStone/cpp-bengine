@@ -1,3 +1,4 @@
+#include "../../editor/core/distribution_paths.hpp"
 #include "scene_loading_modal.hpp"
 #define GLFW_INCLUDE_NONE
 #include <glad.h>
@@ -40,16 +41,18 @@
 namespace editor::ui {
 namespace {
 
-constexpr const char* recent_projects_path = "editor-recent-projects.cfg";
+std::filesystem::path recent_projects_path() {
+    return editor::distribution::user_path("editor-recent-projects.cfg");
+}
 
 void remember_project(const std::string& path) {
     std::vector<std::string> projects{path};
-    std::ifstream input(recent_projects_path);
+    std::ifstream input(recent_projects_path());
     for (std::string previous; std::getline(input, previous);) {
         if (!previous.empty() && previous != path && projects.size() < 12)
             projects.push_back(previous);
     }
-    std::ofstream output(recent_projects_path, std::ios::trunc);
+    std::ofstream output(recent_projects_path(), std::ios::trunc);
     for (const auto& project : projects)
         output << project << '\n';
 }
@@ -1262,7 +1265,7 @@ void editor_ui::create_project_modal(
     m_project_modal->set_enable(false);
     m_project_modal->content().add<bgui::text>("Project Manager", 0.46f);
     m_project_modal->content().add<bgui::text>("Recent projects", 0.32f);
-    std::ifstream recent_input(recent_projects_path);
+    std::ifstream recent_input(recent_projects_path());
     std::size_t recent_count = 0;
     for (std::string recent; std::getline(recent_input, recent);) {
         std::error_code recent_error;
