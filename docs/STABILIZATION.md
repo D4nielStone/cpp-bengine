@@ -171,3 +171,7 @@ Para uma avaliação de critérios mais ampla, veja
   local LinearTests, MenuBarTests and ImageTests all passed afterward.
 - Include subsequent pending `.bmat` material persistence, GPU model preview,
   dependency import/export changes and their regression coverage in v0.1.3.
+- Release workflow 41611609144 built/tested/packaged Linux successfully but MSVC
+  rejected new preview locals named `near` and `far` (Windows macros). Rename
+  them to `near_clip` and `far_clip`; no behavior or interface changes.
+- Full updated local Debug suite passed all 410 CTest entries with runtime smoke.

@@ -364,9 +364,9 @@ private:
                 if (std::abs(glm::determinant(world))<1e-8f) { set_status("Render requer uma transformação invertível.");return; }
                 m_scene_preview_camera.config=m_preview_camera->config;
                 if (m_context->editor_camera_entity) if(auto editor_camera=m_context->registry->get<commons::camera>(*m_context->editor_camera_entity)) {
-                    const auto fov=m_scene_preview_camera.config.fov, near=m_scene_preview_camera.config.corte_curto, far=m_scene_preview_camera.config.corte_longo;
+                    const auto fov=m_scene_preview_camera.config.fov, near_clip=m_scene_preview_camera.config.corte_curto, far_clip=m_scene_preview_camera.config.corte_longo;
                     m_scene_preview_camera.config=editor_camera->config;
-                    m_scene_preview_camera.config.fov=fov;m_scene_preview_camera.config.corte_curto=near;m_scene_preview_camera.config.corte_longo=far;
+                    m_scene_preview_camera.config.fov=fov;m_scene_preview_camera.config.corte_curto=near_clip;m_scene_preview_camera.config.corte_longo=far_clip;
                     m_scene_preview_camera.config.flag_orth=false;
                     m_scene_preview_camera.skybox_asset_root=editor_camera->skybox_asset_root;
                     m_scene_preview_camera.skybox_faces=editor_camera->skybox_faces;
