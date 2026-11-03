@@ -200,16 +200,22 @@ std::shared_ptr<commons::directional_light> global_directional_light(
 }
 
 editor_ui::editor_ui(
-    bgui::dock& dock,
+    bgui::dock& editor_dock,
+    bgui::dock& model_dock,
+    bgui::dock& management_dock,
     bgui::menu_bar& menu_bar,
+    bgui::linear& side_bar,
     ui_persistence_system& ui_persistence,
     project_persistence_system& project_persistence,
     std::shared_ptr<commons::ecs> registry,
     std::string project_path,
     std::filesystem::path build_directory
 )
-    : m_dock(dock),
-      m_panel_manager(dock),
+    : m_dock(editor_dock),
+      m_model_dock(model_dock),
+      m_management_dock(management_dock),
+      m_panel_manager(editor_dock),
+      m_model_panel_manager(model_dock),
       m_project_persistence(project_persistence),
       m_registry(std::move(registry)),
       m_project_path(std::move(project_path)),
@@ -218,7 +224,7 @@ editor_ui::editor_ui(
       m_build_process(std::make_unique<build_process>()) {
     create_project_modal(m_project_path, "");
 
-    menu_bar.add_menu(
+    auto& file_menu_button = menu_bar.add_menu(
         "File",
         0.3f,
         [this](bgui::context_menu& menu) {
@@ -228,6 +234,7 @@ editor_ui::editor_ui(
             });
             menu.add_button("Save Project", [this]() {
                 std::string error;
+                if (!stop_runtime_for_edit(error)) { report_result("Stopping runtime", false, error); return; }
                 const bool success = m_project_persistence.save(m_project_path, error);
                 report_result("Saving project", success, error);
             });
@@ -242,6 +249,7 @@ editor_ui::editor_ui(
             menu.add_button("Exit", [this]() { confirm_exit(); });
         }
     );
+    file_menu_button.style.layout.margin = bgui::vec4i{14, 0, 0, 0};
     menu_bar.add_menu(
         "Build",
         0.3f,
@@ -432,6 +440,109 @@ editor_ui::editor_ui(
     };
 
     add_flexible_spacer(menu_bar);
+
+    side_bar.style.visual.background.normal =
+        bgui::color{0.055f, 0.055f, 0.055f, 1.f};
+    side_bar.style.visual.visible = true;
+    side_bar.style.visual.border_radius = 5.f;
+    side_bar.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
+
+    auto add_vertical_spacer = [&side_bar]() {
+        auto& spacer = side_bar.add<bgui::linear>();
+        spacer.style.layout.require_mode(
+            bgui::mode::match_parent,
+            bgui::mode::stretch
+        );
+    };
+    add_vertical_spacer();
+
+    const auto add_workspace_button = [this, &side_bar](
+        const char* icon_name,
+        const editor_workspace_mode mode,
+        const std::size_t index
+    ) {
+        auto& button = side_bar.add<bgui::button>(
+            "",
+            0.3f,
+            [this, mode]() { set_workspace_mode(mode); }
+        );
+        button.style.layout.require_mode(
+            bgui::mode::pixel,
+            bgui::mode::pixel
+        );
+        button.style.layout.require_size(35.f, 35.f);
+        button.style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::center,
+            bgui::alignment::center
+        };
+        button.style.layout.margin = bgui::vec4i{0, 2, 0, 2};
+        button.style.visual.background.normal =
+            bgui::color{0.f, 0.f, 0.f, 0.f};
+        button.style.visual.background.hover =
+            bgui::color{0.f, 0.f, 0.f, 0.f};
+        button.style.visual.background.pressed =
+            bgui::color{0.f, 0.f, 0.f, 0.f};
+        button.style.visual.border.normal =
+            bgui::color{0.f, 0.f, 0.f, 0.f};
+        button.style.visual.border_size = 0.f;
+        button.get_label().set_enable(false);
+        auto& icon = button.add<bgui::icon>(icon_name, 0.4f);
+        icon.receives_input(false);
+        icon.style.layout.require_mode(
+            bgui::mode::wrap_content,
+            bgui::mode::wrap_content
+        );
+        icon.style.layout.align = bgui::vec<2, bgui::alignment>{
+            bgui::alignment::center,
+            bgui::alignment::center
+        };
+        m_workspace_icons[index] = &icon;
+    };
+    add_workspace_button("home", editor_workspace_mode::editor, 0);
+    add_workspace_button(
+        "cube",
+        editor_workspace_mode::model_editing,
+        1
+    );
+    add_workspace_button(
+        "directory",
+        editor_workspace_mode::scene_management,
+        2
+    );
+
+    add_vertical_spacer();
+    set_workspace_mode(editor_workspace_mode::editor);
+}
+
+void editor_ui::set_workspace_mode(const editor_workspace_mode mode) {
+    const auto selected_mode =
+        mode == editor_workspace_mode::model_editing ||
+                mode == editor_workspace_mode::scene_management
+            ? mode
+            : editor_workspace_mode::editor;
+    if (m_context) m_context->workspace_mode = static_cast<int>(selected_mode);
+    m_dock.set_enable(selected_mode == editor_workspace_mode::editor);
+    m_model_dock.set_enable(
+        selected_mode == editor_workspace_mode::model_editing
+    );
+    m_management_dock.set_enable(
+        selected_mode == editor_workspace_mode::scene_management
+    );
+
+    const bgui::color icon_color{0.65f, 0.65f, 0.65f, 1.f};
+    const bgui::color selected_icon_color{1.f, 1.f, 1.f, 1.f};
+
+    const std::array modes{
+        editor_workspace_mode::editor,
+        editor_workspace_mode::model_editing,
+        editor_workspace_mode::scene_management
+    };
+    for (std::size_t index = 0; index < modes.size(); ++index) {
+        const bool selected = selected_mode == modes[index];
+        m_workspace_icons[index]->style.visual.text.normal =
+            selected ? selected_icon_color : icon_color;
+        m_workspace_icons[index]->mark_style_dirty();
+    }
 }
 
 void editor_ui::create_build_modal() {
@@ -1099,6 +1210,10 @@ bool editor_ui::load_project_selection() {
     }
 
     std::string load_error;
+    if (!stop_runtime_for_edit(load_error)) { report_result("Stopping runtime", false, load_error); return false; }
+    if (m_project_unloading_callback && !m_project_unloading_callback(load_error)) {
+        report_result("Saving workspace", false, load_error); return false;
+    }
     if (!m_project_persistence.load(selected_path.string(), load_error)) {
         report_result("Loading project", false, load_error);
         m_project_picker_status->set_buffer(load_error);
@@ -1279,6 +1394,8 @@ void editor_ui::create_new_project_modal() {
             return;
         }
         const auto project_file = project_file_path(folder).string();
+        if (!stop_runtime_for_edit(error)) { status.set_buffer(error); return; }
+        if (m_project_unloading_callback && !m_project_unloading_callback(error)) { status.set_buffer(error); return; }
         if (!m_project_persistence.load(project_file, error)) {
             status.set_buffer(error);
             return;
@@ -1458,7 +1575,20 @@ void editor_ui::set_exit_callback(std::function<void()> callback) {
     m_exit_callback = std::move(callback);
 }
 
+bool editor_ui::stop_runtime_for_edit(std::string& error) {
+    if (!m_is_playing) return true;
+    if (m_play_state_callback && !m_play_state_callback(false, error)) return false;
+    m_is_playing = false;
+    m_is_paused = false;
+    if (m_pause_button) m_pause_button->set_enable(false);
+    if (m_play_button && m_play_icon) apply_play_visual(*m_play_button, *m_play_icon, false);
+    if (m_pause_button && m_pause_icon) apply_pause_visual(*m_pause_button, *m_pause_icon, false);
+    return true;
+}
+
 void editor_ui::confirm_exit() {
+    std::string error;
+    if (!stop_runtime_for_edit(error)) { report_result("Stopping runtime", false, error); return; }
     if (!m_project_persistence.has_unsaved_changes(m_project_path)) {
         if (m_exit_callback)
             m_exit_callback();
@@ -1472,6 +1602,7 @@ void editor_ui::confirm_exit() {
 
 void editor_ui::update() {
     m_panel_manager.update();
+    m_model_panel_manager.update();
 }
 
 }

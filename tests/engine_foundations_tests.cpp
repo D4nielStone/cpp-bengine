@@ -336,9 +336,7 @@ TEST(EnginePhysics, ModelColliderCanUseConcaveTriangleMeshForStaticBodies) {
     physics collider(true, physics::shapes::mesh_shape);
     collider.set_model_collider_type(physics::model_collider_type::concave);
     collider.setModelo(&geometry);
-    const auto* triangle_shape =
-        dynamic_cast<const btBvhTriangleMeshShape*>(collider.m_forma);
-    ASSERT_NE(triangle_shape, nullptr);
+    EXPECT_EQ(collider.m_forma->getShapeType(), TRIANGLE_MESH_SHAPE_PROXYTYPE);
     ASSERT_NE(collider.m_triangle_mesh, nullptr);
     EXPECT_EQ(collider.m_triangle_mesh->getNumTriangles(), 2);
     EXPECT_THROW(collider.setMass(1.f), std::invalid_argument);
@@ -565,25 +563,18 @@ TEST_F(Foundations, ColliderShapeSizeAndOffsetCanChangeInWorld) {
     EXPECT_FALSE(system.cast_ray({{3,0,5},{0,0,-1}}).atingiu);
 }
 
-TEST_F(Foundations, FppScenePlayerLandsOnConfiguredArenaAtItsSavedSpawn) {
-    const auto scene = std::filesystem::path(__FILE__).parent_path().parent_path() /
-        "projects/fpp_demo/main.scene";
-    std::ifstream input(scene);
-    ASSERT_TRUE(input.good());
-    const std::string json{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-    rapidjson::Document document; document.Parse(json.c_str());
-    ASSERT_FALSE(document.HasParseError());
-    for (const auto& item : document["entities"].GetArray()) {
-        if (item["id"].GetUint() != 101 && item["id"].GetUint() != 106) continue;
-        auto entity = registry->create(item["id"].GetUint());
-        ASSERT_TRUE(at(entity.id)->analyze(item["components"]["transform"]));
-        registry->add<physics>(entity, entity.id == 101,
-            entity.id == 101 ? physics::shapes::box_shape : physics::shapes::forma_capsula);
-        ASSERT_TRUE(registry->get<physics>(entity.id)->analyze(item["components"]["physics"]));
-    }
+TEST_F(Foundations, CharacterLandsOnConfiguredStaticFloor) {
+    auto floor = body(101, true, {0.f, -0.5f, 0.f});
+    registry->get<physics>(floor.id)->configure_collision(
+        physics::shapes::box_shape, {40.f, 1.f, 40.f}, {0.f, 0.f, 0.f}, true, false);
+    auto character = body(106, false, {0.f, 0.1f, 10.f});
+    auto player = registry->get<physics>(character.id);
+    player->configure_collision(
+        physics::shapes::forma_capsula, {0.7f, 0.6f, 0.7f}, {0.f, 0.9f, 0.f}, true, false);
+    player->set_body_type(physics::body_type::character);
+
     physics_system system; system.setup(registry);
     for (int step = 0; step < 240; ++step) system.world()->stepSimulation(1.f/60.f, 0);
-    auto player = registry->get<physics>(106);
     ASSERT_NE(player, nullptr);
     btVector3 minimum, maximum;
     player->m_rigid_body->getAabb(minimum, maximum);

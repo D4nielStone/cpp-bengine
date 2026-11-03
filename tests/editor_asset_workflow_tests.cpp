@@ -50,11 +50,9 @@ TEST_F(EditorAssetWorkflowTest, CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiL
     EXPECT_EQ(find<bgui::button>(dock, [](auto& value) {
         return value.has_class("new-script-button");
     }), nullptr);
-    auto* actions = find<editor::ui::context_action_button>(dock, [](auto& value) {
-        return value.has_class("files-actions-menu-button");
-    });
+    auto* actions = find<editor::ui::context_action_surface>(dock, [](auto&) { return true; });
     ASSERT_NE(actions, nullptr);
-    actions->on_released();
+    actions->open_context();
     bgui::on_update();
     bgui::on_update();
     auto* create = find<bgui::button>(bgui::get_layout(), [](auto& value) {
@@ -103,11 +101,9 @@ TEST_F(EditorAssetWorkflowTest, FilesViewActionsAreAvailableFromItsContextMenu) 
     files.build(dock);
 
     auto open_actions = [&]() {
-        auto* menu = find<editor::ui::context_action_button>(dock, [](auto& value) {
-            return value.has_class("files-actions-menu-button");
-        });
+        auto* menu = find<editor::ui::context_action_surface>(dock, [](auto&) { return true; });
         ASSERT_NE(menu, nullptr);
-        menu->on_released();
+        menu->open_context();
         bgui::on_update();
         bgui::on_update();
     };
@@ -125,6 +121,45 @@ TEST_F(EditorAssetWorkflowTest, FilesViewActionsAreAvailableFromItsContextMenu) 
     EXPECT_NE(find<bgui::button>(bgui::get_layout(), [](auto& value) {
         return value.get_label().get_buffer() == "Importar outra cópia: ativado";
     }), nullptr);
+}
+
+TEST_F(EditorAssetWorkflowTest, ModelBrowserFiltersFilesAndReportsSelection) {
+    std::ofstream(folder / "cube.obj") << "model";
+    std::ofstream(folder / "edited.bmodel") << "native model";
+    std::ofstream(folder / "notes.txt") << "not a model";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    std::filesystem::path selected;
+    editor::ui::files_view files(
+        folder,
+        editor::ui::files_view::drop_callback{},
+        editor::ui::files_view_filter::models_only,
+        [&](const auto& path) { selected = path; }
+    );
+    files.build(dock);
+    bgui::on_update();
+
+    EXPECT_NE(find<bgui::text>(dock, [](auto& value) {
+        return value.get_buffer() == "cube.obj";
+    }), nullptr);
+    EXPECT_NE(find<bgui::text>(dock, [](auto& value) {
+        return value.get_buffer() == "edited.bmodel";
+    }), nullptr);
+    EXPECT_EQ(find<bgui::text>(dock, [](auto& value) {
+        return value.get_buffer() == "notes.txt";
+    }), nullptr);
+    EXPECT_EQ(find<editor::ui::context_action_button>(dock, [](auto& value) {
+        return value.has_class("files-actions-menu-button");
+    }), nullptr);
+
+    auto* model_file = find<bgui::button>(dock, [](auto& value) {
+        return find<bgui::text>(value, [](auto& label) {
+            return label.get_buffer() == "cube.obj";
+        }) != nullptr;
+    });
+    ASSERT_NE(model_file, nullptr);
+    model_file->on_released();
+    bgui::on_update();
+    EXPECT_EQ(selected, folder / "cube.obj");
 }
 
 TEST_F(EditorAssetWorkflowTest, LuaFilesDeliverTheirPathWhenDragged) {
@@ -420,12 +455,10 @@ TEST_F(EditorAssetWorkflowTest, DeletingAFileRequiresAnExplicitConfirmationAndSu
         bgui::on_update();
     };
     auto open_delete_action = [&]() {
-        auto* actions = find<editor::ui::context_action_button>(dock, [](auto& value) {
-            return value.has_class("files-actions-menu-button");
-        });
+        auto* actions = find<editor::ui::context_action_surface>(dock, [](auto&) { return true; });
         EXPECT_NE(actions, nullptr);
         if (!actions) return static_cast<bgui::button*>(nullptr);
-        actions->on_released();
+        actions->open_context();
         bgui::on_update();
         bgui::on_update();
         return find<bgui::button>(bgui::get_layout(), [](auto& button) {
@@ -858,18 +891,18 @@ TEST_F(EditorAssetWorkflowTest, PrimitivesHaveValidGeometryAndCreationSupportsUn
     EXPECT_EQ(registry->entities.size(), count);
 }
 
-TEST_F(EditorAssetWorkflowTest, PrimitiveMenuOpensOnLeftClick) {
+TEST_F(EditorAssetWorkflowTest, AddEntityMenuOpensOnLeftClick) {
     auto registry = std::make_shared<commons::ecs>();
     auto context = std::make_shared<editor::ui::editor_context>(registry);
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::entities_view entities(context);
     entities.build(dock);
-    auto* button = find<bgui::button>(dock, [](auto& value) { return value.has_class("entities-primitives-button"); });
+    auto* button = find<bgui::button>(dock, [](auto& value) { return value.has_class("entities-add-button"); });
     ASSERT_NE(button, nullptr);
-    EXPECT_EQ(button->get_label().get_buffer(), "Primitivas");
     button->on_released(); bgui::on_update();
     auto* popup = find<bgui::linear>(bgui::get_layout(), [](auto& value) { return value.has_class("editor-context-actions") && value.is_enabled(); });
     ASSERT_NE(popup, nullptr);
+    EXPECT_NE(find<bgui::button>(*popup, [](auto& value) { return value.get_label().get_buffer() == "Entidade"; }), nullptr);
     for (const auto& primitive : editor::ui::primitive_entities)
         EXPECT_NE(find<bgui::button>(*popup, [&](auto& value) { return value.get_label().get_buffer() == primitive.name; }), nullptr);
 }

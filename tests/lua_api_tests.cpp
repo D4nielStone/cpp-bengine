@@ -13,6 +13,7 @@
 #include "components/camera.hpp"
 #include "core/ecs.hpp"
 #include "systems/code_system.hpp"
+#include "project_creation_system.hpp"
 #include <fstream>
 #include <filesystem>
 #include <chrono>
@@ -138,7 +139,24 @@ TEST(LuaApi, TransformSeparatesWorldAndLocalPosition) {
     )"));
 }
 
-TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
+TEST(LuaApi, BuiltinFppTemplateScriptsMoveLookAndCollectUsingTheNewApi) {
+    const auto project_directory = std::filesystem::temp_directory_path() /
+        ("bengine-lua-template-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct cleanup {
+        std::filesystem::path path;
+        ~cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup_project{project_directory};
+    std::string error;
+    ASSERT_TRUE(editor::ui::create_project_files(project_directory, error,
+        editor::ui::project_template::fpp)) << error;
+    std::filesystem::copy_file(
+        std::filesystem::path(BENGINE_SOURCE_DIR) / "tests/fixtures/lua/pickup.lua",
+        project_directory / "scripts/pickup.lua");
+
     auto registry = std::make_shared<commons::ecs>();
     auto player = registry->create(106);
     registry->entity_names[player.id] = "PlayerCapsule";
@@ -157,7 +175,7 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     registry->add<commons::physics>(pickup);
     auto load = [&](commons::entity& entity, const std::string& filename) {
         registry->add<commons::code>(entity,
-            std::string(BENGINE_SOURCE_DIR) + "/projects/fpp_demo/scripts/" + filename);
+            (project_directory / "scripts" / filename).string());
         auto script = registry->get<commons::code>(entity.id);
         script->setup();
         return script;
@@ -222,7 +240,7 @@ TEST(LuaApi, FppScriptsMoveLookAndCollectUsingTheNewApi) {
     EXPECT_FLOAT_EQ(registry->get<commons::transform>(camera.id)->get_rotation().x, -89.f);
 
     registry->get<commons::transform>(pickup.id)->set_position(player_transform->get_position());
-    auto game = load(pickup, "fpp_game.lua");
+    auto game = load(pickup, "pickup.lua");
     setup = sol::protected_function(game->f_setup)();
     ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
     auto collected = sol::protected_function(game->f_update)();

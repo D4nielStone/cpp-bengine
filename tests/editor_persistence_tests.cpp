@@ -994,3 +994,27 @@ TEST(ProjectPersistenceTest, CubemapCrossPathSurvivesTemporaryRuntimeSnapshot) {
     registry->entities.clear();
     std::filesystem::remove_all(directory);
 }
+
+#include "runtime_scene_preview.hpp"
+
+TEST(RuntimeScenePreview, MirrorsTransformsAndRestoresWithoutMovingEditorCamera) {
+    auto registry = std::make_shared<commons::ecs>();
+    const auto object = registry->create();
+    const auto editor_entity = registry->create();
+    auto transform = registry->get<commons::transform>(object.id);
+    auto editor_transform = registry->get<commons::transform>(editor_entity.id);
+    transform->set_position({1.f, 2.f, 3.f});
+    const auto before = editor::ui::capture_runtime_preview(registry, editor_entity.id);
+    transform->set_position({9.f, 8.f, 7.f});
+    editor_transform->set_position({5.f, 4.f, 3.f});
+    const auto during = editor::ui::capture_runtime_preview(registry, editor_entity.id);
+    ASSERT_TRUE(editor::ui::apply_runtime_preview(before, registry, editor_entity.id));
+    EXPECT_EQ(transform->get_position(), (bgui::vec3{1.f, 2.f, 3.f}));
+    ASSERT_TRUE(editor::ui::apply_runtime_preview(during, registry, editor_entity.id));
+    EXPECT_EQ(transform->get_position(), (bgui::vec3{9.f, 8.f, 7.f}));
+    EXPECT_EQ(editor_transform->get_position(), (bgui::vec3{5.f, 4.f, 3.f}));
+    EXPECT_FALSE(editor::ui::apply_runtime_preview("[{\"id\":0,\"transform\":{\"position\":[]}}]", registry));
+    EXPECT_EQ(transform->get_position(), (bgui::vec3{9.f, 8.f, 7.f}));
+    registry->remove(object.id);
+    EXPECT_TRUE(editor::ui::apply_runtime_preview(during, registry, editor_entity.id));
+}

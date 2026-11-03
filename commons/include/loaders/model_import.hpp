@@ -119,6 +119,7 @@ inline std::string serialize_model_import_options(const model_import_options& o)
 inline bool supports_model_import(const std::filesystem::path& path) {
     auto extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (extension == ".bmodel") return true;
     // Recognize common sources even when this Assimp build cannot decode them,
     // so the editor can show the importer and its diagnostic instead of ignoring a drop.
     if (extension == ".glb" || extension == ".gltf" || extension == ".fbx" ||

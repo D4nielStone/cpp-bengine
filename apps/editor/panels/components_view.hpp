@@ -19,6 +19,7 @@
 #include <elem/checkbox.hpp>
 #include <elem/combo_box.hpp>
 #include <elem/color_picker.hpp>
+#include "mesh_material_editor.hpp"
 #include <elem/field.hpp>
 #include <elem/icon.hpp>
 #include <elem/image.hpp>
@@ -114,6 +115,17 @@ public:
         m_refresh_requested = true;
     }
 
+    void capture_session() { if (m_root) remember_section_expansion(); }
+    void restore_session() {
+        if (m_root) for (auto& [layer, elements] : m_root->get_elements())
+            for (auto& element : elements)
+                if (auto* section = dynamic_cast<bgui::tree*>(element.get())) {
+                    const auto it = m_context->inspector_sections.find(section->label().get_buffer());
+                    section->set_expanded(it == m_context->inspector_sections.end() || it->second);
+                }
+        refresh();
+    }
+
     void update() override {
         update_inspector();
     }
@@ -169,7 +181,6 @@ private:
         std::function<std::string()> read_value;
     };
     std::vector<property_input> m_property_inputs;
-    std::unordered_map<std::string, bool> m_section_expansion;
     bgui::text* m_edit_status{nullptr};
     struct asset_target {
         bgui::element* bounds;
@@ -203,7 +214,7 @@ private:
                 auto* section = dynamic_cast<bgui::tree*>(element.get());
                 if (!section)
                     continue;
-                m_section_expansion[section->label().get_buffer()] =
+                m_context->inspector_sections[section->label().get_buffer()] =
                     section->is_expanded();
             }
         }
@@ -250,6 +261,11 @@ private:
         clear_content();
         clear_toolbar();
 
+        if (!selected && m_context->editor_camera_entity) {
+            auto camera = m_context->registry->get<commons::camera>(*m_context->editor_camera_entity);
+            if (camera) build_entity(*m_context->editor_camera_entity);
+            return;
+        }
         if (!selected) {
             auto& message = m_root->add<bgui::text>(
                 "Select an entity to inspect its components.",
@@ -599,13 +615,28 @@ private:
         m_edit_status = &m_root->add<bgui::text>("", 0.25f);
     }
 
+    void add_rgb_picker(bgui::linear& content, const std::string& label,
+        std::function<bgui::vec3()> read, std::function<void(bgui::vec3)> write) {
+        content.add<bgui::text>(label, .27f);
+        const auto value = read();
+        auto& picker = panel::add_color(content, {value.x, value.y, value.z, 1.f});
+        if (label == "Fog") picker.add_class("inspector-fog-color");
+        picker.set_on_change([this, read, write](const bgui::color& c) {
+            const auto before = read();
+            const bgui::vec3 after{c.x,c.y,c.z};
+            if (before == after) return;
+            write(after);
+            m_context->record_action([write,before] { write(before); }, [write,after] { write(after); });
+        });
+    }
+
     bgui::tree& add_section(
         const std::string& name,
         const bool removable,
         const std::function<void()>& remove_component
     ) {
-        const auto expansion = m_section_expansion.find(name);
-        const bool expanded = expansion == m_section_expansion.end()
+        const auto expansion = m_context->inspector_sections.find(name);
+        const bool expanded = expansion == m_context->inspector_sections.end()
             ? true
             : expansion->second;
         auto& section = m_root->add<bgui::tree>(name, 0.28f, expanded);
@@ -747,185 +778,12 @@ private:
 
         if (!renderer->m_modelo)
             return;
-        for (std::size_t index = 0;
-             index < renderer->m_modelo->meshes.size();
-             ++index) {
-            auto& mesh = renderer->m_modelo->meshes[index];
-            const auto material = mesh.getMaterial();
-            const auto albedo = material.getUniforme("material.albedo");
-            commons::color base_color;
-            if (albedo.m_type == commons::uniform::type::Cor) {
-                base_color = albedo.valor.color_value;
-            } else if (albedo.m_type == commons::uniform::type::Cor_ptr &&
-                       albedo.ponteiro.color_ptr) {
-                base_color = *albedo.ponteiro.color_ptr;
-            }
-
-            auto& material_label = section.children().add<bgui::text>(
-                "Material " + std::to_string(index + 1) + " Base Color",
-                0.29f
-            );
-            material_label.add_class("editor-property-label");
-            material_label.style.layout.require_mode(
-                bgui::mode::match_parent,
-                bgui::mode::wrap_content
-            );
-
-            auto& color_picker = panel::add_color(section.children(),
-                bgui::color{
-                    base_color.r,
-                    base_color.g,
-                    base_color.b,
-                    base_color.a
-                }
-            );
-            color_picker.set_on_change(
-                [this, renderer, index, base_color](const bgui::color& color) {
-                    if (!renderer->m_modelo ||
-                        index >= renderer->m_modelo->meshes.size())
-                        return;
-                    auto& mesh = renderer->m_modelo->meshes[index];
-                    auto material = mesh.getMaterial();
-                    const auto before = material.getUniforme("material.albedo");
-                    const commons::color previous = before.m_type ==
-                        commons::uniform::type::Cor
-                        ? before.valor.color_value
-                        : before.m_type == commons::uniform::type::Cor_ptr &&
-                            before.ponteiro.color_ptr
-                            ? *before.ponteiro.color_ptr
-                            : base_color;
-                    const commons::color next{
-                        color.x, color.y, color.z, color.w
-                    };
-                    if (previous.r == next.r && previous.g == next.g &&
-                        previous.b == next.b && previous.a == next.a)
-                        return;
-
-                    auto apply_color = [renderer, index](commons::color value) {
-                        if (!renderer->m_modelo ||
-                            index >= renderer->m_modelo->meshes.size())
-                            return;
-                        auto updated =
-                            renderer->m_modelo->meshes[index].getMaterial();
-                        updated.set_uniform("material.albedo", value);
-                        renderer->m_modelo->meshes[index].setMaterial(updated);
-                    };
-                    apply_color(next);
-                    m_context->record_action(
-                        [apply_color, previous]() { apply_color(previous); },
-                        [apply_color, next]() { apply_color(next); }
-                    );
-                }
-            );
-
-            for (const auto& factor : commons::pbr_factors) {
-                add_float(section.children(), factor.label,
-                    commons::pbr_value(material, factor),
-                    [renderer, index, factor]() {
-                        return commons::pbr_value(renderer->m_modelo->meshes[index].getMaterial(), factor);
-                    },
-                    [renderer, index, factor](float value) {
-                        auto updated = renderer->m_modelo->meshes[index].getMaterial();
-                        updated.set_uniform(std::string("material.") + factor.name,
-                            std::clamp(value, 0.f, 1.f));
-                        renderer->m_modelo->meshes[index].setMaterial(updated);
-                    });
-            }
-            auto& world = panel::add_checkbox(section.children(),
-                "WorldTexture", 0.29f, commons::world_texture(material));
-            world.set_on_change([this, renderer, index](bool enabled) {
-                auto apply = [renderer, index](bool value) {
-                    auto updated = renderer->m_modelo->meshes[index].getMaterial();
-                    updated.set_uniform("uvMundo", value);
-                    renderer->m_modelo->meshes[index].setMaterial(updated);
-                };
-                const bool before = commons::world_texture(renderer->m_modelo->meshes[index].getMaterial());
-                apply(enabled);
-                m_context->record_action([apply, before]() { apply(before); },
-                    [apply, enabled]() { apply(enabled); });
-            });
-            for (const auto& factor : commons::texture_factors) {
-                add_float(section.children(), factor.label,
-                    commons::pbr_value(material, factor),
-                    [renderer, index, factor]() {
-                        return commons::pbr_value(renderer->m_modelo->meshes[index].getMaterial(), factor);
-                    },
-                    [renderer, index, factor](float value) {
-                        auto updated = renderer->m_modelo->meshes[index].getMaterial();
-                        updated.set_uniform(std::string("material.") + factor.name, value);
-                        renderer->m_modelo->meshes[index].setMaterial(updated);
-                    });
-            }
-            for (const auto& map : commons::pbr_maps)
-                add_material_map(section.children(), renderer, index, map);
+        for (std::size_t index = 0; index < renderer->m_modelo->meshes.size(); ++index) {
+            auto& group = section.children().add<bgui::tree>("Malha " + std::to_string(index + 1), .28f, true);
+            build_mesh_material_editor(*this, group.children(), m_context, renderer, index,
+                [this](auto* element, auto assign) { m_asset_targets.push_back({element, std::move(assign)}); },
+                [this](std::string message) { if (m_edit_status) m_edit_status->set_buffer(std::move(message)); });
         }
-    }
-
-    void add_material_map(bgui::linear& content,
-        const std::shared_ptr<commons::renderer>& renderer, std::size_t index,
-        const commons::pbr_map& map) {
-        const auto material = renderer->m_modelo->meshes[index].getMaterial();
-        auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
-        configure_property_row(row);
-        auto& label = row.add<bgui::text>(map.label, 0.27f);
-        configure_property_label(label);
-        auto& input = panel::add_input(row, material.getTextura(map.name).path,
-            "Drop a texture or enter its path", 0.26f);
-        configure_property_input(input);
-        auto& preview = content.add<bgui::image>();
-        preview.add_class("material-texture-preview");
-        preview.style.layout.require_size(96.f, 72.f);
-        auto show_preview = [this, preview = &preview](const std::string& value) {
-            preview->set_enable(false);
-            if (value.empty()) return;
-            try {
-                const std::filesystem::path path(value);
-                auto& texture = bgui::asset_manager::get_instance().load_texture(
-                    (path.is_absolute() ? path : m_context->project_root / path).string());
-                preview->set_texture(texture);
-                preview->set_enable(true);
-            } catch (const std::exception&) {
-                // Keep the path editable when a referenced texture is unavailable.
-            }
-        };
-        show_preview(material.getTextura(map.name).path);
-        auto assign = [this, renderer, index, map, show_preview, input = &input](const std::filesystem::path& requested) {
-            if (!renderer->m_modelo || index >= renderer->m_modelo->meshes.size())
-                return;
-            auto before = renderer->m_modelo->meshes[index].getMaterial();
-            auto after = before;
-            if (requested.empty()) {
-                after.textures.erase(map.name);
-                after.set_uniform(std::string("use_") + map.name, false);
-            } else {
-                auto path = requested.is_absolute() ? requested : m_context->project_root / requested;
-                try {
-                    auto& texture = bgui::asset_manager::get_instance().load_texture(path.string());
-                    after.set_texture(map.name, commons::texture{0, texture.m_path});
-                    after.set_uniform(std::string("use_") + map.name, true);
-                } catch (const std::exception& error) {
-                    m_edit_status->set_buffer(error.what());
-                    return;
-                }
-            }
-            auto apply = [renderer, index](const commons::material& value) {
-                if (renderer->m_modelo && index < renderer->m_modelo->meshes.size())
-                    renderer->m_modelo->meshes[index].setMaterial(value);
-            };
-            apply(after);
-            m_context->record_action([apply, before]() { apply(before); },
-                [apply, after]() { apply(after); });
-            input->set_buffer(after.getTextura(map.name).path);
-            show_preview(after.getTextura(map.name).path);
-            m_edit_status->set_buffer("");
-        };
-        input.m_enter_func = [assign](const std::string& path) { assign(path); };
-        m_asset_targets.push_back({&input, assign});
-        auto& clear = row.add<bgui::button>("", 0.25f, [assign]() { assign({}); });
-        clear.add_class("editor-icon-button");
-        clear.style.layout.require_size(22.f, 22.f);
-        clear.get_label().set_enable(false);
-        clear.add<bgui::icon>("close", 0.25f).receives_input(false);
     }
 
     void add_script(entity_id id, const std::shared_ptr<commons::code>& script) {
@@ -1145,24 +1003,11 @@ private:
         if (camera->config.skybox_image.empty() && std::any_of(camera->skybox_faces.begin(), camera->skybox_faces.end(),
                 [](const auto& path) { return !path.empty(); }))
             content.add<bgui::text>("Legacy six-face cubemap loaded; select a cross image to replace it.", 0.25f);
-        const char* channels[] = {"Atmosphere Zenith R", "Atmosphere Zenith G", "Atmosphere Zenith B"};
-        for (unsigned i = 0; i < 3; ++i) {
-            add_float(content, channels[i], camera->config.atmosphere_zenith[i],
-                [camera, i]() { return camera->config.atmosphere_zenith[i]; },
-                [camera, i](float v) { camera->config.atmosphere_zenith[i] = std::clamp(v, 0.f, 1.f); });
-        }
-
-        const char* horizon_labels[] = {"Atmosphere Horizon R", "Atmosphere Horizon G", "Atmosphere Horizon B"};
-        for (unsigned i = 0; i < 3; ++i) {
-            auto read = [camera, i]() { return i == 0 ? camera->config.sky_solid_color.r :
-                i == 1 ? camera->config.sky_solid_color.g : camera->config.sky_solid_color.b; };
-            add_float(content, horizon_labels[i], read(), read,
-                [camera, i](float value) {
-                    float& channel = i == 0 ? camera->config.sky_solid_color.r :
-                        i == 1 ? camera->config.sky_solid_color.g : camera->config.sky_solid_color.b;
-                    channel = std::clamp(value, 0.f, 1.f);
-                });
-        }
+        add_rgb_picker(content, "Atmosphere Zenith", [camera] { return camera->config.atmosphere_zenith; },
+            [camera](bgui::vec3 value) { camera->config.atmosphere_zenith = value; });
+        add_rgb_picker(content, "Atmosphere Horizon", [camera] {
+            auto c = camera->config.sky_solid_color; return bgui::vec3{c.r,c.g,c.b}; },
+            [camera](bgui::vec3 v) { camera->config.sky_solid_color = {v.x,v.y,v.z,1.f}; });
 
         auto& fog_enabled = panel::add_checkbox(content,
             "Enable Fog", 0.29f, camera->config.fog_enabled);
@@ -1180,18 +1025,9 @@ private:
                 if (std::isfinite(value) && value >= 0.f)
                     camera->config.fog_density = value;
             });
-        const char* fog_channels[] = {"Fog R", "Fog G", "Fog B"};
-        for (unsigned i = 0; i < 3; ++i) {
-            auto read = [camera, i]() {
-                return i == 0 ? camera->config.fog_color.r :
-                    i == 1 ? camera->config.fog_color.g : camera->config.fog_color.b;
-            };
-            add_float(content, fog_channels[i], read(), read, [camera, i](float value) {
-                float& channel = i == 0 ? camera->config.fog_color.r :
-                    i == 1 ? camera->config.fog_color.g : camera->config.fog_color.b;
-                channel = std::clamp(value, 0.f, 1.f);
-            });
-        }
+        add_rgb_picker(content, "Fog", [camera] {
+            auto c = camera->config.fog_color; return bgui::vec3{c.r,c.g,c.b}; },
+            [camera](bgui::vec3 v) { camera->config.fog_color = {v.x,v.y,v.z,1.f}; });
 
         auto& orthographic = panel::add_checkbox(content,
             "Orthographic",
@@ -1259,24 +1095,10 @@ private:
                 light->direction[axis] = value;
             }
         );
-        add_vec_field(
-            content,
-            "Ambient",
-            light->ambient,
-            [light]() { return light->ambient; },
-            [light](std::size_t axis, float value) {
-                light->ambient[axis] = value;
-            }
-        );
-        add_vec_field(
-            content,
-            "Color",
-            light->color,
-            [light]() { return light->color; },
-            [light](std::size_t axis, float value) {
-                light->color[axis] = value;
-            }
-        );
+        add_rgb_picker(content, "Ambient", [light] { return light->ambient; },
+            [light](bgui::vec3 v) { light->ambient = v; });
+        add_rgb_picker(content, "Color", [light] { return light->color; },
+            [light](bgui::vec3 v) { light->color = v; });
         add_float(
             content,
             "Intensity",

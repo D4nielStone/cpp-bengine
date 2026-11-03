@@ -90,10 +90,13 @@ gtest_discover_tests(editor_asset_workflow_tests)
 
 add_executable(editor_render_tests
     editor_render_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
 target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main commons)
-target_include_directories(editor_render_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_include_directories(editor_render_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+)
 target_compile_definitions(editor_render_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(editor_render_tests)
 
@@ -112,6 +115,13 @@ add_executable(ui_scale_tests ui_scale_tests.cpp)
 target_include_directories(ui_scale_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(ui_scale_tests PRIVATE GTest::gtest_main bgui)
 gtest_discover_tests(ui_scale_tests)
+
+add_executable(editable_model_tests editable_model_tests.cpp)
+target_include_directories(editable_model_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems
+)
+target_link_libraries(editable_model_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(editable_model_tests)
 
 add_executable(editor_menu_tests
     editor_menu_tests.cpp
@@ -135,7 +145,12 @@ if(WIN32)
 endif()
 gtest_discover_tests(editor_menu_tests)
 
-add_executable(lua_api_tests lua_api_tests.cpp)
+add_executable(lua_api_tests
+    lua_api_tests.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
+)
+target_include_directories(lua_api_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(lua_api_tests PRIVATE GTest::gtest_main commons)
 target_compile_definitions(lua_api_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(lua_api_tests)
@@ -236,12 +251,12 @@ gtest_discover_tests(version_migration_tests)
 add_executable(runtime_process_helper runtime_process_helper.cpp)
 add_executable(runtime_process_tests runtime_process_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/runtime_process.cpp
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
 target_include_directories(runtime_process_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(runtime_process_tests PRIVATE GTest::gtest_main commons)
 target_compile_definitions(runtime_process_tests PRIVATE
-    RUNTIME_PROCESS_HELPER="$<TARGET_FILE:runtime_process_helper>"
-    BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    RUNTIME_PROCESS_HELPER="$<TARGET_FILE:runtime_process_helper>")
 add_dependencies(runtime_process_tests runtime_process_helper)
 if(TARGET runtime_app)
     target_compile_definitions(runtime_process_tests PRIVATE

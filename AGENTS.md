@@ -14,7 +14,7 @@ Main technologies:
 - Lua scripting
 - Assimp for 3D assets
 
-The current development objective is a stable v0.1.0 release.
+The current development objective is a stable v0.1.2 release.
 
 Prioritize reliability, maintainability, correctness and backward compatibility over new features.
 
@@ -25,7 +25,7 @@ Repository Structure
 - "apps/": executable applications.
 - "external/cpp-bgui/": GUI framework.
 - "tests/": automated tests.
-- "projects/fpp_demo/": example game and integration reference.
+- The editor's project creation system provides empty and FPP templates; no sample game assets are bundled.
 
 Inspect the actual repository before assuming any API, class, function or file exists.
 

@@ -34,6 +34,7 @@ private:
     bgui::vec3 m_last_applied_position{}, m_last_applied_rotation{};
     std::function<float()> m_clock;
     bool m_manual_orbit{false};
+    bool m_primary_drag_enabled{true};
 
     float m_movement_speed{5.0f};
     float m_sprint_multiplier{3.0f};
@@ -175,6 +176,8 @@ public:
         m_orbit_initialized = false;
     }
 
+    void set_primary_drag_enabled(bool enabled) { m_primary_drag_enabled = enabled; }
+
     bool is_orbital() const { return m_manual_orbit || bool(m_orbit_target); }
 
     // Seed the pivot along the current sight line, preserving the eye on switch.
@@ -239,7 +242,7 @@ public:
         const bgui::vec2i mouse = bgui::get_mouse_position();
         const bool trackpad_modifier = viewport_camera_modifier();
         const bool camera_button_down = bgui::get_pressed(bgui::input_key::mouse_right) ||
-            bgui::get_pressed(bgui::input_key::mouse_left);
+            (m_primary_drag_enabled && bgui::get_pressed(bgui::input_key::mouse_left));
         const bool camera_button_just_pressed = camera_button_down && !m_camera_button_was_down;
         m_camera_button_was_down = camera_button_down;
 

@@ -23,5 +23,9 @@ O runtime e o painel Game do editor não compartilham a simulação: Play execut
 outro processo. A API Lua ainda não oferece um sistema de HUD, criação genérica
 de entidades/componentes ou controle de reprodução sonora.
 
+O código-fonte e os pacotes da engine não incluem um jogo de demonstração nem
+assets de jogo de terceiros. O editor oferece templates vazios e FPP para criar
+projetos próprios.
+
 Este arquivo não substitui os checks, artefatos ou notas específicas publicados
 com uma distribuição binária.

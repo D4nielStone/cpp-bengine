@@ -45,7 +45,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($RunTests) {
-    & ctest --test-dir $buildDirectory --output-on-failure -C Release
+    $testArgs = @("--test-dir", $buildDirectory, "--output-on-failure", "-C", "Release")
+    & ctest @testArgs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

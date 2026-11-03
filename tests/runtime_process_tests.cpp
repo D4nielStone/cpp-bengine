@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include "runtime_process.hpp"
+#include "runtime_scene_preview.hpp"
 #include "project_persistence_system.hpp"
+#include "project_creation_system.hpp"
 #include "components/camera.hpp"
 #include "os/window.hpp"
 #include "debugging/script_log.hpp"
@@ -99,13 +101,15 @@ TEST_F(RuntimeProcessTest, DestructionStopsChildAndCleansSnapshot) {
 }
 
 #ifdef BENGINE_RUNTIME_EXECUTABLE
-TEST_F(RuntimeProcessTest, RealDemoStartsAndRestartsThroughEditorProcess) {
+TEST_F(RuntimeProcessTest, FppTemplateStartsAndRestartsThroughEditorProcess) {
     if (!std::getenv("BENGINE_RUNTIME_SMOKE"))
-        GTEST_SKIP() << "Set BENGINE_RUNTIME_SMOKE=1 with an OpenGL display to run the real demo";
-    fs::copy(fs::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo", root / "demo",
-        fs::copy_options::recursive);
-    const auto demo = root / "demo/project.bengine";
-    const auto original = fs::file_size(fs::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine");
+        GTEST_SKIP() << "Set BENGINE_RUNTIME_SMOKE=1 with an OpenGL display to run the FPP template";
+    const auto template_directory = root / "fpp_template";
+    std::string error;
+    ASSERT_TRUE(editor::ui::create_project_files(template_directory, error,
+        editor::ui::project_template::fpp)) << error;
+    const auto template_project = template_directory / "project.bengine";
+    const auto original = fs::file_size(template_project);
     commons::window window("Editor runtime snapshot test", 100, 100);
     auto registry = window.get_ecs();
     auto editor_camera = registry->create();
@@ -113,8 +117,7 @@ TEST_F(RuntimeProcessTest, RealDemoStartsAndRestartsThroughEditorProcess) {
     editor::ui::project_persistence_system persistence(registry, editor_camera.id);
     persistence.set_migration_writes_enabled(false);
     editor::ui::runtime_process process;
-    std::string error;
-    ASSERT_TRUE(persistence.load(demo.string(), error)) << error;
+    ASSERT_TRUE(persistence.load(template_project.string(), error)) << error;
     for (int run = 0; run < 2; ++run) {
         ASSERT_TRUE(persistence.save(project.string(), error)) << error;
         commons::script_log::instance().clear();
@@ -125,7 +128,7 @@ TEST_F(RuntimeProcessTest, RealDemoStartsAndRestartsThroughEditorProcess) {
                 if (line.find("FPP player body ready.") != std::string::npos) return true;
             return false;
         }));
-        ASSERT_TRUE(process.running(error)) << "Runtime exited before loading the demo: " << error;
+        ASSERT_TRUE(process.running(error)) << "Runtime exited before loading the FPP template: " << error;
         bool ready = false;
         for (const auto& line : commons::script_log::instance().lines()) {
             ready |= line.find("FPP player body ready.") != std::string::npos;
@@ -142,13 +145,18 @@ TEST_F(RuntimeProcessTest, RealDemoStartsAndRestartsThroughEditorProcess) {
             EXPECT_EQ(line.find("Initialization failed:"), std::string::npos) << line;
             EXPECT_EQ(line.find("Update failed:"), std::string::npos) << line;
         }
+        const auto preview_path = fs::path(project.string() + ".preview");
+        ASSERT_TRUE(fs::exists(preview_path));
+        const auto preview = editor::ui::project_files::read(preview_path);
+        ASSERT_TRUE(editor::ui::apply_runtime_preview(preview, registry, editor_camera.id));
         ASSERT_TRUE(process.set_paused(true, error)) << error;
         ASSERT_TRUE(process.set_paused(false, error)) << error;
         ASSERT_TRUE(process.stop(error)) << error;
+        EXPECT_FALSE(fs::exists(preview_path));
         expect_clean();
     }
-    EXPECT_TRUE(fs::exists(demo));
-    EXPECT_TRUE(fs::exists(root / "demo/main.scene"));
-    EXPECT_EQ(fs::file_size(fs::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/project.bengine"), original);
+    EXPECT_TRUE(fs::exists(template_project));
+    EXPECT_TRUE(fs::exists(template_directory / "project.scene"));
+    EXPECT_EQ(fs::file_size(template_project), original);
 }
 #endif

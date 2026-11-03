@@ -91,3 +91,11 @@ TEST_F(UiScaleTest, ZoomReflowsPixelSizedElements) {
     EXPECT_EQ(element.processed_width(), 150);
     EXPECT_EQ(element.processed_height(), 60);
 }
+
+TEST_F(UiScaleTest, InputOnlyControllerDoesNotDrawDefaultCornerSquare) {
+    shortcuts.style.visual.visible = true;
+    shortcuts.set_final_rect(0, 0, 100, 100);
+    bgui::draw_data data;
+    shortcuts.get_requires(&data);
+    EXPECT_TRUE(data.m_quad_requires.empty());
+}

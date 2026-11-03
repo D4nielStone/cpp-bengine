@@ -1,6 +1,7 @@
 #include "resources/assimp_resource_io.hpp"
 #include <os/resource_files.hpp>
 #include "loaders/model.hpp"
+#include "loaders/editable_model.hpp"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -101,7 +102,7 @@ void model::load_model(const std::string& path) {
 
 bool model::source_available() const {
     if (source_path.empty())
-        return false;
+        return !meshes.empty();
 
     const bool available = bgui::resource_files::exists(source_path);
     if (!available && !m_source_missing)
@@ -117,6 +118,40 @@ void model::load_model_data(const std::string& path) {
     const auto resolved_path = resolve_model_path(path);
     source_path = resolved_path.string();
     const auto resolved_string = resolved_path.string();
+    auto extension = resolved_path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    if (extension == ".bmodel") {
+        editable_model_data editable;
+        std::string error;
+        if (!load_editable_model(resolved_path, editable, error)) {
+            debugging::emit(erro, error);
+            return;
+        }
+        directory = resolved_path.parent_path().string();
+        meshes.reserve(editable.meshes.size());
+        for (auto& source : editable.meshes) {
+            material model_material;
+            model_material.set_uniform("use_tex_albedo", false);
+            model_material.set_uniform("use_tex_metallic", false);
+            model_material.set_uniform("use_tex_roughness", false);
+            model_material.set_uniform("use_tex_normal", false);
+            model_material.set_uniform("use_tex_ao", false);
+            model_material.set_uniform("use_tex_height", false);
+            model_material.set_uniform("material.albedo", color{0.8f, 0.8f, 0.8f, 1.f});
+            model_material.set_uniform("material.metallic", 0.f);
+            model_material.set_uniform("material.ao", 1.f);
+            model_material.set_uniform("material.roughness", 0.5f);
+            meshes.emplace_back(
+                source.vertices,
+                source.triangulated_indices(),
+                model_material
+            );
+            meshes.back().load();
+        }
+        return;
+    }
+
     auto pose = std::make_shared<model_pose>();
     pose->options = read_model_import_options(resolved_path);
     if (bgui::resource_files::embedded()) pose->importer->SetIOHandler(new resource_io());

@@ -637,20 +637,17 @@ public:
         m_toolbar->style.layout.padding = bgui::vec4i{4, 3, 4, 3};
         m_toolbar->style.visual.visible = false;
 
-        auto& add_entity = m_toolbar->add<bgui::button>(
+        auto& add_entity = m_toolbar->add<context_action_button>(
             "",
             0.28f,
-            [this]() { create_entity(); }
+            []() {}
         );
         add_entity.add_class("entities-add-button");
         configure_icon_button(add_entity, 18);
         add_button_icon(add_entity, "plus", 0.26f);
-
-        auto& primitives = m_toolbar->add<context_action_button>("Primitivas", .27f, []() {});
-        primitives.add_class("entities-primitives-button");
-        primitives.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
-        primitives.context_options = [this]() {
+        add_entity.context_options = [this]() {
             context_actions actions;
+            actions.emplace_back("Entidade", [this]() { create_entity(); });
             for (size_t i = 0; i < primitive_entities.size(); ++i) {
                 actions.emplace_back(primitive_entities[i].name, [this, i]() {
                     try { if (const auto id = create_primitive_entity(m_context, i)) { select(*id); refresh(); } }
@@ -662,7 +659,7 @@ public:
             }
             return actions;
         };
-        primitives.set_function([button = &primitives]() { button->open_context(); });
+        add_entity.set_function([button = &add_entity]() { button->open_context(); });
 
         auto& remove_entity = m_toolbar->add<bgui::button>(
             "",

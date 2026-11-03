@@ -304,30 +304,31 @@ bool editor::transform_gizmo::update(
         static_cast<float>(mouse_position.y)
     };
 
+    const auto view_projection = camera.projMatriz * camera.viewMatrix;
+    const auto center_clip = view_projection * glm::vec4(position.x,position.y,position.z,1.f);
     for (int axis_index = 0; axis_index < 3; ++axis_index) {
-        bgui::vec2 unit_end{};
-        if (!project(camera, viewport, position + axis_vectors[axis_index], unit_end))
-            continue;
-
-        const auto unit_screen_direction = unit_end - m_center;
+        const auto& axis = axis_vectors[axis_index];
+        const auto direction = view_projection * glm::vec4(axis.x,axis.y,axis.z,0.f);
+        const float divisor = center_clip.w * center_clip.w;
+        const bgui::vec2 unit_screen_direction{
+            (direction.x*center_clip.w-center_clip.x*direction.w)/divisor*viewport.z*.5f,
+            -(direction.y*center_clip.w-center_clip.y*direction.w)/divisor*viewport.w*.5f
+        };
         pixels_per_unit[axis_index] = length(unit_screen_direction);
-        if (pixels_per_unit[axis_index] < 0.01f)
-            continue;
+        if (pixels_per_unit[axis_index] < 1e-8f) continue;
         axis_directions[axis_index] = unit_screen_direction / pixels_per_unit[axis_index];
     }
 
-    const auto center_clip = camera.projMatriz * camera.viewMatrix *
-        glm::vec4(position.x, position.y, position.z, 1.f);
     const float pixels_per_world = viewport.w * std::abs(camera.projMatriz[1][1]) /
         (2.f * std::max(center_clip.w, 0.0001f));
-    const float ring_radius = std::clamp(74.f / std::max(pixels_per_world, 0.01f), 0.02f, 10.f);
+    const float ring_radius = 74.f / std::max(pixels_per_world, 1e-8f);
 
     for (int axis_index = 0; axis_index < 3; ++axis_index) {
         if (m_mode == mode::rotate) {
             const auto plane = rotation_planes[axis_index];
             auto& ring = rings[axis_index];
             float world_radius = ring_radius;
-            for (int adjustment = 0; adjustment < 3; ++adjustment) {
+            for (int adjustment = 0; adjustment < 8; ++adjustment) {
                 ring_radii[axis_index] = world_radius;
                 ring.clear();
                 float maximum_screen_radius = 0.f;
@@ -346,7 +347,7 @@ bool editor::transform_gizmo::update(
                 }
                 if (ring.size() != 48 || maximum_screen_radius < 0.01f)
                     break;
-                world_radius = std::clamp(world_radius * (74.f / maximum_screen_radius), 0.02f, 10.f);
+                world_radius = world_radius * (74.f / maximum_screen_radius);
             }
             for (std::size_t point_index = 0; point_index < ring.size(); ++point_index) {
                 const auto& start = ring[point_index];
@@ -358,11 +359,9 @@ bool editor::transform_gizmo::update(
                 }
             }
         } else {
-            if (pixels_per_unit[axis_index] < 0.01f)
+            if (pixels_per_unit[axis_index] < 1e-8f)
                 continue;
-            const float world_length = std::clamp(82.f / pixels_per_unit[axis_index], 0.02f, 10.f);
-            if (!project(camera, viewport, position + axis_vectors[axis_index] * world_length, axis_ends[axis_index]))
-                continue;
+            axis_ends[axis_index] = m_center + axis_directions[axis_index] * 82.f;
             const float distance = distance_to_segment(mouse, m_center, axis_ends[axis_index]);
             if (mouse_over_view && distance < hovered_distance) {
                 hovered_distance = distance;
@@ -416,7 +415,7 @@ bool editor::transform_gizmo::update(
     }
 
     if (m_dragging && left_down && m_active_axis >= 0) {
-        if (m_mode == mode::translate && m_drag_pixels_per_unit > 0.01f) {
+        if (m_mode == mode::translate && m_drag_pixels_per_unit > 1e-8f) {
             const bgui::vec2 drag_delta{
                 static_cast<float>(mouse_delta.x),
                 static_cast<float>(mouse_delta.y)
@@ -427,7 +426,7 @@ bool editor::transform_gizmo::update(
                     target->get_world_position() +
                     axis_vectors[m_active_axis] * amount
                 );
-        } else if (m_mode == mode::scale && m_drag_pixels_per_unit > 0.01f) {
+        } else if (m_mode == mode::scale && m_drag_pixels_per_unit > 1e-8f) {
             const float amount = dot(mouse - m_drag_start_mouse, m_drag_axis_screen) / 82.f;
             auto scale = target->get_scale();
             scale[m_active_axis] = std::max(0.001f, m_start_scale * (1.f + amount));
@@ -473,6 +472,7 @@ bool editor::transform_gizmo::update(
             continue;
         }
 
+        if (pixels_per_unit[axis_index] < 1e-8f) continue;
         const auto end = axis_ends[axis_index];
         add_clipped_line(draw_list, visible_regions, m_center, end, highlighted ? 5.f : 3.5f);
         if (m_mode == mode::translate) {

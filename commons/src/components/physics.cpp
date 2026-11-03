@@ -109,6 +109,7 @@ void physics::setModelo(model* model_value) {
     m_bounds_max = bgui::vec3(std::numeric_limits<float>::lowest());
     std::unique_ptr<btTriangleMesh> triangle_mesh;
     std::unique_ptr<btCollisionShape> model_shape;
+    btConvexHullShape* convex_hull = nullptr;
     if (e_forma == shapes::mesh_shape) {
         if (model_collider == model_collider_type::concave) {
             if (m_massa > 0.f)
@@ -152,7 +153,9 @@ void physics::setModelo(model* model_value) {
                 triangle_mesh.get(), true, true
             );
         } else {
-            model_shape = std::make_unique<btConvexHullShape>();
+            auto hull = std::make_unique<btConvexHullShape>();
+            convex_hull = hull.get();
+            model_shape = std::move(hull);
         }
     }
     for (const auto& mesh : model_value->meshes)
@@ -166,17 +169,17 @@ void physics::setModelo(model* model_value) {
                 m_bounds_min[axis] = std::min(m_bounds_min[axis], vertex.position[axis]);
                 m_bounds_max[axis] = std::max(m_bounds_max[axis], vertex.position[axis]);
             }
-            if (auto* hull = dynamic_cast<btConvexHullShape*>(model_shape.get()))
-                hull->addPoint(btVector3(
+            if (convex_hull)
+                convex_hull->addPoint(btVector3(
                     vertex.position.x, vertex.position.y, vertex.position.z
                 ), false);
         }
     if (model_shape) {
-        if (auto* hull = dynamic_cast<btConvexHullShape*>(model_shape.get())) {
-            hull->setMargin(0.001f);
-            if (hull->getNumPoints() >= 4) {
-                hull->optimizeConvexHull();
-                hull->initializePolyhedralFeatures();
+        if (convex_hull) {
+            convex_hull->setMargin(0.001f);
+            if (convex_hull->getNumPoints() >= 4) {
+                convex_hull->optimizeConvexHull();
+                convex_hull->initializePolyhedralFeatures();
             }
         }
         model_shape->setLocalScaling(m_forma->getLocalScaling());

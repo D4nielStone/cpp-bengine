@@ -84,9 +84,9 @@ jobs:
         run: cmake --build out --config Release --parallel 2
       - name: Test
         run: ctest --test-dir out --output-on-failure -C Release
-      - name: Exercise editor runtime with the real demo
+      - name: Exercise runtime with the generated FPP template
         if: runner.os == 'Linux'
-        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure
+        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure -R '^RuntimeProcessTest.FppTemplateStartsAndRestartsThroughEditorProcess$'
       - name: Generate release performance reports
         if: runner.os == 'Linux'
         env:

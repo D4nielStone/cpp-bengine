@@ -25,8 +25,29 @@
 #include <utility>
 
 #include "runtime/game_bootstrap.hpp"
+#include "editor/systems/runtime_scene_preview.hpp"
+#include <chrono>
 
 namespace {
+
+class runtime_preview_publisher final : public commons::system {
+    std::filesystem::path m_path;
+    std::chrono::steady_clock::time_point m_last{};
+public:
+    explicit runtime_preview_publisher(std::filesystem::path path) : m_path(std::move(path)) {}
+    void setup(const std::shared_ptr<commons::ecs>&) override {}
+    void update(const std::shared_ptr<commons::ecs>& registry) override {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - m_last < std::chrono::milliseconds(33)) return;
+        m_last = now;
+        try {
+            editor::ui::project_files::stage({m_path, editor::ui::capture_runtime_preview(registry)});
+            editor::ui::project_files::replace(m_path);
+        } catch (const std::exception& error) {
+            std::cerr << "[runtime preview] " << error.what() << '\n';
+        }
+    }
+};
 
 class runtime_viewport_sync_system final : public commons::system {
 public:
@@ -260,6 +281,7 @@ int main(const int argc, char** argv) {
     auto physics_system = std::make_shared<commons::physics_system>();
     physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
     window.add(physics_system);
+    if (argc == 5) window.add<runtime_preview_publisher>(project_path + ".preview");
     window.add(render_system);
     if (diagnostics) window.add<runtime_collision_overlay>();
     if (!game_camera->flag_fb) {

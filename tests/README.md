@@ -9,11 +9,12 @@ no Linux e `scripts/build.ps1 -BuildDirectory out -RunTests` no Windows.
 | ECS, entidades e componentes | `commons_tests.cpp`, `engine_foundations_tests.cpp`: máscaras, entidades vivas, IDs únicos, reposição/remoção de componentes, lookup e iteração |
 | Transform e hierarquia | `engine_foundations_tests.cpp`: composição TRS, posição mundial/local, reparent, ciclos, pai singular e serialização; gizmos em `editor_interaction_tests.cpp` |
 | Física Bullet | `engine_foundations_tests.cpp`: seis formas suportadas, propriedades/validação, sincronização do mundo, forças, travas, raycast, queda e contato; persistência em `editor_persistence_tests.cpp` |
-| Scripts Lua e integração FPP | `lua_api_tests.cpp`, `editor_script_tests.cpp`: APIs, lookup, propriedades, execução, erros, logs e múltiplos scripts |
+| Scripts Lua e template FPP | `lua_api_tests.cpp`, `editor_script_tests.cpp`, `runtime_process_tests.cpp`: APIs, lookup, propriedades, execução, erros, logs, múltiplos scripts e inicialização de um projeto criado pelo template |
 | Projetos e cenas | `editor_persistence_tests.cpp`, `editor_persistence_transaction_tests.cpp`, `persistence_integrity_tests.cpp`: round-trip, caminhos, recuperação/rollback, truncamento em cada prefixo, corrupção de esquema/hierarquia/journal, preservação da cena ativa e proteção de links |
 | Memória durante persistência | `persistence_integrity_tests.cpp`: liberação de Transform/Lua/Bullet substituídos, referências em falhas repetidas, ownership externo e encerramento explícito do ECS. Não comprova ausência global de leaks. |
 | Câmera, materiais, luzes e renderização | `editor_render_tests.cpp`, `editor_interaction_tests.cpp`, `lua_api_tests.cpp`: framebuffer, resize, PBR, sombras e orientação hierárquica |
 | Editor, BGUI e assets | `editor_*_tests.cpp`, `text_editor_tests.cpp`, `lua_completion_tests.cpp`, `ui_scale_tests.cpp`, `window_file_drop_tests.cpp`, testes da BGUI: documentos, menus, histórico, Inspector, docking, importação e entradas |
+| Exportação e inicialização | `game_export_tests.cpp`, `executable_archive_tests.cpp` e `export_runtime_smoke.py`: estrutura de pacote, arquivo único, projeto mínimo gerado e inicialização longe do diretório de trabalho |
 
 ## Executar somente as bases sem janela
 

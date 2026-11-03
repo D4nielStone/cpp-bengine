@@ -244,11 +244,10 @@ a project directory or a project file path, and it resolves common folders such
 as `project.bengine`, `game.world`, or a project directory containing one of
 those files. Older `.bengine` files that still embed entities remain loadable.
 
-A ready-to-use FPP sample project is available in `projects/fpp_demo/` and uses
-entities, physics, collision, and Lua scripts for gameplay logic.
-Open it with `./build/apps/editor_app --project projects/fpp_demo/project.bengine`
-or select its directory through the editor's **Load Project** folder browser.
-In runtime, the player controller supports WASD movement and mouse look.
+The repository does not bundle a sample game or third-party game assets. Use
+**New Project** in the editor to create an empty project or the built-in FPP
+template, which includes example movement scripts. To export a game, pass your
+own project's `.bengine` file to the platform build helper.
 
 # Structure
 

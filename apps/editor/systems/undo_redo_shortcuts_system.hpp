@@ -31,6 +31,8 @@ public:
         set_flex(false);
     }
 
+    void get_requires(bgui::draw_data*) override {}
+
     void on_update() override {
         const bool f3_down = bgui::get_pressed(bgui::input_key::f3);
         if (m_commands && f3_down && !m_f3_was_down)

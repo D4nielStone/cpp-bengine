@@ -45,6 +45,7 @@ function setup()
     rigidbody = gameObject:GetComponent("Rigidbody")
     yaw = body.localEulerAngles.y
     Input.SetMouseCaptured(true)
+    Debug.Log("FPP player body ready.")
 end
 
 function update()

@@ -8,6 +8,7 @@
 #include <elem/button.hpp>
 #include <elem/checkbox.hpp>
 #include <elem/field.hpp>
+#include <elem/icon.hpp>
 #include <elem/inputbox.hpp>
 #include <elem/window.hpp>
 #include <components/camera.hpp>
@@ -46,11 +47,24 @@ protected:
         std::make_shared<editor::ui::editor_context>(registry);
     bgui::linear& root = bgui::get_layout().add<bgui::linear>();
     bgui::menu_bar& menu = root.add<bgui::menu_bar>(root);
+    bgui::linear& side_bar = root.add<bgui::linear>(bgui::orientation::vertical);
     bgui::dock& dock = root.add<bgui::dock>();
+    bgui::dock& model_dock = root.add<bgui::dock>();
+    bgui::dock& management_dock = root.add<bgui::dock>();
     editor::ui::ui_persistence_system ui_persistence;
     editor::ui::project_persistence_system persistence{registry, 0};
-    editor::ui::editor_ui editor{dock, menu, ui_persistence, persistence,
-        registry, "project.bengine", "/tmp/bengine-build"};
+    editor::ui::editor_ui editor{
+        dock,
+        model_dock,
+        management_dock,
+        menu,
+        side_bar,
+        ui_persistence,
+        persistence,
+        registry,
+        "project.bengine",
+        "/tmp/bengine-build"
+    };
 
     void SetUp() override {
         bgui::get_context().m_input_map.clear();
@@ -82,6 +96,77 @@ TEST_F(EditorMenuTest, ViewZoomActionsChangeTheGlobalInterfaceScale) {
     EXPECT_FLOAT_EQ(bgui::get_global_scale(), 1.f);
 }
 
+TEST_F(EditorMenuTest, WorkspaceModeSelectsItsOwnDock) {
+    ASSERT_TRUE(side_bar.style.visual.background.normal.has_value());
+    EXPECT_LT(side_bar.style.visual.background.normal->x, 0.1f);
+    EXPECT_LT(side_bar.style.visual.background.normal->y, 0.1f);
+    EXPECT_LT(side_bar.style.visual.background.normal->z, 0.1f);
+    ASSERT_TRUE(side_bar.style.layout.padding.has_value());
+    EXPECT_EQ(side_bar.style.layout.padding->x, 0);
+    EXPECT_EQ(side_bar.style.layout.padding->z, 0);
+    auto* file_button = find<bgui::button>(menu, [](auto& button) {
+        return button.get_label().get_buffer() == "File";
+    });
+    ASSERT_NE(file_button, nullptr);
+    bgui::on_update();
+    EXPECT_GE(file_button->processed_x(), 14);
+    ASSERT_TRUE(file_button->style.layout.margin.has_value());
+    EXPECT_EQ(file_button->style.layout.margin->x, 14);
+    EXPECT_EQ(file_button->style.layout.margin->z, 0);
+    std::size_t workspace_button_count = 0;
+    for (const auto& entry : side_bar.get_elements()) {
+        for (const auto& child : entry.second) {
+            auto* button = dynamic_cast<bgui::button*>(child.get());
+            if (!button)
+                continue;
+
+            ++workspace_button_count;
+            EXPECT_TRUE(button->get_label().get_buffer().empty());
+            EXPECT_FALSE(button->get_label().is_enabled());
+            EXPECT_NE(find<bgui::icon>(
+                *button,
+                [](const auto&) { return true; }
+            ), nullptr);
+            ASSERT_TRUE(button->style.layout.align.has_value());
+            EXPECT_EQ(
+                (*button->style.layout.align)[0],
+                bgui::alignment::center
+            );
+            EXPECT_EQ(
+                (*button->style.layout.align)[1],
+                bgui::alignment::center
+            );
+            ASSERT_TRUE(button->style.layout.margin.has_value());
+            EXPECT_EQ(button->style.layout.margin->x, 0);
+            EXPECT_EQ(button->style.layout.margin->z, 0);
+            ASSERT_TRUE(button->style.visual.background.normal.has_value());
+            EXPECT_FLOAT_EQ(button->style.visual.background.normal->a, 0.f);
+        }
+    }
+    EXPECT_EQ(workspace_button_count, 3u);
+
+    EXPECT_TRUE(dock.is_enabled());
+    EXPECT_FALSE(model_dock.is_enabled());
+    EXPECT_FALSE(management_dock.is_enabled());
+
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::model_editing);
+    EXPECT_FALSE(dock.is_enabled());
+    EXPECT_TRUE(model_dock.is_enabled());
+    EXPECT_FALSE(management_dock.is_enabled());
+
+    editor.set_workspace_mode(
+        editor::ui::editor_workspace_mode::scene_management
+    );
+    EXPECT_FALSE(dock.is_enabled());
+    EXPECT_FALSE(model_dock.is_enabled());
+    EXPECT_TRUE(management_dock.is_enabled());
+
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::editor);
+    EXPECT_TRUE(dock.is_enabled());
+    EXPECT_FALSE(model_dock.is_enabled());
+    EXPECT_FALSE(management_dock.is_enabled());
+}
+
 TEST_F(EditorMenuTest, SavedProjectExitsWithoutOpeningSaveConfirmation) {
     auto camera = registry->create();
     registry->add<commons::camera>(camera);
@@ -91,8 +176,18 @@ TEST_F(EditorMenuTest, SavedProjectExitsWithoutOpeningSaveConfirmation) {
             .time_since_epoch().count()) + ".bengine");
     std::string error;
     ASSERT_TRUE(project.save(path.string(), error)) << error;
-    editor::ui::editor_ui ui(dock, menu, ui_persistence, project,
-        registry, path.string(), "/tmp/bengine-build");
+    editor::ui::editor_ui ui(
+        dock,
+        model_dock,
+        management_dock,
+        menu,
+        side_bar,
+        ui_persistence,
+        project,
+        registry,
+        path.string(),
+        "/tmp/bengine-build"
+    );
     bool exited = false;
     ui.set_exit_callback([&]() { exited = true; });
     ui.confirm_exit();
@@ -148,7 +243,7 @@ TEST(PanelManagerTest, OwnsPanelsAndForwardsUpdates) {
     EXPECT_EQ(panel.update_count, 1);
 }
 
-TEST(GameViewTest, PreviewsRuntimeCameraAndHidesWhileTheRuntimeIsRunning) {
+TEST(GameViewTest, PreviewsRuntimeCameraWhileTheRuntimeIsRunning) {
     bgui::scoped_interface ui_scope;
     auto registry = std::make_shared<commons::ecs>();
     auto editor_camera = registry->create(1);
@@ -171,13 +266,17 @@ TEST(GameViewTest, PreviewsRuntimeCameraAndHidesWhileTheRuntimeIsRunning) {
 
     context->is_playing = true;
     panel.update();
-    EXPECT_FALSE(window->is_enabled());
-    EXPECT_FALSE(panel.needs_camera_render(game_camera.id));
+    EXPECT_TRUE(window->is_enabled());
+    EXPECT_TRUE(panel.needs_camera_render(game_camera.id));
 
     context->is_playing = false;
     panel.update();
     EXPECT_TRUE(window->is_enabled());
     EXPECT_TRUE(panel.needs_camera_render(game_camera.id));
+    window->set_enable(false);
+    panel.update();
+    EXPECT_FALSE(window->is_enabled());
+    EXPECT_FALSE(panel.needs_camera_render(game_camera.id));
 }
 
 TEST_F(EditorMenuTest, UnsavedProjectRequiresConfirmationAndCancelKeepsEditorOpen) {
@@ -414,11 +513,24 @@ TEST(EditorExportTest, BuildOutputDirectoryDoesNotReplaceEngineSourceDirectory) 
     auto camera = registry->create(); registry->add<commons::camera>(camera);
     auto& root = bgui::get_layout().add<bgui::linear>();
     auto& menu = root.add<bgui::menu_bar>(root);
+    auto& side_bar = root.add<bgui::linear>(bgui::orientation::vertical);
     auto& dock = root.add<bgui::dock>();
+    auto& model_dock = root.add<bgui::dock>();
+    auto& management_dock = root.add<bgui::dock>();
     editor::ui::ui_persistence_system ui;
     editor::ui::project_persistence_system persistence(registry, camera.id);
-    editor::ui::editor_ui editor(dock, menu, ui, persistence, registry,
-        project.string(), temporary / "build");
+    editor::ui::editor_ui editor(
+        dock,
+        model_dock,
+        management_dock,
+        menu,
+        side_bar,
+        ui,
+        persistence,
+        registry,
+        project.string(),
+        temporary / "build"
+    );
     const auto click = [&](const std::string& label) {
         auto* button = find<bgui::button>(bgui::get_layout(), [&](auto& item) {
             return item.get_label().get_buffer() == label;
@@ -472,10 +584,24 @@ TEST(EditorProjectManager, ContextMenuSeparatesRemovingFromListAndDeletingFolder
     auto registry = std::make_shared<commons::ecs>();
     auto& root = bgui::get_layout();
     auto& menu = root.add<bgui::menu_bar>(root);
+    auto& side_bar = root.add<bgui::linear>(bgui::orientation::vertical);
     auto& dock = root.add<bgui::dock>();
+    auto& model_dock = root.add<bgui::dock>();
+    auto& management_dock = root.add<bgui::dock>();
     editor::ui::ui_persistence_system ui_persistence;
     editor::ui::project_persistence_system persistence(registry, 0);
-    editor::ui::editor_ui editor(dock, menu, ui_persistence, persistence, registry, "other.bengine", folder);
+    editor::ui::editor_ui editor(
+        dock,
+        model_dock,
+        management_dock,
+        menu,
+        side_bar,
+        ui_persistence,
+        persistence,
+        registry,
+        "other.bengine",
+        folder
+    );
     auto* manager = find<bgui::modal>(root, [](auto& value) {
         return find<bgui::text>(value, [](auto& text) { return text.get_buffer() == "Project Manager"; });
     });
@@ -500,4 +626,248 @@ TEST(EditorProjectManager, ContextMenuSeparatesRemovingFromListAndDeletingFolder
     std::ifstream input("editor-recent-projects.cfg");
     EXPECT_TRUE(std::string(std::istreambuf_iterator<char>(input), {}).empty());
     EXPECT_FALSE(row->is_enabled());
+}
+
+#include "editor_workspace.hpp"
+
+TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
+    bgui::scoped_interface ui_scope;
+    const auto root = std::filesystem::temp_directory_path() /
+        ("bubble-workflow-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->editor_camera_entity = entity.id;
+    context->selected_entity = entity.id;
+    context->workspace_mode = 2;
+    context->model_selection = 3;
+    context->orbital_view = true;
+    context->model_orbital_view = true;
+    context->inspector_sections["Camera"] = false;
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->config.atmosphere_zenith = {.2f, .3f, .4f};
+    editor::ui::ui_persistence_system persistence;
+    editor::ui::editor_workspace workspace(persistence, context);
+    workspace.set_project_file(root / "test.bengine");
+    editor::ui::files_view files(root / "test.bengine");
+    std::string error;
+    ASSERT_TRUE(workspace.save_workspace(files, error)) << error;
+    context->selected_entity.reset(); context->workspace_mode = 0;
+    context->model_selection = 0; context->orbital_view = false; context->model_orbital_view = false;
+    context->inspector_sections.clear();
+    camera->config.atmosphere_zenith = {};
+    ASSERT_TRUE(workspace.load_workspace(files, error)) << error;
+    EXPECT_EQ(context->selected_entity, entity.id);
+    EXPECT_EQ(context->workspace_mode, 2);
+    EXPECT_EQ(context->model_selection, 3);
+    EXPECT_TRUE(context->orbital_view);
+    EXPECT_TRUE(context->model_orbital_view);
+    EXPECT_FALSE(context->inspector_sections.at("Camera"));
+    EXPECT_EQ(camera->config.atmosphere_zenith, (bgui::vec3{.2f,.3f,.4f}));
+    std::ofstream(root / ".editor-workflow.json") << "{invalid";
+    EXPECT_FALSE(workspace.load_workspace(files, error));
+    EXPECT_FALSE(error.empty());
+    std::filesystem::remove_all(root);
+}
+
+#include "model_editor_view.hpp"
+
+TEST(ModelEditorLayout, KeepsToolsInSidebarBesidePreview) {
+    bgui::scoped_interface ui_scope;
+    bgui::get_context().m_size = {1000, 700};
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    editor::ui::model_editor_view panel(context);
+    panel.build(dock);
+    bgui::on_update();
+    auto* distance = find<bgui::inputbox>(dock, [](auto& input) { return input.get_buffer() == "0.25"; });
+    ASSERT_NE(distance, nullptr);
+    EXPECT_LE(distance->processed_height(), 30 * bgui::get_global_scale());
+    auto* extrude = find<bgui::button>(dock, [](auto& button) { return button.get_label().get_buffer() == "Extrudar face"; });
+    ASSERT_NE(extrude, nullptr);
+    EXPECT_GE(extrude->processed_y(), distance->processed_y() + distance->processed_height());
+    auto* image = find<bgui::image>(dock, [](auto& image) { return image.has_class("model-editor-preview"); });
+    ASSERT_NE(image, nullptr);
+    EXPECT_GE(distance->processed_x(), image->processed_x() + image->processed_width());
+    EXPECT_GT(image->processed_height(), 200);
+}
+
+TEST(FilesContextMenu, OpensOnLeftClickAndRetiresWithSurface) {
+    bgui::scoped_interface ui_scope;
+    auto& io = bgui::get_context();
+    io.m_size = {800, 600};
+    io.m_input_map.clear();
+    auto& surface = bgui::get_layout().add<editor::ui::context_action_surface>(bgui::orientation::vertical);
+    surface.style.layout.require_size(400, 300);
+    surface.receives_input(true);
+    surface.context_options = [] { return editor::ui::context_actions{{"New file", [] {}}}; };
+    bgui::on_update();
+    io.m_mouse_position = {surface.processed_x() + 20, surface.processed_y() + 20};
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    bgui::on_update();
+    bgui::on_update();
+    auto* popup = find<editor::ui::action_popup>(bgui::get_layout(), [](auto&) { return true; });
+    ASSERT_NE(popup, nullptr);
+    EXPECT_TRUE(popup->is_enabled());
+    bgui::get_layout().remove(&surface);
+    bgui::on_update();
+    bgui::on_update();
+    EXPECT_EQ(find<editor::ui::action_popup>(bgui::get_layout(), [](auto&) { return true; }), nullptr);
+}
+
+TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) {
+    bgui::scoped_interface ui_scope;
+    bgui::get_context().m_size = {1000, 700};
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = std::filesystem::temp_directory_path() /
+        ("model-panel-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto first = registry->create();
+    auto second = registry->create();
+    const std::vector<commons::vertex> vertices{
+        {{-1.f,-1.f,0.f}, {}, {}}, {{1.f,-1.f,0.f}, {}, {}}, {{0.f,1.f,0.f}, {}, {}}
+    };
+    auto make_model = [&vertices](int count) {
+        auto model = std::make_unique<commons::model>();
+        for (int i = 0; i < count; ++i)
+            model->meshes.emplace_back(vertices, std::vector<unsigned int>{0,1,2}, commons::material{});
+        return model;
+    };
+    registry->add<commons::renderer>(first, make_model(1).release());
+    registry->add<commons::renderer>(second, make_model(2).release());
+    context->entity_names[first.id] = "Triângulo em cena";
+    context->entity_names[second.id] = "Outro objeto";
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::model_editor_view panel(context);
+    panel.build(dock);
+    context->selected_entity = first.id;
+    bgui::on_update();
+    bgui::on_update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Triângulo em cena"; }), nullptr);
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Malha 1/1"; }), nullptr);
+    auto* image = find<bgui::image>(dock, [](auto& image) { return image.has_class("model-editor-preview"); });
+    ASSERT_NE(image, nullptr);
+    const auto first_preview = image->get_texture().m_buffer;
+    EXPECT_FALSE(first_preview.empty());
+    // Drag the existing gizmo's projected X axis, then save the changed mesh.
+    const auto matrix = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix;
+    const auto screen = [&](bgui::vec3 p) {
+        const auto clip = matrix*glm::vec4(p.x,p.y,p.z,1.f);
+        return bgui::vec2{image->processed_x()+(clip.x/clip.w*.5f+.5f)*image->processed_width(),
+            image->processed_y()+(.5f-clip.y/clip.w*.5f)*image->processed_height()};
+    };
+    const auto pivot = screen({0.f,-1.f/3.f,0.f});
+    const auto unit = screen({1.f,-1.f/3.f,0.f}) - pivot;
+    const auto direction = unit / std::sqrt(unit.x * unit.x + unit.y * unit.y);
+    auto& io = bgui::get_context();
+    io.m_input_map.clear();
+    io.m_mouse_position = {int(pivot.x+direction.x*50), int(pivot.y+direction.y*50)};
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::g] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_mouse_position = {int(pivot.x+direction.x*70), int(pivot.y+direction.y*70)};
+    bgui::on_update();
+    io.m_input_map.clear();
+    bgui::on_update();
+    auto* save = find<bgui::button>(dock, [](auto& button) {
+        return button.get_label().get_buffer() == "Salvar .bmodel";
+    });
+    ASSERT_NE(save, nullptr);
+    save->on_released();
+    bgui::on_update();
+    bgui::on_update();
+    const auto saved_path = registry->get<commons::renderer>(first.id)->m_modelo->get_source_path();
+    EXPECT_TRUE(std::filesystem::exists(saved_path));
+    commons::editable_model_data saved;
+    std::string error;
+    ASSERT_TRUE(commons::load_editable_model(saved_path, saved, error)) << error;
+    ASSERT_EQ(saved.meshes.size(), 1u);
+    EXPECT_GT(saved.meshes[0].vertices[2].position.x, vertices[2].position.x + .01f);
+    EXPECT_NEAR(saved.meshes[0].vertices[2].position.y, vertices[2].position.y, .001f);
+    EXPECT_EQ(registry->get<commons::transform>(first.id)->get_position(), (bgui::vec3{}));
+    context->selected_entity = second.id;
+    bgui::on_update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Outro objeto"; }), nullptr);
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Malha 1/2"; }), nullptr);
+    std::vector<bgui::tree*> groups;
+    std::function<void(bgui::element&)> collect = [&](bgui::element& element) {
+        if (auto* tree=dynamic_cast<bgui::tree*>(&element); tree && tree->has_class("model-mesh-section")) groups.push_back(tree);
+        if (auto* layout=element.as_layout()) for (auto& [layer,children] : layout->get_elements()) for (auto& child : children) collect(*child);
+    };
+    collect(dock);
+    ASSERT_EQ(groups.size(),2u);
+    EXPECT_FALSE(groups[0]->is_expanded());
+    groups[0]->set_expanded(true);
+    auto* metallic=find<bgui::field>(*groups[0],[](auto& field) { return field.get_label().get_buffer()=="Metallic"; });
+    ASSERT_NE(metallic,nullptr);
+    metallic->get_inputbox().m_enter_func("0.8");
+    auto renderer=registry->get<commons::renderer>(second.id);
+    EXPECT_FLOAT_EQ(commons::pbr_value(renderer->m_modelo->meshes[0].getMaterial(),commons::pbr_factors[0]),.8f);
+    EXPECT_FLOAT_EQ(commons::pbr_value(renderer->m_modelo->meshes[1].getMaterial(),commons::pbr_factors[0]),0.f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(commons::pbr_value(renderer->m_modelo->meshes[0].getMaterial(),commons::pbr_factors[0]),0.f);
+    const unsigned char bytes[]{137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,11,73,68,65,84,120,156,99,248,15,4,0,9,251,3,253,251,94,107,43,0,0,0,0,73,69,78,68,174,66,96,130};
+    const auto texture_path=context->project_root/"texture.png";
+    { std::ofstream out(texture_path,std::ios::binary); out.write(reinterpret_cast<const char*>(bytes),sizeof(bytes)); }
+    auto* texture_input=find<bgui::inputbox>(*groups[0],[](auto& input) { return input.get_buffer().empty(); });
+    ASSERT_NE(texture_input,nullptr);
+    texture_input->m_enter_func(texture_path.string());
+    EXPECT_EQ(renderer->m_modelo->meshes[0].getMaterial().getTextura("tex_albedo").path,texture_path.string());
+    EXPECT_TRUE(renderer->m_modelo->meshes[1].getMaterial().getTextura("tex_albedo").path.empty());
+    ASSERT_TRUE(context->undo());
+    EXPECT_TRUE(renderer->m_modelo->meshes[0].getMaterial().getTextura("tex_albedo").path.empty());
+    // Navigation switches independently from mesh selection and ignores text entry.
+    io.m_mouse_position={image->processed_x()+20,image->processed_y()+20};
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::o]=bgui::input_action::press;
+    bgui::on_update();
+    EXPECT_TRUE(context->model_orbital_view);
+    bgui::on_update();
+    EXPECT_TRUE(context->model_orbital_view);
+    io.m_input_map.clear(); bgui::on_update();
+    const auto orbit_eye=panel.preview_camera().position;
+    io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;
+    bgui::on_update();
+    io.m_mouse_position.x+=30;
+    bgui::on_update();
+    EXPECT_NE(panel.preview_camera().position,orbit_eye);
+    io.m_input_map.clear(); bgui::on_update();
+    io.m_input_map[bgui::input_key::o]=bgui::input_action::press;
+    bgui::on_update();
+    EXPECT_FALSE(context->model_orbital_view);
+    io.m_input_map.clear(); bgui::on_update();
+    const auto normal_eye=panel.preview_camera().position;
+    const auto normal_view=panel.preview_camera().viewMatrix;
+    io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;
+    bgui::on_update();
+    io.m_mouse_position.x+=30;
+    bgui::on_update();
+    EXPECT_EQ(panel.preview_camera().position,normal_eye);
+    EXPECT_NE(panel.preview_camera().viewMatrix,normal_view);
+    io.m_input_map.clear();
+    registry->remove<commons::renderer>(second.id);
+    bgui::on_update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Nenhum modelo"; }), nullptr);
+    std::filesystem::remove_all(context->project_root);
+    context->selected_entity.reset();
+    bgui::on_update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Nenhum objeto selecionado"; }), nullptr);
+}
+
+TEST(EditorInvisibleControllers, ShortcutsNeverEmitCornerQuads) {
+    bgui::scoped_interface ui_scope;
+    auto context = std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
+    editor::ui::undo_redo_shortcuts_system history(context);
+    bgui::draw_data data;
+    history.style.visual.visible = true;
+    history.set_final_rect(0, 0, 100, 100);
+    history.get_requires(&data);
+    EXPECT_TRUE(data.m_quad_requires.empty());
 }

@@ -24,6 +24,8 @@ public:
         set_flex(false);
     }
 
+    void get_requires(bgui::draw_data*) override {}
+
     void on_update() override {
         using key = bgui::input_key;
         const bool control = bgui::get_pressed(key::left_control) ||

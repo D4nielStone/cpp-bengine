@@ -56,6 +56,30 @@ public:
     }
 };
 
+inline void show_action_popup(context_actions actions, std::weak_ptr<bool> alive) {
+    const auto mouse = bgui::get_mouse_position();
+    bgui::add_function([actions = std::move(actions), alive, mouse]() mutable {
+        if (alive.expired()) return;
+        for (auto& element : bgui::get_layout().get_elements()[bgui::layer::overlay])
+            if (auto* popup = dynamic_cast<action_popup*>(element.get())) popup->close();
+        bgui::get_layout().add<action_popup, bgui::layer::overlay>(std::move(actions), alive, mouse);
+    });
+}
+
+class context_action_surface : public bgui::linear {
+    std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
+public:
+    using bgui::linear::linear;
+    std::function<context_actions()> context_options;
+    void open_context() {
+        if (context_options) show_action_popup(context_options(), m_alive);
+    }
+    void on_released() override {
+        bgui::linear::on_released();
+        if (bgui::get_mouse_target() == this) open_context();
+    }
+};
+
 class context_action_button : public bgui::button {
     std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
     bool m_right_down{false};
@@ -64,16 +88,7 @@ public:
     std::function<context_actions()> context_options;
     std::weak_ptr<bool> lifetime() const { return m_alive; }
     void open_context() {
-        if (!context_options) return;
-        auto options = context_options();
-        const auto mouse = bgui::get_mouse_position();
-        std::weak_ptr<bool> alive = m_alive;
-        bgui::add_function([options = std::move(options), alive, mouse]() mutable {
-            if (alive.expired()) return;
-            for (auto& element : bgui::get_layout().get_elements()[bgui::layer::overlay])
-                if (auto* popup = dynamic_cast<action_popup*>(element.get())) popup->close();
-            bgui::get_layout().add<action_popup, bgui::layer::overlay>(std::move(options), alive, mouse);
-        });
+        if (context_options) show_action_popup(context_options(), m_alive);
     }
     void on_update() override {
         bgui::button::on_update();

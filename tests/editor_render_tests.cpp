@@ -21,6 +21,7 @@
 #include "viewport_sync.hpp"
 #include "guizmo/grid_gizmo.hpp"
 #include "components/physics.hpp"
+#include "project_creation_system.hpp"
 #include <chrono>
 #include <fstream>
 #include <filesystem>
@@ -62,7 +63,7 @@ protected:
 
 TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     const auto source = std::filesystem::path(BENGINE_SOURCE_DIR);
-    const auto image_path = source / "projects/fpp_demo/project.bengine.preview.png";
+    const auto image_path = source / "tests/fixtures/cubemap_cross.png";
     commons::texture normal{0, image_path.string()};
     normal.bind(0);
     GLint binding{};
@@ -979,7 +980,24 @@ TEST_F(EditorRenderTest, InvalidCrossImageFallsBackToAtmosphereWithoutGpuErrors)
     registry->entities.clear();
 }
 
-TEST_F(EditorRenderTest, FppSceneMovementFollowsCameraAndPickupIsSeparateFromArena) {
+TEST_F(EditorRenderTest, BuiltinFppTemplateMovementFollowsCameraAndPickupIsSeparateFromArena) {
+    const auto project_directory = std::filesystem::temp_directory_path() /
+        ("bengine-render-template-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct cleanup {
+        std::filesystem::path path;
+        ~cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup_project{project_directory};
+    std::string error;
+    ASSERT_TRUE(editor::ui::create_project_files(project_directory, error,
+        editor::ui::project_template::fpp)) << error;
+    std::filesystem::copy_file(
+        std::filesystem::path(BENGINE_SOURCE_DIR) / "tests/fixtures/lua/pickup.lua",
+        project_directory / "scripts/pickup.lua");
+
     auto registry = std::make_shared<commons::ecs>();
     auto player_object = registry->create(106);
     registry->entity_names[player_object.id] = "PlayerCapsule";
@@ -1008,10 +1026,10 @@ TEST_F(EditorRenderTest, FppSceneMovementFollowsCameraAndPickupIsSeparateFromAre
     registry->add<commons::physics>(floor, true);
     registry->get<commons::physics>(floor.id)->configure_collision(
         commons::physics::shapes::box_shape, {40, 1, 40}, {0, 0, 0}, true, false);
-    const auto scripts_path = std::filesystem::path(BENGINE_SOURCE_DIR) / "projects/fpp_demo/scripts";
+    const auto scripts_path = project_directory / "scripts";
     registry->add<commons::code>(player_object, (scripts_path / "fpp_player.lua").string());
     registry->add<commons::code>(camera_object, (scripts_path / "fpp_camera.lua").string());
-    registry->add<commons::code>(pickup_object, (scripts_path / "fpp_game.lua").string());
+    registry->add<commons::code>(pickup_object, (scripts_path / "pickup.lua").string());
     const auto player = registry->find_by_name("PlayerCapsule");
     const auto camera_entity = registry->find_by_name("PlayerCamera");
     const auto pickup = registry->find_by_name("PickupOrb");

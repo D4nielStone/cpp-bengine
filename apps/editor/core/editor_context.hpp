@@ -35,6 +35,12 @@ struct editor_context {
     std::optional<entity_id> editor_camera_entity;
     bool is_playing{false};
     bool show_colliders{false};
+    bool orbital_view{false};
+    bool model_orbital_view{false};
+    int workspace_mode{0};
+    int model_selection{0};
+    std::string extrude_distance{"0.25"};
+    std::unordered_map<std::string, bool> inspector_sections;
     editor_preferences preferences;
     std::size_t history_revision{0};
     std::unordered_map<entity_id, std::string> entity_names;

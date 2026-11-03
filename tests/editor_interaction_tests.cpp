@@ -946,9 +946,7 @@ TEST_F(EditorInteractionTest, InspectorOffersModelColliderForEntitiesWithRendere
     ASSERT_NE(shape, nullptr);
     shape->set_selected_index(6);
     EXPECT_EQ(physics->e_forma, commons::physics::shapes::mesh_shape);
-    const auto* hull = dynamic_cast<const btConvexHullShape*>(physics->m_forma);
-    ASSERT_NE(hull, nullptr);
-    EXPECT_GT(hull->getNumPoints(), 0);
+    ASSERT_EQ(physics->m_forma->getShapeType(), CONVEX_HULL_SHAPE_PROXYTYPE);
     panel.refresh();
     panel.update();
     auto* model_collider = find_element<bgui::combo_box>(dock, [](auto& item) {
@@ -960,7 +958,7 @@ TEST_F(EditorInteractionTest, InspectorOffersModelColliderForEntitiesWithRendere
         physics->model_collider,
         commons::physics::model_collider_type::concave
     );
-    EXPECT_NE(dynamic_cast<const btBvhTriangleMeshShape*>(physics->m_forma), nullptr);
+    EXPECT_EQ(physics->m_forma->getShapeType(), TRIANGLE_MESH_SHAPE_PROXYTYPE);
     ASSERT_TRUE(context->undo());
     EXPECT_EQ(
         physics->model_collider,
@@ -1253,11 +1251,11 @@ TEST_F(EditorInteractionTest, EditorCameraInspectorExposesEnvironmentWithoutComp
     EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.1f);
     ASSERT_TRUE(context->redo());
     EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.25f);
-    auto* atmosphere = find_element<bgui::field>(dock, [](auto& field) {
-        return field.get_label().get_buffer() == "Atmosphere Zenith R";
+    auto* atmosphere = find_element<bgui::color_picker>(dock, [](auto& picker) {
+        return std::abs(picker.get_color().x - 0.08f) < 0.0001f;
     });
     ASSERT_NE(atmosphere, nullptr);
-    atmosphere->get_inputbox().m_enter_func("0.4");
+    atmosphere->set_color({0.4f, 0.25f, 0.55f, 1.f});
     EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.4f);
     ASSERT_TRUE(context->undo());
     EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.08f);
@@ -1287,13 +1285,62 @@ TEST_F(EditorInteractionTest, EditorCameraInspectorExposesEnvironmentWithoutComp
     EXPECT_FLOAT_EQ(camera->config.fog_density, 0.04f);
     ASSERT_TRUE(context->undo());
     EXPECT_FLOAT_EQ(camera->config.fog_density, 0.01f);
-    auto* fog_red = find_element<bgui::field>(dock, [](auto& item) {
-        return item.get_label().get_buffer() == "Fog R";
+    auto* fog_picker = find_element<bgui::color_picker>(dock, [](auto& picker) {
+        return picker.has_class("inspector-fog-color");
     });
-    ASSERT_NE(fog_red, nullptr);
-    fog_red->get_inputbox().m_enter_func("0.2");
+    ASSERT_NE(fog_picker, nullptr);
+    fog_picker->set_color({0.2f, 0.78f, 0.86f, 1.f});
     EXPECT_FLOAT_EQ(camera->config.fog_color.r, 0.2f);
     ASSERT_TRUE(context->undo());
     EXPECT_FLOAT_EQ(camera->config.fog_color.r, 0.43f);
     registry->entities.clear();
+}
+
+TEST_F(EditorInteractionTest, GizmoScreenSizeStaysConstantAtExtremeZoom) {
+    commons::camera camera;
+    camera.viewMatrix = glm::mat4(1.f);
+    commons::transform target;
+    const bgui::vec4i viewport{0,0,400,400};
+    for (const float zoom : {1e-6f, 1.f, 1e6f}) {
+        editor::transform_gizmo gizmo;
+        camera.projMatriz = glm::mat4(1.f);
+        camera.projMatriz[0][0] = zoom;
+        camera.projMatriz[1][1] = zoom;
+        auto& draw = bgui::get_draw_list();
+        draw.clear();
+        gizmo.update(camera,&target,viewport,{viewport},{0,0},{},false,false,false);
+        float extent = 0.f;
+        for (const auto& v : draw.get_vertices()) extent = std::max(extent,std::abs(v.m_position.x-200.f));
+        EXPECT_NEAR(extent,82.f,2.f) << zoom;
+        draw.clear();
+        bgui::get_context().m_input_map[bgui::input_key::r] = bgui::input_action::press;
+        gizmo.update(camera,&target,viewport,{viewport},{0,0},{},true,false,false);
+        float radius = 0.f;
+        for (const auto& v : draw.get_vertices()) {
+            const auto p=v.m_position-bgui::vec2{200.f,200.f};
+            radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y));
+        }
+        EXPECT_NEAR(radius,74.f,3.f) << zoom;
+        bgui::get_context().m_input_map.clear();
+    }
+}
+
+TEST_F(EditorInteractionTest, GizmoKeepsNearCameraDepthAxisAtFixedScreenSize) {
+    commons::camera camera;
+    camera.viewMatrix=glm::mat4(1.f);
+    camera.projMatriz=glm::perspective(glm::radians(75.f),1.f,.001f,100.f);
+    commons::transform target;
+    target.set_position({.02f,.02f,-.1f});
+    const bgui::vec4i viewport{0,0,400,400};
+    editor::transform_gizmo gizmo;
+    auto& draw=bgui::get_draw_list(); draw.clear();
+    gizmo.update(camera,&target,viewport,{viewport},{0,0},{},false,false,false);
+    const auto clip=camera.projMatriz*glm::vec4(.02f,.02f,-.1f,1.f);
+    const bgui::vec2 center{(clip.x/clip.w*.5f+.5f)*400,(.5f-clip.y/clip.w*.5f)*400};
+    float radius=0.f;
+    for (const auto& vertex : draw.get_vertices()) if (vertex.m_color.b > vertex.m_color.r+.2f && vertex.m_color.b > vertex.m_color.g+.2f) {
+        const auto p=vertex.m_position-center;
+        radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y));
+    }
+    EXPECT_NEAR(radius,82.f,2.f);
 }

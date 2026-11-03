@@ -1,4 +1,4 @@
-"""Start an exported FPP demo from an unrelated directory and verify Lua startup."""
+"""Start a minimal exported project from an unrelated directory."""
 import subprocess
 import sys
 import tempfile
@@ -14,7 +14,7 @@ def main():
             process = subprocess.Popen([str(executable)], cwd=directory,
                                        stdout=output, stderr=subprocess.STDOUT)
             try:
-                deadline = time.monotonic() + 25
+                deadline = time.monotonic() + 20
                 ready_at = None
                 while time.monotonic() < deadline:
                     contents = log_path.read_text(errors="replace")
@@ -22,14 +22,15 @@ def main():
                         raise RuntimeError(f"Runtime exited with {process.returncode}:\n{contents}")
                     if "Initialization failed:" in contents or "Update failed:" in contents:
                         raise RuntimeError(contents)
-                    if "FPP player body ready." in contents:
-                        if ready_at is None:
-                            ready_at = time.monotonic()
-                        if time.monotonic() - ready_at >= 0.5:
-                            print(f"Exported runtime started successfully: {executable.name}")
-                            return
+                    if ready_at is None:
+                        ready_at = time.monotonic()
+                    if time.monotonic() - ready_at >= 2:
+                        print(f"Exported runtime started successfully: {executable.name}")
+                        return
                     time.sleep(0.05)
-                raise RuntimeError(f"Runtime did not load the demo:\n{log_path.read_text(errors='replace')}")
+                raise RuntimeError(
+                    f"Runtime did not remain active:\n{log_path.read_text(errors='replace')}"
+                )
             finally:
                 if process.poll() is None:
                     process.terminate()

@@ -385,6 +385,8 @@ void runtime_process::cleanup_project_file() {
     if (error)
         std::cerr << "[editor] Could not remove runtime project file '"
                   << m_project_file.string() << "': " << error.message() << '\n';
+    std::filesystem::remove(m_project_file.string() + ".preview", error);
+    std::filesystem::remove(m_project_file.string() + ".preview.tmp", error);
     m_project_file.clear();
 }
 

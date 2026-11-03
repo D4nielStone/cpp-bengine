@@ -20,6 +20,8 @@ continuam pertencendo às árvores de elementos do BGUI.
 - **Inspector**: transforma, câmera, iluminação e componentes suportados.
 - **Arquivos**: arquivos do projeto, documentos Lua/texto e importação de
   assets.
+- **Edição do modelo**: edição topológica do modelo 3D da entidade selecionada
+  no modo Modelagem.
 - **Debug**: log de scripts Lua.
 - **Editor Diagnostics**: métricas locais de frame e renderização.
 
@@ -27,6 +29,18 @@ O painel **Game** é ocultado enquanto o runtime externo está executando. O
 runtime roda em outro processo, portanto a prévia não mostra a simulação desse
 processo; ela renderiza o ECS de edição. O runtime atual não fornece sistema de
 HUD de jogo. O painel indica essa ausência em seu status.
+
+## Espaços de trabalho
+
+A barra lateral centraliza os modos **Editor**, **Modelagem** e **Gestão de
+cenas**. Cada botão ativa uma dock própria. O modo **Modelagem** contém um
+único painel para editar a geometria do modelo 3D da entidade selecionada; o
+Files View permanece no modo Editor. O painel acompanha a seleção na cena e na
+Hierarquia e grava as alterações em um arquivo `.bmodel`, atualizando o modelo
+da entidade na cena.
+
+Para trocar o modo por código, use
+`editor_ui::set_workspace_mode(editor_workspace_mode::...)`.
 
 ## Persistência e navegação
 
@@ -41,3 +55,38 @@ ciclo de vida apropriado.
 
 Convenções de layout, helpers de campos e integração com histórico devem seguir
 os padrões de `apps/editor/core/panel.hpp` e dos painéis existentes.
+
+O atalho **O**, com o mouse sobre a cena e sem um campo de texto em edição,
+seleciona a visão normal/orbital. Clique com o botão esquerdo no espaço livre da
+área de arquivos para abrir as ações da pasta. Sem uma entidade selecionada, o
+Inspetor permite configurar a câmera do editor, incluindo céu e neblina.
+
+A sessão do projeto também guarda modos, seleção, seções do Inspetor e a câmera
+em `.editor-workflow.json`. Durante Play, Scene e Game acompanham transformações
+e câmeras das entidades existentes; parar restaura o estado anterior. Salvar,
+trocar de projeto ou sair encerra Play antes de persistir a cena. Entidades
+criadas/removidas apenas no runtime e alterações de materiais/HUD ainda não são
+espelhadas nessa prévia.
+
+O painel **Edição do modelo** acompanha o objeto selecionado na cena/Hierarquia.
+O cabeçalho identifica o objeto e a origem; a coluna à direita concentra extrusão,
+Loop Cut e salvamento. Modelos sem arquivo de origem usam a geometria em memória
+e podem ser salvos na pasta `models` do projeto. Alterações pendentes continuam
+protegidas: salve o modelo atual antes de trocar o objeto em edição.
+
+O gizmo do painel de modelo reutiliza os controles **G** (mover), **R** (girar)
+e **S** (escalar). Arraste um eixo para transformar o modelo inteiro ou a seleção
+de faces, vértices ou arestas. **Enquadrar modelo** ajusta novamente a visualização.
+A geometria editada é aplicada ao objeto ao salvar, preservando seus materiais.
+
+A câmera do painel de modelo tem visões **Normal** e **Orbital**, alternadas por
+**O** ou pelo botão de visão. O botão direito olha/orbita; scroll aproxima/afasta;
+Ctrl + Shift + arraste com o botão direito desloca a vista. A navegação usa os
+mesmos controles da cena e não disputa o arraste esquerdo com o gizmo.
+
+O painel **Malhas** contém uma seção recolhível por mesh. Cada seção controla cor,
+metallic, roughness, AO, mapas de albedo/normal/PBR, repetição e deslocamento de UV,
+e WorldTexture. Os campos de textura aceitam caminhos ou arquivos arrastados.
+Esses materiais são aplicados ao objeto e persistidos ao salvar o **projeto**;
+**Salvar .bmodel** salva a geometria. A prévia mostra albedo e cor; a renderização
+completa de iluminação/PBR continua nos painéis Scene/Game.

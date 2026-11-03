@@ -24,7 +24,7 @@ namespace editor::ui {
 
 struct scene_view_state {
     bgui::image* image{nullptr};
-    bool orbital{false};
+    bgui::button* mode_button{nullptr};
 };
 
 namespace {
@@ -154,6 +154,7 @@ public:
 
     ~scene_view_surface() override {
         m_state->image = nullptr;
+        m_state->mode_button = nullptr;
     }
 
 private:
@@ -191,15 +192,25 @@ public:
 
     void on_update() override {
         m_viewport_sync.update(m_registry);
+        const bool toggle = bgui::get_pressed(bgui::input_key::o);
+        if (toggle && !m_toggle_down && mouse_over_viewport(m_state->image) &&
+            !viewport_input_blocked_by_modal() &&
+            !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()))
+            m_context->orbital_view = !m_context->orbital_view;
+        m_toggle_down = toggle;
+        if (m_state->mode_button)
+            m_state->mode_button->get_label().set_buffer(
+                m_context->orbital_view ? "View: Orbital (O)" : "View: Normal (O)");
         const auto& preferences = m_context->preferences;
         m_camera_movement.set_movement_speed(preferences.movement_speed);
         m_camera_movement.set_sprint_multiplier(preferences.sprint_multiplier);
         m_camera_movement.set_mouse_sensitivity(preferences.mouse_sensitivity);
         m_camera_movement.set_zoom_sensitivity(preferences.zoom_sensitivity);
         m_camera_movement.set_smoothing_speed(preferences.smoothing_speed);
-        auto selected = m_context->selected_entity
+        auto selected = m_context->selected_entity &&
+            m_context->selected_entity != m_context->editor_camera_entity
             ? m_context->registry->get<commons::transform>(*m_context->selected_entity) : nullptr;
-        if (m_state->orbital && selected) {
+        if (m_context->orbital_view && selected) {
             if (!m_camera_movement.is_orbital() || selected != m_selected_orbit) {
                 auto renderer = m_context->registry->get<commons::renderer>(selected->my_object);
                 m_camera_movement.focus_orbit_target(selected,
@@ -207,7 +218,8 @@ public:
             }
             m_selected_orbit = selected;
         } else {
-            m_camera_movement.set_orbital(false);
+            if (m_selected_orbit) m_camera_movement.set_orbital(false);
+            m_camera_movement.set_orbital(m_context->orbital_view);
             m_selected_orbit.reset();
         }
         m_camera_movement.update(m_registry);
@@ -216,6 +228,7 @@ public:
 
 private:
     std::shared_ptr<commons::ecs> m_registry;
+    bool m_toggle_down{false};
     viewport_sync_system m_viewport_sync;
     camera_movement_system m_camera_movement;
     entity_picking_system m_entity_picking;
@@ -329,9 +342,9 @@ void scene_view::build(bgui::dock& dock) {
     auto& mode = tools.add<bgui::button>("View: Normal", 0.28f, [] {});
     mode.style.layout.require_size(150.f, 26.f);
     mode.add<bgui::icon>("eye", 0.28f).receives_input(false);
-    mode.set_function([state = m_state, button = &mode] {
-        state->orbital = !state->orbital;
-        button->get_label().set_buffer(state->orbital ? "View: Orbital" : "View: Normal");
+    m_state->mode_button = &mode;
+    mode.set_function([context = m_context] {
+        context->orbital_view = !context->orbital_view;
     });
     scene_window.add<navigation_hint, bgui::layer::overlay>(m_state);
 }

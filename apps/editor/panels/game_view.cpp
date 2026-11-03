@@ -59,11 +59,7 @@ void update_game_view(const std::shared_ptr<game_view_state>& state) {
         !state->image || !state->status)
         return;
 
-    const bool visible = !state->context->is_playing;
-    if (state->window->is_enabled() != visible)
-        state->window->set_enable(visible);
-    if (!visible)
-        return;
+    if (!state->window->is_enabled()) return;
 
     std::uint32_t camera_entity = 0;
     auto camera = active_game_camera(state->context, camera_entity);
@@ -168,7 +164,7 @@ void game_view::update() {
 }
 
 bool game_view::needs_camera_render(const std::uint32_t entity) const noexcept {
-    return m_state && m_state->context && !m_state->context->is_playing &&
+    return m_state && m_state->context &&
         m_state->window && m_state->window->is_enabled() &&
         m_state->camera && m_state->camera_entity == entity;
 }

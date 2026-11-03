@@ -1,3 +1,4 @@
+#include "editor/systems/runtime_scene_preview.hpp"
 #include "editor/systems/release_indicator.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
@@ -16,6 +17,7 @@
 #include "editor/systems/project_creation_system.hpp"
 #include "editor/systems/project_preview.hpp"
 #include "editor/panels/files_view.hpp"
+#include "editor/panels/model_editor_view.hpp"
 #include "editor/panels/asset_drop_overlay.hpp"
 #include "editor/systems/scene_asset_drop.hpp"
 #include "editor/systems/scene_asset_paths.hpp"
@@ -381,16 +383,26 @@ public:
             &m_context->locked_entities
         );
 
-        auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::vertical);
+        auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::horizontal);
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-        root.add<editor::ui::release_indicator>(m_release_check);
-        m_menu_bar = &root.add<bgui::menu_bar>(root);
-        m_dock = &root.add<bgui::dock>();
+        m_side_bar = &root.add<bgui::linear>(bgui::orientation::vertical);
+        m_center_area = &root.add<bgui::linear>(bgui::orientation::vertical);
+        m_menu_bar = &m_center_area->add<bgui::menu_bar>(root);
+        m_dock = &m_center_area->add<bgui::dock>();
+        m_model_dock = &m_center_area->add<bgui::dock>();
+        m_management_dock = &m_center_area->add<bgui::dock>();
+        m_center_area->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+        m_side_bar->style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::match_parent);
         m_dock->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+        m_model_dock->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+        m_management_dock->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
 
         m_editor = std::make_unique<editor::ui::editor_ui>(
             *m_dock,
+            *m_model_dock,
+            *m_management_dock,
             *m_menu_bar,
+            *m_side_bar,
             m_ui_persistence,
             *m_project_persistence,
             m_registry,
@@ -467,7 +479,8 @@ public:
                 }
                 if (editor::ui::files_view::supports_model(asset))
                     (void)editor::ui::asset_dependencies(std::filesystem::canonical(asset), true);
-                if (m_components->drop_asset(asset, mouse_position) ||
+                if ((m_model_editor && m_model_editor->drop_asset(asset, mouse_position)) ||
+                    m_components->drop_asset(asset, mouse_position) ||
                     !editor::ui::files_view::supports_model(asset) || !m_scene->is_open() ||
                     !editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position))
                     return;
@@ -504,6 +517,7 @@ public:
         };
 
         m_files = &m_editor->add_panel<editor::ui::files_view>(m_project_path, drop_asset);
+        m_model_editor = &m_editor->add_model_panel<editor::ui::model_editor_view>(m_context);
         m_components->set_model_import_error_callback(
             [this](const auto& path, const auto& error) {
                 bgui::add_function([this, path, error]() {
@@ -568,8 +582,12 @@ public:
     }
 
     bool load_workspace(std::string& error) {
-        m_workspace = std::make_unique<editor::ui::editor_workspace>(m_ui_persistence);
+        m_workspace = std::make_unique<editor::ui::editor_workspace>(m_ui_persistence, m_context);
         m_workspace->set_project_file(m_project_path);
+        m_editor->set_project_unloading_callback([this](std::string& error) {
+            m_components->capture_session();
+            return m_workspace->save_workspace(*m_files, error);
+        });
         m_editor->set_project_loaded_callback([this](const std::string& path) {
             m_context->clear_history();
             m_context->selected_entity.reset();
@@ -577,16 +595,26 @@ public:
             m_entities->refresh();
             m_components->refresh();
             std::string error;
-            if (!m_workspace->save_workspace(*m_files, error))
-                std::cerr << "[editor] " << error << '\n';
             m_files->set_project_file(path);
+            m_context->workspace_mode = 0;
+            m_context->model_selection = 0;
+            m_context->extrude_distance = "0.25";
+            m_context->show_colliders = false;
+            m_context->orbital_view = false;
+            m_context->model_orbital_view = false;
+            m_context->inspector_sections.clear();
             m_editor->reset_ui();
             m_project_path = path;
             m_workspace->set_project_file(path);
             if (!m_workspace->load_workspace(*m_files, error))
                 std::cerr << "[editor] " << error << '\n';
+            m_editor->set_workspace_mode(static_cast<editor::ui::editor_workspace_mode>(m_context->workspace_mode));
+            m_components->restore_session();
         });
-        return m_workspace->load_workspace(*m_files, error);
+        const bool loaded = m_workspace->load_workspace(*m_files, error);
+        m_editor->set_workspace_mode(static_cast<editor::ui::editor_workspace_mode>(m_context->workspace_mode));
+        m_components->restore_session();
+        return loaded;
     }
 
     int run() {
@@ -594,6 +622,7 @@ public:
         m_window.set_file_drop_callback({});
 
         std::string error;
+        m_components->capture_session();
         if (!m_workspace->save_workspace(*m_files, error))
             std::cerr << "[editor] " << error << '\n';
         std::string preview_error;
@@ -629,6 +658,11 @@ private:
                 if (!playing) {
                     if (!m_runtime_process->stop(error))
                         return false;
+                    if (!m_runtime_preview_before.empty()) {
+                        editor::ui::apply_runtime_preview(m_runtime_preview_before, m_context->registry,
+                            m_context->editor_camera_entity);
+                        m_runtime_preview_before.clear();
+                    }
                     m_context->is_playing = false;
                     return true;
                 }
@@ -648,6 +682,10 @@ private:
                     std::filesystem::remove(project_file, filesystem_error);
                     return false;
                 }
+                m_runtime_preview_before = editor::ui::capture_runtime_preview(
+                    m_context->registry, m_context->editor_camera_entity);
+                m_runtime_preview_path = project_file.string() + ".preview";
+                m_runtime_preview_last_write = {};
                 const bool started = m_runtime_process->start(
                     runtime_executable, project_file, error
                 );
@@ -657,7 +695,18 @@ private:
             }
         );
         m_editor->set_runtime_running_callback([this](std::string& error) {
-            return m_runtime_process->running(error);
+            const bool running = m_runtime_process->running(error);
+            std::error_code preview_error;
+            const auto modified = std::filesystem::last_write_time(m_runtime_preview_path, preview_error);
+            if (running && !preview_error && modified != m_runtime_preview_last_write) {
+                std::ifstream input(m_runtime_preview_path);
+                if (input) {
+                    const std::string text{std::istreambuf_iterator<char>(input), {}};
+                    if (editor::ui::apply_runtime_preview(text, m_context->registry, m_context->editor_camera_entity))
+                        m_runtime_preview_last_write = modified;
+                }
+            }
+            return running;
         });
         m_editor->set_runtime_pause_callback(
             [this](const bool paused, std::string& error) {
@@ -680,8 +729,12 @@ private:
     std::unique_ptr<editor::ui::editor_workspace> m_workspace;
     bgui::menu_bar* m_menu_bar{nullptr};
     bgui::dock* m_dock{nullptr};
+    bgui::dock* m_model_dock{nullptr};
+    bgui::dock* m_management_dock{nullptr};
+    bgui::linear* m_side_bar, *m_center_area;
     std::unique_ptr<editor::ui::editor_ui> m_editor;
     editor::ui::scene_view* m_scene{nullptr};
+    editor::ui::model_editor_view* m_model_editor{nullptr};
     editor::ui::game_view* m_game_view{nullptr};
     editor::ui::entities_view* m_entities{nullptr};
     editor::ui::components_view* m_components{nullptr};
@@ -689,9 +742,14 @@ private:
     editor::ui::runtime_tools_view* m_runtime_tools{nullptr};
     std::shared_ptr<commons::render_system> m_render_system;
     std::shared_ptr<editor::ui::runtime_process> m_runtime_process;
+    std::filesystem::path m_runtime_preview_path;
+    std::filesystem::file_time_type m_runtime_preview_last_write{};
+    std::string m_runtime_preview_before;
 };
 
 }
+
+// ====================== MAIN ========================== //
 
 int main(int argc, char** argv) {
     std::string project_path = "project.bengine";

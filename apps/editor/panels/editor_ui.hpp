@@ -28,11 +28,20 @@ class checkbox;
 
 namespace editor::ui {
 
+enum class editor_workspace_mode {
+    editor,
+    model_editing,
+    scene_management
+};
+
 class editor_ui final {
 public:
     editor_ui(
-        bgui::dock& dock,
+        bgui::dock& editor_dock,
+        bgui::dock& model_dock,
+        bgui::dock& management_dock,
         bgui::menu_bar& menu_bar,
+        bgui::linear& side_bar,
         ui_persistence_system& ui_persistence,
         project_persistence_system& project_persistence,
         std::shared_ptr<commons::ecs> registry,
@@ -60,10 +69,19 @@ public:
     void set_exit_callback(std::function<void()> callback);
     void confirm_exit();
     void set_editor_context(std::shared_ptr<editor_context> context);
+    void set_workspace_mode(editor_workspace_mode mode);
+    void set_project_unloading_callback(std::function<bool(std::string&)> callback) {
+        m_project_unloading_callback = std::move(callback);
+    }
 
     template <typename T, typename... Args>
     T& add_panel(Args&&... args) {
         return m_panel_manager.add<T>(std::forward<Args>(args)...);
+    }
+
+    template <typename T, typename... Args>
+    T& add_model_panel(Args&&... args) {
+        return m_model_panel_manager.add<T>(std::forward<Args>(args)...);
     }
 
     void update();
@@ -71,8 +89,12 @@ public:
 
 private:
     bgui::dock& m_dock;
+    bgui::dock& m_model_dock;
+    bgui::dock& m_management_dock;
     panel_manager m_panel_manager;
+    panel_manager m_model_panel_manager;
     std::shared_ptr<editor_context> m_context;
+    std::function<bool(std::string&)> m_project_unloading_callback;
     std::shared_ptr<editor_commands> m_commands;
     project_persistence_system& m_project_persistence;
     std::shared_ptr<commons::ecs> m_registry;
@@ -87,6 +109,7 @@ private:
     bgui::icon* m_play_icon{nullptr};
     bgui::button* m_pause_button{nullptr};
     bgui::icon* m_pause_icon{nullptr};
+    std::array<bgui::icon*, 3> m_workspace_icons{};
     bgui::text* m_build_status{nullptr};
     bgui::progress_bar* m_build_progress{nullptr};
     bgui::modal* m_build_modal{nullptr};
@@ -125,6 +148,7 @@ private:
     );
     void create_new_project_modal();
     void create_exit_modal();
+    bool stop_runtime_for_edit(std::string& error);
     void open_preferences_modal();
     void open_editor_camera_modal();
     void apply_layout(bool wide);

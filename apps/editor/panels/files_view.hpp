@@ -48,6 +48,11 @@
 
 namespace editor::ui {
 
+enum class files_view_filter {
+    all_files,
+    models_only
+};
+
 class files_view final : public panel {
 public:
     using drop_callback =
@@ -150,9 +155,16 @@ public:
         return std::nullopt;
     }
 
-    explicit files_view(std::filesystem::path project_file, drop_callback on_drop = {})
+    explicit files_view(
+        std::filesystem::path project_file,
+        drop_callback on_drop = {},
+        const files_view_filter filter = files_view_filter::all_files,
+        std::function<void(const std::filesystem::path&)> on_model_selected = {}
+    )
         : m_project_root(resolve_project_root(std::move(project_file))),
           m_on_drop(std::move(on_drop)),
+          m_filter(filter),
+          m_on_model_selected(std::move(on_model_selected)),
           m_current_directory(m_project_root) {
         m_expanded_directories.insert(m_project_root);
         load_main_scene();
@@ -171,7 +183,9 @@ public:
             return;
 
         auto& window = parent.add_window(
-            "Arquivos",
+            m_filter == files_view_filter::models_only
+                ? "Arquivos 3D"
+                : "Arquivos",
             bgui::dock_area::bottom,
             0.3f
         );
@@ -203,9 +217,13 @@ public:
             bgui::color{0.075f, 0.075f, 0.075f, 1.f};
         m_folder_sidebar->set_scrollable(true);
 
-        m_file_area = &m_root->add<bgui::linear>(
+        auto& file_surface = m_root->add<context_action_surface>(
             bgui::orientation::vertical
         );
+        m_file_area = &file_surface;
+        file_surface.receives_input(true);
+        if (m_filter == files_view_filter::all_files)
+            file_surface.context_options = [this] { return file_actions(); };
         m_file_area->style.layout.require_mode(
             bgui::mode::stretch,
             bgui::mode::match_parent
@@ -363,6 +381,8 @@ private:
 
     std::filesystem::path m_project_root;
     drop_callback m_on_drop;
+    files_view_filter m_filter{files_view_filter::all_files};
+    std::function<void(const std::filesystem::path&)> m_on_model_selected;
     file_moved_callback m_on_file_moved;
     std::function<bool()> m_can_modify_files;
     bgui::modal* m_delete_modal{nullptr};
@@ -928,11 +948,6 @@ private:
         configure_label(path_label);
         path_label.add_class("editor-header");
         path_label.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
-        auto& actions_menu = header.add<context_action_button>("Ações", .28f, []() {});
-        actions_menu.add_class("files-actions-menu-button");
-        actions_menu.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
-        actions_menu.context_options = [this]() { return file_actions(); };
-        actions_menu.set_function([button = &actions_menu]() { button->open_context(); });
         if (!m_asset_status.empty()) add_message(m_asset_status);
 
         std::error_code error;
@@ -946,10 +961,13 @@ private:
             if (it->is_symlink(type_error) || type_error)
                 continue;
             type_error.clear();
-            if (it->is_regular_file(type_error) && !type_error)
-                files.push_back(it->path());
-            else if (!type_error && it->is_directory(type_error) && !type_error)
+            if (it->is_regular_file(type_error) && !type_error) {
+                if (m_filter == files_view_filter::all_files ||
+                    is_model_file(it->path()))
+                    files.push_back(it->path());
+            } else if (!type_error && it->is_directory(type_error) && !type_error) {
                 folders.push_back(it->path());
+            }
         }
 
         if (error) {
@@ -959,6 +977,8 @@ private:
 
         auto& entries = m_file_area->add<bgui::grid>(bgui::vec2i{180, 40}, bgui::vec2i{6, 6});
         entries.add_class("file-grid");
+        entries.style.visual.visible = false;
+        entries.receives_input(false);
         entries.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
 
         std::sort(folders.begin(), folders.end());
@@ -990,7 +1010,10 @@ private:
                 "",
                 [this, file]() {
                     m_selected_file = file;
-                    open_document(file);
+                    if (m_on_model_selected)
+                        m_on_model_selected(file);
+                    else
+                        open_document(file);
                     request_refresh();
                 },
                 [this, file](const bgui::vec2i& position) {
@@ -1006,7 +1029,14 @@ private:
             );
             item.context_options = [this, file]() {
                 context_actions actions{
-                    {"Abrir / Editar", [this, file]() { m_selected_file = file; open_document(file); request_refresh(); }},
+                    {"Abrir / Editar", [this, file]() {
+                        m_selected_file = file;
+                        if (m_on_model_selected)
+                            m_on_model_selected(file);
+                        else
+                            open_document(file);
+                        request_refresh();
+                    }},
                     {"Duplicar arquivo", [this, file]() {
                         try {
                             if (m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução antes de duplicar arquivos.");
@@ -1047,10 +1077,10 @@ private:
             );
             item.style.layout.padding = bgui::vec4i{5, 3, 5, 3};
             item.style.visual.background.normal = selected
-                ? bgui::color{0.20f, 0.31f, 0.43f, 1.f}
-                : bgui::color{0.15f, 0.16f, 0.18f, 1.f};
+                ? bgui::color{0.1f, 0.1f, 0.1f, 1.f}
+                : bgui::color{0.16f, 0.16f, 0.16f, 1.f};
             item.style.visual.background.hover =
-                bgui::color{0.22f, 0.24f, 0.27f, 1.f};
+                bgui::color{0.22f, 0.22f, 0.22f, 1.f};
             item.style.visual.border_radius = 3.f;
         }
     }
