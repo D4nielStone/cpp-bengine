@@ -2,6 +2,7 @@
 #include <os/resource_files.hpp>
 #include "project_persistence_system.hpp"
 #include "project_file_transaction.hpp"
+#include "loaders/material_asset.hpp"
 
 #include "components/camera.hpp"
 #include "components/code.hpp"
@@ -26,6 +27,7 @@
 #include <optional>
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -111,6 +113,9 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
         if (!value["materials"].IsArray())
             return false;
         for (const auto& material : value["materials"].GetArray()) {
+            if (material.IsObject() && material.HasMember("file") &&
+                (!material["file"].IsString() || material["file"].GetStringLength()==0 ||
+                 material["file"].GetStringLength()!=std::strlen(material["file"].GetString()))) return false;
             if (!material.IsObject() || !material.HasMember("albedo") ||
                 !is_color4(material["albedo"]))
                 return false;
@@ -294,7 +299,8 @@ bool parse_component(
                 model_path = project_directory / model_path;
             model_path = model_path.lexically_normal();
             const auto model_path_string = model_path.string();
-            registry.add<commons::renderer>(entity, model_path_string.c_str());
+            try { registry.add<commons::renderer>(entity, model_path_string.c_str()); }
+            catch (const std::exception&) { return false; }
         } else {
             registry.add<commons::renderer>(entity, new commons::model());
         }
@@ -311,6 +317,14 @@ bool parse_component(
             for (rapidjson::SizeType index = 0;
                  index < materials.Size();
                  ++index) {
+                if (materials[index].HasMember("file")) {
+                    const std::filesystem::path reference(materials[index]["file"].GetString());
+                    commons::material loaded; std::string error;
+                    if (!commons::load_material_asset(reference.is_absolute()?reference:project_directory/reference,loaded,error))
+                        return false;
+                    renderer->m_modelo->meshes[index].setMaterial(loaded);
+                    continue;
+                }
                 const auto& albedo = materials[index]["albedo"];
                 auto material =
                     renderer->m_modelo->meshes[index].getMaterial();
@@ -865,6 +879,14 @@ bool project_persistence_system::serialize_project(
                         maps.AddMember(key, value, allocator);
                     }
                     material.AddMember("maps", maps, allocator);
+                    try {
+                        const auto directory=absolute_target.parent_path()/(absolute_target.stem().string()+".materials");
+                        const auto contents=commons::encode_material_asset(source_material,directory);
+                        auto file=commons::material_asset_path(directory,contents);
+                        if (write_files && !commons::store_material_asset(directory,source_material,file,error)) return false;
+                        const auto reference=saving_in_project ? file.lexically_relative(m_asset_root) : file;
+                        material.AddMember("file",rapidjson::Value(reference.generic_string().c_str(),allocator),allocator);
+                    } catch (const std::exception& e) { error=e.what();return false; }
                     materials.PushBack(material, allocator);
                 }
                 component_data.AddMember("materials", materials, allocator);

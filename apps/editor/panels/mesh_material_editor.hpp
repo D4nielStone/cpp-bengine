@@ -4,6 +4,7 @@
 #include "editor_context.hpp"
 #include "components/renderer.hpp"
 #include "util/pbr_material.hpp"
+#include "loaders/material_asset.hpp"
 #include <elem/image.hpp>
 #include <os/asset_manager.hpp>
 
@@ -48,6 +49,31 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
     const std::function<void(std::string)>& status) {
     const mesh_material_binding binding{context, renderer, renderer->m_modelo, index};
     const auto material = binding.read();
+    content.add<bgui::text>("Material .bmat", .27f).receives_input(false);
+    auto& material_row = content.add<bgui::linear>(bgui::orientation::horizontal);
+    panel::configure_property_row(material_row);
+    auto& material_input = panel::add_input(material_row, "", "Carregar .bmat", .26f);
+    material_input.add_class("material-asset-path");
+    panel::configure_property_input(material_input);
+    const auto load = [binding, context, status](const std::filesystem::path& requested) {
+        if (!binding.current() || context->is_playing || requested.empty()) return;
+        const auto path = requested.is_absolute() ? requested : context->project_root / requested;
+        commons::material next;
+        std::string error;
+        if (!commons::load_material_asset(path, next, error)) { status(error); return; }
+        binding.commit(next);
+        status("Material carregado: " + path.filename().string());
+    };
+    material_input.m_enter_func = [load](const std::string& path) { load(path); };
+    if (register_target) register_target(&material_input, load);
+    material_row.add<bgui::button>("Salvar .bmat", .26f, [binding, context, status] {
+        if (!binding.current() || context->is_playing) return;
+        std::filesystem::path path;
+        std::string error;
+        if (!commons::store_material_asset(context->project_root / "assets/materials", binding.read(), path, error))
+            status(error);
+        else status("Material salvo: " + path.string());
+    });
     const auto albedo = material.getUniforme("material.albedo");
     commons::color color;
     if (albedo.m_type == commons::uniform::type::Cor) color = albedo.valor.color_value;
@@ -88,6 +114,7 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         panel::configure_property_row(row);
         auto& input = panel::add_input(row, material.getTextura(map.name).path, "Caminho da textura", .26f);
+        input.add_class("material-texture-path");
         panel::configure_property_input(input);
         auto& preview = content.add<bgui::image>();
         preview.add_class("material-texture-preview");

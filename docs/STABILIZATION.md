@@ -165,3 +165,9 @@ Para uma avaliação de critérios mais ampla, veja
 - Remove Windows test exclusions. Local Debug build and all 403 CTest entries
   passed before the final BGUI measurement regression and version bump; final
   local and native Windows results are recorded in the release validation.
+- Native Windows CI 41604412601 passed MenuBarTests, ImageTests, collider and
+  template regressions; its only failure was the new LinearTest being registered
+  with TEST instead of the suite's existing TEST_F. Corrected that fixture use;
+  local LinearTests, MenuBarTests and ImageTests all passed afterward.
+- Include subsequent pending `.bmat` material persistence, GPU model preview,
+  dependency import/export changes and their regression coverage in v0.1.3.

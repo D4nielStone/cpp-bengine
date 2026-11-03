@@ -95,6 +95,9 @@ add_executable(editor_render_tests
 )
 target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main commons)
 target_include_directories(editor_render_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
+    ${CMAKE_SOURCE_DIR}/apps/editor/tools
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
 target_compile_definitions(editor_render_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

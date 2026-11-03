@@ -598,6 +598,7 @@ public:
             m_files->set_project_file(path);
             m_context->workspace_mode = 0;
             m_context->model_selection = 0;
+            m_context->model_view_mode = 0;
             m_context->extrude_distance = "0.25";
             m_context->show_colliders = false;
             m_context->orbital_view = false;

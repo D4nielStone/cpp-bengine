@@ -1012,3 +1012,39 @@ TEST_F(EditorAssetWorkflowTest, FilesAndFoldersShareResponsiveGrid) {
     EXPECT_GT(children[1]->processed_x(), children[0]->processed_x());
     EXPECT_EQ(files.folder_at(children[0]->processed_position()), folder / "assets");
 }
+
+#include "loaders/material_asset.hpp"
+#include "loaders/editable_model.hpp"
+
+TEST_F(EditorAssetWorkflowTest, ImportsNativeModelAndMaterialWithPortableTextureDependencies) {
+    const auto source=folder/"source",project=folder/"project";
+    std::filesystem::create_directories(source/"textures");
+    std::filesystem::create_directory(project);
+    write_test_png(source/"textures/color.png");
+    commons::material material;
+    material.set_uniform("material.roughness",.23f);
+    material.set_texture("tex_albedo",commons::texture{0,(source/"textures/color.png").string()});
+    std::filesystem::path material_path;std::string error;
+    ASSERT_TRUE(commons::store_material_asset(source/"materials",material,material_path,error)) << error;
+    commons::editable_model_data data;
+    commons::editable_mesh_data mesh;
+    mesh.vertices={{{0,0,0},{0,0,1},{}},{{1,0,0},{0,0,1},{}},{{0,1,0},{0,0,1},{}}};
+    mesh.faces={{0,1,2}};
+    mesh.material_path=material_path.lexically_relative(source).generic_string();
+    data.meshes.push_back(mesh);
+    ASSERT_TRUE(commons::save_editable_model(source/"mesh.bmodel",data,error)) << error;
+    editor::ui::files_view files(project);
+    const auto imported=files.import_file(source/"mesh.bmodel");
+    EXPECT_EQ(files.import_file(source/"mesh.bmodel"),imported);
+    const auto standalone=files.import_file(material_path);
+    EXPECT_EQ(standalone.extension(),".bmat");
+    std::filesystem::remove_all(source);
+    commons::model loaded(imported.string());
+    ASSERT_EQ(loaded.meshes.size(),1u);
+    const auto result=loaded.meshes[0].getMaterial();
+    EXPECT_FLOAT_EQ(result.getUniforme("material.roughness").valor.f,.23f);
+    EXPECT_TRUE(std::filesystem::exists(result.getTextura("tex_albedo").path));
+    commons::material standalone_result;
+    ASSERT_TRUE(commons::load_material_asset(standalone,standalone_result,error)) << error;
+    EXPECT_TRUE(std::filesystem::exists(standalone_result.getTextura("tex_albedo").path));
+}

@@ -44,7 +44,7 @@ inline bool rewrite_paths(rapidjson::Value& value, rapidjson::Document::Allocato
             const bool image_value = key == "value" && value.HasMember("type") &&
                 value["type"].IsString() && std::string_view(value["type"].GetString()) == "image";
             const bool is_path = image_value || path_value || key == "scene" || key == "model" ||
-                key == "directory" || key == "scripts" || key == "maps";
+                key == "directory" || key == "scripts" || key == "maps" || key == "file" || key == "material" || key == "path";
             changed |= rewrite_paths(it->value, allocator, root, from, to, is_path);
         }
     } else if (value.IsArray()) {
@@ -79,9 +79,11 @@ inline fs::path move(const fs::path& requested, const fs::path& folder,
     std::vector<replacement> changes;
     bool main_scene_moved = false;
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
-        if (!entry.is_regular_file() || entry.is_symlink() || !scene_document(entry.path())) continue;
+        if (!entry.is_regular_file() || entry.is_symlink()) continue;
+        const bool native=entry.path().extension()==".bmodel" || entry.path().extension()==".bmat";
+        if (!scene_document(entry.path()) && !native) continue;
         const auto before = project_files::read(entry.path());
-        const auto after = rewrite_document(before, root, source, target);
+        const auto after = rewrite_document(before, native ? entry.path().parent_path() : root, source, target);
         if (before != after) {
             changes.push_back({entry.path() == source ? target : entry.path(), before, after});
             main_scene_moved |= entry.path().extension() == ".bengine" && scene_document(source);

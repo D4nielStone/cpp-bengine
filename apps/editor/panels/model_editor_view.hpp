@@ -9,6 +9,9 @@
 #include "viewport_input_state.hpp"
 #include "../tools/camera_movement.hpp"
 #include "mesh_material_editor.hpp"
+#include "loaders/material_asset.hpp"
+#include "systems/render_system.hpp"
+#include <chrono>
 #include <elem/tree.hpp>
 
 #include <elem/image.hpp>
@@ -77,6 +80,16 @@ public:
         add_mode_button(modes, "Vértices", model_selection_mode::vertices);
         add_mode_button(modes, "Arestas", model_selection_mode::edges);
 
+        auto& views = root.add<bgui::linear>(bgui::orientation::horizontal);
+        views.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
+        views.style.layout.require_height(bgui::mode::pixel,32.f);
+        for (int mode=0;mode<3;++mode) {
+            const char* names[]{"Basic","Material","Render"};
+            auto& button=views.add<bgui::button>(names[mode],.28f,[this,mode] { m_context->model_view_mode=mode; });
+            button.style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);
+            button.style.layout.require_size(96.f,28.f);
+            m_view_buttons.push_back(&button);
+        }
         auto& body = root.add<bgui::linear>(bgui::orientation::horizontal);
         body.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
         body.style.layout.padding = bgui::vec4i{0};
@@ -118,7 +131,7 @@ public:
         m_navigation_button->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
         m_navigation_button->style.layout.require_height(bgui::mode::pixel,30.f);
         auto& frame = tools.add<bgui::button>("Enquadrar modelo", .28f, [this] {
-            m_frame_preview = true;
+            m_frame_preview = true;m_projection_dirty=true;
             mark_preview_dirty();
         });
         frame.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
@@ -144,6 +157,9 @@ public:
     }
 
     const commons::camera& preview_camera() const { return *m_preview_camera; }
+    double last_preview_time_ms() const noexcept { return m_last_preview_ms; }
+    std::size_t geometry_upload_count() const noexcept { return m_geometry_uploads; }
+    std::size_t projection_update_count() const noexcept { return m_projection_updates; }
 
     bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
         for (const auto& [element, assign] : m_material_targets) {
@@ -159,6 +175,7 @@ public:
 
     void update() override {
         if (m_context && static_cast<int>(m_mode) != m_context->model_selection) {
+            m_gizmo_selection_dirty=true;
             m_mode = static_cast<model_selection_mode>(m_context->model_selection);
             refresh_mode_buttons();
             mark_preview_dirty();
@@ -171,6 +188,15 @@ public:
             m_last_extrude_distance = m_context->extrude_distance;
         }
         sync_selected_entity();
+        if (m_view_mode!=m_context->model_view_mode) {
+            m_view_mode=std::clamp(m_context->model_view_mode,0,2);
+            m_material_dirty=true;mark_preview_dirty();
+            for(std::size_t i=0;i<m_view_buttons.size();++i) {
+                m_view_buttons[i]->style.visual.background.normal=static_cast<int>(i)==m_view_mode
+                    ? bgui::color{.17f,.36f,.58f,1.f}:bgui::color{.12f,.12f,.12f,1.f};
+                m_view_buttons[i]->mark_style_dirty();
+            }
+        }
         const auto history = m_context->history_revision;
         const auto actions = m_context->undo_stack.size();
         if (history != m_material_revision || actions != m_material_actions) {
@@ -179,6 +205,7 @@ public:
             if (history != m_material_revision || !editing) rebuild_mesh_controls();
             m_material_actions = actions;
             m_material_revision = history;
+            m_material_dirty=true;
             mark_preview_dirty();
             for (auto& [input, read] : m_material_inputs)
                 if (bgui::get_keyboard_focus() != input) input->set_buffer(read());
@@ -200,7 +227,7 @@ public:
             const auto before = eye->get_model_matrix();
             m_navigation_input->gizmo_active = m_gizmo.is_dragging();
             m_navigation->update(m_preview_registry);
-            if (before != eye->get_model_matrix()) m_preview_dirty = true;
+            if (before != eye->get_model_matrix()) { m_preview_dirty = true; m_projection_dirty=true; }
         }
         if (m_image && !m_model.meshes.empty()) {
             const int width = std::clamp(
@@ -211,8 +238,9 @@ public:
             );
             if (static_cast<int>(m_image->get_texture().m_size.x) != width ||
                 static_cast<int>(m_image->get_texture().m_size.y) != height)
-                m_preview_dirty = true;
+                { m_preview_dirty = true; m_projection_dirty=true; }
         }
+        if (m_view_mode==2 && gpu_available() && !m_model.meshes.empty()) m_preview_dirty=true;
         if (m_preview_dirty)
             refresh_preview();
     }
@@ -268,7 +296,7 @@ private:
     std::filesystem::path m_source_path;
     std::optional<editor_context::entity_id> m_model_entity;
     std::vector<bgui::button*> m_mode_buttons;
-    std::vector<std::pair<std::size_t, std::size_t>> m_face_at_pixel;
+    std::vector<std::vector<bgui::vec3>> m_projected_depths;
     std::vector<std::vector<bgui::vec2>> m_projected_vertices;
     std::set<std::size_t> m_selected_faces;
     std::set<std::size_t> m_selected_vertices;
@@ -280,6 +308,84 @@ private:
     bool m_preview_dirty{true};
     bool m_dirty{false};
     std::string m_last_extrude_distance;
+    std::vector<bgui::button*> m_view_buttons;
+    int m_view_mode{-1};
+    bool m_geometry_dirty{true},m_material_dirty{true},m_projection_dirty{true};
+    std::shared_ptr<commons::renderer> m_gpu_renderer;
+    commons::render_system m_gpu_render_system;
+    commons::camera m_scene_preview_camera;
+    std::optional<commons::shader> m_basic_shader;
+    std::size_t m_geometry_uploads{0},m_projection_updates{0};
+    double m_last_preview_ms{0};
+
+    static bool gpu_available() { return glad_glGetString && glGetString(GL_VERSION); }
+    void sync_gpu_model() {
+        if (!m_gpu_renderer) {
+            auto entity=m_preview_registry->create();
+            auto model=std::make_unique<commons::model>();
+            m_basic_shader=model->getShader();
+            m_preview_registry->add<commons::renderer>(entity,model.release());
+            m_gpu_renderer=m_preview_registry->get<commons::renderer>(entity.id);
+        }
+        if (m_geometry_dirty) {
+            auto& meshes=m_gpu_renderer->m_modelo->meshes;
+            for(auto& mesh:meshes) if(mesh.isLoaded())mesh.unload();
+            meshes.clear();meshes.reserve(m_model.meshes.size());
+            for(const auto& mesh:m_model.meshes) meshes.emplace_back(mesh.vertices,mesh.triangulated_indices(),commons::material{});
+            m_geometry_dirty=false;m_material_dirty=true;++m_geometry_uploads;
+        }
+        if (m_material_dirty) {
+            const auto source=m_source_renderer.lock();
+            if (source && source->m_modelo) {
+                m_gpu_renderer->visible=m_view_mode==2 ? source->visible : true;
+                m_gpu_renderer->cast_shadows=source->cast_shadows;
+                m_gpu_renderer->receive_shadows=source->receive_shadows;
+                m_gpu_renderer->m_modelo->setShader(m_view_mode==0?*m_basic_shader:source->m_modelo->getShader());
+                for(std::size_t i=0;i<m_gpu_renderer->m_modelo->meshes.size();++i) {
+                    auto material=i<source->m_modelo->meshes.size()?source->m_modelo->meshes[i].getMaterial():commons::material{};
+                    if(m_view_mode==0) {
+                        material=commons::material{};
+                        material.set_uniform("material.albedo",commons::color{.65f,.65f,.65f,1.f});
+                        material.set_uniform("material.metallic",0.f);material.set_uniform("material.roughness",.7f);material.set_uniform("material.ao",1.f);
+                    }
+                    m_gpu_renderer->m_modelo->meshes[i].setMaterial(material);
+                }
+            }
+            m_material_dirty=false;
+        }
+    }
+    void render_gpu(int width,int height) {
+        sync_gpu_model();
+        commons::camera* camera=m_preview_camera.get();
+        if (m_view_mode==2 && m_model_entity) {
+            auto transform=m_context->registry->get<commons::transform>(*m_model_entity);
+            if (transform) {
+                const auto world=transform->get_world_model_matrix();
+                if (std::abs(glm::determinant(world))<1e-8f) { set_status("Render requer uma transformação invertível.");return; }
+                m_scene_preview_camera.config=m_preview_camera->config;
+                if (m_context->editor_camera_entity) if(auto editor_camera=m_context->registry->get<commons::camera>(*m_context->editor_camera_entity)) {
+                    const auto fov=m_scene_preview_camera.config.fov, near=m_scene_preview_camera.config.corte_curto, far=m_scene_preview_camera.config.corte_longo;
+                    m_scene_preview_camera.config=editor_camera->config;
+                    m_scene_preview_camera.config.fov=fov;m_scene_preview_camera.config.corte_curto=near;m_scene_preview_camera.config.corte_longo=far;
+                    m_scene_preview_camera.config.flag_orth=false;
+                    m_scene_preview_camera.skybox_asset_root=editor_camera->skybox_asset_root;
+                    m_scene_preview_camera.skybox_faces=editor_camera->skybox_faces;
+                }
+                m_scene_preview_camera.viewMatrix=m_preview_camera->viewMatrix*glm::inverse(world);
+                const auto eye=world*glm::vec4(m_preview_camera->position.x,m_preview_camera->position.y,m_preview_camera->position.z,1.f);
+                m_scene_preview_camera.position={eye.x,eye.y,eye.z};
+                camera=&m_scene_preview_camera;
+            }
+        }
+        camera->request_framebuffer_size({width,height});
+        if(m_view_mode==2 && m_model_entity)
+            m_gpu_render_system.render_view(m_context->registry,*camera,*m_model_entity,m_gpu_renderer);
+        else m_gpu_render_system.render_view(m_preview_registry,*camera);
+        const auto texture=camera->framebuffer_texture();
+        if(texture && (m_image->get_texture().m_id!=texture || m_image->get_texture().m_size!=bgui::vec2{float(width),float(height)}))
+            m_image->set_external_texture(texture,{float(width),float(height)});
+    }
+
     editor::transform_gizmo m_gizmo;
     std::shared_ptr<commons::ecs> m_preview_registry;
     std::shared_ptr<commons::camera> m_preview_camera;
@@ -344,7 +450,10 @@ private:
             for (std::size_t mesh = 0; mesh < m_model.meshes.size(); ++mesh) {
                 std::set<std::size_t> selected;
                 if (m_mode == model_selection_mode::object && m_object_selected) {
-                    for (std::size_t v = 0; v < m_model.meshes[mesh].vertices.size(); ++v) selected.insert(v);
+                    for (std::size_t v = 0; v < m_model.meshes[mesh].vertices.size(); ++v) {
+                        m_gizmo_vertices.emplace_back(mesh,v);pivot+=m_model.meshes[mesh].vertices[v].position;
+                    }
+                    continue;
                 } else if (mesh == m_active_mesh) {
                     if (m_mode == model_selection_mode::faces)
                         for (auto face : m_selected_faces)
@@ -379,12 +488,26 @@ private:
                 point = {next.x, next.y, next.z};
             }
             for (auto& mesh : m_model.meshes) mesh.recalculate_normals();
-            m_dirty = true;
+            m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;
             update_mesh_label();
             mark_preview_dirty();
         }
         if (!m_gizmo.is_dragging() && just_pressed && over) select_at(mouse);
         if (was_dragging && !m_gizmo.is_dragging()) m_gizmo_selection_dirty = true;
+        if(m_active_mesh<m_projected_vertices.size()) {
+            auto& draw=bgui::get_draw_list();const auto previous_color=draw.get_color();
+            const auto previous_clip=draw.get_clip_rect();const bool clipped=draw.has_clip_rect();
+            draw.set_clip_rect(clipped?bgui::intersect_rect(previous_clip,rect):rect);draw.set_color({1.f,.45f,.12f,1.f});
+            const auto size=m_image->get_texture().m_size;
+            const auto screen=[&](std::size_t v){ const auto p=m_projected_vertices[m_active_mesh][v];return bgui::vec2{rect.x+p.x*rect.z/std::max(1.f,size.x),rect.y+p.y*rect.w/std::max(1.f,size.y)}; };
+            if(m_mode==model_selection_mode::faces) for(auto face:m_selected_faces) if(face<m_model.meshes[m_active_mesh].faces.size()) {
+                const auto& indices=m_model.meshes[m_active_mesh].faces[face];
+                for(std::size_t i=0;i<indices.size();++i)draw.add_line(screen(indices[i]),screen(indices[(i+1)%indices.size()]),2.f);
+            }
+            if(m_mode==model_selection_mode::edges && m_selected_edge) draw.add_line(screen(m_selected_edge->first),screen(m_selected_edge->second),3.f);
+            if(m_mode==model_selection_mode::vertices) for(auto vertex:m_selected_vertices) { const auto p=screen(vertex);draw.add_rect_filled(p-bgui::vec2{3.f,3.f},p+bgui::vec2{3.f,3.f}); }
+            draw.set_color(previous_color);if(clipped)draw.set_clip_rect(previous_clip);else draw.clear_clip_rect();
+        }
     }
 
 
@@ -414,6 +537,7 @@ private:
         }
 
         m_gizmo = editor::transform_gizmo{};
+        m_geometry_dirty=true;m_material_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         m_frame_preview = true;
         m_source_renderer = renderer;
         m_model_entity.reset();
@@ -488,6 +612,7 @@ private:
             return;
         }
         m_model = std::move(imported);
+        m_geometry_dirty=true;m_material_dirty=true;m_projection_dirty=true;
         rebuild_mesh_controls();
         m_active_mesh = 0;
         m_selected_faces.clear();
@@ -505,6 +630,7 @@ private:
         const model_selection_mode mode
     ) {
         auto& button = parent.add<bgui::button>(label, 0.27f, [this, mode]() {
+            m_gizmo_selection_dirty=true;
             m_mode = mode;
             if (m_context) m_context->model_selection = static_cast<int>(mode);
             m_selected_faces.clear();
@@ -551,7 +677,7 @@ private:
 
     void mark_preview_dirty() {
         m_preview_dirty = true;
-        if (!m_gizmo.is_dragging()) m_gizmo_selection_dirty = true;
+        // Selection and geometry invalidation are tracked separately from camera/material changes.
         if (m_image)
             m_image->mark_render_dirty();
     }
@@ -595,17 +721,15 @@ private:
     void render_model_preview(bgui::texture& texture) {
         const int width = texture.m_size.x;
         const int height = texture.m_size.y;
-        const bgui::color background{0.055f, 0.06f, 0.07f, 1.f};
-        for (int y = 0; y < height; ++y)
-            for (int x = 0; x < width; ++x)
-                set_pixel(texture, x, y, background);
-        m_face_at_pixel.assign(
-            static_cast<std::size_t>(width * height),
-            {std::numeric_limits<std::size_t>::max(),
-             std::numeric_limits<std::size_t>::max()}
-        );
-        m_projected_vertices.clear();
+
         m_projected_vertices.resize(m_model.meshes.size());
+        m_projected_depths.resize(m_model.meshes.size());
+        for (std::size_t mesh=0;mesh<m_model.meshes.size();++mesh) {
+            m_projected_vertices[mesh].clear();
+            m_projected_depths[mesh].clear();
+            m_projected_vertices[mesh].reserve(m_model.meshes[mesh].vertices.size());
+            m_projected_depths[mesh].reserve(m_model.meshes[mesh].vertices.size());
+        }
         if (m_model.meshes.empty())
             return;
 
@@ -636,197 +760,27 @@ private:
         m_preview_camera->getViewMatrix();
         m_preview_camera->obtProjectionMatrix();
         const auto matrix = m_preview_camera->projMatriz*m_preview_camera->viewMatrix;
-        std::vector<std::vector<bgui::vec3>> projected(m_model.meshes.size());
-        std::vector<std::vector<float>> reciprocal_w(m_model.meshes.size());
+
         for (std::size_t mesh=0; mesh<m_model.meshes.size(); ++mesh) {
             for (const auto& vertex : m_model.meshes[mesh].vertices) {
                 const auto p=vertex.position;
                 const auto clip=matrix*glm::vec4(p.x,p.y,p.z,1.f);
                 if (clip.w <= 1e-5f) {
-                    projected[mesh].push_back({0.f,0.f,2.f});
-                    reciprocal_w[mesh].push_back(0.f);
+                    m_projected_depths[mesh].push_back({0.f,0.f,2.f});
+
                     m_projected_vertices[mesh].push_back({-100000.f,-100000.f});
                 } else {
                     const auto ndc=glm::vec3(clip)/clip.w;
                     const bgui::vec2 point{std::clamp((ndc.x*.5f+.5f)*width,-100000.f,100000.f),
                         std::clamp((.5f-ndc.y*.5f)*height,-100000.f,100000.f)};
-                    projected[mesh].push_back({point.x,point.y,ndc.z});
-                    reciprocal_w[mesh].push_back(1.f/clip.w);
+                    m_projected_depths[mesh].push_back({point.x,point.y,ndc.z});
+
                     m_projected_vertices[mesh].push_back(point);
                 }
             }
         }
 
-        std::vector<float> depth_buffer(
-            static_cast<std::size_t>(width * height),
-            std::numeric_limits<float>::max()
-        );
-        for (std::size_t mesh_index = 0;
-             mesh_index < m_model.meshes.size();
-             ++mesh_index) {
-            const auto& mesh = m_model.meshes[mesh_index];
-            const auto renderer = m_source_renderer.lock();
-            const auto material = renderer && renderer->m_modelo && mesh_index < renderer->m_modelo->meshes.size()
-                ? renderer->m_modelo->meshes[mesh_index].getMaterial() : commons::material{};
-            commons::color base_color;
-            const auto albedo = material.getUniforme("material.albedo");
-            if (albedo.m_type == commons::uniform::type::Cor) base_color = albedo.valor.color_value;
-            else if (albedo.m_type == commons::uniform::type::Cor_ptr && albedo.ponteiro.color_ptr) base_color = *albedo.ponteiro.color_ptr;
-            const bgui::texture* albedo_map = nullptr;
-            const auto map = material.getTextura("tex_albedo");
-            const auto enabled = material.getUniforme("use_tex_albedo");
-            if (!map.path.empty() && !(enabled.m_type == commons::uniform::type::Bool && !enabled.valor.b)) {
-                try {
-                    const std::filesystem::path path(map.path);
-                    albedo_map = &bgui::asset_manager::get_instance().load_texture((path.is_absolute() ? path : m_context->project_root/path).string());
-                } catch (const std::exception&) {}
-            }
-            const auto repeat_x = commons::pbr_value(material,commons::texture_factors[2]);
-            const auto repeat_y = commons::pbr_value(material,commons::texture_factors[3]);
-            const auto offset_x = commons::pbr_value(material,commons::texture_factors[0]);
-            const auto offset_y = commons::pbr_value(material,commons::texture_factors[1]);
-
-            for (std::size_t face_index = 0;
-                 face_index < mesh.faces.size();
-                 ++face_index) {
-                const auto& face = mesh.faces[face_index];
-                for (std::size_t corner = 1;
-                     corner + 1 < face.size();
-                     ++corner) {
-                    const std::array<unsigned int, 3> triangle{
-                        face[0], face[corner], face[corner + 1]
-                    };
-                    if (projected[mesh_index][triangle[0]].z < -1.f || projected[mesh_index][triangle[0]].z > 1.f ||
-                        projected[mesh_index][triangle[1]].z < -1.f || projected[mesh_index][triangle[1]].z > 1.f ||
-                        projected[mesh_index][triangle[2]].z < -1.f || projected[mesh_index][triangle[2]].z > 1.f) continue;
-                    const auto a = m_projected_vertices[mesh_index][triangle[0]];
-                    const auto b = m_projected_vertices[mesh_index][triangle[1]];
-                    const auto c = m_projected_vertices[mesh_index][triangle[2]];
-                    const auto area = edge_function(a, b, c.x, c.y);
-                    if (std::abs(area) < 1e-5f)
-                        continue;
-                    const int min_px = std::max(
-                        0,
-                        static_cast<int>(std::floor(std::min({a.x, b.x, c.x})))
-                    );
-                    const int max_px = std::min(
-                        width - 1,
-                        static_cast<int>(std::ceil(std::max({a.x, b.x, c.x})))
-                    );
-                    const int min_py = std::max(
-                        0,
-                        static_cast<int>(std::floor(std::min({a.y, b.y, c.y})))
-                    );
-                    const int max_py = std::min(
-                        height - 1,
-                        static_cast<int>(std::ceil(std::max({a.y, b.y, c.y})))
-                    );
-                    const auto normal = face_normal(mesh, face);
-                    const float shade = std::clamp(
-                        0.3f + std::abs(normal.y) * 0.55f +
-                            std::abs(normal.z) * 0.15f,
-                        0.25f,
-                        0.9f
-                    );
-                    const bool selected =
-                        mesh_index == m_active_mesh &&
-                        m_selected_faces.contains(face_index) &&
-                        m_mode == model_selection_mode::faces;
-                    const bgui::color color = selected
-                        ? bgui::color{1.f, 0.45f, 0.12f, 1.f}
-                        : bgui::color{shade*base_color.r, shade*base_color.g, shade*base_color.b, base_color.a};
-                    for (int py = min_py; py <= max_py; ++py) {
-                        for (int px = min_px; px <= max_px; ++px) {
-                            const float sample_x = px + 0.5f;
-                            const float sample_y = py + 0.5f;
-                            const float u = edge_function(
-                                b, c, sample_x, sample_y
-                            ) / area;
-                            const float v = edge_function(
-                                c, a, sample_x, sample_y
-                            ) / area;
-                            const float w = 1.f - u - v;
-                            if (u < 0.f || v < 0.f || w < 0.f)
-                                continue;
-                            const float depth =
-                                u * projected[mesh_index][triangle[0]].z +
-                                v * projected[mesh_index][triangle[1]].z +
-                                w * projected[mesh_index][triangle[2]].z;
-                            const auto pixel = static_cast<std::size_t>(
-                                pixel_index(px, py, width)
-                            );
-                            if (depth >= depth_buffer[pixel])
-                                continue;
-                            depth_buffer[pixel] = depth;
-                            auto pixel_color = color;
-                            if (!selected && albedo_map && !albedo_map->m_buffer.empty() && albedo_map->m_size.x > 0 && albedo_map->m_size.y > 0) {
-                                const auto uv0 = mesh.vertices[triangle[0]].uvcoords;
-                                const auto uv1 = mesh.vertices[triangle[1]].uvcoords;
-                                const auto uv2 = mesh.vertices[triangle[2]].uvcoords;
-                                const float pu=u*reciprocal_w[mesh_index][triangle[0]],
-                                    pv=v*reciprocal_w[mesh_index][triangle[1]], pw=w*reciprocal_w[mesh_index][triangle[2]];
-                                const auto uv = (uv0*pu+uv1*pv+uv2*pw)/std::max(1e-8f,pu+pv+pw);
-                                const float tx=uv.x*repeat_x+offset_x, ty=uv.y*repeat_y+offset_y;
-                                const int tw=static_cast<int>(albedo_map->m_size.x), th=static_cast<int>(albedo_map->m_size.y);
-                                const int sx=std::clamp(static_cast<int>((tx-std::floor(tx))*tw),0,tw-1);
-                                const int sy=std::clamp(static_cast<int>((1.f-(ty-std::floor(ty)))*th),0,th-1);
-                                const auto index=static_cast<std::size_t>((sy*tw+sx)*4);
-                                if (index+2<albedo_map->m_buffer.size()) for (int channel=0;channel<3;++channel)
-                                    pixel_color[channel] *= albedo_map->m_buffer[index+channel]/255.f;
-                            }
-                            set_pixel(texture, px, py, pixel_color);
-                            m_face_at_pixel[pixel] = {mesh_index, face_index};
-                        }
-                    }
-                }
-            }
-        }
-
-        for (std::size_t mesh_index = 0;
-             mesh_index < m_model.meshes.size();
-             ++mesh_index) {
-            const auto& mesh = m_model.meshes[mesh_index];
-            for (const auto& face : mesh.faces) {
-                for (std::size_t corner = 0; corner < face.size(); ++corner) {
-                    const auto first_depth=projected[mesh_index][face[corner]].z;
-                    const auto second_depth=projected[mesh_index][face[(corner+1)%face.size()]].z;
-                    if (first_depth < -1.f || first_depth > 1.f || second_depth < -1.f || second_depth > 1.f) continue;
-                    auto first = m_projected_vertices[mesh_index][face[corner]];
-                    auto second = m_projected_vertices[mesh_index][
-                        face[(corner + 1) % face.size()]
-                    ];
-                    draw_line(texture, first, second, {0.05f, 0.05f, 0.05f, 1.f});
-                }
-            }
-        }
-        if (m_mode == model_selection_mode::edges && m_selected_edge &&
-            m_active_mesh < m_projected_vertices.size()) {
-            const auto& points = m_projected_vertices[m_active_mesh];
-            draw_line(
-                texture,
-                points[m_selected_edge->first],
-                points[m_selected_edge->second],
-                {1.f, 0.45f, 0.12f, 1.f}
-            );
-        }
-        if (m_mode == model_selection_mode::vertices &&
-            m_active_mesh < m_projected_vertices.size()) {
-            for (std::size_t vertex = 0;
-                 vertex < m_projected_vertices[m_active_mesh].size();
-                 ++vertex) {
-                const auto point = m_projected_vertices[m_active_mesh][vertex];
-                const bool selected = m_selected_vertices.contains(vertex);
-                draw_square(
-                    texture,
-                    static_cast<int>(point.x),
-                    static_cast<int>(point.y),
-                    selected ? 3 : 1,
-                    selected
-                        ? bgui::color{1.f, 0.45f, 0.12f, 1.f}
-                        : bgui::color{0.95f, 0.95f, 0.95f, 1.f}
-                );
-            }
-        }
+        ++m_projection_updates;
     }
 
     static void draw_line(
@@ -884,23 +838,32 @@ private:
     }
 
     void refresh_preview() {
-        m_preview_dirty = false;
-        if (!m_image)
-            return;
-        const int width = std::clamp(m_image->processed_width(), 240, 1280);
-        const int height = std::clamp(m_image->processed_height(), 180, 900);
-        bgui::texture texture;
-        texture.m_path = "model-editor-preview";
-        texture.m_size = {
-            static_cast<float>(width),
-            static_cast<float>(height)
-        };
-        texture.m_has_alpha = true;
-        texture.m_generate_mipmap = false;
-        texture.m_revision = ++m_preview_revision;
-        texture.m_buffer.resize(static_cast<std::size_t>(width * height * 4));
-        render_model_preview(texture);
-        m_image->set_texture(texture);
+        const auto start=std::chrono::steady_clock::now();
+        m_preview_dirty=false;
+        if(!m_image)return;
+        const int width=std::clamp(m_image->processed_width(),240,1280),height=std::clamp(m_image->processed_height(),180,900);
+        bgui::texture texture;texture.m_size={float(width),float(height)};
+        if(m_projection_dirty || m_frame_preview) {
+            render_model_preview(texture);m_projection_dirty=false;
+        }
+        if(!m_model.meshes.empty() && gpu_available()) render_gpu(width,height);
+        else {
+            texture.m_path="model-editor-preview";texture.m_revision=++m_preview_revision;
+            texture.m_generate_mipmap=false;texture.m_has_alpha=true;
+            texture.m_buffer.resize(static_cast<std::size_t>(width)*height*4);
+            for(std::size_t i=0;i<texture.m_buffer.size();i+=4) {
+                texture.m_buffer[i]=14;texture.m_buffer[i+1]=15;texture.m_buffer[i+2]=18;texture.m_buffer[i+3]=255;
+            }
+            // Headless fallback: project wire edges, without rasterizing triangle fills.
+            for(std::size_t mesh=0;mesh<m_model.meshes.size();++mesh)for(const auto& face:m_model.meshes[mesh].faces)
+                for(std::size_t i=0;i<face.size();++i) {
+                    const auto a=face[i],b=face[(i+1)%face.size()];
+                    if(m_projected_depths[mesh][a].z>=-1.f && m_projected_depths[mesh][a].z<=1.f && m_projected_depths[mesh][b].z>=-1.f && m_projected_depths[mesh][b].z<=1.f)
+                        draw_line(texture,m_projected_vertices[mesh][a],m_projected_vertices[mesh][b],{.65f,.65f,.65f,1.f});
+                }
+            m_image->set_texture(texture);
+        }
+        m_last_preview_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }
 
     void select_at(const bgui::vec2i& position) {
@@ -932,11 +895,22 @@ private:
             m_object_selected = true;
             set_status("Objeto selecionado.");
         } else if (m_mode == model_selection_mode::faces) {
-            const auto selected = m_face_at_pixel[
-                static_cast<std::size_t>(pixel_index(pixel_x, pixel_y, width))
-            ];
-            if (selected.first == std::numeric_limits<std::size_t>::max())
-                return;
+            std::pair<std::size_t,std::size_t> selected{std::numeric_limits<std::size_t>::max(),0};
+            float nearest=std::numeric_limits<float>::max();
+            for(std::size_t mesh=0;mesh<m_model.meshes.size();++mesh)for(std::size_t face=0;face<m_model.meshes[mesh].faces.size();++face) {
+                const auto& corners=m_model.meshes[mesh].faces[face];
+                for(std::size_t i=1;i+1<corners.size();++i) {
+                    const auto a=m_projected_depths[mesh][corners[0]],b=m_projected_depths[mesh][corners[i]],c=m_projected_depths[mesh][corners[i+1]];
+                    if(a.z < -1.f || b.z < -1.f || c.z < -1.f || a.z>1.f || b.z>1.f || c.z>1.f)continue;
+                    const bgui::vec2 pa{a.x,a.y},pb{b.x,b.y},pc{c.x,c.y};
+                    const float area=edge_function(pa,pb,c.x,c.y);if(std::abs(area)<1e-8f)continue;
+                    const float u=edge_function(pb,pc,float(pixel_x),float(pixel_y))/area;
+                    const float v=edge_function(pc,pa,float(pixel_x),float(pixel_y))/area,w=1.f-u-v;
+                    const float depth=u*a.z+v*b.z+w*c.z;
+                    if(u>=0.f && v>=0.f && w>=0.f && depth<nearest) { nearest=depth;selected={mesh,face}; }
+                }
+            }
+            if(selected.first==std::numeric_limits<std::size_t>::max())return;
             m_active_mesh = selected.first;
             m_selected_faces = {selected.second};
             set_status("Face " + std::to_string(selected.second + 1) +
@@ -950,6 +924,7 @@ private:
                     y * height / std::max(1, image_rect.w)))
                 return;
         }
+        m_gizmo_selection_dirty=true;
         update_mesh_label();
         mark_preview_dirty();
     }
@@ -1062,7 +1037,7 @@ private:
             return;
         }
         m_selected_faces.clear();
-        m_dirty = true;
+        m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         update_mesh_label();
         set_status("Extrusão aplicada. Salve o modelo como .bmodel.");
         mark_preview_dirty();
@@ -1084,7 +1059,7 @@ private:
             return;
         }
         m_selected_edge.reset();
-        m_dirty = true;
+        m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         update_mesh_label();
         set_status("Loop Cut aplicado. Salve o modelo como .bmodel.");
         mark_preview_dirty();
@@ -1118,6 +1093,14 @@ private:
             if (filesystem_error) { set_status(filesystem_error.message()); return; }
         }
         std::string error;
+        if (auto renderer=m_source_renderer.lock(); renderer && renderer->m_modelo && renderer->m_modelo->meshes.size()==m_model.meshes.size()) {
+            for (std::size_t i=0;i<m_model.meshes.size();++i) {
+                std::filesystem::path material_file;
+                if (!commons::store_material_asset(destination.parent_path()/(destination.stem().string()+".materials"),
+                    renderer->m_modelo->meshes[i].getMaterial(),material_file,error)) { set_status(error);return; }
+                m_model.meshes[i].material_path=material_file.lexically_relative(destination.parent_path()).generic_string();
+            }
+        }
         if (!commons::save_editable_model(destination, m_model, error)) {
             set_status(error);
             return;

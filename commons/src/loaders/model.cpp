@@ -2,6 +2,7 @@
 #include <os/resource_files.hpp>
 #include "loaders/model.hpp"
 #include "loaders/editable_model.hpp"
+#include "loaders/material_asset.hpp"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -71,8 +72,10 @@ mesh& model::getMalha(size_t i) {
 void model::draw() {
     if (m_pose && m_pose->options.animations && m_pose->scene->HasAnimations())
         update_animation(std::chrono::duration<double>(std::chrono::steady_clock::now() - m_animation_start).count());
-    for(auto& mesh : meshes)
+    for(auto& mesh : meshes) {
+        if (!mesh.isLoaded()) mesh.load();
         mesh.draw(m_shader);
+    }
 }
 
 shader& model::getShader() {
@@ -142,12 +145,16 @@ void model::load_model_data(const std::string& path) {
             model_material.set_uniform("material.metallic", 0.f);
             model_material.set_uniform("material.ao", 1.f);
             model_material.set_uniform("material.roughness", 0.5f);
+            if (!source.material_path.empty()) {
+                const std::filesystem::path reference(source.material_path);
+                if (!load_material_asset(reference.is_absolute() ? reference : resolved_path.parent_path()/reference, model_material, error))
+                    throw std::runtime_error(error);
+            }
             meshes.emplace_back(
                 source.vertices,
                 source.triangulated_indices(),
                 model_material
             );
-            meshes.back().load();
         }
         return;
     }

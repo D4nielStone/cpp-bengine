@@ -39,6 +39,7 @@ struct editor_context {
     bool model_orbital_view{false};
     int workspace_mode{0};
     int model_selection{0};
+    int model_view_mode{0};
     std::string extrude_distance{"0.25"};
     std::unordered_map<std::string, bool> inspector_sections;
     editor_preferences preferences;

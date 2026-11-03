@@ -61,6 +61,7 @@ private:
         auto& a = doc.GetAllocator();
         doc.AddMember("version", 1, a);
         doc.AddMember("workspace", m_context->workspace_mode, a);
+        doc.AddMember("model_view_mode", m_context->model_view_mode, a);
         doc.AddMember("model_selection", m_context->model_selection, a);
         doc.AddMember("extrude_distance", rapidjson::Value(m_context->extrude_distance.c_str(), a), a);
         doc.AddMember("model_orbital", m_context->model_orbital_view, a);
@@ -102,6 +103,7 @@ private:
             if (doc.HasMember("workspace") && doc["workspace"].IsInt() &&
                 doc["workspace"].GetInt() >= 0 && doc["workspace"].GetInt() <= 2)
                 m_context->workspace_mode = doc["workspace"].GetInt();
+            if (doc.HasMember("model_view_mode") && doc["model_view_mode"].IsInt() && doc["model_view_mode"].GetInt()>=0 && doc["model_view_mode"].GetInt()<=2) m_context->model_view_mode=doc["model_view_mode"].GetInt();
             if (doc.HasMember("model_selection") && doc["model_selection"].IsInt() &&
                 doc["model_selection"].GetInt() >= 0 && doc["model_selection"].GetInt() <= 3)
                 m_context->model_selection = doc["model_selection"].GetInt();

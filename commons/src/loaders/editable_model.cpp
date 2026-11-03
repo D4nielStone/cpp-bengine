@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -55,6 +56,12 @@ bool parse_mesh(
         return false;
     }
 
+    if (value.HasMember("material")) {
+        if (!value["material"].IsString() || value["material"].GetStringLength() != std::strlen(value["material"].GetString())) {
+            error = "Invalid native material reference."; return false;
+        }
+        mesh.material_path = value["material"].GetString();
+    }
     const auto& vertices = value["vertices"];
     const auto& faces = value["faces"];
     if (vertices.Empty() || vertices.Size() > max_vertices ||
@@ -250,6 +257,7 @@ bool save_editable_model(
     writer.StartArray();
     for (const auto& mesh : model.meshes) {
         writer.StartObject();
+        if (!mesh.material_path.empty()) { writer.Key("material"); writer.String(mesh.material_path.c_str()); }
         writer.Key("vertices");
         writer.StartArray();
         for (const auto& value : mesh.vertices) {

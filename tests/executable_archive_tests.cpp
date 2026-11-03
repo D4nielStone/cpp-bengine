@@ -150,3 +150,28 @@ TEST_F(ExecutableArchiveTest, LoadsThemeDirectlyFromExecutable) {
     EXPECT_FALSE(*theme.base.visual.visible);
     EXPECT_FALSE(fs::exists(output.parent_path()/"assets/themes/custom.theme"));
 }
+
+#include "loaders/editable_model.hpp"
+#include "loaders/material_asset.hpp"
+#include "loaders/model.hpp"
+
+TEST_F(ExecutableArchiveTest, RuntimeLoadsNativeModelAndMaterialFromPackedResources) {
+    commons::material material;
+    material.set_uniform("material.roughness",.26f);
+    material.set_uniform("material.albedo",commons::color{.1f,.3f,.7f,1.f});
+    fs::path reference;std::string error;
+    ASSERT_TRUE(commons::store_material_asset(data/"game/assets/materials",material,reference,error)) << error;
+    commons::editable_mesh_data mesh;
+    mesh.vertices={{{0,0,0},{0,0,1},{}},{{1,0,0},{0,0,1},{}},{{0,1,0},{0,0,1},{}}};
+    mesh.faces={{0,1,2}};
+    mesh.material_path=reference.lexically_relative(data/"game/assets").generic_string();
+    commons::editable_model_data source;source.meshes.push_back(mesh);
+    ASSERT_TRUE(commons::save_editable_model(data/"game/assets/native.bmodel",source,error)) << error;
+    pack();fs::remove_all(data);
+    ASSERT_TRUE(game_bootstrap::mount_executable(output));
+    commons::model model((output.parent_path()/"game/assets/native.bmodel").string());
+    ASSERT_EQ(model.meshes.size(),1u);
+    EXPECT_FLOAT_EQ(model.meshes[0].getMaterial().getUniforme("material.roughness").valor.f,.26f);
+    EXPECT_EQ(model.meshes[0].indices().size(),3u);
+    EXPECT_FALSE(fs::exists(output.parent_path()/"game/assets/native.bmodel"));
+}

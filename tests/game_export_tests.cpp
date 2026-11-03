@@ -230,3 +230,22 @@ TEST_F(GameExportTest, CopiesSingleCrossCubemapReferencedByCamera) {
     const auto document = game_package::read_json(staging / "game/main.scene");
     EXPECT_STREQ(document["entities"][0]["components"]["camera"]["skybox_image"].GetString(), "assets/sky-cross.png");
 }
+
+TEST_F(GameExportTest, PackagesNativeModelsAndMaterialsWithPortableReferences) {
+    put(project/"assets/native.bmodel",R"({"format":"bengine-model","version":1,"meshes":[{"material":"materials/surface.bmat"}]})");
+    rapidjson::Document material;
+    material.SetObject();auto& a=material.GetAllocator();
+    rapidjson::Value texture(rapidjson::kObjectType);
+    texture.AddMember("path",rapidjson::Value((project/"assets/texture.png").string().c_str(),a),a);
+    rapidjson::Value textures(rapidjson::kObjectType);textures.AddMember("tex_albedo",texture,a);
+    material.AddMember("textures",textures,a);
+    game_package::write_json(project/"assets/materials/surface.bmat",material);
+    scene(R"({"renderer":{"model":"assets/native.bmodel","materials":[{"file":"assets/materials/surface.bmat"}]}})");
+    prepare();
+    auto result=game_package::read_json(staging/"game/assets/materials/surface.bmat");
+    EXPECT_STREQ(result["textures"]["tex_albedo"]["path"].GetString(),"../texture.png");
+    result=game_package::read_json(staging/"game/assets/native.bmodel");
+    EXPECT_STREQ(result["meshes"][0]["material"].GetString(),"materials/surface.bmat");
+    result=game_package::read_json(staging/"game/main.scene");
+    EXPECT_STREQ(result["entities"][0]["components"]["renderer"]["materials"][0]["file"].GetString(),"assets/materials/surface.bmat");
+}

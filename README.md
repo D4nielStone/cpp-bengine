@@ -1,12 +1,11 @@
-Bubble Engine
-===
+# Bubble Engine
+
+![PREVIEW|700](preview.jpg)
+
 
 [![Build and Test](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml/badge.svg?branch=main)](https://github.com/D4nielStone/cpp-bengine/actions/workflows/build_and_test.yml)
 [![Latest release](https://img.shields.io/github/v/release/D4nielStone/cpp-bengine)](https://github.com/D4nielStone/cpp-bengine/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/D4nielStone/cpp-bengine?style=flat)](https://github.com/D4nielStone/cpp-bengine/stargazers)
-
-![PREVIEW](preview.jpg)
-
 # About
 
 An experimental C++ engine for windowing, rendering, physics, and component-based entities. The project is still under development and provides both runtime and editor applications.

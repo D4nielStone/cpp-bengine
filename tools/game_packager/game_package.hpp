@@ -124,6 +124,23 @@ public:
         auto extension = source.extension().string();
         std::transform(extension.begin(), extension.end(), extension.begin(),
             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (extension == ".bmodel" || extension == ".bmat") {
+            auto document = read_json(source);
+            const auto rewrite_native = [&](auto&& self, rapidjson::Value& value) -> void {
+                if (value.IsObject()) {
+                    for (auto& member : value.GetObject()) {
+                        const std::string_view key(member.name.GetString(), member.name.GetStringLength());
+                        if ((key == "material" || key == "path") && member.value.IsString() && member.value.GetStringLength()) {
+                            const auto mapped = dependency(member.value.GetString(), source.parent_path());
+                            member.value.SetString(mapped.c_str(), static_cast<rapidjson::SizeType>(mapped.size()), document.GetAllocator());
+                        } else self(self, member.value);
+                    }
+                } else if (value.IsArray()) for (auto& item : value.GetArray()) self(self, item);
+            };
+            rewrite_native(rewrite_native, document);
+            write_json(target, document);
+            return;
+        }
         if (extension == ".gltf") {
             auto document = read_json(source);
             const auto rewrite_uri = [&](auto&& self, rapidjson::Value& value) -> void {
@@ -195,7 +212,7 @@ public:
     void rewrite(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator,
                  const std::string& role = "") const {
         if (value.IsString() && (role == "scene" || role == "model" || role == "directory" || role == "scripts" ||
-                                role == "maps" || role == "skybox_faces" || role == "skybox_image" || role == "image")) {
+                                role == "maps" || role == "file" || role == "skybox_faces" || role == "skybox_image" || role == "image")) {
             const auto path = asset(value.GetString(), role == "model");
             value.SetString(path.c_str(), static_cast<rapidjson::SizeType>(path.size()), allocator);
         } else if (value.IsArray()) {
@@ -269,7 +286,7 @@ inline void prepare(const fs::path& repository, const fs::path& project_file,
             auto document = it->path() == project ? std::move(main) : read_json(it->path());
             paths.rewrite(document, document.GetAllocator());
             write_json(target, document);
-        } else if (extension == ".gltf" || extension == ".obj" || extension == ".mtl") {
+        } else if (extension == ".gltf" || extension == ".obj" || extension == ".mtl" || extension == ".bmodel" || extension == ".bmat") {
             paths.model_document(it->path(), target);
         } else {
             fs::copy_file(it->path(), target, fs::copy_options::overwrite_existing);

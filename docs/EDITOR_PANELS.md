@@ -87,6 +87,24 @@ mesmos controles da cena e não disputa o arraste esquerdo com o gizmo.
 O painel **Malhas** contém uma seção recolhível por mesh. Cada seção controla cor,
 metallic, roughness, AO, mapas de albedo/normal/PBR, repetição e deslocamento de UV,
 e WorldTexture. Os campos de textura aceitam caminhos ou arquivos arrastados.
-Esses materiais são aplicados ao objeto e persistidos ao salvar o **projeto**;
-**Salvar .bmodel** salva a geometria. A prévia mostra albedo e cor; a renderização
-completa de iluminação/PBR continua nos painéis Scene/Game.
+Os controles **Material .bmat** carregam um material por caminho ou arquivo
+arrastado; **Salvar .bmat** cria um arquivo reutilizável em `assets/materials`.
+Os materiais são persistidos em `.bmat` ao salvar o **projeto** e ao usar
+**Salvar .bmodel**. O modelo nativo referencia seus materiais por malha, de modo
+que materiais e texturas acompanham sua importação e funcionam também no runtime.
+Ao transferir um modelo manualmente, mantenha os arquivos referenciados junto dele.
+Modelos antigos sem referências de material continuam usando o material padrão.
+Cenas antigas com materiais embutidos continuam sendo lidas.
+
+A modelagem oferece três visualizações, guardadas no workflow:
+
+- **Basic**: modelo isolado, superfície neutra e iluminação de trabalho.
+- **Material**: modelo isolado com seus materiais, texturas e iluminação de trabalho.
+- **Render**: modelo na cena completa, com os demais objetos, luzes, sombras e
+  ambiente da câmera do editor. A geometria pendente aparece nessa prévia sem
+  alterar a cena antes de salvar.
+
+As três visualizações usam o renderizador OpenGL da engine. A geometria fica na
+GPU enquanto não é editada; Basic e Material reutilizam a imagem quando parados.
+Render acompanha a cena a cada frame. A seleção calcula a face sob o cursor
+somente no clique, sem manter um mapa de faces do tamanho da imagem.

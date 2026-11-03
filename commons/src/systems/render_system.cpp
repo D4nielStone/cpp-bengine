@@ -93,7 +93,7 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
 
     if (renderer_component.m_modelo) {
         for (const auto& mesh : renderer_component.m_modelo->meshes) {
-            for (const auto& vertex : mesh.getVertices()) {
+            for (const auto& vertex : mesh.vertices()) {
                 const glm::vec3 position{vertex.position.x, vertex.position.y, vertex.position.z};
                 minimum = glm::min(minimum, position);
                 maximum = glm::max(maximum, position);
@@ -113,7 +113,7 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
 
     float radius = 0.f;
     for (const auto& mesh : renderer_component.m_modelo->meshes) {
-        for (const auto& vertex : mesh.getVertices()) {
+        for (const auto& vertex : mesh.vertices()) {
             const glm::vec3 position{vertex.position.x, vertex.position.y, vertex.position.z};
             const float distance = glm::length(position - local_center);
             radius = std::max(radius, distance);
@@ -178,7 +178,43 @@ bool render_system::prepare_shadow_map(shadow_map& map, int resolution) {
 void render_system::setup(const std::shared_ptr<ecs>&) {
 }
 
-void render_system::update(const std::shared_ptr<ecs>& reg) {
+void render_system::update(const std::shared_ptr<ecs>& reg) { render(reg,nullptr,0,{}); }
+
+void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
+    std::uint32_t replacement_entity, std::shared_ptr<renderer> replacement) {
+    struct state_guard {
+        GLint draw_fb,read_fb,viewport[4],program,vao,array_buffer,active,depth_func,scissor[4];
+        std::array<GLint,16> textures{},cubemaps{};
+        GLboolean depth,blend,cull,scissor_test,srgb,depth_mask,color_mask[4];
+        GLfloat clear_color[4];
+        state_guard() {
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw_fb);glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read_fb);
+            glGetIntegerv(GL_VIEWPORT,viewport);glGetIntegerv(GL_CURRENT_PROGRAM,&program);glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao);
+            glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&array_buffer);glGetIntegerv(GL_ACTIVE_TEXTURE,&active);glGetIntegerv(GL_DEPTH_FUNC,&depth_func);
+            glGetIntegerv(GL_SCISSOR_BOX,scissor);glGetFloatv(GL_COLOR_CLEAR_VALUE,clear_color);
+            glGetBooleanv(GL_DEPTH_WRITEMASK,&depth_mask);glGetBooleanv(GL_COLOR_WRITEMASK,color_mask);
+            depth=glIsEnabled(GL_DEPTH_TEST);blend=glIsEnabled(GL_BLEND);cull=glIsEnabled(GL_CULL_FACE);
+            scissor_test=glIsEnabled(GL_SCISSOR_TEST);srgb=glIsEnabled(GL_FRAMEBUFFER_SRGB);
+            for(unsigned i=0;i<16;++i) { glActiveTexture(GL_TEXTURE0+i);glGetIntegerv(GL_TEXTURE_BINDING_2D,&textures[i]);glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP,&cubemaps[i]); }
+            glActiveTexture(active);
+        }
+        ~state_guard() {
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw_fb);glBindFramebuffer(GL_READ_FRAMEBUFFER,read_fb);glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+            glUseProgram(program);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,array_buffer);glDepthFunc(depth_func);glDepthMask(depth_mask);
+            glColorMask(color_mask[0],color_mask[1],color_mask[2],color_mask[3]);glClearColor(clear_color[0],clear_color[1],clear_color[2],clear_color[3]);
+            glScissor(scissor[0],scissor[1],scissor[2],scissor[3]);
+            const auto restore=[](GLenum cap,bool enabled){ if(enabled)glEnable(cap);else glDisable(cap); };
+            restore(GL_DEPTH_TEST,depth);restore(GL_BLEND,blend);restore(GL_CULL_FACE,cull);restore(GL_SCISSOR_TEST,scissor_test);restore(GL_FRAMEBUFFER_SRGB,srgb);
+            for(unsigned i=0;i<16;++i) { glActiveTexture(GL_TEXTURE0+i);glBindTexture(GL_TEXTURE_2D,textures[i]);glBindTexture(GL_TEXTURE_CUBE_MAP,cubemaps[i]); }
+            glActiveTexture(active);
+        }
+    } guard;
+    glDisable(GL_SCISSOR_TEST);glDisable(GL_BLEND);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    render(reg,&view,replacement_entity,replacement);
+}
+
+void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_view,
+    std::uint32_t replacement_entity, const std::shared_ptr<renderer>& replacement) {
     const auto start_time = std::chrono::steady_clock::now();
     m_last_camera_count = 0;
     m_last_rendered_entity_count = 0;
@@ -230,7 +266,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
     std::vector<std::pair<std::shared_ptr<renderer>, std::shared_ptr<transform>>> renderables;
     reg->cada<renderer, transform>([&](const uint32_t render_entity) {
         renderables.emplace_back(
-            reg->get<renderer>(render_entity),
+            replacement && render_entity==replacement_entity ? replacement : reg->get<renderer>(render_entity),
             reg->get<transform>(render_entity)
         );
     });
@@ -279,7 +315,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
                 auto draw = [&](const glm::mat4& matrix) {
                     depth_shader.setMat4("model", glm::value_ptr(matrix));
                     glBindVertexArray(mesh.getVertexArray());
-                    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.getIndices().size()), GL_UNSIGNED_INT, nullptr);
+                    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices().size()), GL_UNSIGNED_INT, nullptr);
                 };
                 if (instances.empty()) draw(transform->get_model_matrix());
                 else for (const auto& instance : instances) draw(instance.get_world_model_matrix());
@@ -327,14 +363,8 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
         spot_shadows_prepared = true;
     };
 
-    reg->cada<camera>([&](const uint32_t entity) {
-        if (m_camera_filter && !m_camera_filter(entity))
-            return;
-        auto camera_component = reg->get<camera>(entity);
-        if (!camera_component) {
-            return;
-        }
-
+    const auto draw_camera = [&](camera* camera_component) {
+        if (!camera_component) return;
         if (!spot_shadows_prepared) prepare_spot_shadows();
         ++m_last_camera_count;
         camera_component->drawFB();
@@ -351,7 +381,7 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             camera_component->config.atmosphere_zenith, camera_component->config.skybox_image);
 
         auto direction_light = global_direction_light;
-        if (auto camera_light = reg->get<directional_light>(camera_component->my_object)) {
+        if (auto camera_light = explicit_view ? std::shared_ptr<directional_light>{} : reg->get<directional_light>(camera_component->my_object)) {
             direction_light = *camera_light;
             direction_light.direction = camera_light->get_world_direction();
         }
@@ -465,6 +495,12 @@ void render_system::update(const std::shared_ptr<ecs>& reg) {
             glBindTexture(GL_TEXTURE_2D, shadow_binding);
             glActiveTexture(active_texture);
         }
+    };
+    if (explicit_view) draw_camera(explicit_view);
+    else reg->cada<camera>([&](const std::uint32_t entity) {
+        if (m_camera_filter && !m_camera_filter(entity)) return;
+        auto camera_component=reg->get<camera>(entity);
+        draw_camera(camera_component.get());
     });
 
     m_last_render_time_ms = std::chrono::duration<double, std::milli>(

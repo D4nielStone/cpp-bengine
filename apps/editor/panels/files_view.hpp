@@ -80,6 +80,17 @@ public:
         const std::filesystem::path& destination = {}, const std::string& diagnostic = {},
         std::function<void(const std::filesystem::path&)> complete = {}) {
         if (m_can_modify_files && !m_can_modify_files()) { set_asset_status("Pare a execução antes de importar."); return; }
+        auto extension=source.extension().string();
+        std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        if (extension==".bmodel") {
+            try {
+                const auto imported=import_file(source,destination);
+                if (m_on_model_imported) m_on_model_imported(imported);
+                if (complete) complete(imported);
+                set_asset_status("Modelo nativo importado: "+imported.filename().string());
+            } catch (const std::exception& error) { set_asset_status(error.what()); }
+            return;
+        }
         m_model_importer.show(source, m_project_root, destination, diagnostic,
             [this, complete](const auto& imported) {
                 m_current_directory = imported.parent_path(); m_selected_file = imported;

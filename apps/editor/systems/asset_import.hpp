@@ -12,6 +12,8 @@
 #include <assimp/material.h>
 #include <assimp/scene.h>
 #include "loaders/model_import.hpp"
+#include "loaders/editable_model.hpp"
+#include "loaders/material_asset.hpp"
 
 namespace editor::ui {
 
@@ -39,6 +41,31 @@ public:
 inline std::set<std::filesystem::path> asset_dependencies(const std::filesystem::path& source, bool model) {
     namespace fs = std::filesystem;
     std::set<fs::path> files{source};
+    auto extension=source.extension().string();
+    std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    if (extension==".bmodel" || extension==".bmat") {
+        const auto material_files = [&]() {
+            std::vector<fs::path> references;
+            if (extension==".bmat") references.push_back(source);
+            else {
+                commons::editable_model_data data; std::string error;
+                if (!commons::load_editable_model(source,data,error)) throw std::runtime_error(error);
+                for (const auto& mesh : data.meshes) if (!mesh.material_path.empty()) {
+                    const fs::path ref(mesh.material_path);
+                    if (ref.is_absolute()) throw std::runtime_error("Use referências de material relativas no pacote .bmodel.");
+                    references.push_back((source.parent_path()/ref).lexically_normal());
+                }
+            }
+            return references;
+        }();
+        for (const auto& path : material_files) {
+            std::vector<fs::path> textures; std::string error;
+            if (!commons::material_asset_dependencies(path,textures,error)) throw std::runtime_error(error);
+            files.insert(fs::canonical(path));
+            for (const auto& texture : textures) files.insert(fs::canonical(texture));
+        }
+        return files;
+    }
     if (model) {
         const auto settings = commons::model_import_settings_path(source);
         if (fs::is_regular_file(settings)) files.insert(settings);
@@ -159,6 +186,13 @@ inline std::filesystem::path import_asset(const std::filesystem::path& requested
             const auto target = destination / file.lexically_relative(common);
             fs::create_directories(target.parent_path());
             fs::copy_file(file, target);
+        }
+        auto extension=source.extension().string();
+        std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        if (extension==".bmodel" || extension==".bmat") {
+            for (const auto& dependency : asset_dependencies(destination/source.lexically_relative(common),model))
+                if (!path_inside(dependency,destination)) throw std::runtime_error("Dependência nativa fora do pacote importado.");
+            return destination/source.lexically_relative(common);
         }
         Assimp::Importer verification;
         auto* tracker = new import_file_tracker();

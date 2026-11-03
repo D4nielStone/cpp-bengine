@@ -7,6 +7,8 @@
 #include <utility>
 
 namespace COMMONS_NS {
+    class camera;
+    class renderer;
   /**
    * @brief Classe responsável por gerenciar o sistema de renderização do jogo.
    * @brief Atualiza os framebuffers das câmeras, configura as luzes e renderiza os objetos na tela.
@@ -19,6 +21,10 @@ namespace COMMONS_NS {
       render_system& operator=(const render_system&) = delete;
 		  void setup(const std::shared_ptr<ecs>&) override;
       void update(const std::shared_ptr<ecs>&) override;
+
+      // Render an explicit camera without inserting editor entities into the scene.
+      void render_view(const std::shared_ptr<ecs>& registry, camera& view,
+          std::uint32_t replacement_entity = 0, std::shared_ptr<renderer> replacement = {});
 
       // An empty filter preserves rendering to every camera.
       void set_camera_filter(std::function<bool(std::uint32_t)> filter) {
@@ -38,6 +44,7 @@ namespace COMMONS_NS {
       }
 
     private:
+      void render(const std::shared_ptr<ecs>&, camera*, std::uint32_t, const std::shared_ptr<renderer>&);
       std::function<bool(std::uint32_t)> m_camera_filter;
       struct shadow_map {
         unsigned int fbo{0}, texture{0};

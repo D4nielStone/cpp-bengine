@@ -643,6 +643,7 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
     context->selected_entity = entity.id;
     context->workspace_mode = 2;
     context->model_selection = 3;
+    context->model_view_mode = 2;
     context->orbital_view = true;
     context->model_orbital_view = true;
     context->inspector_sections["Camera"] = false;
@@ -655,13 +656,14 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
     std::string error;
     ASSERT_TRUE(workspace.save_workspace(files, error)) << error;
     context->selected_entity.reset(); context->workspace_mode = 0;
-    context->model_selection = 0; context->orbital_view = false; context->model_orbital_view = false;
+    context->model_selection = 0; context->model_view_mode = 0; context->orbital_view = false; context->model_orbital_view = false;
     context->inspector_sections.clear();
     camera->config.atmosphere_zenith = {};
     ASSERT_TRUE(workspace.load_workspace(files, error)) << error;
     EXPECT_EQ(context->selected_entity, entity.id);
     EXPECT_EQ(context->workspace_mode, 2);
     EXPECT_EQ(context->model_selection, 3);
+    EXPECT_EQ(context->model_view_mode, 2);
     EXPECT_TRUE(context->orbital_view);
     EXPECT_TRUE(context->model_orbital_view);
     EXPECT_FALSE(context->inspector_sections.at("Camera"));
@@ -816,13 +818,22 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     const unsigned char bytes[]{137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,11,73,68,65,84,120,156,99,248,15,4,0,9,251,3,253,251,94,107,43,0,0,0,0,73,69,78,68,174,66,96,130};
     const auto texture_path=context->project_root/"texture.png";
     { std::ofstream out(texture_path,std::ios::binary); out.write(reinterpret_cast<const char*>(bytes),sizeof(bytes)); }
-    auto* texture_input=find<bgui::inputbox>(*groups[0],[](auto& input) { return input.get_buffer().empty(); });
+    auto* texture_input=find<bgui::inputbox>(*groups[0],[](auto& input) { return input.has_class("material-texture-path") && input.get_buffer().empty(); });
     ASSERT_NE(texture_input,nullptr);
     texture_input->m_enter_func(texture_path.string());
     EXPECT_EQ(renderer->m_modelo->meshes[0].getMaterial().getTextura("tex_albedo").path,texture_path.string());
     EXPECT_TRUE(renderer->m_modelo->meshes[1].getMaterial().getTextura("tex_albedo").path.empty());
     ASSERT_TRUE(context->undo());
     EXPECT_TRUE(renderer->m_modelo->meshes[0].getMaterial().getTextura("tex_albedo").path.empty());
+    auto* material_input=find<bgui::inputbox>(*groups[0],[](auto& input) { return input.has_class("material-asset-path"); });
+    ASSERT_NE(material_input,nullptr);
+    commons::material reusable=renderer->m_modelo->meshes[0].getMaterial();
+    reusable.set_uniform("material.roughness",.29f);
+    std::filesystem::path reusable_path;
+    ASSERT_TRUE(commons::store_material_asset(context->project_root/"materials",reusable,reusable_path,error)) << error;
+    material_input->m_enter_func(reusable_path.string());
+    EXPECT_FLOAT_EQ(renderer->m_modelo->meshes[0].getMaterial().getUniforme("material.roughness").valor.f,.29f);
+    ASSERT_TRUE(context->undo());
     // Navigation switches independently from mesh selection and ignores text entry.
     io.m_mouse_position={image->processed_x()+20,image->processed_y()+20};
     bgui::on_update();

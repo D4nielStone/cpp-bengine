@@ -11,6 +11,7 @@ namespace commons {
 struct editable_mesh_data {
     std::vector<vertex> vertices;
     std::vector<std::vector<unsigned int>> faces;
+    std::string material_path;
 
     bool validate(std::string& error) const;
     std::vector<unsigned int> triangulated_indices() const;

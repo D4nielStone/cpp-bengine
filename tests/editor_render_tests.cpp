@@ -117,6 +117,15 @@ TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
     if (enabled.m_type == commons::uniform::type::Bool)
         EXPECT_TRUE(enabled.valor.b);
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    const auto original_renderer=registry->get<commons::renderer>(entity.id);
+    std::filesystem::path sidecar;
+    for(const auto& file : std::filesystem::recursive_directory_iterator(folder))
+        if(file.path().extension()==".bmat") { sidecar=file.path();break; }
+    ASSERT_FALSE(sidecar.empty());
+    std::ofstream(sidecar) << "{invalid";
+    EXPECT_FALSE(persistence.load(project.string(),error));
+    EXPECT_EQ(registry->get<commons::renderer>(entity.id),original_renderer);
+    EXPECT_FLOAT_EQ(original_renderer->m_modelo->meshes[0].getMaterial().getUniforme("material.metallic").valor.f,.73f);
     std::filesystem::remove_all(folder);
 }
 
@@ -1130,4 +1139,86 @@ TEST_F(EditorRenderTest, CameraFilterSkipsUnusedFramebuffersAndCanBeCleared) {
     EXPECT_EQ(render.last_camera_count(), 2u);
     EXPECT_EQ(second_camera->viewportFBO.x, 48);
     EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+}
+
+#include "model_editor_view.hpp"
+#include "loaders/editable_model.hpp"
+#include "loaders/material_asset.hpp"
+
+TEST_F(EditorRenderTest, ExplicitViewPreservesGlStateAndUsesFullScene) {
+    auto registry=std::make_shared<commons::ecs>();
+    auto object=registry->create();
+    auto model=std::make_unique<commons::model>();
+    commons::material material;
+    material.set_uniform("material.albedo",commons::color{1.f,.1f,.1f,1.f});
+    model->meshes.emplace_back(std::vector<commons::vertex>{
+        {{-1,-1,0},{0,0,1},{}},{{1,-1,0},{0,0,1},{}},{{0,1,0},{0,0,1},{}}},
+        std::vector<unsigned>{0,1,2},material);
+    registry->add<commons::renderer>(object,model.release());
+    commons::camera view;
+    view.position={0,0,3};
+    view.viewMatrix=glm::lookAt(glm::vec3{0,0,3},glm::vec3{},glm::vec3{0,1,0});
+    view.request_framebuffer_size({64,64});
+    glViewport(3,5,23,27);
+    glEnable(GL_SCISSOR_TEST);glScissor(1,2,8,9);
+    glEnable(GL_BLEND);glDepthMask(GL_FALSE);glColorMask(GL_TRUE,GL_FALSE,GL_TRUE,GL_FALSE);
+    glActiveTexture(GL_TEXTURE3);
+    commons::render_system rendering;
+    rendering.render_view(registry,view);
+    EXPECT_EQ(rendering.last_camera_count(),1u);
+    EXPECT_EQ(rendering.last_rendered_entity_count(),1u);
+    GLint viewport[4]{};glGetIntegerv(GL_VIEWPORT,viewport);
+    EXPECT_EQ(viewport[0],3);EXPECT_EQ(viewport[1],5);EXPECT_EQ(viewport[2],23);EXPECT_EQ(viewport[3],27);
+    GLint active{},framebuffer{};glGetIntegerv(GL_ACTIVE_TEXTURE,&active);glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&framebuffer);
+    EXPECT_EQ(active,GL_TEXTURE3);EXPECT_EQ(framebuffer,0);
+    EXPECT_TRUE(glIsEnabled(GL_SCISSOR_TEST));EXPECT_TRUE(glIsEnabled(GL_BLEND));
+    GLboolean mask{};glGetBooleanv(GL_DEPTH_WRITEMASK,&mask);EXPECT_FALSE(mask);
+    ASSERT_NE(view.framebuffer_texture(),0u);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,view.fbo);
+    std::array<unsigned char,4> pixel{};
+    glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel.data());
+    EXPECT_GT(pixel[0],pixel[1]);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,0);
+    glDisable(GL_SCISSOR_TEST);glDisable(GL_BLEND);glDepthMask(GL_TRUE);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    EXPECT_EQ(glGetError(),GL_NO_ERROR);
+}
+
+TEST_F(EditorRenderTest, ModelModesCacheDenseGeometryAndUseGpuPreview) {
+    bgui::scoped_interface scope;
+    bgui::get_context().m_size={1000,700};
+    auto registry=std::make_shared<commons::ecs>();
+    auto context=std::make_shared<editor::ui::editor_context>(registry);
+    auto entity=registry->create();
+    auto model=std::make_unique<commons::model>();
+    std::vector<commons::vertex> vertices;
+    std::vector<unsigned> indices;
+    constexpr unsigned side=100;
+    for(unsigned y=0;y<=side;++y)for(unsigned x=0;x<=side;++x)
+        vertices.push_back({{float(x)/side*2-1,float(y)/side*2-1,0},{0,0,1},{float(x)/side,float(y)/side}});
+    for(unsigned y=0;y<side;++y)for(unsigned x=0;x<side;++x) {
+        const auto a=y*(side+1)+x,b=a+1,c=a+side+1,d=c+1;
+        indices.insert(indices.end(),{a,b,d,a,d,c});
+    }
+    model->meshes.emplace_back(vertices,indices,commons::material{});
+    registry->add<commons::renderer>(entity,model.release());
+    context->selected_entity=entity.id;
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::match_parent);
+    editor::ui::model_editor_view panel(context);
+    panel.build(dock);
+    for(int i=0;i<3;++i)bgui::on_update();
+    const auto uploads=panel.geometry_upload_count(),projections=panel.projection_update_count();
+    EXPECT_GT(uploads,0u);
+    for(int i=0;i<10;++i)bgui::on_update();
+    EXPECT_EQ(panel.geometry_upload_count(),uploads);
+    EXPECT_EQ(panel.projection_update_count(),projections);
+    for(int mode=0;mode<3;++mode) {
+        context->model_view_mode=mode;
+        bgui::on_update();glFinish();
+        std::cout << "Model preview (20,000 triangles), mode " << mode << ": " << panel.last_preview_time_ms() << " ms CPU\n";
+        EXPECT_EQ(panel.geometry_upload_count(),uploads);
+        EXPECT_EQ(panel.projection_update_count(),projections);
+        EXPECT_NE(panel.preview_camera().framebuffer_texture(),0u);
+        EXPECT_EQ(glGetError(),GL_NO_ERROR);
+    }
 }
