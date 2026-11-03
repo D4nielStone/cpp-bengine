@@ -1042,7 +1042,7 @@ TEST(DirectionGizmo, FitsTopRightWithScalingAndSmallViewports) {
     EXPECT_EQ(rect.z, 200);
     const auto small_viewport = editor::ui::direction_gizmo_rect({0, 0, 70, 60}, 1.f);
     EXPECT_EQ(small_viewport.z, 36);
-    EXPECT_EQ(small_viewport.x + small.z, 58);
+    EXPECT_EQ(small_viewport.x + small_viewport.z, 58);
     EXPECT_EQ(editor::ui::direction_gizmo_rect({0, 0, 0, 0}, 1.f).z, 0);
 }
 
