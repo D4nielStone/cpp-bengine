@@ -137,19 +137,23 @@ public:
         auto& actions = tools.add<bgui::linear>(bgui::orientation::vertical);
         actions.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         actions.style.layout.padding = bgui::vec4i{0};
+        auto& undo_button = actions.add<bgui::button>("Desfazer", .28f, [this] { restore_geometry(false); });
+        auto& redo_button = actions.add<bgui::button>("Refazer", .28f, [this] { restore_geometry(true); });
         m_extrude_button = &actions.add<bgui::button>("Extrudar face", .28f, [this] { extrude(); });
         auto& group_button = actions.add<bgui::button>("Agrupar faces", .28f, [this] {
-            if (!is_native_model(m_source_path) || m_selected_faces.empty() || m_active_mesh >= m_model.meshes.size()) return;
+            if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before || !is_native_model(m_source_path) ||
+                m_selected_faces.empty() || m_active_mesh >= m_model.meshes.size()) return;
+            auto before = capture_geometry();
             auto& groups = m_model.meshes[m_active_mesh].face_groups;
             groups.push_back({"Grupo " + std::to_string(groups.size() + 1),
                 {m_selected_faces.begin(), m_selected_faces.end()}});
-            m_dirty = true;
-            m_material_revision = std::numeric_limits<std::size_t>::max();
+            record_geometry(std::move(before));
+            update_mesh_label();
             set_status("Grupo de faces criado. Salve o modelo.");
         });
-        m_loop_button = &actions.add<bgui::button>("Loop Cut", .28f, [this] { loop_cut(); });
+        m_loop_button = &actions.add<bgui::button>("Loop Cut", .28f, [this] { start_loop_cut(); });
         m_save_button = &actions.add<bgui::button>("Salvar .bmodel", .28f, [this] { save(); });
-        for (auto* button : {m_extrude_button, &group_button, m_loop_button, m_save_button}) {
+        for (auto* button : {&undo_button, &redo_button, m_extrude_button, &group_button, m_loop_button, m_save_button}) {
             button->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
             button->style.layout.require_height(bgui::mode::pixel, 30.f);
             button->style.layout.margin = bgui::vec4i{2, 0, 2, 0};
@@ -167,7 +171,7 @@ public:
         frame.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         frame.style.layout.require_height(bgui::mode::pixel, 30.f);
         auto& help = tools.add<bgui::text>(
-            "O: visão normal/orbital.\nBotão direito: olhar/orbitar.\nCtrl + Shift + arraste: pan.\nScroll: aproximar/afastar.\nG/R/S: transformar a seleção.\n\nFaces: selecione para extrudar.\nArestas: selecione para Loop Cut.\n\nAs alterações ficam pendentes até salvar.", .25f);
+            "O: visão normal/orbital.\nBotão direito: olhar/orbitar.\nCtrl + Shift + arraste: pan.\nScroll: aproximar/afastar.\nTab: modo objeto/edição.\nShift + clique: seleção múltipla.\nG/R/S: mover/girar/escalar.\nE: extrudar faces. Ctrl + R: Loop Cut.\n\nFaces: selecione para extrudar.\nArestas: selecione para Loop Cut.\n\nAs alterações ficam pendentes até salvar.", .25f);
         help.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         help.receives_input(false);
         m_mesh_controls = &tools.add<bgui::linear>(bgui::orientation::vertical);
@@ -192,6 +196,15 @@ public:
     std::size_t geometry_upload_count() const noexcept { return m_geometry_uploads; }
     std::size_t projection_update_count() const noexcept { return m_projection_updates; }
 
+    bool handle_history_shortcut(bool redo) {
+        if (!m_image || m_context->is_playing || !viewport_owns_mouse(m_image) ||
+            !is_native_model(m_source_path)) return false;
+        if (m_geometry_undo.empty() && m_geometry_redo.empty() &&
+            !m_gizmo.is_dragging() && !m_extrusion_before && !m_cut_before) return false;
+        restore_geometry(redo);
+        return true;
+    }
+
     bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
         for (const auto& [element, assign] : m_material_targets) {
             bool enabled = true;
@@ -205,9 +218,11 @@ public:
     }
 
     void update() override {
-        if (m_context && static_cast<int>(m_mode) != m_context->model_selection) {
+        if (m_context && !m_extrusion_before && !m_cut_before && static_cast<int>(m_mode) != m_context->model_selection) {
             m_gizmo_selection_dirty=true;
             m_mode = static_cast<model_selection_mode>(m_context->model_selection);
+            if (m_mode != model_selection_mode::object) m_last_edit_mode = m_mode;
+            m_picking_cut = false;
             refresh_mode_buttons();
             mark_preview_dirty();
         }
@@ -246,7 +261,6 @@ public:
             m_navigation->set_movement_speed(preferences.movement_speed);
             m_navigation->set_sprint_multiplier(preferences.sprint_multiplier);
             m_navigation->set_mouse_sensitivity(preferences.mouse_sensitivity);
-            m_navigation->set_zoom_sensitivity(preferences.zoom_sensitivity);
             m_navigation->set_smoothing_speed(preferences.smoothing_speed);
             const bool over = mouse_over_viewport(m_image) && !viewport_input_blocked_by_modal() &&
                 !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus());
@@ -261,8 +275,12 @@ public:
             }
             m_navigation_button->get_label().set_buffer(m_context->orbital_view ? "Visão: Orbital (O)" : "Visão: Normal (O)");
             auto eye = m_preview_registry->get<commons::transform>(m_preview_camera->my_object);
+            const auto pivot = m_context->orbital_view ? m_orbit_pivot->get_position() : m_model_center;
+            const float zoom_distance = std::clamp((eye->get_position() - pivot).length(),
+                m_frame_distance * .01f, m_frame_distance * 10.f);
+            m_navigation->set_zoom_sensitivity(preferences.zoom_sensitivity * zoom_distance * .15f);
             const auto before = eye->get_model_matrix();
-            m_navigation_input->gizmo_active = m_gizmo.is_dragging();
+            m_navigation_input->gizmo_active = m_gizmo.is_dragging() || m_extrusion_before.has_value() || m_cut_before.has_value();
             m_navigation->update(m_preview_registry);
             if (before != eye->get_model_matrix()) { m_preview_dirty = true; m_projection_dirty=true; }
         }
@@ -455,6 +473,7 @@ private:
                 auto& group = m_mesh_controls->add<bgui::tree>("Malha " + std::to_string(i+1), .28f, i<expansion.size() && expansion[i]);
                 group.add_class("model-mesh-section");
                 group.children().add<bgui::button>("Selecionar malha", .26f, [this, i] {
+                    if (m_extrusion_before || m_cut_before) return;
                     m_active_mesh = i;
                     m_mode = model_selection_mode::faces;
                     m_context->model_selection = static_cast<int>(m_mode);
@@ -467,6 +486,7 @@ private:
                 for (std::size_t g = 0; g < m_model.meshes[i].face_groups.size(); ++g) {
                     const auto& faces = m_model.meshes[i].face_groups[g];
                     group.children().add<bgui::button>(faces.name, .26f, [this, i, g] {
+                        if (m_extrusion_before || m_cut_before) return;
                         if (m_active_mesh != i || !bgui::get_pressed(bgui::input_key::left_control)) m_selected_faces.clear();
                         m_active_mesh = i;
                         const auto& indices = m_model.meshes[i].face_groups[g].faces;
@@ -484,15 +504,192 @@ private:
         }
     }
 
+    struct geometry_state {
+        commons::editable_model_data model;
+        std::size_t revision;
+    };
+    std::vector<geometry_state> m_geometry_undo;
+    std::vector<geometry_state> m_geometry_redo;
+    std::optional<geometry_state> m_drag_before;
+    std::size_t m_geometry_revision{};
+    std::size_t m_saved_geometry_revision{};
+    std::size_t m_next_geometry_revision{};
+    float m_frame_distance{1.f};
+
+    geometry_state capture_geometry() const {
+        return {m_model, m_geometry_revision};
+    }
+
+    void record_geometry(geometry_state before) {
+        constexpr std::size_t history_limit = 32;
+        if (m_geometry_undo.size() == history_limit)
+            m_geometry_undo.erase(m_geometry_undo.begin());
+        m_geometry_undo.push_back(std::move(before));
+        m_geometry_redo.clear();
+        m_geometry_revision = ++m_next_geometry_revision;
+        m_dirty = true;
+        m_material_revision = std::numeric_limits<std::size_t>::max();
+    }
+
+    void restore_geometry(bool redo) {
+        auto& source = redo ? m_geometry_redo : m_geometry_undo;
+        auto& destination = redo ? m_geometry_undo : m_geometry_redo;
+        if (source.empty() || m_gizmo.is_dragging() || m_extrusion_before || m_cut_before) return;
+        auto state = std::move(source.back());
+        source.pop_back();
+        for (std::size_t i = 0; i < m_model.meshes.size(); ++i) {
+            auto& current = m_model.meshes[i];
+            auto& previous = state.model.meshes[i];
+            current.vertices.swap(previous.vertices);
+            current.faces.swap(previous.faces);
+            current.face_groups.swap(previous.face_groups);
+        }
+        std::swap(state.revision, m_geometry_revision);
+        destination.push_back(std::move(state));
+        m_dirty = m_geometry_revision != m_saved_geometry_revision;
+        m_selected_faces.clear();
+        m_selected_vertices.clear();
+        m_selected_edge.reset();
+        m_geometry_dirty = m_projection_dirty = m_gizmo_selection_dirty = true;
+        m_material_revision = std::numeric_limits<std::size_t>::max();
+        update_mesh_label();
+        set_status(redo ? "Edição de geometria refeita." : "Edição de geometria desfeita.");
+        mark_preview_dirty();
+    }
+
     commons::transform m_gizmo_transform;
     std::vector<std::pair<std::size_t, std::size_t>> m_gizmo_vertices;
     bgui::vec2i m_gizmo_last_mouse{};
     bool m_gizmo_left_down{false};
     bool m_gizmo_selection_dirty{true};
     bool m_frame_preview{true};
+    bgui::vec3 m_model_center{};
+    model_selection_mode m_last_edit_mode{model_selection_mode::vertices};
+    bool m_tab_down{}, m_extrude_down{}, m_cut_down{};
+    bool m_picking_cut{};
+    std::optional<geometry_state> m_cut_before;
+    std::vector<mesh_edge> m_cut_rails;
+    bgui::vec2i m_cut_start{};
+    bgui::vec2 m_cut_screen_edge{};
+
+    void draw_cut_slide(const bgui::vec4i& rect) const {
+        if (m_projection_dirty) return;
+        const auto size = m_image->get_texture().m_size;
+        if (size.x <= 0 || size.y <= 0) return;
+        const auto first_new = m_cut_before->model.meshes[m_active_mesh].vertices.size();
+        const auto& points = m_projected_depths[m_active_mesh];
+        auto& draw = bgui::get_draw_list();
+        const auto color = draw.get_color();
+        const auto clip = draw.get_clip_rect();
+        const bool clipped = draw.has_clip_rect();
+        draw.set_clip_rect(clipped ? bgui::intersect_rect(clip, rect) : rect);
+        draw.set_color({1.f, .65f, .1f, 1.f});
+        const auto screen = [&](const bgui::vec3& p) {
+            return bgui::vec2{rect.x + p.x * rect.z / size.x, rect.y + p.y * rect.w / size.y};
+        };
+        for (const auto& face : m_model.meshes[m_active_mesh].faces) {
+            for (std::size_t i = 0; i < face.size(); ++i) {
+                const auto a = face[i], b = face[(i + 1) % face.size()];
+                if (a < first_new || b < first_new || a > b) continue;
+                if (std::abs(points[a].z) <= 1.f && std::abs(points[b].z) <= 1.f)
+                    draw.add_line(screen(points[a]), screen(points[b]), 2.f);
+            }
+        }
+        draw.set_color(color);
+        if (clipped) draw.set_clip_rect(clip);
+        else draw.clear_clip_rect();
+    }
+
+    void update_cut_slide(bgui::vec2i mouse, bool confirm, bool center, bool cancel) {
+        auto& mesh = m_model.meshes[m_active_mesh];
+        const auto& original = m_cut_before->model.meshes[m_active_mesh];
+        if (cancel) {
+            mesh = std::move(m_cut_before->model.meshes[m_active_mesh]);
+            m_dirty = m_geometry_revision != m_saved_geometry_revision;
+            set_status("Corte cancelado.");
+        } else {
+            const auto delta = mouse - m_cut_start;
+            const auto edge = m_cut_screen_edge;
+            const float length_squared = edge.x * edge.x + edge.y * edge.y;
+            const float fraction = center ? .5f : std::clamp(
+                .5f + (delta.x * edge.x + delta.y * edge.y) / length_squared, .001f, .999f);
+            slide_loop_cut(mesh, original.vertices.size(), m_cut_rails, fraction);
+            if (confirm || center) {
+                record_geometry(std::move(*m_cut_before));
+                set_status("Loop Cut aplicado. Salve o arquivo .bmodel.");
+            }
+        }
+        if (confirm || center || cancel) {
+            m_cut_before.reset();
+            m_cut_rails.clear();
+        }
+        m_geometry_dirty = m_projection_dirty = m_gizmo_selection_dirty = true;
+        update_mesh_label();
+        mark_preview_dirty();
+    }
+    std::optional<geometry_state> m_extrusion_before;
+    int m_extrusion_start_y{};
+    bool m_extrusion_changed{};
+
+    void update_extrusion(int y, bool confirm, bool cancel) {
+        if (cancel) {
+            m_model.meshes[m_active_mesh] = std::move(m_extrusion_before->model.meshes[m_active_mesh]);
+            m_extrusion_before.reset();
+            m_dirty = m_geometry_revision != m_saved_geometry_revision;
+            set_status("Extrusão cancelada.");
+        } else {
+            const float distance = (m_extrusion_start_y - y) * m_frame_distance /
+                std::max(1, m_image->processed_height());
+            if (std::abs(distance) < 1e-6f) {
+                if (!m_extrusion_changed) return;
+                m_model.meshes[m_active_mesh] = m_extrusion_before->model.meshes[m_active_mesh];
+                m_extrusion_changed = false;
+            } else {
+                auto candidate = m_extrusion_before->model.meshes[m_active_mesh];
+                std::string error;
+                if (!extrude_faces(candidate, m_selected_faces, distance, error)) {
+                    set_status(error);
+                    return;
+                }
+                m_model.meshes[m_active_mesh] = std::move(candidate);
+                m_extrusion_changed = true;
+            }
+        }
+        if (confirm && m_extrusion_before && m_extrusion_changed) {
+            const auto count = m_selected_faces.size();
+            const auto end = m_extrusion_before->model.meshes[m_active_mesh].faces.size();
+            m_selected_faces.clear();
+            for (auto face = end - count; face < end; ++face) m_selected_faces.insert(face);
+            record_geometry(std::move(*m_extrusion_before));
+            m_extrusion_before.reset();
+            set_status("Extrusão aplicada. Salve o arquivo .bmodel.");
+        }
+        m_geometry_dirty = m_projection_dirty = m_gizmo_selection_dirty = true;
+        update_mesh_label();
+        mark_preview_dirty();
+    }
+
+    static bool extend_selection() {
+        return bgui::get_pressed(bgui::input_key::left_shift) ||
+            bgui::get_pressed(bgui::input_key::right_shift) ||
+            bgui::get_pressed(bgui::input_key::left_control) ||
+            bgui::get_pressed(bgui::input_key::right_control);
+    }
+
+    void set_selection_mode(model_selection_mode mode) {
+        if (mode != model_selection_mode::object) m_last_edit_mode = mode;
+        m_context->model_selection = static_cast<int>(mode);
+        m_mode = mode;
+        m_selected_faces.clear();
+        m_selected_vertices.clear();
+        m_selected_edge.reset();
+        m_gizmo_selection_dirty = true;
+        refresh_mode_buttons();
+        mark_preview_dirty();
+    }
 
     void draw_gizmo() {
-        if (!is_native_model(m_source_path)) return;
+        const bool editable = is_native_model(m_source_path);
         const auto mouse = bgui::get_mouse_position();
         const bool blocked = !m_context || m_context->is_playing || viewport_input_blocked_by_modal();
         const bool down = !blocked && bgui::get_pressed(bgui::input_key::mouse_left);
@@ -504,6 +701,62 @@ private:
         const bool over = !blocked && !bgui::get_pressed(bgui::input_key::mouse_right) &&
             bgui::get_mouse_target() == m_pick_overlay &&
             !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus());
+        const bool tab = bgui::get_pressed(bgui::input_key::tab);
+        const bool extrude_key = bgui::get_pressed(bgui::input_key::e);
+        const bool control = bgui::get_pressed(bgui::input_key::left_control) ||
+            bgui::get_pressed(bgui::input_key::right_control);
+        const bool cut = control && bgui::get_pressed(bgui::input_key::r);
+        if (m_cut_before) {
+            draw_cut_slide(rect);
+            const bool center = bgui::get_pressed(bgui::input_key::mouse_right);
+            const bool cancel = blocked || bgui::get_pressed(bgui::input_key::escape);
+            const bool confirm = just_pressed && over;
+            m_tab_down = tab;
+            m_extrude_down = extrude_key;
+            m_cut_down = cut;
+            if (delta.x || delta.y || confirm || center || cancel)
+                update_cut_slide(mouse, confirm, center, cancel);
+            return;
+        }
+        if (over && editable && !m_gizmo.is_dragging() && !m_extrusion_before) {
+            if (tab && !m_tab_down) {
+                m_picking_cut = false;
+                set_selection_mode(m_mode == model_selection_mode::object
+                    ? m_last_edit_mode : model_selection_mode::object);
+            }
+            if (extrude_key && !m_extrude_down && !control && !m_picking_cut &&
+                m_mode == model_selection_mode::faces && !m_selected_faces.empty()) {
+                m_extrusion_before = capture_geometry();
+                m_extrusion_start_y = mouse.y;
+                m_extrusion_changed = false;
+                m_dirty = true;
+                set_status("Mova o mouse para extrudar. Clique para confirmar ou Esc para cancelar.");
+            }
+            if (cut && !m_cut_down) start_loop_cut(true);
+        }
+        m_tab_down = tab;
+        m_extrude_down = extrude_key;
+        m_cut_down = cut;
+        if (m_extrusion_before) {
+            const bool cancel = blocked || bgui::get_pressed(bgui::input_key::escape) ||
+                bgui::get_pressed(bgui::input_key::mouse_right);
+            if (delta.y != 0 || just_pressed || cancel)
+                update_extrusion(mouse.y, just_pressed && over, cancel);
+            return;
+        }
+        if (m_picking_cut && (blocked || bgui::get_pressed(bgui::input_key::escape) ||
+                bgui::get_pressed(bgui::input_key::mouse_right))) {
+            m_picking_cut = false;
+            set_status("Corte cancelado.");
+        }
+        if (m_picking_cut && just_pressed && over) {
+            select_at(mouse);
+            if (m_selected_edge) {
+                m_picking_cut = false;
+                loop_cut();
+            }
+            return;
+        }
         if (m_gizmo_selection_dirty && !m_gizmo.is_dragging()) {
             m_gizmo_vertices.clear();
             bgui::vec3 pivot{};
@@ -529,18 +782,21 @@ private:
                 }
             }
             if (!m_gizmo_vertices.empty()) pivot = pivot / static_cast<float>(m_gizmo_vertices.size());
+            m_orbit_pivot->set_position(m_mode != model_selection_mode::object &&
+                !m_gizmo_vertices.empty() ? pivot : m_model_center);
             m_gizmo_transform.set_position(pivot);
             m_gizmo_transform.set_rotation({});
             m_gizmo_transform.set_scale({1.f, 1.f, 1.f});
             m_gizmo_selection_dirty = false;
         }
         const auto before = m_gizmo_transform.get_model_matrix();
-        auto* target = m_gizmo_vertices.empty() ? nullptr : &m_gizmo_transform;
+        auto* target = !editable || m_picking_cut || m_gizmo_vertices.empty() ? nullptr : &m_gizmo_transform;
         const bool was_dragging = m_gizmo.is_dragging();
         m_gizmo.update(*m_preview_camera, target, rect, {rect}, mouse, delta,
             over, just_pressed && over, down && (over || m_gizmo.is_dragging()));
         const auto after = m_gizmo_transform.get_model_matrix();
         if (target && before != after) {
+            if (!m_drag_before) m_drag_before = capture_geometry();
             const auto change = after * glm::inverse(before);
             for (auto [mesh, vertex] : m_gizmo_vertices) {
                 auto& point = m_model.meshes[mesh].vertices[vertex].position;
@@ -553,6 +809,10 @@ private:
             mark_preview_dirty();
         }
         if (!m_gizmo.is_dragging() && just_pressed && over) select_at(mouse);
+        if (!m_gizmo.is_dragging() && m_drag_before) {
+            record_geometry(std::move(*m_drag_before));
+            m_drag_before.reset();
+        }
         if (was_dragging && !m_gizmo.is_dragging()) m_gizmo_selection_dirty = true;
         if(m_active_mesh<m_projected_vertices.size()) {
             auto& draw=bgui::get_draw_list();const auto previous_color=draw.get_color();
@@ -596,6 +856,11 @@ private:
             return;
         }
 
+        m_picking_cut = false;
+        m_geometry_undo.clear();
+        m_geometry_redo.clear();
+        m_drag_before.reset();
+        m_saved_geometry_revision = m_geometry_revision = 0;
         m_gizmo = editor::transform_gizmo{};
         m_geometry_dirty=true;m_material_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         m_frame_preview = true;
@@ -678,14 +943,9 @@ private:
         const model_selection_mode mode
     ) {
         auto& button = parent.add<bgui::button>(label, 0.27f, [this, mode]() {
-            m_gizmo_selection_dirty=true;
-            m_mode = mode;
-            if (m_context) m_context->model_selection = static_cast<int>(mode);
-            m_selected_faces.clear();
-            m_selected_vertices.clear();
-            m_selected_edge.reset();
-            refresh_mode_buttons();
-            mark_preview_dirty();
+            if (m_extrusion_before || m_cut_before || m_gizmo.is_dragging()) return;
+            m_picking_cut = false;
+            set_selection_mode(mode);
         });
         button.style.layout.require_mode(bgui::mode::stretch, bgui::mode::pixel);
         button.style.layout.require_height(bgui::mode::pixel, 26.f);
@@ -789,9 +1049,10 @@ private:
             const float radius = std::max(.01f,(high-low).length()*.5f);
             const float aspect = static_cast<float>(width)/height;
             const float distance = radius / (std::sin(glm::radians(m_preview_camera->config.fov)*.5f)*std::min(1.f,aspect)) * 1.2f;
+            m_frame_distance = distance;
             m_preview_camera->config.corte_longo = std::max(300.f,distance+radius*4.f);
             m_preview_camera->config.corte_curto = std::max(1e-6f,distance*1e-4f);
-            m_navigation->set_orbit_distance_limits(.01f,std::max(1000.f,distance*100.f));
+            m_navigation->set_orbit_distance_limits(distance * .005f, distance * 100.f);
 
 
             const float yaw = .65f - 1.57079632679f, pitch = -.4f;
@@ -799,6 +1060,8 @@ private:
             auto eye = m_preview_registry->get<commons::transform>(m_preview_camera->my_object);
             eye->set_position(center-forward*distance);
             eye->set_rotation({glm::degrees(pitch),glm::degrees(yaw),0.f});
+            m_model_center = center;
+            m_gizmo_selection_dirty = true;
             m_orbit_pivot->set_position(center);
             m_navigation->set_orbital(false);
             if (m_context->orbital_view) m_navigation->focus_orbit_target(m_orbit_pivot,distance);
@@ -917,7 +1180,7 @@ private:
     }
 
     void select_at(const bgui::vec2i& position) {
-        if (m_model.meshes.empty() || !m_image)
+        if (m_model.meshes.empty() || !m_image || m_projection_dirty)
             return;
         const auto image_rect = m_image->processed_rect();
         const float x = static_cast<float>(position.x - image_rect.x);
@@ -961,7 +1224,7 @@ private:
                 }
             }
             if(selected.first==std::numeric_limits<std::size_t>::max())return;
-            if (m_active_mesh != selected.first || !bgui::get_pressed(bgui::input_key::left_control))
+            if (m_active_mesh != selected.first || !extend_selection())
                 m_selected_faces.clear();
             m_active_mesh = selected.first;
             if (!m_selected_faces.erase(selected.second)) m_selected_faces.insert(selected.second);
@@ -1000,7 +1263,7 @@ private:
         }
         if (!best)
             return false;
-        if (m_active_mesh != best->first || !bgui::get_pressed(bgui::input_key::left_control))
+        if (m_active_mesh != best->first || !extend_selection())
             m_selected_vertices.clear();
         m_active_mesh = best->first;
         if (!m_selected_vertices.erase(best->second)) m_selected_vertices.insert(best->second);
@@ -1070,6 +1333,7 @@ private:
     }
 
     void extrude() {
+        if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before) return;
         if (!is_native_model(m_source_path)) {
             set_status("Importe o modelo como .bmodel para editar a geometria.");
             return;
@@ -1085,6 +1349,7 @@ private:
             return;
         }
         std::string error;
+        auto before = capture_geometry();
         if (!extrude_faces(
                 m_model.meshes[m_active_mesh],
                 m_selected_faces,
@@ -1095,13 +1360,30 @@ private:
             return;
         }
         m_selected_faces.clear();
-        m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
+        record_geometry(std::move(before));
+        m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         update_mesh_label();
         set_status("Extrusão aplicada. Salve o arquivo .bmodel.");
         mark_preview_dirty();
     }
 
+    void start_loop_cut(bool pick_edge = false) {
+        if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before) return;
+        if (!is_native_model(m_source_path)) {
+            set_status("Importe o modelo como .bmodel para editar a geometria.");
+            return;
+        }
+        if (!pick_edge && m_mode == model_selection_mode::edges && m_selected_edge) {
+            loop_cut();
+            return;
+        }
+        set_selection_mode(model_selection_mode::edges);
+        m_picking_cut = true;
+        set_status("Clique em uma aresta para cortar. Esc cancela.");
+    }
+
     void loop_cut() {
+        if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before) return;
         if (!is_native_model(m_source_path)) {
             set_status("Importe o modelo como .bmodel para editar a geometria.");
             return;
@@ -1111,23 +1393,37 @@ private:
             set_status("Loop Cut requer uma aresta selecionada no modo Edges.");
             return;
         }
+        if (m_projection_dirty) return;
+        const auto& points = m_projected_vertices[m_active_mesh];
+        const auto edge = points[m_selected_edge->second] - points[m_selected_edge->first];
+        const auto size = m_image->get_texture().m_size;
+        const auto rect = m_image->processed_rect();
+        if (size.x <= 0 || size.y <= 0) return;
+        m_cut_screen_edge = {edge.x * rect.z / size.x, edge.y * rect.w / size.y};
+        if (std::hypot(m_cut_screen_edge.x, m_cut_screen_edge.y) < 1.f) m_cut_screen_edge = {100.f, 0.f};
         std::string error;
+        auto before = capture_geometry();
         if (!editor::ui::loop_cut(
                 m_model.meshes[m_active_mesh],
                 *m_selected_edge,
-                error
+                error,
+                &m_cut_rails
             )) {
             set_status(error);
             return;
         }
         m_selected_edge.reset();
-        m_dirty = true;m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
+        m_cut_before = std::move(before);
+        m_cut_start = bgui::get_mouse_position();
+        m_dirty = true;
+        m_geometry_dirty=true;m_projection_dirty=true;m_gizmo_selection_dirty=true;
         update_mesh_label();
-        set_status("Loop Cut aplicado. Salve o arquivo .bmodel.");
+        set_status("Deslize com o mouse. Clique para confirmar, botão direito para centralizar ou Esc para cancelar.");
         mark_preview_dirty();
     }
 
     void save() {
+        if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before) return;
         if (m_model.meshes.empty() || !m_model_entity) {
             set_status("Selecione uma entidade com modelo antes de salvar.");
             return;
@@ -1180,6 +1476,7 @@ private:
                 updated_entity = true;
             }
         }
+        m_saved_geometry_revision = m_geometry_revision;
         m_dirty = false;
         update_mesh_label();
         if (m_source_label) m_source_label->set_buffer(destination.filename().string());

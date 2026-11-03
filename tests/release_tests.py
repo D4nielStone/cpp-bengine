@@ -10,6 +10,14 @@ spec.loader.exec_module(module)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_release_changelog_includes_tag_preview(self):
+        workflow = (module.ROOT / '.github/workflows/release_installer.yml').read_text()
+        self.assertIn(
+            '![Bubble Engine preview](https://raw.githubusercontent.com/%s/%s/preview.jpg)',
+            workflow)
+        self.assertIn('"$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release/CHANGELOG.md',
+                      workflow)
+
     @unittest.skipUnless(sys.platform == 'linux', 'Linux library bundling')
     def test_host_cpp_runtime_is_not_bundled(self):
         import shutil

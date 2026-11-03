@@ -71,19 +71,20 @@ float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D
     vec3 projected = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
     float bias = max(depthBias * (1.0 - dot(normal, lightDirection)), depthBias);
     vec2 atlasTexel = 1.0 / vec2(textureSize(depthMap, 0));
-    vec2 texel = atlasTexel / scale;
-    // Bound receiver depth variation across the PCF footprint (one texel plus
-    // half a texel of nearest-sample rounding). The geometric depth derivatives
-    // also work with normal maps, whose shading normals do not describe this slope.
     vec3 dx = dFdx(projected);
     vec3 dy = dFdy(projected);
     if (lightPosition.w <= 0.0 || any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) return 1.0;
     float determinant = dx.x * dy.y - dx.y * dy.x;
+    vec2 depthGradient = vec2(0.0);
     if (abs(determinant) > 1e-12) {
-        vec2 depthGradient = vec2(dy.y * dx.z - dx.y * dy.z,
-                                  dx.x * dy.z - dy.x * dx.z) / determinant;
-        bias += 1.5 * dot(abs(depthGradient), texel);
+        depthGradient = vec2(dy.y * dx.z - dx.y * dy.z,
+                             dx.x * dy.z - dy.x * dx.z) / determinant;
     }
+    if (scale < 1.0)
+        bias += 1.5 * dot(abs(depthGradient), atlasTexel / scale);
+    else
+        // Allow for depth quantization and subpixel rasterization error.
+        bias = max(bias, 2.0 / 16777215.0) + dot(abs(depthGradient), atlasTexel) / 128.0;
     float blocked = 0.0;
     for (int x = -1; x <= 1; ++x)
         for (int y = -1; y <= 1; ++y) {
@@ -91,7 +92,13 @@ float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D
             // Keep PCF taps inside this light's atlas tile.
             if (scale < 1.0)
                 uv = clamp(uv, offset + atlasTexel * 0.5, offset + vec2(scale) - atlasTexel * 0.5);
-            blocked += projected.z - bias > texture(depthMap, uv).r ? 1.0 : 0.0;
+            float receiverDepth = projected.z;
+            if (scale == 1.0) {
+                // Compare at the center of the texel selected by nearest sampling.
+                vec2 sampleCenter = (floor(uv / atlasTexel) + 0.5) * atlasTexel;
+                receiverDepth += dot(depthGradient, sampleCenter - projected.xy);
+            }
+            blocked += receiverDepth - bias > texture(depthMap, uv).r ? 1.0 : 0.0;
         }
     return 1.0 - strength * blocked / 9.0;
 }

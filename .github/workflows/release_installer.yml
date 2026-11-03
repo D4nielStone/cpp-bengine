@@ -159,7 +159,8 @@ jobs:
           mkdir release
           find release-artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
           (cd release && sha256sum *.zip > SHA256SUMS)
-          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body > release/CHANGELOG.md
+          printf '![Bubble Engine preview](https://raw.githubusercontent.com/%s/%s/preview.jpg)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release/CHANGELOG.md
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body >> release/CHANGELOG.md
           notes_path="docs/RELEASE_${GITHUB_REF_NAME}.md"
           if [ -f "$notes_path" ]; then
             printf '\n' >> release/CHANGELOG.md

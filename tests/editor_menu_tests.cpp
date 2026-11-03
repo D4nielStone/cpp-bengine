@@ -797,6 +797,27 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
         return button.get_label().get_buffer() == "Salvar .bmodel";
     });
     ASSERT_NE(save, nullptr);
+    editor::ui::undo_redo_shortcuts_system shortcuts(
+        std::make_shared<editor::ui::editor_commands>(context),
+        [&](bool redo) { return panel.handle_history_shortcut(redo); });
+    io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::z] = bgui::input_action::press;
+    shortcuts.on_update();
+    io.m_input_map.clear();
+    shortcuts.on_update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Malha 1/1"; }), nullptr);
+    save->on_released();
+    bgui::on_update();
+    commons::editable_model_data reverted;
+    ASSERT_TRUE(commons::load_editable_model(native, reverted, save_error)) << save_error;
+    ASSERT_EQ(reverted.meshes[0].vertices.size(), vertices.size());
+    for (std::size_t i = 0; i < vertices.size(); ++i)
+        EXPECT_EQ(reverted.meshes[0].vertices[i].position, vertices[i].position);
+    io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::left_shift] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::z] = bgui::input_action::press;
+    shortcuts.on_update();
+    io.m_input_map.clear();
     save->on_released();
     bgui::on_update();
     bgui::on_update();

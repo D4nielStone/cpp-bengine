@@ -861,28 +861,13 @@ TEST_F(EditorAssetWorkflowTest, ProjectRemovalSeparatesRecentListFromDiskAndProt
 TEST_F(EditorAssetWorkflowTest, PrimitivesHaveValidGeometryAndCreationSupportsUndoAndPlayGuard) {
     auto registry = std::make_shared<commons::ecs>();
     auto context = std::make_shared<editor::ui::editor_context>(registry);
+    ASSERT_EQ(editor::ui::primitive_entities.size(), 5u);
+    EXPECT_STREQ(editor::ui::primitive_entities.back().name, "Cápsula");
     for (size_t i = 0; i < editor::ui::primitive_entities.size(); ++i) {
         const auto path = std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / editor::ui::primitive_entities[i].asset;
-        Assimp::Importer importer;
-        const auto* scene = importer.ReadFile(path.string(), aiProcess_Triangulate | aiProcess_GenSmoothNormals);
-        ASSERT_NE(scene, nullptr) << importer.GetErrorString();
-        ASSERT_TRUE(scene->HasMeshes());
-        EXPECT_TRUE(scene->mMeshes[0]->HasTextureCoords(0));
-        auto loader = [scene](const auto& path) {
-            auto model = std::make_unique<commons::model>();
-            model->relocate_source_path(path);
-            std::vector<commons::vertex> vertices;
-            const auto* mesh = scene->mMeshes[0];
-            for (unsigned j = 0; j < mesh->mNumVertices; ++j)
-                vertices.emplace_back(bgui::vec3{mesh->mVertices[j].x, mesh->mVertices[j].y, mesh->mVertices[j].z},
-                    bgui::vec3{mesh->mNormals[j].x, mesh->mNormals[j].y, mesh->mNormals[j].z}, bgui::vec2{0, 0});
-            std::vector<unsigned> indices;
-            for (unsigned j = 0; j < mesh->mNumFaces; ++j)
-                for (unsigned k = 0; k < mesh->mFaces[j].mNumIndices; ++k) indices.push_back(mesh->mFaces[j].mIndices[k]);
-            model->meshes.emplace_back(vertices, indices, commons::material{});
-            return model;
-        };
-        const auto id = editor::ui::create_primitive_entity(context, i, loader);
+        EXPECT_EQ(path.extension(), ".bmodel");
+        const auto id = editor::ui::create_primitive_entity(context, i,
+            [](const auto& asset) { return commons::model::prepare(asset.string()); });
         ASSERT_TRUE(id.has_value());
         EXPECT_EQ(context->selected_entity, id);
         EXPECT_EQ(context->entity_names.at(*id), editor::ui::primitive_entities[i].name);

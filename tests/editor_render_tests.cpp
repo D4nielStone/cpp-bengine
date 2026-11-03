@@ -699,6 +699,16 @@ TEST_F(EditorRenderTest, ColliderOverlayDrawsWireframeAndRestoresOpenGLState) {
     for (size_t i=0;i<pixels.size();i+=3)
         if (pixels[i] > 180 && pixels[i+1] > 150 && pixels[i+2] < 120) ++yellow;
     EXPECT_GT(yellow,10);
+    glDepthMask(GL_TRUE);
+    glClearDepth(0.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClearDepth(1.0);
+    overlay.draw_colliders(*camera, {0,0,64,64}, registry);
+    overlay.draw_camera_frustum(*camera, *camera, {0,0,64,64});
+    overlay.draw_point_light(*camera, {0,0,64,64}, {0,0,0});
+    glReadPixels(0,0,64,64,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+    EXPECT_TRUE(std::all_of(pixels.begin(), pixels.end(), [](auto value) { return value == 0; }));
+    EXPECT_FALSE(glIsEnabled(GL_DEPTH_TEST));
     registry->remove(2);registry->remove(1);
 }
 

@@ -215,7 +215,7 @@ int main(const int argc, char** argv) {
 
     if (project_path.empty()) {
         auto cube_entity = registry->create();
-        registry->add<commons::renderer>(cube_entity, "assets/models/cube.obj");
+        registry->add<commons::renderer>(cube_entity, "assets/models/primitive-cube.bmodel");
         registry->get<commons::transform>(cube_entity.id)->set_position(
             {0.f, 0.f, 0.f}
         );

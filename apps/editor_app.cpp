@@ -366,7 +366,7 @@ public:
         auto cube_entity = m_registry->create();
         m_camera_entity = camera_entity.id;
         m_registry->add<commons::camera>(camera_entity);
-        m_registry->add<commons::renderer>(cube_entity, "assets/models/cube.obj");
+        m_registry->add<commons::renderer>(cube_entity, "assets/models/primitive-cube.bmodel");
         m_camera = m_registry->get<commons::camera>(camera_entity.id);
         m_registry->get<commons::transform>(cube_entity.id)->set_position({0.f, 0.f, 0.f});
         m_registry->get<commons::transform>(camera_entity.id)->set_position({0.f, 0.f, 5.f});
@@ -581,7 +581,9 @@ public:
             m_window, m_context, m_render_system
         );
         register_runtime_commands();
-        bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(m_commands);
+        bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(m_commands, [this](bool redo) {
+            return m_model_editor && m_model_editor->handle_history_shortcut(redo);
+        });
     }
 
     bool load_workspace(std::string& error) {

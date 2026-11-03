@@ -430,7 +430,7 @@ public:
     }
 
     void set_orbit_distance_limits(float min_distance, float max_distance) {
-        m_min_orbit_distance = std::max(0.01f, min_distance);
+        m_min_orbit_distance = std::max(1e-6f, min_distance);
         m_max_orbit_distance = std::max(
             m_min_orbit_distance,
             max_distance

@@ -9,6 +9,7 @@
 #include <bgui.hpp>
 #include <elem/inputbox.hpp>
 
+#include <functional>
 #include <memory>
 #include <utility>
 
@@ -24,9 +25,10 @@ public:
           ) {}
 
     explicit undo_redo_shortcuts_system(
-        std::shared_ptr<editor_commands> commands
+        std::shared_ptr<editor_commands> commands,
+        std::function<bool(bool)> model_history = {}
     )
-        : m_commands(std::move(commands)) {
+        : m_commands(std::move(commands)), m_model_history(std::move(model_history)) {
         receives_input(false);
         set_flex(false);
     }
@@ -51,14 +53,12 @@ public:
             bgui::get_pressed(bgui::input_key::right_shift);
 
         const bool editing_text = dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) != nullptr;
-        if (!editing_text && m_commands && z_down && !m_z_was_down) {
-            if (shift_down)
-                m_commands->execute(editor_command::redo);
-            else
-                m_commands->execute(editor_command::undo);
+        if (!editing_text && m_commands && !viewport_input_blocked_by_modal()) {
+            const bool undo = z_down && !m_z_was_down && !shift_down;
+            const bool redo = (z_down && !m_z_was_down && shift_down) || (y_down && !m_y_was_down);
+            if ((undo || redo) && (!m_model_history || !m_model_history(redo)))
+                m_commands->execute(redo ? editor_command::redo : editor_command::undo);
         }
-        if (!editing_text && m_commands && y_down && !m_y_was_down)
-            m_commands->execute(editor_command::redo);
 
         const bool copy_down = control_down && bgui::get_pressed(bgui::input_key::c);
         const bool paste_down = control_down && bgui::get_pressed(bgui::input_key::v);
@@ -87,6 +87,7 @@ private:
     }
 
     std::shared_ptr<editor_commands> m_commands;
+    std::function<bool(bool)> m_model_history;
     entity_clipboard m_clipboard;
     bool m_c_was_down{false}, m_v_was_down{false};
     bool m_z_was_down{false};

@@ -174,7 +174,6 @@ namespace {
         const GLuint program,
         const GLuint vao,
         const GLuint vbo,
-        const bool depth_test,
         const float line_width
     ) {
         if (!camera.flag_fb || camera.viewportFBO.x <= 0 ||
@@ -185,10 +184,7 @@ namespace {
         const auto state = save_gl_state();
         glBindFramebuffer(GL_FRAMEBUFFER, camera.fbo);
         glViewport(0, 0, camera.viewportFBO.x, camera.viewportFBO.y);
-        if (depth_test)
-            glEnable(GL_DEPTH_TEST);
-        else
-            glDisable(GL_DEPTH_TEST);
+        glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LEQUAL);
         glDepthMask(GL_FALSE);
         glEnable(GL_BLEND);
@@ -263,7 +259,7 @@ void editor::grid_gizmo::draw(
 
     ensure_resources(m_program, m_vao, m_vbo);
     render_vertices(
-        camera, viewport, vertices, m_program, m_vao, m_vbo, true, 1.f
+        camera, viewport, vertices, m_program, m_vao, m_vbo, 1.f
     );
 }
 
@@ -318,7 +314,7 @@ void editor::grid_gizmo::draw_camera_frustum(
 
     ensure_resources(m_program, m_vao, m_vbo);
     render_vertices(
-        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 1.5f
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, 1.5f
     );
 }
 
@@ -384,7 +380,7 @@ void editor::grid_gizmo::draw_directional_light(
 
     ensure_resources(m_program, m_vao, m_vbo);
     render_vertices(
-        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 2.f
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, 2.f
     );
 }
 
@@ -440,7 +436,7 @@ void editor::grid_gizmo::draw_point_light(
 
     ensure_resources(m_program, m_vao, m_vbo);
     render_vertices(
-        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 2.f
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, 2.f
     );
 }
 
@@ -491,7 +487,7 @@ void editor::grid_gizmo::draw_sound_player_area(
 
     ensure_resources(m_program, m_vao, m_vbo);
     render_vertices(
-        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, false, 1.75f
+        viewport_camera, viewport, vertices, m_program, m_vao, m_vbo, 1.75f
     );
 }
 
@@ -505,5 +501,5 @@ void editor::grid_gizmo::draw_colliders(const COMMONS_NS::camera& camera,
     }
     if (vertices.empty()) return;
     ensure_resources(m_program, m_vao, m_vbo);
-    render_vertices(camera, viewport, vertices, m_program, m_vao, m_vbo, false, 1.5f);
+    render_vertices(camera, viewport, vertices, m_program, m_vao, m_vbo, 1.5f);
 }

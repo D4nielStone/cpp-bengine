@@ -76,6 +76,25 @@ TEST_F(EditableModelTest, LoopCutSplitsQuadAndRejectsUnsupportedTopology) {
     EXPECT_NE(error.find("quadriláteras"), std::string::npos);
 }
 
+TEST_F(EditableModelTest, LoopCutSlidesCoherentlyAcrossOppositeEdgeWinding) {
+    auto mesh = quad_mesh();
+    mesh.vertices.push_back({{0.f, 2.f, 0.f}, {}, {0.f, 2.f}});
+    mesh.vertices.push_back({{1.f, 2.f, 0.f}, {}, {1.f, 2.f}});
+    mesh.faces.push_back({3, 2, 5, 4});
+    std::string error;
+    std::vector<editor::ui::mesh_edge> rails;
+    ASSERT_TRUE(editor::ui::loop_cut(mesh, {0, 1}, error, &rails)) << error;
+    ASSERT_EQ(rails.size(), 3u);
+    editor::ui::slide_loop_cut(mesh, 6, rails, .8f);
+    for (std::size_t i = 6; i < mesh.vertices.size(); ++i) {
+        EXPECT_FLOAT_EQ(mesh.vertices[i].position.x, .8f);
+        EXPECT_FLOAT_EQ(mesh.vertices[i].uvcoords.x, .8f);
+    }
+    editor::ui::slide_loop_cut(mesh, 6, rails, .5f);
+    for (std::size_t i = 6; i < mesh.vertices.size(); ++i)
+        EXPECT_FLOAT_EQ(mesh.vertices[i].position.x, .5f);
+}
+
 TEST_F(EditableModelTest, NativeModelRoundTripsAndPreservesPolygonTopology) {
     commons::editable_model_data source;
     source.meshes.push_back(quad_mesh());

@@ -144,10 +144,24 @@ inline bool extrude_faces(
     return true;
 }
 
+inline void slide_loop_cut(commons::editable_mesh_data& mesh, std::size_t first_new_vertex,
+    const std::vector<mesh_edge>& rails, float fraction) {
+    for (std::size_t i = 0; i < rails.size(); ++i) {
+        const auto [a, b] = rails[i];
+        auto& vertex = mesh.vertices[first_new_vertex + i];
+        const auto& first = mesh.vertices[a];
+        const auto& second = mesh.vertices[b];
+        vertex.position = first.position + (second.position - first.position) * fraction;
+        vertex.uvcoords = first.uvcoords + (second.uvcoords - first.uvcoords) * fraction;
+    }
+    mesh.recalculate_normals();
+}
+
 inline bool loop_cut(
     commons::editable_mesh_data& mesh,
     const mesh_edge& selected_edge,
-    std::string& error
+    std::string& error,
+    std::vector<mesh_edge>* slide_rails = nullptr
 ) {
     error.clear();
     if (!mesh.validate(error)) return false;
@@ -157,7 +171,7 @@ inline bool loop_cut(
         return false;
     }
 
-    std::set<mesh_edge> cut_edges{seed};
+    std::map<mesh_edge, mesh_edge> cut_edges{{seed, selected_edge}};
     bool changed = true;
     while (changed) {
         changed = false;
@@ -179,17 +193,19 @@ inline bool loop_cut(
             if (matching_edges.size() == 2)
                 continue;
             const auto opposite = (matching_edges.front() + 2) % 4;
-            const auto edge = ordered_mesh_edge(
-                face[opposite],
-                face[(opposite + 1) % 4]
-            );
-            changed = cut_edges.insert(edge).second || changed;
+            const auto corner = matching_edges.front();
+            const auto direction = cut_edges.at(ordered_mesh_edge(face[corner], face[(corner + 1) % 4]));
+            mesh_edge rail{face[(opposite + 1) % 4], face[opposite]};
+            if (direction.first != face[corner]) std::swap(rail.first, rail.second);
+            changed = cut_edges.emplace(ordered_mesh_edge(rail.first, rail.second), rail).second || changed;
         }
     }
 
     std::map<mesh_edge, unsigned int> midpoint_indices;
     auto result = mesh;
-    for (const auto& edge : cut_edges) {
+    std::vector<mesh_edge> rails;
+    for (const auto& [edge, rail] : cut_edges) {
+        rails.push_back(rail);
         const auto& first = mesh.vertices[edge.first];
         const auto& second = mesh.vertices[edge.second];
         commons::vertex midpoint;
@@ -264,6 +280,7 @@ inline bool loop_cut(
     if (!result.validate(error))
         return false;
     mesh = std::move(result);
+    if (slide_rails) *slide_rails = std::move(rails);
     return true;
 }
 
