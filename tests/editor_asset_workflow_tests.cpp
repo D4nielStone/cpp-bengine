@@ -875,7 +875,7 @@ TEST_F(EditorAssetWorkflowTest, PrimitivesHaveValidGeometryAndCreationSupportsUn
         ASSERT_NE(renderer, nullptr);
         EXPECT_FALSE(renderer->m_modelo->meshes.front().getVertices().empty());
         EXPECT_FALSE(renderer->m_modelo->meshes.front().getIndices().empty());
-        EXPECT_EQ(renderer->m_modelo->get_source_path(), path.string());
+        EXPECT_TRUE(std::filesystem::equivalent(renderer->m_modelo->get_source_path(), path));
         ASSERT_TRUE(context->undo()); EXPECT_FALSE(registry->is_alive(*id));
         ASSERT_TRUE(context->redo()); EXPECT_TRUE(registry->is_alive(*id));
     }
