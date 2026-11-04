@@ -1,8 +1,11 @@
 #pragma once
+
+#include "editor_api.hpp"
 #include "../systems/editable_model_import.hpp"
 
 #include "editor_context.hpp"
 #include "panel.hpp"
+#include "project_file_transaction.hpp"
 
 #include "components/camera.hpp"
 #include "components/directional_light.hpp"
@@ -14,6 +17,7 @@
 #include "components/sound_player.hpp"
 #include "components/hud.hpp"
 #include "util/pbr_material.hpp"
+#include "util/texture.hpp"
 #include "script_tools.hpp"
 
 #include <bgui.hpp>
@@ -21,6 +25,7 @@
 #include <elem/combo_box.hpp>
 #include <elem/color_picker.hpp>
 #include "mesh_material_editor.hpp"
+#include "../systems/material_file.hpp"
 #include <elem/field.hpp>
 #include <elem/icon.hpp>
 #include <elem/image.hpp>
@@ -139,6 +144,10 @@ public:
         m_model_import_error = std::move(callback);
     }
 
+    void set_material_saved_callback(std::function<void(const std::filesystem::path&)> callback) {
+        m_material_saved = std::move(callback);
+    }
+
     // Returns true if the asset was dropped on a valid target in the components view.
     bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
         if (!*m_surface_alive)
@@ -161,7 +170,7 @@ public:
 
 private:
     void record_edit(std::function<void()> undo, std::function<void()> redo) override {
-        m_context->record_action(std::move(undo), std::move(redo));
+        editor_api(m_context).record_property_edit(std::move(undo), std::move(redo));
     }
 
     using entity_id = editor_context::entity_id;
@@ -174,9 +183,13 @@ private:
     bgui::linear* m_component_options{nullptr};
     bgui::tree* m_entity_tree{nullptr};
     std::optional<entity_id> m_rendered_selection;
+    std::filesystem::path m_rendered_image;
+    std::filesystem::path m_rendered_material;
+    std::function<void(const std::filesystem::path&)> m_material_saved;
     bool m_refresh_requested{false};
     commons::component::mask m_rendered_mask{commons::component::COMPONENTE_NONE};
     std::size_t m_history_revision{0};
+    std::uint64_t m_asset_revision{0};
     struct property_input {
         bgui::inputbox* input;
         std::function<std::string()> read_value;
@@ -234,6 +247,51 @@ private:
         }
     }
 
+    void build_material_file(const std::filesystem::path& requested) {
+        auto& content = add_section(requested.filename().string(), false, {}).children();
+        auto& status = content.add<bgui::text>("Alterações são salvas no arquivo.", .27f);
+        struct file_binding {
+            std::shared_ptr<editor_context> context;
+            std::filesystem::path selected;
+            std::shared_ptr<std::pair<commons::material, std::string>> state;
+            std::function<bool(const commons::material&)> save;
+            bool current() const { return context->selected_material == selected && !context->is_playing; }
+            const commons::material& read() const { return state->first; }
+            bool commit(const commons::material& next) const { return current() && save(next); }
+            void write(const commons::material& next) const { commit(next); }
+        };
+
+        try {
+            const auto path = asset_files::editable_file(requested, m_context->project_root);
+            auto state = std::make_shared<std::pair<commons::material, std::string>>();
+            state->second = project_files::read(path);
+            std::string error;
+            if (!commons::load_material_asset(path, state->first, error)) throw std::runtime_error(error);
+            if (project_files::read(path) != state->second)
+                throw std::runtime_error("O arquivo mudou durante a leitura. Selecione-o novamente.");
+            const auto report = [&status](std::string message) { status.set_buffer(message); };
+            const auto save = [this, path, state, report](const commons::material& next) {
+                try {
+                    auto contents = encode_material_edit(next, path.parent_path(), state->second);
+                    save_material_file(path, m_context->project_root, state->second, contents);
+                    *state = {next, std::move(contents)};
+                    report("Material salvo.");
+                    if (m_material_saved) m_material_saved(path);
+                    return true;
+                } catch (const std::exception& error) {
+                    report(error.what());
+                    return false;
+                }
+            };
+            build_material_properties(*this, content, m_context,
+                file_binding{m_context, requested, state, save},
+                [this](auto* element, auto assign) { m_asset_targets.push_back({element, std::move(assign)}); },
+                report, false);
+        } catch (const std::exception& error) {
+            status.set_buffer(error.what());
+        }
+    }
+
     void refresh_if_needed() {
         if (!m_root || !*m_surface_alive)
             return;
@@ -254,17 +312,65 @@ private:
         const auto widget = m_context->selected_hud_widget.lock();
         if (widget != m_rendered_hud.lock()) { m_refresh_requested=true; m_rendered_hud=widget; }
         const auto history_revision = m_context ? m_context->history_revision : 0;
+        if (selected || widget) {
+            m_context->selected_image.clear();
+            m_context->selected_material.clear();
+        }
+        const editor_api api(m_context);
+        const auto image = api.selected_asset(editor_asset_kind::image);
+        const auto material = api.selected_asset(editor_asset_kind::material);
+        const auto asset_revision = api.events().revision(editor_event::assets);
         if (!m_refresh_requested && selected == m_rendered_selection &&
-            mask == m_rendered_mask && history_revision == m_history_revision)
+            image == m_rendered_image && material == m_rendered_material &&
+            mask == m_rendered_mask && history_revision == m_history_revision &&
+            asset_revision == m_asset_revision)
             return;
 
         m_refresh_requested = false;
         remember_section_expansion();
         m_rendered_selection = selected;
+        m_rendered_image = image;
+        m_rendered_material = material;
         m_rendered_mask = mask;
         m_history_revision = history_revision;
+        m_asset_revision = asset_revision;
         clear_content();
         clear_toolbar();
+
+        if (!material.empty()) {
+            build_material_file(material);
+            return;
+        }
+
+        if (!image.empty()) {
+            auto& content = add_section(image.filename().string(), false, {}).children();
+            auto& status = content.add<bgui::text>("Reopen the scene to apply texture changes.", 0.27f);
+            int percent = commons::default_texture_resolution_percent;
+            try {
+                percent = commons::texture_resolution_percent(image);
+            } catch (const std::exception& error) {
+                status.set_buffer(error.what());
+            }
+            content.add<bgui::field>("Texture Resolution (%)", std::to_string(percent), 0.27f,
+                [image, &status](const std::string& input) {
+                    int value{};
+                    const auto parsed = std::from_chars(input.data(), input.data() + input.size(), value);
+                    if (parsed.ec != std::errc{} || parsed.ptr != input.data() + input.size() ||
+                        value < 1 || value > 100) {
+                        status.set_buffer("Enter a whole percentage from 1 to 100.");
+                        return;
+                    }
+                    try {
+                        const auto path = commons::texture_resolution_path(image);
+                        project_files::stage({path, std::to_string(value)});
+                        project_files::replace(path);
+                        status.set_buffer("Saved. Reopen the scene to apply.");
+                    } catch (const std::exception& error) {
+                        status.set_buffer(error.what());
+                    }
+                });
+            return;
+        }
 
         if (!selected && m_context->editor_camera_entity) {
             auto camera = m_context->registry->get<commons::camera>(*m_context->editor_camera_entity);
@@ -916,17 +1022,41 @@ private:
     void add_script_property(bgui::linear& content, entity_id id,
         const std::shared_ptr<commons::code>& script, const commons::script_property& property) {
         using value_type = commons::script_property::value_type;
-        auto change = [this, id, script, name = property.name](const value_type& next) {
-            if (m_context->is_playing || m_context->locked_entities.contains(id)) return;
-            const auto it = std::find_if(script->properties.begin(), script->properties.end(),
-                [&](const auto& p) { return p.name == name; });
-            if (it == script->properties.end() || it->value == next) return;
-            const auto before = it->value;
-            if (!script->set_property(name, next)) return;
-            m_context->record_action([script, name, before]() { script->set_property(name, before); },
-                [script, name, next]() { script->set_property(name, next); });
+        auto change = [this, id, script, property](const value_type& next) {
+            auto updated = property;
+            updated.value = next;
+            editor_api(m_context).set_script_property(id, script, updated);
         };
-        if (property.type == "boolean") {
+        if (property.type == "entity") {
+            const auto registry = m_context->registry;
+            const auto current = std::get<std::uint32_t>(property.value);
+            std::vector<entity_id> ids{0};
+            std::vector<std::string> labels{"Nenhuma"};
+            std::size_t selected = 0;
+            for (const auto& [candidate, components] : registry->entities) {
+                if (m_context->editor_camera_entity == candidate ||
+                    !components.contains(commons::transform::mask)) continue;
+                if (candidate == current) selected = ids.size();
+                ids.push_back(candidate);
+                labels.push_back(entity_name(candidate) + " (#" + std::to_string(candidate) + ")");
+            }
+            if (current && selected == 0) {
+                selected = ids.size();
+                ids.push_back(current);
+                labels.push_back("Entidade ausente (#" + std::to_string(current) + ")");
+            }
+            content.add<bgui::text>(property.name, .27f);
+            auto& picker = content.add<bgui::combo_box>(labels, .27f, selected);
+            picker.add_class("lua-property-entity");
+            picker.add_class("lua-entity-" + property.name);
+            picker.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+            picker.style.layout.require_height(bgui::mode::pixel, 30.f);
+            picker.set_on_change([this, change, ids = std::move(ids)](std::size_t index, const std::string&) {
+                const auto target = ids[index];
+                if (target && !m_context->registry->is_alive(target)) return;
+                change(target);
+            });
+        } else if (property.type == "boolean") {
             auto& checkbox = panel::add_checkbox(content, property.name, .29f, std::get<bool>(property.value));
             checkbox.set_on_change([change](bool value) { change(value); });
         } else if (property.type == "color") {
@@ -1088,6 +1218,31 @@ private:
         add_rgb_picker(content, "Fog", [camera] {
             auto c = camera->config.fog_color; return bgui::vec3{c.r,c.g,c.b}; },
             [camera](bgui::vec3 v) { camera->config.fog_color = {v.x,v.y,v.z,1.f}; });
+
+        using commons::ambient_occlusion_mode;
+        using commons::camera_post_processing;
+        auto& post = add_section("Camera Post-processing", false, {}).children();
+        post.add<bgui::text>("Ambient Occlusion", .27f);
+        auto& mode = post.add<bgui::combo_box>(std::vector<std::string>{"Off", "SSAO", "HBAO", "GTAO"},
+            .27f, static_cast<std::size_t>(camera->config.post_processing.occlusion));
+        mode.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+        mode.style.layout.require_height(bgui::mode::pixel, 30.f);
+        mode.set_on_change([this, camera](std::size_t index, const std::string&) {
+            const auto previous = camera->config.post_processing.occlusion;
+            const auto selected = static_cast<ambient_occlusion_mode>(index);
+            if (previous == selected) return;
+            camera->config.post_processing.occlusion = selected;
+            m_context->record_action(
+                [camera, previous]() { camera->config.post_processing.occlusion = previous; },
+                [camera, selected]() { camera->config.post_processing.occlusion = selected; });
+        });
+        add_float(post, "AO Radius", camera->config.post_processing.radius,
+            [camera]() { return camera->config.post_processing.radius; },
+            [camera](float v) { camera->config.post_processing.radius =
+                std::clamp(v, camera_post_processing::min_radius, camera_post_processing::max_radius); });
+        add_float(post, "AO Strength", camera->config.post_processing.strength,
+            [camera]() { return camera->config.post_processing.strength; },
+            [camera](float v) { camera->config.post_processing.strength = std::clamp(v, 0.f, 1.f); });
 
         auto& orthographic = panel::add_checkbox(content,
             "Orthographic",

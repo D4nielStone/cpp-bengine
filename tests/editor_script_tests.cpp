@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 #include "script_tools.hpp"
+#include "components/physics.hpp"
+#include "components/camera.hpp"
+#include "components/transform.hpp"
 #include "systems/code_system.hpp"
 #include "debugging/script_log.hpp"
 #include <chrono>
+#include <cmath>
 #include <limits>
 
 namespace {
@@ -36,6 +40,108 @@ TEST_F(EditorScriptTest, CreatesTemplateWithoutOverwritingOrEscapingFolder) {
     EXPECT_FALSE(editor::ui::create_lua_script(folder, "file.cpp", path, error));
     std::ifstream preserved(folder / "Movement.lua");
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(preserved), {}), original);
+}
+
+TEST_F(EditorScriptTest, WasdPresetMovesWithAndWithoutRigidbody) {
+    const auto registry = context->registry;
+    auto entity = registry->create();
+    std::filesystem::path path;
+    std::string error;
+    ASSERT_TRUE(editor::ui::create_lua_script(folder, "Walk", path, error,
+        editor::ui::lua_script_preset::wasd)) << error;
+    ASSERT_TRUE(editor::ui::attach_lua_script(context, entity.id, path, error)) << error;
+    auto script = registry->get<commons::code>(entity.id);
+    script->setup();
+    sol::table input = script->estado_lua["Input"];
+    input.set_function("GetAxis", [](const std::string&) { return 1.f; });
+    script->estado_lua["Time"]["deltaTime"] = .1f;
+    auto update = sol::protected_function(script->f_update);
+    auto moved = update();
+    ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
+    const auto pose = registry->get<commons::transform>(entity.id);
+    const auto position = pose->get_position();
+    EXPECT_NEAR(std::hypot(position.x, position.z), .5f, .0001f);
+    EXPECT_GT(position.x, 0.f);
+    EXPECT_GT(position.z, 0.f);
+
+    registry->add<commons::physics>(entity);
+    const auto body = registry->get<commons::physics>(entity.id);
+    body->setVelocidade({0.f, -3.f, 0.f});
+    moved = update();
+    ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
+    const auto velocity = body->getVelocidade();
+    EXPECT_NEAR(std::hypot(velocity.x, velocity.z), 5.f, .0001f);
+    EXPECT_FLOAT_EQ(velocity.y, -3.f);
+    EXPECT_EQ(pose->get_position(), position);
+}
+
+TEST_F(EditorScriptTest, FppControllerUsesSelectedCameraYawAndMovesTheSelectedPlayer) {
+    std::filesystem::path path;
+    std::string error;
+    ASSERT_TRUE(editor::ui::create_lua_script(folder, "Fpp", path, error,
+        editor::ui::lua_script_preset::fpp_controller)) << error;
+
+    const auto registry = context->registry;
+    auto host = registry->create();
+    auto player = registry->create();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    registry->add<commons::physics>(player);
+    const auto player_pose = registry->get<commons::transform>(player.id);
+    const auto camera_pose = registry->get<commons::transform>(camera.id);
+    player_pose->set_rotation({0.f, 35.f, 0.f});
+    camera_pose->set_position({0.f, 1.5f, 0.f});
+    ASSERT_TRUE(camera_pose->set_parent(player.id, false));
+    const auto body = registry->get<commons::physics>(player.id);
+    body->setVelocidade({0.f, -3.f, 0.f});
+    ASSERT_TRUE(editor::ui::attach_lua_script(context, host.id, path, error)) << error;
+    const auto script = registry->get<commons::code>(host.id);
+    ASSERT_TRUE(script->set_property("player", player.id));
+    ASSERT_TRUE(script->set_property("camera", camera.id));
+
+    rapidjson::Document document;
+    document.SetObject();
+    ASSERT_TRUE(script->serialize(document, document.GetAllocator()));
+    commons::code restored;
+    ASSERT_TRUE(restored.analyze(document));
+    EXPECT_EQ(restored.properties, script->properties);
+
+    const auto run = [&](float mouse_x, float mouse_y) {
+        sol::table input = script->estado_lua["Input"];
+        input.set_function("GetAxis", [](const std::string& axis) {
+            return axis == "Vertical" ? 1.f : 0.f;
+        });
+        input.set_function("GetMouseDelta", [mouse_x, mouse_y] {
+            return std::tuple<float, float>{mouse_x, mouse_y};
+        });
+        script->estado_lua["Time"]["deltaTime"] = .1f;
+        const auto moved = sol::protected_function(script->f_update)();
+        ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
+    };
+
+    script->setup();
+    run(250.f, -1000.f);
+    EXPECT_FLOAT_EQ(camera_pose->get_rotation().y, 30.f);
+    EXPECT_FLOAT_EQ(camera_pose->get_rotation().x, 89.f);
+    EXPECT_FLOAT_EQ(player_pose->get_rotation().y, 35.f);
+    const auto view = registry->get<commons::camera>(camera.id);
+    view->getViewMatrix();
+    const auto horizontal = std::hypot(view->forward.x, view->forward.z);
+    EXPECT_NEAR(body->getVelocidade().x, view->forward.x / horizontal * 5.f, .0001f);
+    EXPECT_NEAR(body->getVelocidade().z, view->forward.z / horizontal * 5.f, .0001f);
+    EXPECT_FLOAT_EQ(body->getVelocidade().y, -3.f);
+
+    registry->remove<commons::physics>(player.id);
+    ASSERT_TRUE(camera_pose->set_parent(0, false));
+    const auto offset = camera_pose->get_world_position() - player_pose->get_world_position();
+    script->setup();
+    run(0.f, 0.f);
+    EXPECT_NEAR(player_pose->get_world_position().length(), .5f, .0001f);
+    EXPECT_EQ(camera_pose->get_world_position() - player_pose->get_world_position(), offset);
+    registry->remove(camera.id);
+    const auto before = player_pose->get_position();
+    run(0.f, 0.f);
+    EXPECT_EQ(player_pose->get_position(), before);
 }
 
 TEST_F(EditorScriptTest, AttachIsRelativeUndoableAndDoesNotExecuteUserCode) {
@@ -112,6 +218,7 @@ TEST_F(EditorScriptTest, PropertyErrorsPreserveExistingValuesAndRejectAttachment
     auto entity = context->registry->create();
     for (const auto* metadata : {
         R"({"name":"speed","type":"number","default":"wrong"})",
+        R"({"name":"player","type":"entity","default":-1})",
         R"({"name":"tint","type":"color","default":[2,0,0,1]})",
         R"({"name":"bad name","type":"text","default":""})",
         R"({"name":"x","type":"unknown","default":0})", "{}", "not json"}) {

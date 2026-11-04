@@ -75,6 +75,8 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
 
     const auto editor_camera = registry->get<commons::camera>(editor_camera_entity.id);
     const auto scene_camera = registry->get<commons::camera>(scene_camera_entity.id);
+    editor_camera->config.post_processing = {commons::ambient_occlusion_mode::gtao, 1.25f, 0.4f};
+    scene_camera->config.post_processing = {commons::ambient_occlusion_mode::hbao, 2.f, 0.75f};
     editor_camera->config.skybox_image = "assets/editor-cross.png";
     editor_camera->config.use_skybox = true;
     editor_camera->config.atmosphere_zenith = {0.2f, 0.3f, 0.4f};
@@ -134,6 +136,14 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     editor_camera->config.fov = 90.f;
     editor_camera->config.corte_curto = 0.1f;
     ASSERT_TRUE(persistence.load(path_string, error)) << error;
+    EXPECT_EQ(editor_camera->config.post_processing.occlusion, commons::ambient_occlusion_mode::gtao);
+    EXPECT_FLOAT_EQ(editor_camera->config.post_processing.radius, 1.25f);
+    EXPECT_FLOAT_EQ(editor_camera->config.post_processing.strength, 0.4f);
+    const auto loaded_scene_camera = registry->get<commons::camera>(scene_camera_entity.id);
+    ASSERT_NE(loaded_scene_camera, nullptr);
+    EXPECT_EQ(loaded_scene_camera->config.post_processing.occlusion, commons::ambient_occlusion_mode::hbao);
+    EXPECT_FLOAT_EQ(loaded_scene_camera->config.post_processing.radius, 2.f);
+    EXPECT_FLOAT_EQ(loaded_scene_camera->config.post_processing.strength, 0.75f);
     EXPECT_EQ(editor_camera->config.skybox_image, "assets/editor-cross.png");
     EXPECT_TRUE(editor_camera->config.use_skybox);
     EXPECT_TRUE(editor_camera->config.fog_enabled);
@@ -786,6 +796,67 @@ TEST(ProjectPersistenceTest, RoundTripsSpotLightSettings) {
     EXPECT_FLOAT_EQ(light->shadow_bias, 0.003f);
     EXPECT_FLOAT_EQ(light->shadow_strength, 0.6f);
     remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, MigratesLegacySpotOcclusionOnlyForCamerasWithoutSettings) {
+    using mode = commons::ambient_occlusion_mode;
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(17);
+    registry->add<commons::camera>(editor_camera);
+    auto legacy_camera = registry->create(23);
+    registry->add<commons::camera>(legacy_camera);
+    auto configured_camera = registry->create(24);
+    registry->add<commons::camera>(configured_camera);
+    auto light = registry->create(25);
+    registry->add<commons::spot_light>(light);
+
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const auto path = temporary_project_path();
+    std::string error;
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    const auto scene_path = scene_file_for_project(path);
+    rapidjson::Document scene;
+    scene.Parse(read_file(scene_path).c_str());
+    ASSERT_FALSE(scene.HasParseError());
+    for (auto& item : scene["entities"].GetArray()) {
+        const auto id = item["id"].GetUint();
+        auto& components = item["components"];
+        if (id == legacy_camera.id)
+            ASSERT_TRUE(components["camera"].RemoveMember("post_processing"));
+        if (id == light.id) {
+            auto& spot = components["spot_light"];
+            EXPECT_FALSE(spot.HasMember("ssao_enabled"));
+            spot.AddMember("ssao_enabled", true, scene.GetAllocator());
+            spot.AddMember("ssao_radius", 1.25f, scene.GetAllocator());
+            spot.AddMember("ssao_strength", 0.4f, scene.GetAllocator());
+        }
+    }
+    { std::ofstream output(scene_path); output << editor::ui::project_files::encode(scene); }
+    ASSERT_TRUE(persistence.load(path.string(), error)) << error;
+    const auto& migrated = registry->get<commons::camera>(legacy_camera.id)->config.post_processing;
+    EXPECT_EQ(migrated.occlusion, mode::ssao);
+    EXPECT_FLOAT_EQ(migrated.radius, 1.25f);
+    EXPECT_FLOAT_EQ(migrated.strength, 0.4f);
+    EXPECT_EQ(registry->get<commons::camera>(configured_camera.id)->config.post_processing.occlusion, mode::off);
+    ASSERT_TRUE(persistence.save(path.string(), error)) << error;
+    EXPECT_EQ(read_file(scene_path).find("ssao_radius"), std::string::npos);
+    remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, RejectsInvalidCameraPostProcessing) {
+    commons::camera camera;
+    rapidjson::Document data(rapidjson::kObjectType);
+    ASSERT_TRUE(camera.serialize(data, data.GetAllocator()));
+    auto& post = data["post_processing"];
+    post["occlusion"].SetInt(4);
+    EXPECT_FALSE(camera.analyze(data));
+    post["occlusion"].SetUint(1);
+    post["radius"].SetFloat(0.f);
+    EXPECT_FALSE(camera.analyze(data));
+    post["radius"].SetFloat(1.f);
+    post["strength"].SetFloat(1.5f);
+    EXPECT_FALSE(camera.analyze(data));
+    EXPECT_EQ(camera.config.post_processing.occlusion, commons::ambient_occlusion_mode::off);
 }
 
 TEST(ProjectPersistenceTest, RoundTripsSoundComponents) {

@@ -12,6 +12,26 @@ namespace {
 
 constexpr float radians_to_degrees = 57.295779513082320876f;
 
+struct scene_ray_callback : btCollisionWorld::ClosestRayResultCallback {
+    scene_ray_callback(const btVector3& origin, const btVector3& destination,
+        ecs* registry, std::uint32_t ignored_entity)
+        : ClosestRayResultCallback(origin, destination), registry(registry), ignored_entity(ignored_entity) {}
+
+    bool needsCollision(btBroadphaseProxy* proxy) const override {
+        if (!ClosestRayResultCallback::needsCollision(proxy)) return false;
+        if (!registry) return true;
+        const auto* object = static_cast<const btCollisionObject*>(proxy->m_clientObject);
+        const auto id = static_cast<std::uint32_t>(object->getUserIndex());
+        if (id == ignored_entity) return false;
+        const auto body = registry->get<physics>(id);
+        return body && body->m_rigid_body == object && body->collision_enabled &&
+            registry->has<transform>(id);
+    }
+
+    ecs* registry;
+    std::uint32_t ignored_entity;
+};
+
 btTransform entity_pose(physics& body, const transform& value, const std::shared_ptr<ecs>& registry, uint32_t id) {
     const auto visual = registry->get<renderer>(id);
     return body.synchronize_transform(value, visual ? visual->m_modelo : nullptr);
@@ -85,6 +105,7 @@ void physics_system::synchronize_entities(
             const auto world_transform = entity_pose(*body, *entity_transform, registry, id);
             body->m_rigid_body->setWorldTransform(world_transform);
             body->m_estado_de_movimento->setWorldTransform(world_transform);
+            body->m_rigid_body->setUserIndex(static_cast<int>(id));
             dynamic_world->addRigidBody(body->m_rigid_body, 1, body->collision_enabled ? -1 : 0);
             m_collision_revisions[id] = body->collision_revision;
             m_bodies.emplace(id, std::move(body));
@@ -214,8 +235,22 @@ const bgui::vec3& physics_system::gravity() const noexcept {
 }
 
 ray_result physics_system::cast_ray(const ray& ray_value) {
-    if (!dynamic_world)
-        return {false, bgui::vec3(0.f), bgui::vec3(0.f), nullptr};
+    return cast_ray(ray_value, 300.f, nullptr, 0);
+}
+
+ray_result physics_system::cast_scene_ray(const ray& ray_value, float distance,
+    const std::shared_ptr<ecs>& registry, std::uint32_t ignored_entity) {
+    if (!dynamic_world) {
+        ensure_world();
+        synchronize_entities(registry);
+    }
+    return cast_ray(ray_value, distance, registry.get(), ignored_entity);
+}
+
+ray_result physics_system::cast_ray(const ray& ray_value, float distance, ecs* registry,
+    std::uint32_t ignored_entity) {
+    ray_result result{false, bgui::vec3(0.f), bgui::vec3(0.f), nullptr};
+    if (!dynamic_world) return result;
 
     const btVector3 origin(
         ray_value.origem.x,
@@ -227,11 +262,13 @@ ray_result physics_system::cast_ray(const ray& ray_value) {
         ray_value.direction.y,
         ray_value.direction.z
     );
-    const btVector3 destination = origin + direction * 300.f;
-    btCollisionWorld::ClosestRayResultCallback callback(origin, destination);
+    const btVector3 destination = origin + direction * distance;
+    if (!std::isfinite(destination.x()) || !std::isfinite(destination.y()) ||
+        !std::isfinite(destination.z()))
+        return result;
+    scene_ray_callback callback(origin, destination, registry, ignored_entity);
     dynamic_world->rayTest(origin, destination, callback);
 
-    ray_result result{false, bgui::vec3(0.f), bgui::vec3(0.f), nullptr};
     if (!callback.hasHit())
         return result;
 

@@ -2,23 +2,15 @@
 
 #include <bgui.hpp>
 
-#include "components/camera.hpp"
-#include "components/directional_light.hpp"
-#include "components/renderer.hpp"
-#include "components/spot_light.hpp"
-#include "components/transform.hpp"
-#include "editor_context.hpp"
+#include "../presenters/entities_presenter.hpp"
 #include "panel.hpp"
 #include "viewport_input_state.hpp"
 #include "context_action_button.hpp"
-#include "primitive_entities.hpp"
+#include "primitive_catalog.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
-#include <cstdlib>
 #include <functional>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -52,18 +44,10 @@ public:
 class entities_view final : public panel {
 public:
     using entity_id = std::uint32_t;
-    using name_provider = std::function<std::string(entity_id)>;
+    using name_provider = entities_presenter::name_provider;
 
 private:
-    struct entry {
-        entity_id id{};
-        std::string label;
-        std::string normalized_label;
-
-        bool operator==(const entry& other) const noexcept {
-            return id == other.id && label == other.label;
-        }
-    };
+    using entry = entities_presenter::entry;
 
     struct row {
         entity_id id{};
@@ -79,8 +63,7 @@ private:
     static constexpr const char* selected_class = "editor-entity-row-selected";
     static constexpr const char* selected_class_legacy = "entity-row-selected";
 
-    std::shared_ptr<editor_context> m_context;
-    name_provider m_get_name;
+    entities_presenter m_presenter;
 
     detail::entities_refreshing_layout* m_root{nullptr};
     std::shared_ptr<bool> m_surface_alive = std::make_shared<bool>(false);
@@ -95,172 +78,6 @@ private:
     std::vector<row> m_rows;
     std::vector<entry> m_last_entries;
     std::string m_last_filter;
-    std::optional<entity_id> m_last_selection;
-    std::vector<std::pair<entity_id, entity_id>> m_last_parentage;
-
-    static std::string normalize(std::string value) {
-        std::transform(
-            value.begin(),
-            value.end(),
-            value.begin(),
-            [](unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            }
-        );
-        return value;
-    }
-
-    static std::string normalized_filter(const std::string& raw_filter) {
-        const auto is_space = [](unsigned char character) {
-            return std::isspace(character) != 0;
-        };
-        const auto begin = std::find_if_not(
-            raw_filter.begin(), raw_filter.end(), is_space
-        );
-        const auto end = std::find_if_not(
-            raw_filter.rbegin(), raw_filter.rend(), is_space
-        ).base();
-        return begin < end
-            ? normalize(std::string(begin, end))
-            : std::string{};
-    }
-
-    static bool matches_filter(const entry& item, const std::string& filter) {
-        return filter.empty() ||
-            item.normalized_label.find(filter) != std::string::npos ||
-            std::to_string(item.id).find(filter) != std::string::npos;
-    }
-
-    std::string entity_label(const entity_id id) const {
-        if (m_context) {
-            const auto name = m_context->entity_names.find(id);
-            if (name != m_context->entity_names.end() && !name->second.empty())
-                return name->second;
-        }
-        if (m_get_name) {
-            auto name = m_get_name(id);
-            if (!name.empty())
-                return name;
-        }
-        return "Entity " + std::to_string(id);
-    }
-
-    std::string_view entity_icon(const entity_id id) const {
-        if (!m_context || !m_context->registry)
-            return "circle";
-
-        if (m_context->registry->get<commons::camera>(id))
-            return "camera";
-        if (m_context->registry->get<commons::directional_light>(id))
-            return "lightbulb";
-        if (m_context->registry->get<commons::spot_light>(id))
-            return "lightbulb";
-        if (m_context->registry->get<commons::renderer>(id))
-            return "cube";
-
-        return "circle";
-    }
-
-    // Snapshot ordenado por id (ordem estável independente do container).
-    std::vector<entry> collect_entries() const {
-        std::vector<entry> result;
-
-        if (!m_context || !m_context->registry)
-            return result;
-
-        result.reserve(m_context->registry->entities.size());
-
-        for (const auto& [id, components] : m_context->registry->entities) {
-            (void)components;
-            if (m_context->editor_camera_entity == id)
-                continue;
-
-            entry e;
-            e.id = id;
-            e.label = entity_label(id);
-            e.normalized_label = normalize(e.label);
-            result.push_back(std::move(e));
-        }
-
-        std::sort(result.begin(), result.end(), [](const entry& a, const entry& b) {
-            return a.id < b.id;
-        });
-
-        return result;
-    }
-
-    static bool contains(const std::vector<entry>& entries, const entity_id id) {
-        return std::binary_search(
-            entries.begin(),
-            entries.end(),
-            entry{id, {}, {}},
-            [](const entry& a, const entry& b) { return a.id < b.id; }
-        );
-    }
-
-    struct local_transform_state {
-        entity_id parent{};
-        bgui::vec3 position;
-        bgui::vec3 rotation;
-        bgui::vec3 scale;
-    };
-
-    static local_transform_state capture_transform(
-        const std::shared_ptr<commons::transform>& transform
-    ) {
-        return {
-            transform->parent_id,
-            transform->position,
-            transform->rotation,
-            transform->scale
-        };
-    }
-
-    static void restore_transform(
-        const std::shared_ptr<commons::transform>& transform,
-        const local_transform_state& state
-    ) {
-        transform->parent_id = state.parent;
-        transform->position = state.position;
-        transform->rotation = state.rotation;
-        transform->scale = state.scale;
-    }
-
-    entity_id parent_of(const entity_id id) const {
-        if (!m_context || !m_context->registry)
-            return 0;
-        const auto transform = m_context->registry->get<commons::transform>(id);
-        return transform ? transform->parent_id : 0;
-    }
-
-    std::vector<std::pair<entity_id, entity_id>> parentage_signature(
-        const std::vector<entry>& entries
-    ) const {
-        std::vector<std::pair<entity_id, entity_id>> result;
-        result.reserve(entries.size());
-        for (const auto& item : entries)
-            result.emplace_back(item.id, parent_of(item.id));
-        return result;
-    }
-
-    void reparent_entity(const entity_id child_id, const entity_id parent_id) {
-        if (!m_context || !m_context->registry || child_id == parent_id)
-            return;
-        const auto child = m_context->registry->get<commons::transform>(child_id);
-        if (!child)
-            return;
-        const auto before = capture_transform(child);
-        if (!child->set_parent(parent_id, true))
-            return;
-        const auto after = capture_transform(child);
-        if (before.parent == after.parent && before.position == after.position &&
-            before.rotation == after.rotation && before.scale == after.scale)
-            return;
-        m_context->record_action(
-            [child, before]() { restore_transform(child, before); },
-            [child, after]() { restore_transform(child, after); }
-        );
-    }
 
     void drop_entity(const entity_id dragged_id, const bgui::vec2i& position) {
         for (const auto& item : m_rows) {
@@ -270,7 +87,7 @@ private:
             if (position.x >= rect.x && position.x < rect.x + rect.z &&
                 position.y >= rect.y && position.y < rect.y + rect.w) {
                 if (item.id != dragged_id)
-                    reparent_entity(dragged_id, item.id);
+                    m_presenter.api().reparent_entity(dragged_id, item.id);
                 return;
             }
         }
@@ -278,137 +95,8 @@ private:
             const auto rect = m_scene_tree->processed_rect();
             if (position.x >= rect.x && position.x < rect.x + rect.z &&
                 position.y >= rect.y && position.y < rect.y + rect.w)
-                reparent_entity(dragged_id, 0);
+                m_presenter.api().reparent_entity(dragged_id, 0);
         }
-    }
-
-    void create_entity() {
-        if (!m_context || !m_context->registry)
-            return;
-        auto entity = m_context->registry->create();
-        m_context->registry->add<commons::transform>(entity);
-        m_context->record_entity_creation(entity.id);
-        select(entity.id);
-    }
-
-    void group_selected_entities() {
-        if (!m_context || !m_context->registry) return;
-        m_context->synchronize_selection();
-        auto ids = m_context->selected_entities;
-        if (m_context->selected_entity) ids.insert(*m_context->selected_entity);
-        std::vector<entity_id> roots;
-        for (auto id : ids) {
-            if (!m_context->registry->is_alive(id) || m_context->locked_entities.contains(id) ||
-                m_context->editor_camera_entity == id) continue;
-            bool nested = false;
-            std::unordered_set<entity_id> visited;
-            for (auto parent = parent_of(id); parent && visited.insert(parent).second; parent = parent_of(parent))
-                if (ids.contains(parent)) { nested = true; break; }
-            if (!nested) roots.push_back(id);
-        }
-        if (roots.empty()) return;
-        const auto history_start = m_context->undo_stack.size();
-        auto group = m_context->registry->create();
-        m_context->registry->add<commons::transform>(group);
-        m_context->entity_names[group.id] = "Grupo";
-        m_context->record_entity_creation(group.id);
-        for (auto id : roots) reparent_entity(id, group.id);
-        std::vector<editor_context::history_action> actions;
-        while (m_context->undo_stack.size() > history_start) {
-            actions.push_back(std::move(m_context->undo_stack.back()));
-            m_context->undo_stack.pop_back();
-        }
-        m_context->record_action(
-            [actions] { for (const auto& action : actions) action.undo(); },
-            [actions] { for (auto it = actions.rbegin(); it != actions.rend(); ++it) it->redo(); });
-        m_context->select_entity(group.id);
-        refresh();
-    }
-
-    void delete_selected_entity() {
-        if (!m_context || !m_context->registry || !m_context->selected_entity)
-            return;
-        const auto id = *m_context->selected_entity;
-        if (m_context->editor_camera_entity == id ||
-            m_context->locked_entities.contains(id))
-            return;
-        const auto found = m_context->registry->entities.find(id);
-        const auto mask = m_context->registry->mascaras.find(id);
-        if (found == m_context->registry->entities.end() ||
-            mask == m_context->registry->mascaras.end())
-            return;
-
-        auto registry = m_context->registry;
-        auto context = m_context;
-        const auto removed_components = found->second;
-        const auto removed_mask = mask->second;
-        const auto transform = registry->get<commons::transform>(id);
-        const auto removed_name = context->entity_names.find(id);
-        const std::optional<std::string> name = removed_name == context->entity_names.end()
-            ? std::nullopt
-            : std::optional<std::string>{removed_name->second};
-        const bool was_hidden = context->hidden_entities.contains(id);
-        const bool was_locked = context->locked_entities.contains(id);
-
-        struct child_state {
-            std::shared_ptr<commons::transform> transform;
-            local_transform_state before;
-            local_transform_state after;
-        };
-        std::vector<child_state> children;
-        const auto new_parent = transform ? transform->parent_id : 0;
-        for (const auto& [child_id, components] : registry->entities) {
-            (void)components;
-            const auto child = registry->get<commons::transform>(child_id);
-            if (!child || child->parent_id != id)
-                continue;
-            const auto before = capture_transform(child);
-            if (!child->set_parent(new_parent, true)) {
-                for (const auto& state : children)
-                    restore_transform(state.transform, state.before);
-                return;
-            }
-            children.push_back({child, before, capture_transform(child)});
-        }
-
-        registry->remove(id);
-        context->entity_names.erase(id);
-        context->hidden_entities.erase(id);
-        context->locked_entities.erase(id);
-        context->select_entity(std::nullopt);
-        const std::weak_ptr<editor_context> weak_context = context;
-        context->record_action(
-            [registry, weak_context, id, removed_components, removed_mask,
-             name, was_hidden, was_locked, children]() {
-                const auto context = weak_context.lock();
-                if (!context)
-                    return;
-                registry->entities[id] = removed_components;
-                registry->mascaras[id] = removed_mask;
-                registry->live_entities.insert(id);
-                if (name)
-                    context->entity_names[id] = *name;
-                if (was_hidden)
-                    context->hidden_entities.insert(id);
-                if (was_locked)
-                    context->locked_entities.insert(id);
-                for (const auto& child : children)
-                    restore_transform(child.transform, child.before);
-                context->selected_entity = id;
-            },
-            [registry, weak_context, id, children]() {
-                const auto context = weak_context.lock();
-                if (!context)
-                    return;
-                for (const auto& child : children)
-                    restore_transform(child.transform, child.after);
-                registry->remove(id);
-                context->entity_names.erase(id);
-                context->hidden_entities.erase(id);
-                context->locked_entities.erase(id);
-                context->select_entity(std::nullopt);
-            }
-        );
     }
 
     static void configure_icon_button(bgui::button& button, const int size) {
@@ -464,8 +152,7 @@ private:
                 continue;
 
             const bool is_selected =
-                m_context && (m_context->selected_entity == item.id ||
-                m_context->selected_entities.contains(item.id));
+                m_presenter.api().is_selected(item.id);
             if (is_selected) {
                 item.selection->add_class(selected_class);
                 item.selection->add_class(selected_class_legacy);
@@ -490,7 +177,7 @@ private:
             item.selection->mark_style_dirty();
 
             const bool hidden =
-                m_context && m_context->hidden_entities.contains(item.id);
+                m_presenter.api().is_hidden(item.id);
             if (item.visibility) {
                 item.visibility->set_buffer(
                     hidden ? "\xef\x81\xb0" : "\xef\x81\xae"
@@ -502,7 +189,7 @@ private:
             }
 
             const bool locked =
-                m_context && m_context->locked_entities.contains(item.id);
+                m_presenter.api().is_locked(item.id);
             if (item.lock) {
                 item.lock->style.visual.text.normal = locked
                     ? bgui::color{0.92f, 0.72f, 0.32f, 1.f}
@@ -513,43 +200,10 @@ private:
     }
 
     void select(const entity_id id) {
-        if (!m_context || m_context->locked_entities.contains(id))
+        if (m_presenter.api().is_locked(id))
             return;
 
-        m_context->select_entity(id, bgui::get_pressed(bgui::input_key::left_control));
-        m_last_selection = m_context->selected_entity;
-        update_row_styles();
-    }
-
-    void toggle_visibility(const entity_id id) {
-        if (!m_context || !m_context->registry)
-            return;
-
-        const bool now_hidden =
-            !m_context->hidden_entities.contains(id);
-        if (now_hidden)
-            m_context->hidden_entities.insert(id);
-        else
-            m_context->hidden_entities.erase(id);
-
-        if (const auto renderer = m_context->registry->get<commons::renderer>(id))
-            renderer->visible = !now_hidden;
-
-        update_row_styles();
-    }
-
-    void toggle_lock(const entity_id id) {
-        if (!m_context)
-            return;
-
-        if (m_context->locked_entities.contains(id)) {
-            m_context->locked_entities.erase(id);
-        } else {
-            m_context->locked_entities.insert(id);
-            if (m_context->selected_entity == id)
-                m_context->selected_entity.reset();
-        }
-
+        m_presenter.api().select_entity(id, bgui::get_pressed(bgui::input_key::left_control));
         update_row_styles();
     }
 
@@ -557,7 +211,7 @@ private:
         const entry& item,
         bgui::linear& parent,
         const std::unordered_map<entity_id, std::vector<entity_id>>& children_by_parent,
-        const std::unordered_map<entity_id, entry>& entries_by_id,
+        const std::unordered_map<entity_id, const entry*>& entries_by_id,
         std::unordered_set<entity_id>& recursion_path
     ) {
         if (!recursion_path.insert(item.id).second)
@@ -568,8 +222,13 @@ private:
 
         auto& node = parent.add<bgui::tree>(item.label, 0.28f, has_children);
         node.set_leaf(!has_children);
-        node.set_icon(entity_icon(item.id), 0.24f);
-        if (normalized_filter(m_filter->get_buffer()).empty() && m_expanded_entities.contains(item.id))
+        switch (item.kind) {
+        case editor_entity_kind::camera: node.set_icon("camera", 0.24f); break;
+        case editor_entity_kind::light: node.set_icon("lightbulb", 0.24f); break;
+        case editor_entity_kind::mesh: node.set_icon("cube", 0.24f); break;
+        case editor_entity_kind::generic: node.set_icon("circle", 0.24f); break;
+        }
+        if (entities_presenter::normalized_filter(m_filter->get_buffer()).empty() && m_expanded_entities.contains(item.id))
             node.set_expanded(m_expanded_entities.at(item.id));
         auto& row_layout = node.header();
         const auto id = item.id;
@@ -584,7 +243,7 @@ private:
         auto& visibility_button = row_layout.add<bgui::button>(
             "",
             0.26f,
-            [this, id]() { toggle_visibility(id); }
+            [this, id]() { m_presenter.api().toggle_visibility(id); update_row_styles(); }
         );
         configure_icon_button(visibility_button, 20);
         auto& visibility_icon = add_button_icon(visibility_button, "eye", 0.24f);
@@ -592,7 +251,7 @@ private:
         auto& lock_button = row_layout.add<bgui::button>(
             "",
             0.26f,
-            [this, id]() { toggle_lock(id); }
+            [this, id]() { m_presenter.api().toggle_lock(id); update_row_styles(); }
         );
         configure_icon_button(lock_button, 20);
         auto& lock_icon = add_button_icon(lock_button, "key", 0.24f);
@@ -605,7 +264,7 @@ private:
             for (const auto child_id : child_it->second) {
                 const auto child = entries_by_id.find(child_id);
                 if (child != entries_by_id.end())
-                    build_entity_node(child->second, nested, children_by_parent,
+                    build_entity_node(*child->second, nested, children_by_parent,
                         entries_by_id, recursion_path);
             }
         }
@@ -625,8 +284,7 @@ public:
         std::shared_ptr<editor_context> context,
         name_provider get_name = {}
     )
-        : m_context(std::move(context)),
-          m_get_name(std::move(get_name)) {}
+        : m_presenter(std::move(context), std::move(get_name)) {}
 
     entities_view(const entities_view&) = delete;
     entities_view& operator=(const entities_view&) = delete;
@@ -680,10 +338,10 @@ public:
         add_button_icon(add_entity, "plus", 0.26f);
         add_entity.context_options = [this]() {
             context_actions actions;
-            actions.emplace_back("Entidade", [this]() { create_entity(); });
+            actions.emplace_back("Entidade", [this]() { if (auto id = m_presenter.api().create_entity()) select(*id); });
             for (size_t i = 0; i < primitive_entities.size(); ++i) {
                 actions.emplace_back(primitive_entities[i].name, [this, i]() {
-                    try { if (const auto id = create_primitive_entity(m_context, i)) { select(*id); refresh(); } }
+                    try { if (const auto id = m_presenter.api().create_primitive(i)) { select(*id); refresh(); } }
                     catch (const std::exception& e) {
                         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
                         modal.add<bgui::text>(e.what(), .3f);
@@ -695,12 +353,12 @@ public:
         add_entity.set_function([button = &add_entity]() { button->open_context(); });
 
         auto& group_entities = m_toolbar->add<bgui::button>("Agrupar", .26f,
-            [this] { group_selected_entities(); });
+            [this] { m_presenter.api().group_selected_entities(); refresh(); });
         group_entities.style.layout.require_size(76.f, 28.f);
         auto& remove_entity = m_toolbar->add<bgui::button>(
             "",
             0.28f,
-            [this]() { delete_selected_entity(); }
+            [this]() { m_presenter.api().delete_selected_entity(); }
         );
         remove_entity.add_class("entities-remove-button");
         configure_icon_button(remove_entity, 18);
@@ -748,83 +406,33 @@ public:
             return;
 
         const bool delete_down = bgui::get_pressed(bgui::input_key::delete_key);
+        const auto* mouse_target = bgui::get_mouse_target();
         if (delete_down && !m_delete_was_down &&
+            !(mouse_target && mouse_target->has_class("model-editor-viewport-input")) &&
             !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) &&
-            !viewport_input_blocked_by_modal() && m_context && !m_context->is_playing)
-            delete_selected_entity();
+            !viewport_input_blocked_by_modal() && !m_presenter.api().is_playing())
+            m_presenter.api().delete_selected_entity();
         m_delete_was_down = delete_down;
         if (m_delete_button) {
-            const bool can_delete = m_context && m_context->selected_entity &&
-                m_context->selected_entity != m_context->editor_camera_entity &&
-                !m_context->locked_entities.contains(*m_context->selected_entity);
+            const bool can_delete = m_presenter.api().can_delete_selection();
             m_delete_button->receives_input(can_delete);
             m_delete_button->set_style_state(can_delete ? bgui::state::normal : bgui::state::disabled);
         }
 
-        const auto entries = collect_entries();
-        const auto current_filter = m_filter->get_buffer();
-
-        if (m_context) {
-            for (auto it = m_context->entity_names.begin();
-                 it != m_context->entity_names.end();) {
-                if (!contains(entries, it->first))
-                    it = m_context->entity_names.erase(it);
-                else
-                    ++it;
-            }
-            for (auto it = m_context->hidden_entities.begin();
-                 it != m_context->hidden_entities.end();) {
-                if (!contains(entries, *it))
-                    it = m_context->hidden_entities.erase(it);
-                else
-                    ++it;
-            }
-            for (auto it = m_context->locked_entities.begin();
-                 it != m_context->locked_entities.end();) {
-                if (!contains(entries, *it))
-                    it = m_context->locked_entities.erase(it);
-                else
-                    ++it;
-            }
-
-            if (m_context->registry) {
-                for (const auto& item : entries) {
-                    if (!m_context->hidden_entities.contains(item.id))
-                        continue;
-                    if (const auto renderer =
-                            m_context->registry->get<commons::renderer>(item.id)) {
-                        renderer->visible = false;
-                    }
-                }
-            }
-        }
-
-        // Limpa a seleção se a entidade selecionada não existe mais.
-        if (m_context && m_context->selected_entity &&
-            (!contains(entries, *m_context->selected_entity) ||
-             m_context->locked_entities.contains(*m_context->selected_entity))) {
-            m_context->selected_entity = std::nullopt;
-        }
-
-        const auto parentage = parentage_signature(entries);
-        if (entries != m_last_entries || current_filter != m_last_filter ||
-            parentage != m_last_parentage)
+        m_presenter.api().synchronize_scene();
+        const auto entries = m_presenter.entries();
+        if (entries != m_last_entries || m_filter->get_buffer() != m_last_filter)
             refresh(entries);
-
-        if (m_context) m_context->synchronize_selection();
-        const auto selection = m_context ? m_context->selected_entity : std::nullopt;
         update_row_styles();
-
-        m_last_selection = selection;
     }
 
     void refresh() {
         if (!*m_surface_alive) return;
-        refresh(collect_entries());
+        refresh(m_presenter.entries());
     }
 
     std::optional<entity_id> selected() const {
-        return m_context ? m_context->selected_entity : std::nullopt;
+        return m_presenter.api().selected_entity();
     }
 
     std::optional<entity_id> entity_at(const bgui::vec2i& position) const {
@@ -857,37 +465,10 @@ private:
             if (row.node)
                 m_expanded_entities[row.id] = row.node->is_expanded();
         m_rows.clear();
-        const auto filter = normalized_filter(
+        const auto filter = entities_presenter::normalized_filter(
             m_filter ? m_filter->get_buffer() : std::string{}
         );
-        std::unordered_map<entity_id, entry> entries_by_id;
-        for (const auto& item : entries)
-            entries_by_id.emplace(item.id, item);
-
-        std::unordered_set<entity_id> included;
-        for (const auto& item : entries) {
-            if (!matches_filter(item, filter))
-                continue;
-            auto current = item.id;
-            while (current && included.insert(current).second) {
-                const auto parent = parent_of(current);
-                if (!parent || !entries_by_id.contains(parent))
-                    break;
-                current = parent;
-            }
-        }
-
-        std::unordered_map<entity_id, std::vector<entity_id>> children_by_parent;
-        std::vector<entity_id> roots;
-        for (const auto& item : entries) {
-            if (!included.contains(item.id))
-                continue;
-            const auto parent = parent_of(item.id);
-            if (parent && included.contains(parent))
-                children_by_parent[parent].push_back(item.id);
-            else
-                roots.push_back(item.id);
-        }
+        const auto hierarchy = entities_presenter::build_hierarchy(entries, filter);
 
         const bool create_scene_tree = !m_scene_tree;
         if (!m_scene_tree) {
@@ -903,14 +484,14 @@ private:
 
         m_rows.clear();
         std::unordered_set<entity_id> recursion_path;
-        for (const auto id : roots) {
-            const auto item = entries_by_id.find(id);
-            if (item != entries_by_id.end())
-                build_entity_node(item->second, m_scene_tree->children(),
-                    children_by_parent, entries_by_id, recursion_path);
+        for (const auto id : hierarchy.roots) {
+            const auto item = hierarchy.entries_by_id.find(id);
+            if (item != hierarchy.entries_by_id.end())
+                build_entity_node(*item->second, m_scene_tree->children(),
+                    hierarchy.children_by_parent, hierarchy.entries_by_id, recursion_path);
         }
 
-        if (included.empty()) {
+        if (!hierarchy.has_matches) {
             auto& empty = m_scene_tree->children().add<bgui::text>(
                 filter.empty() ? "No entities" : "No entities found",
                 0.26f
@@ -923,7 +504,6 @@ private:
 
         m_last_entries = entries;
         m_last_filter = m_filter ? m_filter->get_buffer() : std::string{};
-        m_last_parentage = parentage_signature(entries);
 
         update_row_styles();
     }

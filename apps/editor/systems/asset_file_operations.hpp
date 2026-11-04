@@ -1,5 +1,6 @@
 #pragma once
 #include "asset_import.hpp"
+#include "util/texture.hpp"
 #include "project_file_transaction.hpp"
 #include <sstream>
 #include <exception>
@@ -100,8 +101,14 @@ inline fs::path move(const fs::path& requested, const fs::path& folder,
     if (update_marker) changes.push_back({marker, old_marker, target.lexically_relative(root).generic_string() + "\n"});
 
     const auto dependencies = asset_dependencies(source, model);
+    const auto resolution = commons::texture_resolution_path(source);
+    const auto target_resolution = commons::texture_resolution_path(target);
+    const bool has_resolution = fs::is_regular_file(resolution);
+    if (has_resolution && fs::exists(fs::symlink_status(target_resolution)))
+        throw std::runtime_error("Já existe uma configuração de resolução no destino.");
     std::vector<fs::path> copied, temporaries;
     bool renamed = false;
+    bool resolution_moved = false;
     std::size_t replaced = 0;
     try {
         for (const auto& dependency : dependencies) {
@@ -132,6 +139,10 @@ inline fs::path move(const fs::path& requested, const fs::path& folder,
         }
         fs::rename(source, target);
         renamed = true;
+        if (has_resolution) {
+            fs::rename(resolution, target_resolution);
+            resolution_moved = true;
+        }
         for (const auto& change : changes) {
             project_files::replace(change.path);
             ++replaced;
@@ -143,6 +154,7 @@ inline fs::path move(const fs::path& requested, const fs::path& folder,
             if (change.path == marker && !marker_exists) fs::remove(marker);
             else { project_files::stage({change.path, change.before}); project_files::replace(change.path); }
         }
+        if (resolution_moved) fs::rename(target_resolution, resolution);
         if (renamed) fs::rename(target, source);
         std::error_code ignored;
         for (const auto& copy : copied) fs::remove(copy, ignored);

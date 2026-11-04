@@ -10,6 +10,7 @@
 #include <vector>
 #include <memory>
 #include <array>
+#include <cstdint>
 #include <variant>
 #include <lua.hpp>
 #include <sol/sol.hpp>
@@ -18,9 +19,10 @@
 #include "component.hpp"
 
 namespace COMMONS_NS {
+    struct physics_system;
     // Metadata is read without executing Lua. Images are project-relative asset paths.
     struct script_property {
-        using value_type = std::variant<double, bool, std::string, std::array<float, 4>>;
+        using value_type = std::variant<double, bool, std::string, std::array<float, 4>, std::uint32_t>;
         std::string name;
         std::string type;
         value_type value;
@@ -54,6 +56,7 @@ namespace COMMONS_NS {
         bool analyze(const rapidjson::Value&) override;
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override;
 		void setup();
+        void setup(const std::weak_ptr<physics_system>& physics_world);
 		void update();
 	};
 }

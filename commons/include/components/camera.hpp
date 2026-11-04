@@ -3,6 +3,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <memory>
+#include <optional>
 #include <string>
 #include "commons_namespace.hpp"
 #include "component.hpp"
@@ -12,6 +13,18 @@
 #include "util/ray.hpp"
 
 namespace COMMONS_NS {
+    enum class ambient_occlusion_mode { off = 0, ssao = 1, hbao = 2, gtao = 3 };
+
+    struct camera_post_processing {
+        static constexpr float min_radius = 0.05f;
+        static constexpr float max_radius = 10.f;
+        ambient_occlusion_mode occlusion{ambient_occlusion_mode::off};
+        float radius{0.75f};
+        float strength{1.f};
+
+        bool valid() const;
+    };
+
 	struct camera_config {
 		bgui::vec3 atmosphere_zenith{0.08f, 0.25f, 0.55f};
 		color sky_solid_color		{0.43F, 0.78F, 0.86F, 1.0F};
@@ -29,6 +42,7 @@ namespace COMMONS_NS {
 		float left{0.f}, top{0.f}, bottom{0.f}, right_limit{0.f};
 
 		bool flag_orth		{ false };
+        camera_post_processing post_processing{};
 	};
 	/**
 	 * @class camera
@@ -79,7 +93,12 @@ namespace COMMONS_NS {
 		ray point_to_ray(const bgui::vec2& screenPoint) const;
 		bgui::vec3 telaParaMundo(const bgui::vec2& screenPoint, float profundidade) const;
         bgui::vec2i worldParaTela(const bgui::vec3& worldPos);
+        bgui::vec2i viewport_size() const;
+        std::optional<bgui::vec3> world_to_screen(const bgui::vec3& world_point);
+        std::optional<bgui::vec3> screen_to_world(const bgui::vec3& screen_point);
 
 		void move(const bgui::vec3& pos);
+    private:
+        std::optional<glm::mat4> view_projection();
 	};
 }

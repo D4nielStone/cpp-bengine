@@ -10,6 +10,7 @@ namespace editor::ui {
 enum class editor_command {
     undo,
     redo,
+    toggle_orbital,
     toggle_colliders
 };
 
@@ -31,8 +32,13 @@ public:
             return m_context->undo();
         case editor_command::redo:
             return m_context->redo();
+        case editor_command::toggle_orbital:
+            m_context->orbital_view = !m_context->orbital_view;
+            m_context->events.publish(editor_event::viewport);
+            return true;
         case editor_command::toggle_colliders:
             m_context->show_colliders = !m_context->show_colliders;
+            m_context->events.publish(editor_event::viewport);
             return true;
         }
         return false;

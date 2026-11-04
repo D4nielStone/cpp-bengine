@@ -2,6 +2,7 @@
 
 #include "core/ecs.hpp"
 #include "editor_preferences.hpp"
+#include "editor_events.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -24,16 +25,20 @@ struct editor_context {
     struct history_action {
         std::function<void()> undo;
         std::function<void()> redo;
+        editor_event event{editor_event::scene};
     };
 
     explicit editor_context(std::shared_ptr<commons::ecs> entity_registry)
         : registry(std::move(entity_registry)) {}
 
+    editor_events events;
     std::shared_ptr<commons::ecs> registry;
     std::filesystem::path project_root;
     std::vector<history_action> undo_stack;
     std::vector<history_action> redo_stack;
     std::optional<entity_id> selected_entity;
+    std::filesystem::path selected_image;
+    std::filesystem::path selected_material;
     std::weak_ptr<commons::hud_element> selected_hud_widget;
     std::unordered_set<entity_id> selected_entities;
 
@@ -52,6 +57,11 @@ struct editor_context {
     }
 
     void select_entity(std::optional<entity_id> id, bool additive = false) {
+        events.publish(editor_event::selection);
+        if (!selected_image.empty() || !selected_material.empty())
+            events.publish(editor_event::assets);
+        selected_image.clear();
+        selected_material.clear();
         synchronize_selection();
         if (!additive) selected_entities.clear();
         else if (selected_entity) selected_entities.insert(*selected_entity);
@@ -84,9 +94,12 @@ struct editor_context {
 
     void record_action(
         std::function<void()> undo,
-        std::function<void()> redo
+        std::function<void()> redo,
+        editor_event event = editor_event::scene
     ) {
-        undo_stack.push_back({std::move(undo), std::move(redo)});
+        undo_stack.push_back({std::move(undo), std::move(redo), event});
+        events.publish(event);
+        events.publish(editor_event::history);
         redo_stack.clear();
     }
 
@@ -96,6 +109,8 @@ struct editor_context {
         auto action = std::move(undo_stack.back());
         undo_stack.pop_back();
         action.undo();
+        events.publish(action.event);
+        events.publish(editor_event::history);
         ++history_revision;
         redo_stack.push_back(std::move(action));
         return true;
@@ -107,6 +122,8 @@ struct editor_context {
         auto action = std::move(redo_stack.back());
         redo_stack.pop_back();
         action.redo();
+        events.publish(action.event);
+        events.publish(editor_event::history);
         ++history_revision;
         undo_stack.push_back(std::move(action));
         return true;
@@ -116,6 +133,7 @@ struct editor_context {
         undo_stack.clear();
         redo_stack.clear();
         ++history_revision;
+        events.publish(editor_event::history);
     }
 
     void record_entity_creation(const entity_id id) {

@@ -44,6 +44,9 @@ namespace COMMONS_NS {
         texture load_texture(aiMaterial*, const aiTextureType&);
         static bool hasTextura(aiMaterial*, const aiTextureType&);
     private:
+        friend class render_system;
+        void advance_animation();
+        void draw_meshes();
         using embedded_textures = std::unordered_map<std::string, texture>;
         mesh process_mesh(aiMesh*, const aiScene*, embedded_textures&);
         texture load_texture(aiMaterial*, const aiTextureType&, embedded_textures&);

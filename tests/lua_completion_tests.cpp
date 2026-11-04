@@ -24,6 +24,17 @@ TEST(LuaCompletion, FiltersMembersAndInfersTransformAliases) {
     EXPECT_EQ(result->end, 11u); // Replace the whole token, including the suffix after the caret.
 }
 
+TEST(LuaCompletion, SuggestsVectorHelpersForTheTypeAndLocalValues) {
+    const std::string type_call = "Vector3.di";
+    auto result = complete_lua(type_call, type_call.size());
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->members, (std::vector<std::string>{"distance"}));
+    const std::string value_call = "local target = Vector3(1, 2, 3)\ntarget:le";
+    result = complete_lua(value_call, value_call.size());
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->members, (std::vector<std::string>{"length", "lerp"}));
+}
+
 TEST(LuaCompletion, IgnoresUnknownObjectsCommentsAndStrings) {
     for (const std::string source : {"unknown.", "-- Input.", "print('Input.", "[[transform:", "--[[\nInput.", "Time:"})
         EXPECT_FALSE(complete_lua(source, source.size())) << source;
@@ -99,6 +110,17 @@ TEST(LuaCompletion, InfersWritableComponentProperties) {
         ASSERT_TRUE(result) << source;
         EXPECT_EQ(result->members, (std::vector<std::string>{property}));
     }
+}
+
+TEST(LuaCompletion, OffersCameraAndHierarchyMethods) {
+    const std::string camera_source = "local cam = gameObject:GetComponent(\"Camera\")\ncam:";
+    const auto camera = complete_lua(camera_source, camera_source.size());
+    ASSERT_TRUE(camera);
+    EXPECT_EQ(camera->members, (std::vector<std::string>{"screenToWorld", "traceRay", "worldToScreen"}));
+    const std::string object_source = "gameObject:SetP";
+    const auto object = complete_lua(object_source, object_source.size());
+    ASSERT_TRUE(object);
+    EXPECT_EQ(object->members, (std::vector<std::string>{"SetParent"}));
 }
 
 TEST(LuaCompletion, OffersSoundPlayerAndListenerProperties) {

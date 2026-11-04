@@ -26,12 +26,18 @@ SOFTWARE.
 
 #pragma once
 #include <string>
+#include <filesystem>
 #include <memory>
 #include <vector>
 #include <cstdint>
 namespace bgui { struct texture; }
 
 namespace COMMONS_NS {
+    inline constexpr int default_texture_resolution_percent = 70;
+    std::filesystem::path texture_resolution_path(const std::filesystem::path& image);
+    int texture_resolution_percent(const std::filesystem::path& image);
+    bgui::texture resize_texture(const bgui::texture& source, int percent);
+
     enum class texture_filter { original, bilinear, trilinear };
 
     struct texture {
@@ -48,6 +54,11 @@ namespace COMMONS_NS {
         void update_embedded_revision();
         void bind(int slot) const;
 
+    private:
+        mutable std::shared_ptr<bgui::texture> m_resized;
+        mutable std::string m_resized_path;
+
+    public:
         bool operator==(const texture& other) const {
             return id == other.id && path == other.path;
         }

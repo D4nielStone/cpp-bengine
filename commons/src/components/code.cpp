@@ -42,6 +42,8 @@ bool read_property(const rapidjson::Value& entry, const char* value_key, script_
     const auto& value = entry[value_key];
     if (result.type == "number" && value.IsNumber() && std::isfinite(value.GetDouble()))
         result.value = value.GetDouble();
+    else if (result.type == "entity" && (value.IsNull() || value.IsUint()))
+        result.value = value.IsNull() ? std::uint32_t{0} : value.GetUint();
     else if (result.type == "boolean" && value.IsBool()) result.value = value.GetBool();
     else if ((result.type == "text" || result.type == "image") && value.IsString())
         result.value = std::string(value.GetString(), value.GetStringLength());
@@ -79,6 +81,9 @@ rapidjson::Value write_properties(const std::vector<script_property>& properties
             using T = std::decay_t<decltype(v)>;
             if constexpr (std::is_same_v<T, double>) value.SetDouble(v);
             else if constexpr (std::is_same_v<T, bool>) value.SetBool(v);
+            else if constexpr (std::is_same_v<T, std::uint32_t>) {
+                if (v != 0) value.SetUint(v);
+            }
             else if constexpr (std::is_same_v<T, std::string>)
                 value.SetString(v.data(), static_cast<rapidjson::SizeType>(v.size()), allocator);
             else {
@@ -150,6 +155,10 @@ code::code(const std::string& file) : file(file) {
 }
 
 void code::setup() {
+    setup({});
+}
+
+void code::setup(const std::weak_ptr<physics_system>& physics_world) {
     bind_script_output(estado_lua, my_object);
     auto bubble = estado_lua["bubble"].get_or_create<sol::table>();
     bubble["meuID"] = my_object;
@@ -348,7 +357,7 @@ void code::setup() {
     );
     bubble["transform"] = transform_api;
 
-    api::setUpApi(estado_lua, reg.lock(), my_object);
+    api::setUpApi(estado_lua, reg.lock(), my_object, physics_world);
     std::string property_error;
     if (!load_properties(property_error)) throw sol::error(property_error);
     auto values = estado_lua.create_table();
@@ -361,6 +370,8 @@ void code::setup() {
                 if (property.type == "image" && !value.empty() && !asset_root.empty())
                     values[property.name] = (std::filesystem::path(asset_root) / value).lexically_normal().string();
                 else values[property.name] = value;
+            } else if constexpr (std::is_same_v<T, std::uint32_t>) {
+                if (value != 0) values[property.name] = value;
             } else values[property.name] = value;
         }, property.value);
     }

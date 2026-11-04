@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include "components/physics.hpp"
 #include "mesh_topology_edit.hpp"
+#include "model_mesh_extract.hpp"
 #include "loaders/editable_model.hpp"
 
 #include <chrono>
@@ -268,4 +270,134 @@ TEST_F(EditableModelTest, FaceGroupsRoundTripAndFollowTopologyEdits) {
     EXPECT_EQ(mesh.face_groups[0].faces, (std::vector<unsigned int>{0, 1}));
     mesh.face_groups[0].faces = {999};
     EXPECT_FALSE(mesh.validate(error));
+}
+
+TEST_F(EditableModelTest, DeletesFacesEdgesAndVerticesAndRemapsFaceGroups) {
+    auto mesh = quad_mesh();
+    mesh.faces = {{0, 1, 2}, {0, 2, 3}};
+    mesh.face_groups = {{"Both", {0, 1}}, {"First", {0}}};
+    std::string error;
+
+    const auto check_remaining_face = [&](const commons::editable_mesh_data& result) {
+        ASSERT_EQ(result.vertices.size(), 3u);
+        EXPECT_EQ(result.vertices[1].position, mesh.vertices[2].position);
+        EXPECT_EQ(result.faces, (std::vector<std::vector<unsigned int>>{{0, 1, 2}}));
+        ASSERT_EQ(result.face_groups.size(), 1u);
+        EXPECT_EQ(result.face_groups[0].name, "Both");
+        EXPECT_EQ(result.face_groups[0].faces, (std::vector<unsigned int>{0}));
+    };
+    auto by_face = mesh;
+    ASSERT_TRUE(editor::ui::delete_mesh_elements(by_face, {0}, {}, {}, error)) << error;
+    check_remaining_face(by_face);
+    auto by_vertex = mesh;
+    ASSERT_TRUE(editor::ui::delete_mesh_elements(by_vertex, {}, {1}, {}, error)) << error;
+    check_remaining_face(by_vertex);
+    auto by_edge = mesh;
+    ASSERT_TRUE(editor::ui::delete_mesh_elements(by_edge, {}, {}, {{0, 1}}, error)) << error;
+    check_remaining_face(by_edge);
+
+    ASSERT_TRUE(editor::ui::delete_mesh_elements(mesh, {}, {}, {{0, 2}}, error)) << error;
+    EXPECT_TRUE(mesh.vertices.empty());
+    EXPECT_TRUE(mesh.faces.empty());
+    EXPECT_TRUE(mesh.face_groups.empty());
+    const auto path = folder / "empty-mesh.bmodel";
+    ASSERT_TRUE(commons::save_editable_model(path, {{mesh}}, error)) << error;
+    commons::editable_model_data loaded;
+    ASSERT_TRUE(commons::load_editable_model(path, loaded, error)) << error;
+    ASSERT_EQ(loaded.meshes.size(), 1u);
+    EXPECT_TRUE(loaded.meshes[0].vertices.empty());
+    EXPECT_TRUE(loaded.meshes[0].faces.empty());
+}
+
+TEST_F(EditableModelTest, EmptyNativeMeshUsesAnEmptyCollider) {
+    std::string error;
+    const auto path = folder / "empty-collider.bmodel";
+    auto mesh = quad_mesh();
+    mesh.faces.clear();
+    ASSERT_TRUE(commons::save_editable_model(path, {{mesh}}, error)) << error;
+    commons::model model(path.string());
+    commons::physics body(true, commons::physics::shapes::mesh_shape);
+    body.set_model_collider_type(commons::physics::model_collider_type::concave);
+    body.setModelo(&model);
+    EXPECT_EQ(body.m_forma->getShapeType(), EMPTY_SHAPE_PROXYTYPE);
+}
+
+TEST_F(EditableModelTest, CopiesSelectedFaceWithUvsAndRemapsPastedGroup) {
+    auto source = quad_mesh();
+    source.faces = {{0, 1, 2}, {2, 3, 0}};
+    source.face_groups = {{"Grupo", {0, 1}}};
+    const auto copied = editor::ui::copy_mesh_elements(source, {1}, {}, {});
+    ASSERT_EQ(copied.geometry.vertices.size(), 3u);
+    EXPECT_EQ(copied.geometry.vertices.front().uvcoords, source.vertices[2].uvcoords);
+    ASSERT_EQ(copied.geometry.faces.size(), 1u);
+    ASSERT_EQ(copied.geometry.face_groups.size(), 1u);
+    EXPECT_EQ(copied.geometry.face_groups.front().faces, (std::vector<unsigned int>{0}));
+
+    auto target = quad_mesh();
+    target.material_path = "target.bmat";
+    std::string error;
+    ASSERT_TRUE(editor::ui::append_mesh_elements(target, copied, error)) << error;
+    ASSERT_EQ(target.faces.size(), 2u);
+    EXPECT_EQ(target.faces.back(), (std::vector<unsigned int>{4, 5, 6}));
+    ASSERT_EQ(target.face_groups.size(), 1u);
+    EXPECT_EQ(target.face_groups.front().faces, (std::vector<unsigned int>{1}));
+    EXPECT_EQ(target.material_path, "target.bmat");
+}
+
+TEST_F(EditableModelTest, CopiesEdgeWithIncidentFacesAndVertexWithoutFaces) {
+    auto mesh = quad_mesh();
+    mesh.faces = {{0, 1, 2}, {2, 3, 0}};
+    const auto edge = editor::ui::copy_mesh_elements(mesh, {}, {}, {{0, 2}});
+    EXPECT_EQ(edge.geometry.faces.size(), 2u);
+    EXPECT_EQ(edge.edges, (std::set<editor::ui::mesh_edge>{{0, 1}}));
+
+    const auto vertex = editor::ui::copy_mesh_elements(mesh, {}, {3}, {});
+    ASSERT_EQ(vertex.geometry.vertices.size(), 1u);
+    EXPECT_EQ(vertex.geometry.vertices.front().position, mesh.vertices[3].position);
+    EXPECT_TRUE(vertex.geometry.faces.empty());
+    std::string error;
+    ASSERT_TRUE(editor::ui::append_mesh_elements(mesh, vertex, error)) << error;
+    EXPECT_EQ(mesh.vertices.size(), 5u);
+    EXPECT_EQ(mesh.faces.size(), 2u);
+}
+
+TEST_F(EditableModelTest, ExtractsOneNamedMeshWithEditableTopologyAndLiveMaterial) {
+    auto mesh = quad_mesh();
+    mesh.face_groups = {{"Painel", {0}}};
+    mesh.material_path = "original.bmat";
+    commons::material material;
+    material.set_uniform("material.roughness", .37f);
+    const auto source_texture = folder / "source.png";
+    std::ofstream(source_texture, std::ios::binary) << "texture payload";
+    commons::texture texture;
+    texture.path = source_texture.string();
+    material.set_texture("tex_albedo", texture);
+    EXPECT_THROW(editor::ui::extract(folder, "original.bmodel", "../outside", mesh, material), std::runtime_error);
+    const auto output = editor::ui::extract(folder, "original.bmodel", "Painel.bmodel", mesh, material);
+    EXPECT_EQ(output, std::filesystem::canonical(folder) / "assets/models/original_parts/Painel.bmodel");
+    material.set_uniform("material.roughness", .9f);
+    EXPECT_THROW(editor::ui::extract(folder, "original.bmodel", "Painel", mesh, material), std::runtime_error);
+    const auto second = editor::ui::extract(folder, "original.bmodel", "Suporte", mesh, material);
+    EXPECT_EQ(second.parent_path(), output.parent_path());
+    EXPECT_NE(second, output);
+    ASSERT_TRUE(std::filesystem::remove(source_texture));
+
+    commons::editable_model_data data;
+    std::string error;
+    ASSERT_TRUE(commons::load_editable_model(output, data, error)) << error;
+    ASSERT_EQ(data.meshes.size(), 1u);
+    EXPECT_EQ(data.meshes.front().faces, mesh.faces);
+    ASSERT_EQ(data.meshes.front().face_groups.size(), 1u);
+    EXPECT_EQ(data.meshes.front().face_groups.front().name, "Painel");
+    EXPECT_EQ(mesh.material_path, "original.bmat");
+    const std::filesystem::path reference(data.meshes.front().material_path);
+    EXPECT_TRUE(reference.is_relative());
+    const commons::model loaded(output.string());
+    ASSERT_EQ(loaded.meshes.size(), 1u);
+    const auto extracted = loaded.meshes.front().getMaterial();
+    EXPECT_FLOAT_EQ(extracted.getUniforme("material.roughness").valor.f, .37f);
+    const std::filesystem::path texture_path = extracted.getTextura("tex_albedo").path;
+    EXPECT_EQ(texture_path.parent_path(), output.parent_path() / "Painel.materials");
+    std::ifstream copied_texture(texture_path, std::ios::binary);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(copied_texture), {}), "texture payload");
 }

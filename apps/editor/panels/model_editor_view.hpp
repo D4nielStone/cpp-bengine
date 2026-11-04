@@ -2,6 +2,7 @@
 
 #include "editable_model_import.hpp"
 #include "mesh_topology_edit.hpp"
+#include "model_mesh_extract.hpp"
 #include "editor_context.hpp"
 #include "panel.hpp"
 #include "components/renderer.hpp"
@@ -11,9 +12,11 @@
 #include "mesh_material_editor.hpp"
 #include "../tools/direction_gizmo.hpp"
 #include "loaders/material_asset.hpp"
-#include "systems/render_system.hpp"
+#include "render_viewport.hpp"
 #include <chrono>
 #include <elem/tree.hpp>
+#include <elem/combo_box.hpp>
+#include <elem/modal.hpp>
 
 #include <elem/image.hpp>
 #include <elem/inputbox.hpp>
@@ -152,8 +155,9 @@ public:
             set_status("Grupo de faces criado. Salve o modelo.");
         });
         m_loop_button = &actions.add<bgui::button>("Loop Cut", .28f, [this] { start_loop_cut(); });
-        m_save_button = &actions.add<bgui::button>("Salvar .bmodel", .28f, [this] { save(); });
-        for (auto* button : {&undo_button, &redo_button, m_extrude_button, &group_button, m_loop_button, m_save_button}) {
+        auto& save_button = actions.add<bgui::button>("Salvar .bmodel", .28f, [this] { save(); });
+        auto& export_button = actions.add<bgui::button>("Extract (Ctrl+E)", .28f, [this] { request_extract(); });
+        for (auto* button : {&undo_button, &redo_button, m_extrude_button, &group_button, m_loop_button, &save_button, &export_button}) {
             button->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
             button->style.layout.require_height(bgui::mode::pixel, 30.f);
             button->style.layout.margin = bgui::vec4i{2, 0, 2, 0};
@@ -171,7 +175,7 @@ public:
         frame.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         frame.style.layout.require_height(bgui::mode::pixel, 30.f);
         auto& help = tools.add<bgui::text>(
-            "O: visão normal/orbital.\nBotão direito: olhar/orbitar.\nCtrl + Shift + arraste: pan.\nScroll: aproximar/afastar.\nTab: modo objeto/edição.\nShift + clique: seleção múltipla.\nG/R/S: mover/girar/escalar.\nE: extrudar faces. Ctrl + R: Loop Cut.\n\nFaces: selecione para extrudar.\nArestas: selecione para Loop Cut.\n\nAs alterações ficam pendentes até salvar.", .25f);
+            "O: visão normal/orbital.\nBotão direito: olhar/orbitar.\nCtrl + Shift + arraste: pan.\nScroll: aproximar/afastar.\nTab: modo objeto/edição.\nShift + clique: seleção múltipla.\nArraste para selecionar por retângulo. Shift + arraste adiciona.\nDelete: apagar seleção.\nCtrl+C / Ctrl+V: copiar / colar elementos.\nCtrl+S: salvar. Ctrl+E: Extract.\nG/R/S: mover/girar/escalar.\nE: extrudar faces. Ctrl + R: Loop Cut.\n\nFaces: selecione para extrudar.\nArestas: selecione para Loop Cut.\n\nAs alterações ficam pendentes até salvar.", .25f);
         help.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         help.receives_input(false);
         m_mesh_controls = &tools.add<bgui::linear>(bgui::orientation::vertical);
@@ -205,6 +209,74 @@ public:
         return true;
     }
 
+    void set_extract_callback(std::function<void(const std::string&)> callback) {
+        m_on_extract = std::move(callback);
+    }
+
+    void request_extract() {
+        bgui::add_function([this] { show_extract(); });
+    }
+
+    void copy_selection() {
+        if (geometry_operation_active()) return;
+        sync_selected_entity();
+        if (m_mode == model_selection_mode::object || m_active_mesh >= m_model.meshes.size()) {
+            set_status("Selecione faces, vértices ou arestas para copiar.");
+            return;
+        }
+
+        const std::set<std::size_t> empty_indices;
+        const std::set<mesh_edge> empty_edges;
+        auto copy = copy_mesh_elements(m_model.meshes[m_active_mesh],
+            m_mode == model_selection_mode::faces ? m_selected_faces : empty_indices,
+            m_mode == model_selection_mode::vertices ? m_selected_vertices : empty_indices,
+            m_mode == model_selection_mode::edges ? m_selected_edges : empty_edges);
+        if (copy.geometry.vertices.empty()) {
+            set_status("Selecione elementos para copiar.");
+            return;
+        }
+        m_clipboard = std::move(copy);
+        m_clipboard_project = m_context->project_root;
+        m_clipboard_mode = m_mode;
+        set_status("Elementos copiados.");
+    }
+
+    void paste_selection() {
+        if (geometry_operation_active()) return;
+        sync_selected_entity();
+        if (m_active_mesh >= m_model.meshes.size() || !is_native_model(m_source_path)) {
+            set_status("Abra um modelo .bmodel para colar os elementos.");
+            return;
+        }
+        if (m_clipboard.geometry.vertices.empty() || m_clipboard_project != m_context->project_root) {
+            set_status("Copie elementos no projeto atual antes de colar.");
+            return;
+        }
+
+        auto before = capture_geometry();
+        auto& mesh = m_model.meshes[m_active_mesh];
+        const auto vertex_offset = static_cast<unsigned int>(mesh.vertices.size());
+        const auto face_offset = mesh.faces.size();
+        std::string error;
+        if (!append_mesh_elements(mesh, m_clipboard, error)) {
+            set_status(error);
+            return;
+        }
+
+        set_selection_mode(m_clipboard_mode);
+        if (m_mode == model_selection_mode::vertices)
+            for (auto i = vertex_offset; i < mesh.vertices.size(); ++i) m_selected_vertices.insert(i);
+        if (m_mode == model_selection_mode::faces)
+            for (auto i = face_offset; i < mesh.faces.size(); ++i) m_selected_faces.insert(i);
+        for (const auto& [a, b] : m_clipboard.edges)
+            m_selected_edges.emplace(a + vertex_offset, b + vertex_offset);
+        record_geometry(std::move(before));
+        m_geometry_dirty = m_projection_dirty = m_gizmo_selection_dirty = true;
+        update_mesh_label();
+        set_status("Elementos colados na malha ativa. Salve o modelo.");
+        mark_preview_dirty();
+    }
+
     bool drop_asset(const std::filesystem::path& path, const bgui::vec2i& position) {
         for (const auto& [element, assign] : m_material_targets) {
             bool enabled = true;
@@ -223,6 +295,7 @@ public:
             m_mode = static_cast<model_selection_mode>(m_context->model_selection);
             if (m_mode != model_selection_mode::object) m_last_edit_mode = m_mode;
             m_picking_cut = false;
+            m_selection_start.reset();
             refresh_mode_buttons();
             mark_preview_dirty();
         }
@@ -234,9 +307,11 @@ public:
             m_last_extrude_distance = m_context->extrude_distance;
         }
         sync_selected_entity();
+        sync_model_transform();
         if (m_view_mode!=m_context->model_view_mode) {
-            m_view_mode=std::clamp(m_context->model_view_mode,0,2);
-            m_material_dirty=true;mark_preview_dirty();
+            m_view_mode = std::clamp(m_context->model_view_mode, 0, 2);
+            m_material_dirty = true;
+            mark_preview_dirty();
             for(std::size_t i=0;i<m_view_buttons.size();++i) {
                 m_view_buttons[i]->style.visual.background.normal=static_cast<int>(i)==m_view_mode
                     ? bgui::color{.17f,.36f,.58f,1.f}:bgui::color{.12f,.12f,.12f,1.f};
@@ -280,7 +355,12 @@ public:
                 m_frame_distance * .01f, m_frame_distance * 10.f);
             m_navigation->set_zoom_sensitivity(preferences.zoom_sensitivity * zoom_distance * .15f);
             const auto before = eye->get_model_matrix();
-            m_navigation_input->gizmo_active = m_gizmo.is_dragging() || m_extrusion_before.has_value() || m_cut_before.has_value();
+            m_navigation_input->gizmo_active = m_gizmo.is_dragging() || m_extrusion_before.has_value() ||
+                m_cut_before.has_value() || m_selection_start.has_value();
+            const bool control = bgui::get_pressed(bgui::input_key::left_control) ||
+                bgui::get_pressed(bgui::input_key::right_control);
+            m_navigation_input->movement_shortcut_active = control &&
+                (bgui::get_pressed(bgui::input_key::s) || bgui::get_pressed(bgui::input_key::e));
             m_navigation->update(m_preview_registry);
             if (before != eye->get_model_matrix()) { m_preview_dirty = true; m_projection_dirty=true; }
         }
@@ -317,6 +397,7 @@ private:
         pick_overlay(model_editor_view& owner, bgui::image& image)
             : m_owner(owner), m_image(image) {
             type = "model-editor-picking-overlay";
+            add_class("model-editor-viewport-input");
             receives_input(true);
             set_flex(false);
         }
@@ -343,7 +424,7 @@ private:
     bgui::text* m_source_label{nullptr};
     bgui::button* m_extrude_button{nullptr};
     bgui::button* m_loop_button{nullptr};
-    bgui::button* m_save_button{nullptr};
+
     std::weak_ptr<commons::renderer> m_source_renderer;
     bgui::text* m_status{nullptr};
     std::shared_ptr<editor_context> m_context;
@@ -355,7 +436,16 @@ private:
     std::vector<std::vector<bgui::vec2>> m_projected_vertices;
     std::set<std::size_t> m_selected_faces;
     std::set<std::size_t> m_selected_vertices;
-    std::optional<mesh_edge> m_selected_edge;
+    mesh_element_clipboard m_clipboard;
+    std::filesystem::path m_clipboard_project;
+    model_selection_mode m_clipboard_mode{model_selection_mode::vertices};
+    std::function<void(const std::string&)> m_on_extract;
+    std::set<mesh_edge> m_selected_edges;
+    std::optional<bgui::vec2i> m_selection_start;
+    bool m_selection_extend{};
+    bool m_delete_down{};
+    glm::mat4 m_model_world{1.f};
+    std::optional<glm::mat4> m_world_to_model{glm::mat4{1.f}};
     model_selection_mode m_mode{model_selection_mode::object};
     std::size_t m_active_mesh{0};
     std::uint64_t m_preview_revision{0};
@@ -373,6 +463,37 @@ private:
     std::size_t m_geometry_uploads{0},m_projection_updates{0};
     double m_last_preview_ms{0};
 
+    bgui::vec3 world_point(const bgui::vec3& point) const {
+        const auto world = m_model_world * glm::vec4(point.x, point.y, point.z, 1.f);
+        return {world.x, world.y, world.z};
+    }
+
+    void sync_model_transform() {
+        glm::mat4 world{1.f};
+        if (m_model_entity && m_context->registry) {
+            if (const auto transform = m_context->registry->get<commons::transform>(*m_model_entity))
+                world = transform->get_world_model_matrix();
+        }
+        if (world == m_model_world) return;
+        m_model_world = world;
+        m_world_to_model.reset();
+        if (glm::determinant(world) != 0.f) {
+            const auto inverse = glm::inverse(world);
+            bool finite = true;
+            for (int col = 0; col < 4; ++col)
+                for (int row = 0; row < 4; ++row)
+                    finite &= std::isfinite(inverse[col][row]);
+            if (finite) m_world_to_model = inverse;
+        }
+        if (m_drag_before) {
+            record_geometry(std::move(*m_drag_before));
+            m_drag_before.reset();
+        }
+        m_gizmo = editor::transform_gizmo{};
+        m_frame_preview = m_projection_dirty = m_gizmo_selection_dirty = true;
+        mark_preview_dirty();
+    }
+
     static bool gpu_available() { return glad_glGetString && glGetString(GL_VERSION); }
     void sync_gpu_model() {
         if (!m_gpu_renderer) {
@@ -386,7 +507,8 @@ private:
             auto& meshes=m_gpu_renderer->m_modelo->meshes;
             for(auto& mesh:meshes) if(mesh.isLoaded())mesh.unload();
             meshes.clear();meshes.reserve(m_model.meshes.size());
-            for(const auto& mesh:m_model.meshes) meshes.emplace_back(mesh.vertices,mesh.triangulated_indices(),commons::material{});
+            for (const auto& mesh : m_model.meshes)
+                meshes.emplace_back(mesh.vertices, mesh.triangulated_indices(), commons::material{});
             m_geometry_dirty=false;m_material_dirty=true;++m_geometry_uploads;
         }
         if (m_material_dirty) {
@@ -413,32 +535,33 @@ private:
         sync_gpu_model();
         commons::camera* camera=m_preview_camera.get();
         if (m_view_mode==2 && m_model_entity) {
-            auto transform=m_context->registry->get<commons::transform>(*m_model_entity);
-            if (transform) {
-                const auto world=transform->get_world_model_matrix();
-                if (std::abs(glm::determinant(world))<1e-8f) { set_status("Render requer uma transformação invertível.");return; }
-                m_scene_preview_camera.config=m_preview_camera->config;
-                if (m_context->editor_camera_entity) if(auto editor_camera=m_context->registry->get<commons::camera>(*m_context->editor_camera_entity)) {
-                    const auto fov=m_scene_preview_camera.config.fov, near_clip=m_scene_preview_camera.config.corte_curto, far_clip=m_scene_preview_camera.config.corte_longo;
-                    m_scene_preview_camera.config=editor_camera->config;
-                    m_scene_preview_camera.config.fov=fov;m_scene_preview_camera.config.corte_curto=near_clip;m_scene_preview_camera.config.corte_longo=far_clip;
-                    m_scene_preview_camera.config.flag_orth=false;
-                    m_scene_preview_camera.skybox_asset_root=editor_camera->skybox_asset_root;
-                    m_scene_preview_camera.skybox_faces=editor_camera->skybox_faces;
-                }
-                m_scene_preview_camera.viewMatrix=m_preview_camera->viewMatrix*glm::inverse(world);
-                const auto eye=world*glm::vec4(m_preview_camera->position.x,m_preview_camera->position.y,m_preview_camera->position.z,1.f);
-                m_scene_preview_camera.position={eye.x,eye.y,eye.z};
-                camera=&m_scene_preview_camera;
+            m_scene_preview_camera.config=m_preview_camera->config;
+            if (m_context->editor_camera_entity) if(auto editor_camera=m_context->registry->get<commons::camera>(*m_context->editor_camera_entity)) {
+                const auto fov=m_scene_preview_camera.config.fov, near_clip=m_scene_preview_camera.config.corte_curto, far_clip=m_scene_preview_camera.config.corte_longo;
+                m_scene_preview_camera.config=editor_camera->config;
+                m_scene_preview_camera.config.fov=fov;m_scene_preview_camera.config.corte_curto=near_clip;m_scene_preview_camera.config.corte_longo=far_clip;
+                m_scene_preview_camera.config.flag_orth=false;
+                m_scene_preview_camera.skybox_asset_root=editor_camera->skybox_asset_root;
+                m_scene_preview_camera.skybox_faces=editor_camera->skybox_faces;
             }
+            m_scene_preview_camera.viewMatrix = m_preview_camera->viewMatrix;
+            m_scene_preview_camera.position = m_preview_camera->position;
+            camera = &m_scene_preview_camera;
         }
-        camera->request_framebuffer_size({width,height});
-        if(m_view_mode==2 && m_model_entity)
-            m_gpu_render_system.render_view(m_context->registry,*camera,*m_model_entity,m_gpu_renderer);
-        else m_gpu_render_system.render_view(m_preview_registry,*camera);
-        const auto texture=camera->framebuffer_texture();
-        if(texture && (m_image->get_texture().m_id!=texture || m_image->get_texture().m_size!=bgui::vec2{float(width),float(height)}))
-            m_image->set_external_texture(texture,{float(width),float(height)});
+        viewport_frame frame;
+        if (m_view_mode == 2 && m_model_entity) {
+            frame = render_viewport(m_gpu_render_system, m_context->registry, *camera,
+                width, height, *m_model_entity, m_gpu_renderer);
+        } else {
+            const auto transform = m_model_entity
+                ? m_context->registry->get<commons::transform>(*m_model_entity) : nullptr;
+            frame = render_viewport(m_gpu_render_system, m_preview_registry, *camera,
+                width, height, m_gpu_renderer->my_object, {}, transform);
+        }
+        const bgui::vec2 size{float(frame.width), float(frame.height)};
+        if (frame.texture && (m_image->get_texture().m_id != frame.texture ||
+            m_image->get_texture().m_size != size))
+            m_image->set_external_texture(frame.texture, size);
     }
 
     editor::transform_gizmo m_gizmo;
@@ -474,7 +597,7 @@ private:
                 group.add_class("model-mesh-section");
                 group.children().add<bgui::button>("Selecionar malha", .26f, [this, i] {
                     if (m_extrusion_before || m_cut_before) return;
-                    m_active_mesh = i;
+                    set_active_mesh(i);
                     m_mode = model_selection_mode::faces;
                     m_context->model_selection = static_cast<int>(m_mode);
                     m_selected_faces.clear();
@@ -488,7 +611,7 @@ private:
                     group.children().add<bgui::button>(faces.name, .26f, [this, i, g] {
                         if (m_extrusion_before || m_cut_before) return;
                         if (m_active_mesh != i || !bgui::get_pressed(bgui::input_key::left_control)) m_selected_faces.clear();
-                        m_active_mesh = i;
+                        set_active_mesh(i);
                         const auto& indices = m_model.meshes[i].face_groups[g].faces;
                         m_selected_faces.insert(indices.begin(), indices.end());
                         m_mode = model_selection_mode::faces;
@@ -547,9 +670,7 @@ private:
         std::swap(state.revision, m_geometry_revision);
         destination.push_back(std::move(state));
         m_dirty = m_geometry_revision != m_saved_geometry_revision;
-        m_selected_faces.clear();
-        m_selected_vertices.clear();
-        m_selected_edge.reset();
+        clear_element_selection();
         m_geometry_dirty = m_projection_dirty = m_gizmo_selection_dirty = true;
         m_material_revision = std::numeric_limits<std::size_t>::max();
         update_mesh_label();
@@ -680,9 +801,8 @@ private:
         if (mode != model_selection_mode::object) m_last_edit_mode = mode;
         m_context->model_selection = static_cast<int>(mode);
         m_mode = mode;
-        m_selected_faces.clear();
-        m_selected_vertices.clear();
-        m_selected_edge.reset();
+        m_selection_start.reset();
+        clear_element_selection();
         m_gizmo_selection_dirty = true;
         refresh_mode_buttons();
         mark_preview_dirty();
@@ -694,6 +814,10 @@ private:
         const bool blocked = !m_context || m_context->is_playing || viewport_input_blocked_by_modal();
         const bool down = !blocked && bgui::get_pressed(bgui::input_key::mouse_left);
         const bool just_pressed = down && !m_gizmo_left_down;
+        const bool just_released = !down && m_gizmo_left_down;
+        const bool delete_key = bgui::get_pressed(bgui::input_key::delete_key);
+        const bool delete_pressed = delete_key && !m_delete_down;
+        m_delete_down = delete_key;
         const auto delta = mouse - m_gizmo_last_mouse;
         m_gizmo_last_mouse = mouse;
         m_gizmo_left_down = down;
@@ -718,7 +842,11 @@ private:
                 update_cut_slide(mouse, confirm, center, cancel);
             return;
         }
-        if (over && editable && !m_gizmo.is_dragging() && !m_extrusion_before) {
+        const bool cancel_selection = blocked || bgui::get_pressed(bgui::input_key::escape) ||
+            bgui::get_pressed(bgui::input_key::mouse_right);
+        if (cancel_selection) m_selection_start.reset();
+        if (over && editable && !m_gizmo.is_dragging() && !m_extrusion_before && !m_selection_start) {
+            if (delete_pressed && !m_picking_cut) delete_selection();
             if (tab && !m_tab_down) {
                 m_picking_cut = false;
                 set_selection_mode(m_mode == model_selection_mode::object
@@ -751,7 +879,7 @@ private:
         }
         if (m_picking_cut && just_pressed && over) {
             select_at(mouse);
-            if (m_selected_edge) {
+            if (m_selected_edges.size() == 1) {
                 m_picking_cut = false;
                 loop_cut();
             }
@@ -764,7 +892,7 @@ private:
                 std::set<std::size_t> selected;
                 if (m_mode == model_selection_mode::object && m_object_selected) {
                     for (std::size_t v = 0; v < m_model.meshes[mesh].vertices.size(); ++v) {
-                        m_gizmo_vertices.emplace_back(mesh,v);pivot+=m_model.meshes[mesh].vertices[v].position;
+                        m_gizmo_vertices.emplace_back(mesh,v);pivot+=world_point(m_model.meshes[mesh].vertices[v].position);
                     }
                     continue;
                 } else if (mesh == m_active_mesh) {
@@ -773,12 +901,15 @@ private:
                             if (face < m_model.meshes[mesh].faces.size())
                                 selected.insert(m_model.meshes[mesh].faces[face].begin(), m_model.meshes[mesh].faces[face].end());
                     if (m_mode == model_selection_mode::vertices) selected = m_selected_vertices;
-                    if (m_mode == model_selection_mode::edges && m_selected_edge)
-                        selected = {m_selected_edge->first, m_selected_edge->second};
+                    if (m_mode == model_selection_mode::edges)
+                        for (const auto& [first, second] : m_selected_edges) {
+                            selected.insert(first);
+                            selected.insert(second);
+                        }
                 }
                 for (auto vertex : selected) if (vertex < m_model.meshes[mesh].vertices.size()) {
                     m_gizmo_vertices.emplace_back(mesh, vertex);
-                    pivot += m_model.meshes[mesh].vertices[vertex].position;
+                    pivot += world_point(m_model.meshes[mesh].vertices[vertex].position);
                 }
             }
             if (!m_gizmo_vertices.empty()) pivot = pivot / static_cast<float>(m_gizmo_vertices.size());
@@ -790,14 +921,14 @@ private:
             m_gizmo_selection_dirty = false;
         }
         const auto before = m_gizmo_transform.get_model_matrix();
-        auto* target = !editable || m_picking_cut || m_gizmo_vertices.empty() ? nullptr : &m_gizmo_transform;
+        auto* target = !editable || !m_world_to_model || m_picking_cut || m_selection_start || m_gizmo_vertices.empty() ? nullptr : &m_gizmo_transform;
         const bool was_dragging = m_gizmo.is_dragging();
         m_gizmo.update(*m_preview_camera, target, rect, {rect}, mouse, delta,
             over, just_pressed && over, down && (over || m_gizmo.is_dragging()));
         const auto after = m_gizmo_transform.get_model_matrix();
         if (target && before != after) {
             if (!m_drag_before) m_drag_before = capture_geometry();
-            const auto change = after * glm::inverse(before);
+            const auto change = *m_world_to_model * after * glm::inverse(before) * m_model_world;
             for (auto [mesh, vertex] : m_gizmo_vertices) {
                 auto& point = m_model.meshes[mesh].vertices[vertex].position;
                 const auto next = change * glm::vec4(point.x, point.y, point.z, 1.f);
@@ -808,7 +939,24 @@ private:
             update_mesh_label();
             mark_preview_dirty();
         }
-        if (!m_gizmo.is_dragging() && just_pressed && over) select_at(mouse);
+        if (!m_gizmo.is_dragging() && just_pressed && over && !cancel_selection) {
+            if (m_mode == model_selection_mode::object) select_at(mouse);
+            else {
+                m_selection_start = mouse;
+                m_selection_extend = extend_selection();
+            }
+        }
+        if (m_selection_start) {
+            const auto start = *m_selection_start;
+            const bool box = std::abs(mouse.x - start.x) >= 4 || std::abs(mouse.y - start.y) >= 4;
+            if (just_released) {
+                m_selection_start.reset();
+                if (box) select_rectangle(start, mouse, m_selection_extend);
+                else if (over) select_at(start, m_selection_extend);
+            } else if (box) {
+                draw_selection_rectangle(start, mouse, rect);
+            }
+        }
         if (!m_gizmo.is_dragging() && m_drag_before) {
             record_geometry(std::move(*m_drag_before));
             m_drag_before.reset();
@@ -824,8 +972,21 @@ private:
                 const auto& indices=m_model.meshes[m_active_mesh].faces[face];
                 for(std::size_t i=0;i<indices.size();++i)draw.add_line(screen(indices[i]),screen(indices[(i+1)%indices.size()]),2.f);
             }
-            if(m_mode==model_selection_mode::edges && m_selected_edge) draw.add_line(screen(m_selected_edge->first),screen(m_selected_edge->second),3.f);
-            if(m_mode==model_selection_mode::vertices) for(auto vertex:m_selected_vertices) { const auto p=screen(vertex);draw.add_rect_filled(p-bgui::vec2{3.f,3.f},p+bgui::vec2{3.f,3.f}); }
+            if (m_mode == model_selection_mode::edges)
+                for (const auto& [first, second] : m_selected_edges)
+                    draw.add_line(screen(first), screen(second), 3.f);
+            if (m_mode == model_selection_mode::vertices && !m_projection_dirty) {
+                const auto& points = m_projected_depths[m_active_mesh];
+                for (std::size_t vertex = 0; vertex < points.size(); ++vertex) {
+                    if (std::abs(points[vertex].z) > 1.f) continue;
+                    const bool selected = m_selected_vertices.contains(vertex);
+                    const auto p = screen(vertex);
+                    const auto radius = selected ? bgui::vec2{3.f, 3.f} : bgui::vec2{2.f, 2.f};
+                    draw.set_color(selected ? bgui::color{1.f, .45f, .12f, 1.f}
+                        : bgui::color{.75f, .75f, .75f, 1.f});
+                    draw.add_rect_filled(p - radius, p + radius);
+                }
+            }
             draw.set_color(previous_color);if(clipped)draw.set_clip_rect(previous_clip);else draw.clear_clip_rect();
         }
     }
@@ -857,6 +1018,7 @@ private:
         }
 
         m_picking_cut = false;
+        m_selection_start.reset();
         m_geometry_undo.clear();
         m_geometry_redo.clear();
         m_drag_before.reset();
@@ -870,9 +1032,7 @@ private:
         m_model.meshes.clear();
         rebuild_mesh_controls();
         m_active_mesh = 0;
-        m_selected_faces.clear();
-        m_selected_vertices.clear();
-        m_selected_edge.reset();
+        clear_element_selection();
         m_object_selected = false;
         m_dirty = false;
         update_mesh_label();
@@ -926,9 +1086,7 @@ private:
         m_geometry_dirty=true;m_material_dirty=true;m_projection_dirty=true;
         rebuild_mesh_controls();
         m_active_mesh = 0;
-        m_selected_faces.clear();
-        m_selected_vertices.clear();
-        m_selected_edge.reset();
+        clear_element_selection();
         m_object_selected = true;
         update_mesh_label();
         set_status(is_native_model(selected_path)
@@ -1042,9 +1200,20 @@ private:
             return;
 
         if (m_frame_preview) {
-            bgui::vec3 low{std::numeric_limits<float>::max()}, high{std::numeric_limits<float>::lowest()};
-            for (const auto& mesh : m_model.meshes) for (const auto& v : mesh.vertices)
-                for (int axis=0; axis<3; ++axis) { low[axis]=std::min(low[axis],v.position[axis]); high[axis]=std::max(high[axis],v.position[axis]); }
+            const auto origin = world_point({});
+            bgui::vec3 low = origin, high = origin;
+            bool first = true;
+            for (const auto& mesh : m_model.meshes) for (const auto& vertex : mesh.vertices) {
+                const auto point = world_point(vertex.position);
+                if (first) {
+                    low = high = point;
+                    first = false;
+                }
+                for (int axis = 0; axis < 3; ++axis) {
+                    low[axis] = std::min(low[axis], point[axis]);
+                    high[axis] = std::max(high[axis], point[axis]);
+                }
+            }
             const auto center = (low+high)*.5f;
             const float radius = std::max(.01f,(high-low).length()*.5f);
             const float aspect = static_cast<float>(width)/height;
@@ -1067,12 +1236,8 @@ private:
             if (m_context->orbital_view) m_navigation->focus_orbit_target(m_orbit_pivot,distance);
             m_frame_preview = false;
         }
-        const auto framebuffer_size = m_preview_camera->viewportFBO;
-        m_preview_camera->viewportFBO = {width,height};
-        m_preview_camera->getViewMatrix();
-        m_preview_camera->obtProjectionMatrix();
-        if (m_preview_camera->flag_fb) m_preview_camera->viewportFBO = framebuffer_size;
-        const auto matrix = m_preview_camera->projMatriz*m_preview_camera->viewMatrix;
+        update_viewport_projection(*m_preview_camera, width, height);
+        const auto matrix = m_preview_camera->projMatriz * m_preview_camera->viewMatrix * m_model_world;
 
         for (std::size_t mesh=0; mesh<m_model.meshes.size(); ++mesh) {
             for (const auto& vertex : m_model.meshes[mesh].vertices) {
@@ -1179,7 +1344,116 @@ private:
         m_last_preview_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
     }
 
-    void select_at(const bgui::vec2i& position) {
+    void clear_element_selection() {
+        m_selected_faces.clear();
+        m_selected_vertices.clear();
+        m_selected_edges.clear();
+    }
+
+    void set_active_mesh(std::size_t mesh) {
+        if (mesh != m_active_mesh) clear_element_selection();
+        m_active_mesh = mesh;
+    }
+
+    void delete_selection() {
+        if (m_mode == model_selection_mode::object || m_active_mesh >= m_model.meshes.size())
+            return;
+
+        const std::set<std::size_t> empty_indices;
+        const std::set<mesh_edge> empty_edges;
+        const auto& faces = m_mode == model_selection_mode::faces ? m_selected_faces : empty_indices;
+        const auto& vertices = m_mode == model_selection_mode::vertices ? m_selected_vertices : empty_indices;
+        const auto& edges = m_mode == model_selection_mode::edges ? m_selected_edges : empty_edges;
+        if (faces.empty() && vertices.empty() && edges.empty()) return;
+
+        auto before = capture_geometry();
+        std::string error;
+        if (!delete_mesh_elements(m_model.meshes[m_active_mesh], faces, vertices, edges, error)) {
+            if (!error.empty()) set_status(error);
+            return;
+        }
+        clear_element_selection();
+        record_geometry(std::move(before));
+        m_geometry_dirty = m_projection_dirty = m_gizmo_selection_dirty = true;
+        update_mesh_label();
+        set_status("Seleção apagada. Salve o arquivo .bmodel.");
+        mark_preview_dirty();
+    }
+
+    static void draw_selection_rectangle(bgui::vec2i start, bgui::vec2i end, const bgui::vec4i& rect) {
+        auto& draw = bgui::get_draw_list();
+        const auto color = draw.get_color();
+        const auto clip = draw.get_clip_rect();
+        const bool clipped = draw.has_clip_rect();
+        draw.set_clip_rect(clipped ? bgui::intersect_rect(clip, rect) : rect);
+        const bgui::vec2 low{float(std::min(start.x, end.x)), float(std::min(start.y, end.y))};
+        const bgui::vec2 high{float(std::max(start.x, end.x)), float(std::max(start.y, end.y))};
+        draw.set_color({.25f, .6f, 1.f, .18f});
+        draw.add_rect_filled(low, high);
+        draw.set_color({.35f, .7f, 1.f, 1.f});
+        draw.add_rect(low, high);
+        draw.set_color(color);
+        if (clipped) draw.set_clip_rect(clip);
+        else draw.clear_clip_rect();
+    }
+
+    void select_rectangle(bgui::vec2i start, bgui::vec2i end, bool extend) {
+        if (m_projection_dirty || m_model.meshes.empty()) return;
+        const auto rect = m_image->processed_rect();
+        const auto size = m_image->get_texture().m_size;
+        if (rect.z <= 0 || rect.w <= 0 || size.x <= 0.f || size.y <= 0.f) return;
+        const auto pixel = [&](bgui::vec2i point) {
+            return bgui::vec2{
+                std::clamp(point.x - rect.x, 0, rect.z) * size.x / rect.z,
+                std::clamp(point.y - rect.y, 0, rect.w) * size.y / rect.w
+            };
+        };
+        const auto first = pixel(start), second = pixel(end);
+        const auto add_matches = [&](std::size_t mesh_index) {
+            const auto inside = [&](std::size_t vertex) {
+                const auto& p = m_projected_depths[mesh_index][vertex];
+                return std::abs(p.z) <= 1.f &&
+                    p.x >= std::min(first.x, second.x) && p.x <= std::max(first.x, second.x) &&
+                    p.y >= std::min(first.y, second.y) && p.y <= std::max(first.y, second.y);
+            };
+            std::set<std::size_t> indices;
+            std::set<mesh_edge> edges;
+            const auto& mesh = m_model.meshes[mesh_index];
+            if (m_mode == model_selection_mode::vertices) {
+                for (std::size_t vertex = 0; vertex < mesh.vertices.size(); ++vertex)
+                    if (inside(vertex)) indices.insert(vertex);
+            } else if (m_mode == model_selection_mode::faces) {
+                for (std::size_t face = 0; face < mesh.faces.size(); ++face)
+                    if (std::ranges::all_of(mesh.faces[face], inside)) indices.insert(face);
+            } else {
+                for (const auto& face : mesh.faces)
+                    for (std::size_t i = 0; i < face.size(); ++i) {
+                        const auto a = face[i], b = face[(i + 1) % face.size()];
+                        if (inside(a) && inside(b)) edges.insert(ordered_mesh_edge(a, b));
+                    }
+            }
+            if (indices.empty() && edges.empty()) return false;
+            set_active_mesh(mesh_index);
+            auto& selected = m_mode == model_selection_mode::faces ? m_selected_faces : m_selected_vertices;
+            selected.insert(indices.begin(), indices.end());
+            m_selected_edges.insert(edges.begin(), edges.end());
+            return true;
+        };
+
+        if (!extend) clear_element_selection();
+        if (!add_matches(m_active_mesh) && !extend) {
+            for (std::size_t mesh = 0; mesh < m_model.meshes.size(); ++mesh)
+                if (mesh != m_active_mesh && add_matches(mesh)) break;
+        }
+        const auto count = m_mode == model_selection_mode::faces ? m_selected_faces.size()
+            : m_mode == model_selection_mode::vertices ? m_selected_vertices.size() : m_selected_edges.size();
+        set_status("Elementos selecionados: " + std::to_string(count));
+        m_gizmo_selection_dirty = true;
+        update_mesh_label();
+        mark_preview_dirty();
+    }
+
+    void select_at(const bgui::vec2i& position, bool extend = false) {
         if (m_model.meshes.empty() || !m_image || m_projection_dirty)
             return;
         const auto image_rect = m_image->processed_rect();
@@ -1224,19 +1498,18 @@ private:
                 }
             }
             if(selected.first==std::numeric_limits<std::size_t>::max())return;
-            if (m_active_mesh != selected.first || !extend_selection())
-                m_selected_faces.clear();
-            m_active_mesh = selected.first;
+            set_active_mesh(selected.first);
+            if (!extend) m_selected_faces.clear();
             if (!m_selected_faces.erase(selected.second)) m_selected_faces.insert(selected.second);
             set_status("Face " + std::to_string(selected.second + 1) +
                 " selecionada.");
         } else if (m_mode == model_selection_mode::vertices) {
             if (!select_vertex(x * width / std::max(1, image_rect.z),
-                    y * height / std::max(1, image_rect.w)))
+                    y * height / std::max(1, image_rect.w), extend))
                 return;
         } else {
             if (!select_edge(x * width / std::max(1, image_rect.z),
-                    y * height / std::max(1, image_rect.w)))
+                    y * height / std::max(1, image_rect.w), extend))
                 return;
         }
         m_gizmo_selection_dirty=true;
@@ -1244,13 +1517,14 @@ private:
         mark_preview_dirty();
     }
 
-    bool select_vertex(const float x, const float y) {
+    bool select_vertex(const float x, const float y, bool extend) {
         float best_distance = 8.f;
         std::optional<std::pair<std::size_t, std::size_t>> best;
         for (std::size_t mesh = 0; mesh < m_projected_vertices.size(); ++mesh) {
             for (std::size_t vertex = 0;
                  vertex < m_projected_vertices[mesh].size();
                  ++vertex) {
+                if (std::abs(m_projected_depths[mesh][vertex].z) > 1.f) continue;
                 const auto point = m_projected_vertices[mesh][vertex];
                 const float dx = point.x - x;
                 const float dy = point.y - y;
@@ -1263,16 +1537,15 @@ private:
         }
         if (!best)
             return false;
-        if (m_active_mesh != best->first || !extend_selection())
-            m_selected_vertices.clear();
-        m_active_mesh = best->first;
+        set_active_mesh(best->first);
+        if (!extend) m_selected_vertices.clear();
         if (!m_selected_vertices.erase(best->second)) m_selected_vertices.insert(best->second);
         set_status("Vértice " + std::to_string(best->second + 1) +
             " selecionado.");
         return true;
     }
 
-    bool select_edge(const float x, const float y) {
+    bool select_edge(const float x, const float y, bool extend) {
         float best_distance = 8.f;
         std::optional<std::pair<std::size_t, mesh_edge>> best;
         for (std::size_t mesh_index = 0;
@@ -1285,6 +1558,8 @@ private:
                         face[corner], face[(corner + 1) % face.size()]
                     ));
             for (const auto& edge : edges) {
+                if (std::abs(m_projected_depths[mesh_index][edge.first].z) > 1.f ||
+                    std::abs(m_projected_depths[mesh_index][edge.second].z) > 1.f) continue;
                 const auto first = m_projected_vertices[mesh_index][edge.first];
                 const auto second = m_projected_vertices[mesh_index][edge.second];
                 const float dx = second.x - first.x;
@@ -1311,8 +1586,9 @@ private:
         }
         if (!best)
             return false;
-        m_active_mesh = best->first;
-        m_selected_edge = best->second;
+        set_active_mesh(best->first);
+        if (!extend) m_selected_edges.clear();
+        if (!m_selected_edges.erase(best->second)) m_selected_edges.insert(best->second);
         set_status("Aresta selecionada.");
         return true;
     }
@@ -1373,7 +1649,7 @@ private:
             set_status("Importe o modelo como .bmodel para editar a geometria.");
             return;
         }
-        if (!pick_edge && m_mode == model_selection_mode::edges && m_selected_edge) {
+        if (!pick_edge && m_mode == model_selection_mode::edges && m_selected_edges.size() == 1) {
             loop_cut();
             return;
         }
@@ -1388,14 +1664,15 @@ private:
             set_status("Importe o modelo como .bmodel para editar a geometria.");
             return;
         }
-        if (m_mode != model_selection_mode::edges || !m_selected_edge ||
+        if (m_mode != model_selection_mode::edges || m_selected_edges.size() != 1 ||
             m_active_mesh >= m_model.meshes.size()) {
             set_status("Loop Cut requer uma aresta selecionada no modo Edges.");
             return;
         }
         if (m_projection_dirty) return;
         const auto& points = m_projected_vertices[m_active_mesh];
-        const auto edge = points[m_selected_edge->second] - points[m_selected_edge->first];
+        const auto selected = *m_selected_edges.begin();
+        const auto edge = points[selected.second] - points[selected.first];
         const auto size = m_image->get_texture().m_size;
         const auto rect = m_image->processed_rect();
         if (size.x <= 0 || size.y <= 0) return;
@@ -1405,14 +1682,14 @@ private:
         auto before = capture_geometry();
         if (!editor::ui::loop_cut(
                 m_model.meshes[m_active_mesh],
-                *m_selected_edge,
+                selected,
                 error,
                 &m_cut_rails
             )) {
             set_status(error);
             return;
         }
-        m_selected_edge.reset();
+        m_selected_edges.clear();
         m_cut_before = std::move(before);
         m_cut_start = bgui::get_mouse_position();
         m_dirty = true;
@@ -1422,8 +1699,69 @@ private:
         mark_preview_dirty();
     }
 
+    bool geometry_operation_active() const {
+        return m_context->is_playing || m_gizmo.is_dragging() || m_extrusion_before ||
+            m_cut_before || m_picking_cut || m_selection_start;
+    }
+
+    void show_extract() {
+        if (geometry_operation_active() || viewport_input_blocked_by_modal()) return;
+        sync_selected_entity();
+        if (m_model.meshes.empty()) {
+            set_status("Selecione um objeto com malhas para extrair.");
+            return;
+        }
+        const auto renderer = m_source_renderer;
+        const auto source = m_source_path;
+        const auto entity = m_model_entity;
+        const auto project = m_context->project_root;
+        const auto original = source.empty()
+            ? std::filesystem::path("Modelo-" + std::to_string(entity.value_or(0)))
+            : source;
+        const auto base = original.stem().string();
+        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+        modal.add<bgui::text>("Extract: assets/models/" + base + "_parts", .3f);
+        std::vector<std::string> meshes;
+        for (std::size_t i = 0; i < m_model.meshes.size(); ++i)
+            meshes.push_back("Malha " + std::to_string(i + 1));
+        auto& choice = modal.content().add<bgui::combo_box>(std::move(meshes), .28f);
+        choice.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+        choice.style.layout.require_height(bgui::mode::pixel, 30.f);
+        choice.set_selected_index(m_active_mesh);
+        auto& name = modal.content().add<bgui::inputbox>(base + "-malha-" +
+            std::to_string(m_active_mesh + 1), "Nome do arquivo .bmodel", .28f);
+        modal.set_confirmation_text("Extract");
+        modal.set_on_confirm([this, &name, &choice, renderer, source, original, base, entity, project] {
+            sync_selected_entity();
+            const auto index = static_cast<std::size_t>(choice.get_selected_index());
+            const auto live = renderer.lock();
+            if (geometry_operation_active() || !live || live != m_source_renderer.lock() ||
+                !live->m_modelo || source != m_source_path || entity != m_model_entity ||
+                project != m_context->project_root || index >= m_model.meshes.size() ||
+                index >= live->m_modelo->meshes.size()) {
+                set_status("O modelo mudou. Abra Extract novamente.");
+                return;
+            }
+            try {
+                const auto output = extract(project, original, name.get_buffer(),
+                    m_model.meshes[index], live->m_modelo->meshes[index].getMaterial());
+                const auto message = "Malha extraída em assets/models/" + base + "_parts/" +
+                    output.filename().string();
+                set_status(message);
+                if (m_on_extract) m_on_extract(message);
+            } catch (const std::exception& error) {
+                set_status(error.what());
+            }
+        });
+        modal.add<bgui::button>("Cancelar", .28f, [surface = &modal] {
+            bgui::add_function([surface] { bgui::get_layout().remove(surface); });
+        });
+    }
+
+public:
     void save() {
-        if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before) return;
+        if (geometry_operation_active()) return;
+        sync_selected_entity();
         if (m_model.meshes.empty() || !m_model_entity) {
             set_status("Selecione uma entidade com modelo antes de salvar.");
             return;

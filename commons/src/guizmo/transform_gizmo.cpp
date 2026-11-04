@@ -277,7 +277,9 @@ bool editor::transform_gizmo::update(
     if (mouse_over_view && !m_dragging) {
         if (key_pressed(bgui::input_key::g)) m_mode = mode::translate;
         if (key_pressed(bgui::input_key::r)) m_mode = mode::rotate;
-        if (key_pressed(bgui::input_key::s)) m_mode = mode::scale;
+        if (key_pressed(bgui::input_key::s) &&
+            !bgui::get_pressed(bgui::input_key::left_control) &&
+            !bgui::get_pressed(bgui::input_key::right_control)) m_mode = mode::scale;
     }
     if (m_dragging && !left_down) {
         m_dragging = false;

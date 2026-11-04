@@ -2,6 +2,7 @@
 
 #include "../core/editor_context.hpp"
 #include "components/code.hpp"
+#include "script_templates.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -18,7 +19,8 @@ inline bool is_lua_script(const std::filesystem::path& path) {
 }
 
 inline bool create_lua_script(const std::filesystem::path& directory,
-    std::string name, std::filesystem::path& created, std::string& error) {
+    std::string name, std::filesystem::path& created, std::string& error,
+    lua_script_preset preset = lua_script_preset::empty) {
     error.clear();
     created.clear();
     if (name.empty() || name.find_first_of("/\\<>:\"|?*") != std::string::npos ||
@@ -40,10 +42,7 @@ inline bool create_lua_script(const std::filesystem::path& directory,
         return false;
     }
     std::ofstream stream(path, std::ios::binary);
-    stream << "-- Editable per entity in the Inspector; read with properties.speed.\n"
-              "--@property {\"name\":\"speed\",\"type\":\"number\",\"default\":5}\n\n"
-              "-- Called once when the scene starts.\nfunction setup()\nend\n\n"
-              "-- Called every frame.\nfunction update()\nend\n";
+    stream << script_template(preset).source;
     stream.close();
     if (!stream) {
         error = "Could not create the script.";

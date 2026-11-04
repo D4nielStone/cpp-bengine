@@ -25,6 +25,7 @@
 #include "editor/systems/scene_asset_paths.hpp"
 #include "editor/panels/debug_view.hpp"
 #include "editor/panels/scene_view.hpp"
+#include "editor/core/editor_api.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
 #include "editor/panels/game_view.hpp"
 #include "editor/panels/entities_view.hpp"
@@ -530,7 +531,22 @@ public:
         };
 
         m_files = &m_editor->add_panel<editor::ui::files_view>(m_project_path, drop_asset);
+        m_files->set_file_selection_callback([this](const std::filesystem::path& file) {
+            using editor::ui::editor_asset_kind;
+            auto kind = editor_asset_kind::none;
+            if (editor::ui::is_material_file(file))
+                kind = editor_asset_kind::material;
+            else if (editor::ui::files_view::supports_image(file))
+                kind = editor_asset_kind::image;
+            editor::ui::editor_api(m_context).select_asset(kind, file);
+        });
+        m_components->set_material_saved_callback([this](const auto& path) {
+            m_files->material_file_changed(path);
+        });
         m_model_editor = &m_editor->add_model_panel<editor::ui::model_editor_view>(m_context);
+        m_model_editor->set_extract_callback([this](const auto& message) {
+            m_files->set_asset_status(message);
+        });
         m_components->set_model_import_error_callback(
             [this](const auto& path, const auto& error) {
                 bgui::add_function([this, path, error]() {
@@ -552,6 +568,7 @@ public:
         m_files->set_file_operation_guard([this]() { return !m_context->is_playing; });
         m_files->set_file_moved_callback([this](const auto& from, const auto& to) {
             editor::ui::relocate_scene_asset(m_context, from, to);
+            if (m_context->selected_material == from) m_context->selected_material = to;
             m_components->refresh();
         });
         m_window.set_file_drop_callback([this, drop_asset](const auto& paths, int x, int y) {
@@ -592,8 +609,19 @@ public:
             m_window, m_context, m_render_system
         );
         register_runtime_commands();
+        using editor::ui::model_shortcut;
         bgui::get_layout().add<editor::ui::undo_redo_shortcuts_system>(m_commands, [this](bool redo) {
             return m_model_editor && m_model_editor->handle_history_shortcut(redo);
+        }, [this](model_shortcut action) {
+            if (!m_model_editor || m_context->workspace_mode !=
+                    static_cast<int>(editor::ui::editor_workspace_mode::model_editing)) return false;
+            switch (action) {
+                case model_shortcut::copy: m_model_editor->copy_selection(); break;
+                case model_shortcut::paste: m_model_editor->paste_selection(); break;
+                case model_shortcut::save: m_model_editor->save(); break;
+                case model_shortcut::extract: m_model_editor->request_extract(); break;
+            }
+            return true;
         });
     }
 
@@ -606,6 +634,8 @@ public:
         });
         m_editor->set_project_loaded_callback([this](const std::string& path) {
             m_context->clear_history();
+            m_context->selected_image.clear();
+            m_context->selected_material.clear();
             m_context->selected_entity.reset();
             m_context->project_root = std::filesystem::absolute(path).parent_path();
             m_entities->refresh();

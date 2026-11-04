@@ -151,5 +151,23 @@ struct uniform {
         std::unordered_map<std::string, texture> textures;
         std::unordered_map<std::string, uniform> uniforms;
         void usar(shader& shader);
+        void apply(shader& shader) const;
+        bool same_configuration(const material&) const;
     };
+    class material_binding {
+    public:
+        material_binding(const material&, shader&);
+        ~material_binding();
+        material_binding(const material_binding&) = delete;
+        material_binding& operator=(const material_binding&) = delete;
+
+    private:
+        struct texture_state {
+            int binding{0}, s{0}, t{0}, min_filter{0}, mag_filter{0};
+            bool parameters_changed{false};
+        };
+        std::vector<texture_state> m_textures;
+        int m_active_texture{0};
+    };
+
 }

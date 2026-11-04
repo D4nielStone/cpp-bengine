@@ -1,8 +1,11 @@
 #include "components/physics.hpp"
 #include "components/transform.hpp"
 #include <bullet/BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
+#include <bullet/BulletCollision/CollisionShapes/btEmptyShape.h>
 #include <bullet/BulletCollision/CollisionShapes/btTriangleMesh.h>
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <limits>
 
 #include <rapidjson/document.h>
@@ -116,6 +119,10 @@ void physics::setModelo(model* model_value) {
                 throw std::invalid_argument(
                     "Concave model colliders require a static body."
                 );
+            auto extension = std::filesystem::path(model_value->get_source_path()).extension().string();
+            std::ranges::transform(extension, extension.begin(),
+                [](unsigned char character) { return std::tolower(character); });
+            const bool native_model = extension == ".bmodel";
             triangle_mesh = std::make_unique<btTriangleMesh>(true, false);
             for (const auto& mesh : model_value->meshes) {
                 const auto vertices = mesh.getVertices();
@@ -124,7 +131,7 @@ void physics::setModelo(model* model_value) {
                     return indices.empty() ? index : static_cast<std::size_t>(indices[index]);
                 };
                 const auto triangle_count = indices.empty()
-                    ? vertices.size() / 3
+                    ? (native_model ? 0 : vertices.size() / 3)
                     : indices.size() / 3;
                 for (std::size_t triangle = 0; triangle < triangle_count; ++triangle) {
                     const auto a = index_at(triangle * 3);
@@ -149,12 +156,18 @@ void physics::setModelo(model* model_value) {
                     );
                 }
             }
-            model_shape = std::make_unique<btBvhTriangleMeshShape>(
-                triangle_mesh.get(), true, true
-            );
+            if (triangle_mesh->getNumTriangles() == 0) {
+                triangle_mesh.reset();
+                model_shape = std::make_unique<btEmptyShape>();
+            } else {
+                model_shape = std::make_unique<btBvhTriangleMeshShape>(
+                    triangle_mesh.get(), true, true
+                );
+            }
         } else {
             auto hull = std::make_unique<btConvexHullShape>();
             convex_hull = hull.get();
+            convex_hull->setMargin(0.001f);
             model_shape = std::move(hull);
         }
     }
@@ -176,8 +189,9 @@ void physics::setModelo(model* model_value) {
         }
     if (model_shape) {
         if (convex_hull) {
-            convex_hull->setMargin(0.001f);
-            if (convex_hull->getNumPoints() >= 4) {
+            if (convex_hull->getNumPoints() == 0) {
+                model_shape = std::make_unique<btEmptyShape>();
+            } else if (convex_hull->getNumPoints() >= 4) {
                 convex_hull->optimizeConvexHull();
                 convex_hull->initializePolyhedralFeatures();
             }

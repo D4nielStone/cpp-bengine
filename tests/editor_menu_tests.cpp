@@ -740,6 +740,17 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     context->project_root = std::filesystem::temp_directory_path() /
         ("model-panel-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     auto first = registry->create();
+    auto ancestor = registry->create();
+    auto parent = registry->create();
+    auto ancestor_transform = registry->get<commons::transform>(ancestor.id);
+    auto parent_transform = registry->get<commons::transform>(parent.id);
+    ancestor_transform->set_position({7.f, 4.f, -3.f});
+    parent_transform->set_rotation({30.f, 0.f, 0.f});
+    parent_transform->set_scale({2.f, 3.f, 1.f});
+    ASSERT_TRUE(parent_transform->set_parent(ancestor.id, false));
+    auto model_transform = registry->get<commons::transform>(first.id);
+    model_transform->set_position({1.f, 2.f, 0.f});
+    ASSERT_TRUE(model_transform->set_parent(parent.id, false));
     auto second = registry->create();
     const std::vector<commons::vertex> vertices{
         {{-1.f,-1.f,0.f}, {}, {}}, {{1.f,-1.f,0.f}, {}, {}}, {{0.f,1.f,0.f}, {}, {}}
@@ -772,8 +783,13 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     ASSERT_NE(image, nullptr);
     const auto first_preview = image->get_texture().m_buffer;
     EXPECT_FALSE(first_preview.empty());
+    const auto before_parent_move = panel.preview_camera().position;
+    ancestor_transform->move({3.f, 0.f, 0.f});
+    bgui::on_update();
+    EXPECT_NEAR(panel.preview_camera().position.x - before_parent_move.x, 3.f, .001f);
     // Drag the existing gizmo's projected X axis, then save the changed mesh.
-    const auto matrix = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix;
+    const auto matrix = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix *
+        model_transform->get_world_model_matrix();
     const auto screen = [&](bgui::vec3 p) {
         const auto clip = matrix*glm::vec4(p.x,p.y,p.z,1.f);
         return bgui::vec2{image->processed_x()+(clip.x/clip.w*.5f+.5f)*image->processed_width(),
@@ -799,7 +815,24 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     ASSERT_NE(save, nullptr);
     editor::ui::undo_redo_shortcuts_system shortcuts(
         std::make_shared<editor::ui::editor_commands>(context),
-        [&](bool redo) { return panel.handle_history_shortcut(redo); });
+        [&](bool redo) { return panel.handle_history_shortcut(redo); },
+        [&](editor::ui::model_shortcut action) {
+            switch (action) {
+                case editor::ui::model_shortcut::copy: panel.copy_selection(); break;
+                case editor::ui::model_shortcut::paste: panel.paste_selection(); break;
+                case editor::ui::model_shortcut::save: panel.save(); break;
+                case editor::ui::model_shortcut::extract: panel.request_extract(); break;
+            }
+            return true;
+        });
+    const auto shortcut = [&](bgui::input_key key) {
+        io.m_input_map[bgui::input_key::right_control] = bgui::input_action::press;
+        io.m_input_map[key] = bgui::input_action::press;
+        shortcuts.on_update();
+        shortcuts.on_update();
+        io.m_input_map.clear();
+        shortcuts.on_update();
+    };
     io.m_input_map[bgui::input_key::left_control] = bgui::input_action::press;
     io.m_input_map[bgui::input_key::z] = bgui::input_action::press;
     shortcuts.on_update();
@@ -829,7 +862,84 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     ASSERT_EQ(saved.meshes.size(), 1u);
     EXPECT_GT(saved.meshes[0].vertices[2].position.x, vertices[2].position.x + .01f);
     EXPECT_NEAR(saved.meshes[0].vertices[2].position.y, vertices[2].position.y, .001f);
-    EXPECT_EQ(registry->get<commons::transform>(first.id)->get_position(), (bgui::vec3{}));
+    EXPECT_EQ(model_transform->get_position(), (bgui::vec3{1.f, 2.f, 0.f}));
+
+    context->model_selection = static_cast<int>(editor::ui::model_selection_mode::edges);
+    auto low = screen(saved.meshes[0].vertices.front().position);
+    auto high = low;
+    for (const auto& vertex : saved.meshes[0].vertices) {
+        const auto point = screen(vertex.position);
+        low = {std::min(low.x, point.x), std::min(low.y, point.y)};
+        high = {std::max(high.x, point.x), std::max(high.y, point.y)};
+    }
+    const auto over_model = [] {
+        const auto* target = bgui::get_mouse_target();
+        return target && target->has_class("model-editor-viewport-input");
+    };
+    io.m_mouse_position = {int(low.x) - 8, int(low.y) - 8};
+    bgui::on_update();
+    ASSERT_TRUE(over_model());
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_mouse_position = {int(high.x) + 8, int(high.y) + 8};
+    bgui::on_update();
+    io.m_input_map.clear();
+    bgui::on_update();
+    ASSERT_NE(find<bgui::text>(dock, [](auto& text) {
+        return text.get_buffer() == "Elementos selecionados: 3";
+    }), nullptr);
+    ASSERT_TRUE(over_model());
+    shortcut(bgui::input_key::c);
+    shortcut(bgui::input_key::v);
+    shortcut(bgui::input_key::e);
+    bgui::on_update();
+    auto* export_modal = find<bgui::modal>(bgui::get_layout(), [](auto&) { return true; });
+    ASSERT_NE(export_modal, nullptr);
+    auto* confirm_export = find<bgui::button>(*export_modal, [](auto& button) {
+        return button.has_class("modal-confirm");
+    });
+    ASSERT_NE(confirm_export, nullptr);
+    confirm_export->on_released();
+    bgui::on_update();
+    commons::editable_model_data exported;
+    ASSERT_TRUE(commons::load_editable_model(
+        context->project_root / "assets/models/triangle_parts/triangle-malha-1.bmodel", exported, error)) << error;
+    ASSERT_EQ(exported.meshes.size(), 1u);
+    EXPECT_EQ(exported.meshes.front().faces.size(), 2u);
+    ASSERT_TRUE(commons::load_editable_model(native, saved, error)) << error;
+    EXPECT_EQ(saved.meshes.front().faces.size(), 1u);
+    shortcut(bgui::input_key::s);
+    ASSERT_TRUE(commons::load_editable_model(native, saved, error)) << error;
+    EXPECT_EQ(saved.meshes.front().faces.size(), 2u);
+    EXPECT_EQ(saved.meshes.front().vertices.size(), 6u);
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    shortcut(bgui::input_key::s);
+    ASSERT_TRUE(commons::load_editable_model(native, saved, error)) << error;
+    EXPECT_EQ(saved.meshes.front().faces.size(), 1u);
+
+    // Reselect the original triangle for the deletion check.
+    io.m_mouse_position = {int(low.x) - 8, int(low.y) - 8};
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_mouse_position = {int(high.x) + 8, int(high.y) + 8};
+    bgui::on_update();
+    io.m_input_map.clear();
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::delete_key] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear();
+    bgui::on_update();
+    save->on_released();
+    bgui::on_update();
+    ASSERT_TRUE(commons::load_editable_model(native, saved, error)) << error;
+    ASSERT_EQ(saved.meshes.size(), 1u);
+    EXPECT_TRUE(saved.meshes[0].faces.empty());
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    save->on_released();
+    bgui::on_update();
+    ASSERT_TRUE(commons::load_editable_model(native, saved, error)) << error;
+    EXPECT_EQ(saved.meshes[0].faces.size(), 1u);
     context->selected_entity = second.id;
     bgui::on_update();
     EXPECT_NE(find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == "Outro objeto"; }), nullptr);
@@ -1071,4 +1181,33 @@ TEST(HudEditor, RightClickAddsWidgetToGameCamera) {
     EXPECT_EQ(context->selected_entity, camera.id);
     ASSERT_TRUE(registry->get<commons::hud>(camera.id));
     EXPECT_FALSE(registry->get<commons::hud>(other.id));
+}
+
+TEST_F(EditorMenuTest, UnifiesOnlyIdenticalSceneMaterialsAndKeepsEditsIndependent) {
+    const auto add_mesh = [&](const commons::material& material) -> commons::mesh& {
+        auto entity = registry->create();
+        auto model = std::make_unique<commons::model>();
+        model->meshes.emplace_back(std::vector<commons::vertex>{}, std::vector<unsigned>{}, material);
+        registry->add<commons::renderer>(entity, model.release());
+        return registry->get<commons::renderer>(entity.id)->m_modelo->meshes.front();
+    };
+
+    commons::material material;
+    material.set_uniform("material.roughness", 0.5f);
+    material.set_texture("tex_albedo", commons::texture(0, "albedo.png"));
+    auto& first = add_mesh(material);
+    auto& duplicate = add_mesh(material);
+    material.textures.at("tex_albedo").filtering = commons::texture_filter::trilinear;
+    auto& different = add_mesh(material);
+
+    ASSERT_NE(&first.material_configuration(), &duplicate.material_configuration());
+    click("Unify Identical Materials");
+    EXPECT_EQ(&first.material_configuration(), &duplicate.material_configuration());
+    EXPECT_NE(&first.material_configuration(), &different.material_configuration());
+    click("OK");
+
+    duplicate.setMaterial(material);
+    EXPECT_NE(&first.material_configuration(), &duplicate.material_configuration());
+    EXPECT_EQ(first.material_configuration().textures.at("tex_albedo").filtering,
+        commons::texture_filter::original);
 }

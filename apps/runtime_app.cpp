@@ -281,9 +281,9 @@ int main(const int argc, char** argv) {
     );
     root.add<commons::hud_view, bgui::layer::overlay>(registry, game_camera, game_view);
     window.add<runtime_viewport_sync_system>(game_camera, game_view);
-    window.add<commons::code_system>();
     auto physics_system = std::make_shared<commons::physics_system>();
     physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
+    window.add<commons::code_system>(physics_system);
     window.add(physics_system);
     if (argc == 5) window.add<runtime_preview_publisher>(project_path + ".preview");
     window.add(render_system);

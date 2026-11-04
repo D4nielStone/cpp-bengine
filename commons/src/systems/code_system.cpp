@@ -18,7 +18,7 @@ code_system::script_state& code_system::initialize(
 
     state = {script, false};
     try {
-        script->setup();
+        script->setup(m_physics_world);
     } catch (const sol::error& error) {
         state.failed = true;
         script_log::instance().write(id, std::string("Initialization failed: ") + error.what());

@@ -70,8 +70,16 @@ mesh& model::getMalha(size_t i) {
     return meshes.back();
 }
 void model::draw() {
+    advance_animation();
+    draw_meshes();
+}
+
+void model::advance_animation() {
     if (m_pose && m_pose->options.animations && m_pose->scene->HasAnimations())
         update_animation(std::chrono::duration<double>(std::chrono::steady_clock::now() - m_animation_start).count());
+}
+
+void model::draw_meshes() {
     for(auto& mesh : meshes) {
         if (!mesh.isLoaded()) mesh.load();
         mesh.draw(getShader());

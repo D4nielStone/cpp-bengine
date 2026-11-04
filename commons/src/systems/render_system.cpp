@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -29,6 +30,18 @@
 using namespace COMMONS_NS;
 
 namespace {
+bool batchable_material(const material& material) {
+    // Units 14 and 15 belong to the shadow passes.
+    return material.textures.size() <= 14 &&
+        std::all_of(material.textures.begin(), material.textures.end(), [](const auto& entry) {
+            return entry.first.starts_with("tex_");
+        }) &&
+        std::all_of(material.uniforms.begin(), material.uniforms.end(), [](const auto& entry) {
+            const auto& name = entry.first;
+            return name == "uvMundo" || name.starts_with("material.") || name.starts_with("use_tex_");
+        });
+}
+
 float finite_clamp(float value, float fallback, float low, float high) {
     return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
 }
@@ -113,20 +126,19 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
     }
 
     const glm::vec3 local_center = (minimum + maximum) * 0.5f;
-    const glm::vec4 world_center = transform_component.get_world_model_matrix() * glm::vec4(local_center, 1.f);
+    const auto world = transform_component.get_world_model_matrix();
+    const glm::vec4 world_center = world * glm::vec4(local_center, 1.f);
 
     float radius = 0.f;
     for (const auto& mesh : renderer_component.m_modelo->meshes) {
         for (const auto& vertex : mesh.vertices()) {
             const glm::vec3 position{vertex.position.x, vertex.position.y, vertex.position.z};
-            const float distance = glm::length(position - local_center);
+            const float distance = glm::length(glm::mat3(world) * (position - local_center));
             radius = std::max(radius, distance);
         }
     }
 
-    const float max_scale = std::max({std::abs(transform_component.get_scale().x),
-        std::abs(transform_component.get_scale().y), std::abs(transform_component.get_scale().z)});
-    return {glm::vec3(world_center), radius * std::max(max_scale, 1.f)};
+    return {glm::vec3(world_center), radius};
 }
 }
 
@@ -137,6 +149,8 @@ render_system::~render_system() {
             glDeleteBuffers(1, &mesh.buffer);
             glDeleteVertexArrays(1, &mesh.vao);
         }
+        if (m_occlusion_depth) glDeleteTextures(1, &m_occlusion_depth);
+        if (m_occlusion_vao) glDeleteVertexArrays(1, &m_occlusion_vao);
         for (auto* map : {&m_directional_shadow, &m_spot_shadow}) {
             if (map->texture) glDeleteTextures(1, &map->texture);
             if (map->fbo) glDeleteFramebuffers(1, &map->fbo);
@@ -144,13 +158,12 @@ render_system::~render_system() {
     }
 }
 
-bool render_system::prepare_shadow_map(shadow_map& map, int resolution) {
-    resolution = std::clamp(resolution, 128, 8192);
-    if (map.fbo && map.resolution == resolution) return true;
+bool render_system::prepare_depth_map(depth_map& map, int width, int height) {
+    if (map.fbo && map.width == width && map.height == height) return true;
     GLint max_texture_size;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
-    resolution = std::min(resolution, max_texture_size);
-    if (map.fbo && map.resolution == resolution) return true;
+    if (width <= 0 || height <= 0 || width > max_texture_size || height > max_texture_size)
+        return false;
     GLint framebuffer, read_framebuffer, texture;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_framebuffer);
@@ -158,7 +171,7 @@ bool render_system::prepare_shadow_map(shadow_map& map, int resolution) {
     if (!map.fbo) glGenFramebuffers(1, &map.fbo);
     if (!map.texture) glGenTextures(1, &map.texture);
     glBindTexture(GL_TEXTURE_2D, map.texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, resolution, resolution,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height,
         0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -179,8 +192,104 @@ bool render_system::prepare_shadow_map(shadow_map& map, int resolution) {
         glDeleteFramebuffers(1, &map.fbo);
         map.texture = map.fbo = 0;
     }
-    map.resolution = complete ? resolution : 0;
+    map.width = complete ? width : 0;
+    map.height = complete ? height : 0;
     return complete;
+}
+
+void render_system::apply_camera_occlusion(const camera& view) {
+    const auto& settings = view.config.post_processing;
+    if (!settings.valid() || settings.occlusion == ambient_occlusion_mode::off || settings.strength == 0.f)
+        return;
+
+    GLint viewport[4], draw_fb, read_fb;
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+    GLint max_texture_size, depth_bits;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, draw_fb ? GL_DEPTH_ATTACHMENT : GL_DEPTH,
+        GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depth_bits);
+    const int width = viewport[2], height = viewport[3];
+    if (depth_bits == 0 || width <= 0 || height <= 0 || width > max_texture_size || height > max_texture_size)
+        return;
+
+    shader program("ambient_occlusion.vert", "ambient_occlusion.frag");
+    if (!program.ID) return;
+
+    GLint previous_program, vao, active_texture, texture;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    if (!m_occlusion_depth) glGenTextures(1, &m_occlusion_depth);
+    glBindTexture(GL_TEXTURE_2D, m_occlusion_depth);
+    // Retain enough storage for the largest view so cameras of different sizes can share it.
+    if (width > m_occlusion_width || height > m_occlusion_height) {
+        GLint unpack_buffer;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
+            std::max(width, m_occlusion_width), std::max(height, m_occlusion_height), 0,
+            GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack_buffer);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &m_occlusion_width);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &m_occlusion_height);
+        if (width > m_occlusion_width || height > m_occlusion_height) {
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glActiveTexture(active_texture);
+            return;
+        }
+    }
+    // Sample the actual scene depth, including custom shaders and animated geometry.
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fb);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport[0], viewport[1], width, height);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fb);
+
+    const bool depth = glIsEnabled(GL_DEPTH_TEST);
+    const bool cull = glIsEnabled(GL_CULL_FACE);
+    const bool stencil = glIsEnabled(GL_STENCIL_TEST);
+    const bool blend = glIsEnabled(GL_BLEND);
+    GLint src_rgb, dst_rgb, src_alpha, dst_alpha, equation_rgb, equation_alpha;
+    glGetIntegerv(GL_BLEND_SRC_RGB, &src_rgb);
+    glGetIntegerv(GL_BLEND_DST_RGB, &dst_rgb);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &src_alpha);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &dst_alpha);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &equation_rgb);
+    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &equation_alpha);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFuncSeparate(GL_ZERO, GL_SRC_COLOR, GL_ZERO, GL_ONE);
+
+    if (!m_occlusion_vao) glGenVertexArrays(1, &m_occlusion_vao);
+    glBindVertexArray(m_occlusion_vao);
+    program.use();
+    program.setInt("sceneDepth", 0);
+    program.setVec2("viewportSize", static_cast<float>(width), static_cast<float>(height));
+    program.setInt("mode", static_cast<int>(settings.occlusion));
+    program.setFloat("radius", settings.radius);
+    program.setFloat("strength", settings.strength);
+    program.setMat4("projection", glm::value_ptr(view.projMatriz));
+    const auto inverse = glm::inverse(view.projMatriz);
+    program.setMat4("inverseProjection", glm::value_ptr(inverse));
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    glBlendEquationSeparate(equation_rgb, equation_alpha);
+    glBlendFuncSeparate(src_rgb, dst_rgb, src_alpha, dst_alpha);
+    if (!blend) glDisable(GL_BLEND);
+    if (depth) glEnable(GL_DEPTH_TEST);
+    if (cull) glEnable(GL_CULL_FACE);
+    if (stencil) glEnable(GL_STENCIL_TEST);
+    glUseProgram(previous_program);
+    glBindVertexArray(vao);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glActiveTexture(active_texture);
 }
 
 void render_system::setup(const std::shared_ptr<ecs>&) {
@@ -190,6 +299,12 @@ void render_system::update(const std::shared_ptr<ecs>& reg) { render(reg,nullptr
 
 void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
     std::uint32_t replacement_entity, std::shared_ptr<renderer> replacement) {
+    render_view(reg, view, replacement_entity, std::move(replacement), {});
+}
+
+void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
+    std::uint32_t replacement_entity, std::shared_ptr<renderer> replacement,
+    const std::shared_ptr<transform>& replacement_transform) {
     struct state_guard {
         GLint draw_fb,read_fb,renderbuffer,viewport[4],program,vao,array_buffer,active,depth_func,scissor[4];
         std::array<GLint,16> textures{},cubemaps{};
@@ -220,7 +335,7 @@ void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
         }
     } guard;
     glDisable(GL_SCISSOR_TEST);glDisable(GL_BLEND);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-    render(reg,&view,replacement_entity,replacement);
+    render(reg, &view, replacement_entity, replacement, replacement_transform);
 }
 
 namespace {
@@ -343,7 +458,8 @@ void render_system::draw_world_text(const std::shared_ptr<ecs>& registry, camera
 }
 
 void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_view,
-    std::uint32_t replacement_entity, const std::shared_ptr<renderer>& replacement) {
+    std::uint32_t replacement_entity, const std::shared_ptr<renderer>& replacement,
+    const std::shared_ptr<transform>& replacement_transform) {
     const auto start_time = std::chrono::steady_clock::now();
     m_last_camera_count = 0;
     m_last_rendered_entity_count = 0;
@@ -388,22 +504,17 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             auto world_light = *light;
             world_light.position = light->get_world_position();
             world_light.direction = light->get_world_direction();
-            const glm::vec3 direction{
-                world_light.direction.x, world_light.direction.y, world_light.direction.z
-            };
-            const float length_squared = glm::dot(direction, direction);
-            if (spot_lights.size() < 16 && std::isfinite(length_squared) && length_squared > 1e-8f &&
-                std::isfinite(world_light.position.x) && std::isfinite(world_light.position.y) &&
-                std::isfinite(world_light.position.z))
-                spot_lights.push_back(std::move(world_light));
+            spot_lights.push_back(std::move(world_light));
         }
     });
 
-    std::vector<std::pair<std::shared_ptr<renderer>, std::shared_ptr<transform>>> renderables;
+    using renderable = std::pair<std::shared_ptr<renderer>, std::shared_ptr<transform>>;
+    std::vector<renderable> renderables;
     reg->cada<renderer, transform>([&](const uint32_t render_entity) {
+        const bool replace = render_entity == replacement_entity;
         renderables.emplace_back(
-            replacement && render_entity==replacement_entity ? replacement : reg->get<renderer>(render_entity),
-            reg->get<transform>(render_entity)
+            replace && replacement ? replacement : reg->get<renderer>(render_entity),
+            replace && replacement_transform ? replacement_transform : reg->get<transform>(render_entity)
         );
     });
 
@@ -415,8 +526,9 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             available_models.emplace(render_component->m_modelo, render_component->m_modelo->source_available());
     }
 
-    const auto draw_depth = [&](const shadow_map& map, const glm::mat4& matrix, int x, int y, int size) {
-        GLint framebuffer, viewport[4], depth_function, scissor_box[4], vertex_array, program;
+    const auto draw_depth = [&](const depth_map& map, const glm::mat4& matrix, int x, int y,
+                                int width, int height, const std::vector<renderable>& geometry) {
+        GLint framebuffer, viewport[4], depth_function, scissor_box[4], vertex_array, array_buffer, program;
         GLboolean depth_mask;
         const bool depth_test = glIsEnabled(GL_DEPTH_TEST);
         const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
@@ -424,26 +536,27 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         glGetIntegerv(GL_SCISSOR_BOX, scissor_box);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vertex_array);
         glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &array_buffer);
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &framebuffer);
         glGetIntegerv(GL_VIEWPORT, viewport);
         glGetIntegerv(GL_DEPTH_FUNC, &depth_function);
         glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, map.fbo);
-        glViewport(x, y, size, size);
+        glViewport(x, y, width, height);
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
         glDepthFunc(GL_LESS);
         glDisable(GL_CULL_FACE); // Thin and double-sided surfaces can cast shadows.
         glEnable(GL_SCISSOR_TEST);
-        glScissor(x, y, size, size);
+        glScissor(x, y, width, height);
         glClear(GL_DEPTH_BUFFER_BIT);
         glDisable(GL_SCISSOR_TEST);
         shader depth_shader("shadow.vert", "shadow.frag");
         depth_shader.use();
         depth_shader.setMat4("lightSpaceMatrix", glm::value_ptr(matrix));
-        for (const auto& [renderer, transform] : renderables) {
-            if (!renderer || !transform || !renderer->visible || !renderer->cast_shadows || !renderer->m_modelo ||
-                !available_models.at(renderer->m_modelo)) continue;
+        for (const auto& [renderer, transform] : geometry) {
+            if (!renderer || !transform || !renderer->visible || !renderer->m_modelo ||
+                !available_models.at(renderer->m_modelo) || !renderer->cast_shadows) continue;
             for (auto& mesh : renderer->m_modelo->meshes) {
                 if (mesh.isOverlayed()) continue;
                 if (!mesh.isLoaded()) mesh.load();
@@ -454,10 +567,12 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
                     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices().size()), GL_UNSIGNED_INT, nullptr);
                 };
                 if (instances.empty()) draw(transform->get_model_matrix());
-                else for (const auto& instance : instances) draw(instance.get_world_model_matrix());
+                else for (const auto& instance : instances)
+                    draw(instance.get_world_model_matrix());
             }
         }
         glBindVertexArray(vertex_array);
+        glBindBuffer(GL_ARRAY_BUFFER, array_buffer);
         glUseProgram(program);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
@@ -469,17 +584,24 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         if (cull) glEnable(GL_CULL_FACE);
     };
 
+    const auto shadow_size_for = [](int resolution) {
+        GLint max_texture_size;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+        return std::min(std::clamp(resolution, 128, 8192), max_texture_size);
+    };
+
     // A 4x4 atlas keeps all 16 spotlight shadows in one texture unit.
     std::array<glm::mat4, 16> spot_spaces;
     std::array<bool, 16> spot_shadows{};
     bool has_spot_shadows = false;
     bool spot_shadows_prepared = false;
     const auto prepare_spot_shadows = [&]() {
-        has_spot_shadows = std::any_of(spot_lights.begin(), spot_lights.end(),
-            [](const auto& light) { return light.shadows && light.intensity > 0.f; }) &&
-            prepare_shadow_map(m_spot_shadow, 4096);
+        const bool needs_atlas = std::any_of(spot_lights.begin(), spot_lights.end(),
+            [](const auto& light) { return light.shadows && light.intensity > 0.f; });
+        const int atlas_size = needs_atlas ? shadow_size_for(4096) / 4 * 4 : 0;
+        has_spot_shadows = needs_atlas && prepare_depth_map(m_spot_shadow, atlas_size, atlas_size);
         if (has_spot_shadows) {
-            const int tile_size = m_spot_shadow.resolution / 4;
+            const int tile_size = m_spot_shadow.width / 4;
             for (size_t index = 0; index < spot_lights.size(); ++index) {
                 const auto& light = spot_lights[index];
                 if (!light.shadows || !(light.intensity > 0.f)) continue;
@@ -492,7 +614,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
                     finite_clamp(light.shadow_distance, 50.f, 1.f, 10000.f)) *
                     glm::lookAt(position, position + ray, up);
                 draw_depth(m_spot_shadow, spot_spaces[index], static_cast<int>(index % 4) * tile_size,
-                    static_cast<int>(index / 4) * tile_size, tile_size);
+                    static_cast<int>(index / 4) * tile_size, tile_size, tile_size, renderables);
                 spot_shadows[index] = true;
             }
         }
@@ -526,7 +648,9 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         glm::mat4 light_space{1.f};
         const glm::vec3 direction{direction_light.direction.x, direction_light.direction.y, direction_light.direction.z};
         const bool valid_direction = std::isfinite(glm::dot(direction, direction)) && glm::dot(direction, direction) > 1e-8f;
-        const bool shadows = direction_light.shadows && valid_direction && prepare_shadow_map(m_directional_shadow, direction_light.shadow_resolution);
+        const bool needs_shadow = direction_light.shadows && valid_direction;
+        const int shadow_size = needs_shadow ? shadow_size_for(direction_light.shadow_resolution) : 0;
+        const bool shadows = needs_shadow && prepare_depth_map(m_directional_shadow, shadow_size, shadow_size);
         GLint shadow_binding = 0, active_texture = GL_TEXTURE0;
         if (shadows) {
             const float distance = finite_clamp(direction_light.shadow_distance, 50.f, 1.f, 10000.f);
@@ -535,7 +659,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             const auto up = std::abs(ray.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
             light_space = glm::ortho(-distance, distance, -distance, distance, 0.1f, distance * 4.f) *
                 glm::lookAt(center - ray * (distance * 2.f), center, up);
-            draw_depth(m_directional_shadow, light_space, 0, 0, m_directional_shadow.resolution);
+            draw_depth(m_directional_shadow, light_space, 0, 0, shadow_size, shadow_size, renderables);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
             glActiveTexture(GL_TEXTURE15);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &shadow_binding);
@@ -552,6 +676,8 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             glActiveTexture(spot_active_texture);
         }
 
+        std::vector<renderable> visible_geometry;
+        visible_geometry.reserve(renderables.size());
         for (const auto& [render_component, transform_component] : renderables) {
             if (!render_component || !transform_component || !render_component->m_modelo) {
                 debugging::emit(debug, "render", "Renderizador ou transformação inválida");
@@ -564,9 +690,12 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             if (!sphere_in_frustum(world_center, world_radius, frustum))
                 continue;
 
-            auto& shader = render_component->m_modelo->getShader();
+            visible_geometry.emplace_back(render_component, transform_component);
+        }
+
+        const auto set_camera_uniforms = [&](shader& shader, bool receive_shadows) {
             shader.use();
-            shader.setBool("shadowEnabled", shadows && render_component->receive_shadows);
+            shader.setBool("shadowEnabled", shadows && receive_shadows);
             shader.setInt("shadowMap", 15);
             shader.setInt("spotShadowMap", 14);
             shader.setMat4("lightSpaceMatrix", glm::value_ptr(light_space));
@@ -574,7 +703,6 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             shader.setFloat("shadowStrength", finite_clamp(direction_light.shadow_strength, 1.f, 0.f, 1.f));
             shader.setMat4("view", glm::value_ptr(view));
             shader.setMat4("projection", glm::value_ptr(projection));
-            shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
             shader.setVec3("viewPos", camera_component->position);
             shader.setBool("fogEnabled", camera_component->config.fog_enabled);
             shader.setVec3("fogColor", {camera_component->config.fog_color.r,
@@ -600,7 +728,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             for (size_t index = 0; index < spot_lights.size(); ++index) {
                 const auto prefix = "spotLights[" + std::to_string(index) + "].";
                 const auto& light = spot_lights[index];
-                shader.setBool(prefix + "shadowEnabled", spot_shadows[index] && render_component->receive_shadows);
+                shader.setBool(prefix + "shadowEnabled", spot_shadows[index] && receive_shadows);
                 if (spot_shadows[index])
                     shader.setMat4(prefix + "shadowMatrix", glm::value_ptr(spot_spaces[index]));
                 shader.setFloat(prefix + "shadowBias", finite_clamp(light.shadow_bias, 0.001f, 0.f, 0.1f));
@@ -618,9 +746,48 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
                 shader.setFloat(prefix + "outerCutoff", std::cos(glm::radians(outer)));
             }
 
-            render_component->m_modelo->draw();
+        };
+
+        std::optional<material_binding> binding;
+        const material* bound_material = nullptr;
+        GLuint bound_program = 0;
+        bool bound_receives_shadows = false;
+        for (const auto& [render_component, transform_component] : visible_geometry) {
+            auto& model = *render_component->m_modelo;
+            auto& shader = model.getShader();
+            const bool receive_shadows = render_component->receive_shadows;
+            if (!bound_material || bound_program != shader.ID || bound_receives_shadows != receive_shadows)
+                set_camera_uniforms(shader, receive_shadows);
+            bound_receives_shadows = receive_shadows;
+            shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
+            model.advance_animation();
+            const bool standard_shader = shader.vert == "pbr.vert" && shader.frag == "pbr.frag";
+            for (auto& mesh : model.meshes) {
+                if (!mesh.isLoaded()) mesh.load();
+                const auto& material = mesh.material_configuration();
+                const bool can_batch = standard_shader && !mesh.isOverlayed() && mesh.instances().empty();
+                if (can_batch && bound_material && bound_program == shader.ID &&
+                    material.same_configuration(*bound_material)) {
+                    mesh.draw_geometry();
+                    continue;
+                }
+
+                binding.reset();
+                bound_material = nullptr;
+                // Only reuse material uniforms that cannot override camera or object state.
+                if (can_batch && batchable_material(material)) {
+                    binding.emplace(material, shader);
+                    shader.setBool("instance", false);
+                    bound_material = &material;
+                    bound_program = shader.ID;
+                    mesh.draw_geometry();
+                } else {
+                    mesh.draw(shader);
+                }
+            }
             ++m_last_rendered_entity_count;
         }
+        binding.reset();
 
         if (has_spot_shadows) {
             glActiveTexture(GL_TEXTURE14);
@@ -632,6 +799,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             glBindTexture(GL_TEXTURE_2D, shadow_binding);
             glActiveTexture(active_texture);
         }
+        apply_camera_occlusion(*camera_component);
         draw_world_text(reg, *camera_component);
     };
     if (explicit_view) draw_camera(explicit_view);

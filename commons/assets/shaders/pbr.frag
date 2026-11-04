@@ -69,8 +69,8 @@ float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D
     if (!enabled) return 1.0;
     vec4 lightPosition = matrix * vec4(Position, 1.0);
     vec3 projected = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
-    float bias = max(depthBias * (1.0 - dot(normal, lightDirection)), depthBias);
-    vec2 atlasTexel = 1.0 / vec2(textureSize(depthMap, 0));
+    ivec2 dimensions = textureSize(depthMap, 0);
+    vec2 atlasTexel = 1.0 / vec2(dimensions);
     vec3 dx = dFdx(projected);
     vec3 dy = dFdy(projected);
     if (lightPosition.w <= 0.0 || any(lessThan(projected, vec3(0.0))) || any(greaterThan(projected, vec3(1.0)))) return 1.0;
@@ -80,26 +80,42 @@ float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D
         depthGradient = vec2(dy.y * dx.z - dx.y * dy.z,
                              dx.x * dy.z - dy.x * dx.z) / determinant;
     }
-    if (scale < 1.0)
-        bias += 1.5 * dot(abs(depthGradient), atlasTexel / scale);
-    else
-        // Allow for depth quantization and subpixel rasterization error.
-        bias = max(bias, 2.0 / 16777215.0) + dot(abs(depthGradient), atlasTexel) / 128.0;
     float blocked = 0.0;
-    for (int x = -1; x <= 1; ++x)
-        for (int y = -1; y <= 1; ++y) {
-            vec2 uv = offset + projected.xy * scale + vec2(x, y) * atlasTexel;
-            // Keep PCF taps inside this light's atlas tile.
-            if (scale < 1.0)
-                uv = clamp(uv, offset + atlasTexel * 0.5, offset + vec2(scale) - atlasTexel * 0.5);
-            float receiverDepth = projected.z;
-            if (scale == 1.0) {
-                // Compare at the center of the texel selected by nearest sampling.
-                vec2 sampleCenter = (floor(uv / atlasTexel) + 0.5) * atlasTexel;
-                receiverDepth += dot(depthGradient, sampleCenter - projected.xy);
+    if (scale < 1.0) {
+        const float depthUnit = 1.0 / 16777215.0;
+        ivec2 tileSize = dimensions / 4;
+        vec2 tileTexel = 1.0 / vec2(tileSize);
+        // Correct each tap to the receiver plane, leaving only a small residual bias.
+        float residualLimit = 4.0 * depthUnit + 0.25 * dot(abs(depthGradient), tileTexel);
+        float bias = clamp(depthBias, 2.0 * depthUnit, residualLimit);
+        ivec2 tileMin = ivec2(offset / scale) * tileSize;
+        ivec2 tileMax = tileMin + tileSize - 1;
+        vec2 samplePosition = vec2(tileMin) + projected.xy * vec2(tileSize) - 0.5;
+        ivec2 base = ivec2(floor(samplePosition));
+        vec2 fraction = fract(samplePosition);
+        // The combined footprint of nine bilinear depth comparisons is 4x4.
+        for (int x = -1; x <= 2; ++x)
+            for (int y = -1; y <= 2; ++y) {
+                ivec2 texel = clamp(base + ivec2(x, y), tileMin, tileMax);
+                float depth = texelFetch(depthMap, texel, 0).r;
+                float wx = x == -1 ? 1.0 - fraction.x : (x == 2 ? fraction.x : 1.0);
+                float wy = y == -1 ? 1.0 - fraction.y : (y == 2 ? fraction.y : 1.0);
+                vec2 tapOffset = (vec2(texel) - samplePosition) * tileTexel;
+                float receiverDepth = projected.z + dot(depthGradient, tapOffset);
+                blocked += receiverDepth - bias > depth ? wx * wy : 0.0;
             }
-            blocked += receiverDepth - bias > texture(depthMap, uv).r ? 1.0 : 0.0;
-        }
+    } else {
+        // Allow for depth quantization and subpixel rasterization error.
+        float bias = max(depthBias * (1.0 - dot(normal, lightDirection)), depthBias);
+        bias = max(bias, 2.0 / 16777215.0) + dot(abs(depthGradient), atlasTexel) / 128.0;
+        for (int x = -1; x <= 1; ++x)
+            for (int y = -1; y <= 1; ++y) {
+                vec2 uv = projected.xy + vec2(x, y) * atlasTexel;
+                vec2 sampleCenter = (floor(uv / atlasTexel) + 0.5) * atlasTexel;
+                float receiverDepth = projected.z + dot(depthGradient, sampleCenter - projected.xy);
+                blocked += receiverDepth - bias > texture(depthMap, uv).r ? 1.0 : 0.0;
+            }
+    }
     return 1.0 - strength * blocked / 9.0;
 }
 

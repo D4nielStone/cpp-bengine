@@ -64,8 +64,7 @@ bool parse_mesh(
     }
     const auto& vertices = value["vertices"];
     const auto& faces = value["faces"];
-    if (vertices.Empty() || vertices.Size() > max_vertices ||
-        faces.Empty() || faces.Size() > max_faces) {
+    if (vertices.Size() > max_vertices || faces.Size() > max_faces) {
         error = "Editable mesh exceeds supported limits.";
         return false;
     }
@@ -129,9 +128,8 @@ bool parse_mesh(
 }
 
 bool editable_mesh_data::validate(std::string& error) const {
-    if (vertices.empty() || vertices.size() > max_vertices ||
-        faces.empty() || faces.size() > max_faces) {
-        error = "Editable mesh must contain vertices and faces.";
+    if (vertices.size() > max_vertices || faces.size() > max_faces) {
+        error = "Editable mesh exceeds supported limits.";
         return false;
     }
     for (const auto& value : vertices) {

@@ -74,6 +74,7 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
             else if (value.find("GetComponent") != std::string::npos && value.find("SoundListener") != std::string::npos) type = "soundListener";
             else if (value.find("GetComponent") != std::string::npos && value.find("SoundPlayer") != std::string::npos) type = "soundPlayer";
             else if (value.find("GetComponent") != std::string::npos && value.find("Camera") != std::string::npos) type = "camera";
+            else if (value.starts_with("Vector3(")) type = "vector3";
             else if (value.starts_with("gameObject.transform") || value == "transform") type = "transform";
             else if (value.starts_with("GameObject.Find(") || value == "gameObject") type = "gameObject";
             else type.clear();
@@ -83,17 +84,23 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
     if (type == "transform") {
         names = {"Rotate", "Translate"};
         if (!methods) names.insert(names.end(), {"eulerAngles", "localEulerAngles", "localPosition", "localScale", "position"});
+    } else if (type == "vector3" || (type == "Vector3" && !methods)) {
+        names = {"cross", "distance", "dot", "length", "lerp", "normalized"};
+        if (type == "vector3" && !methods) names.insert(names.end(), {"x", "y", "z"});
     } else if (type == "gameObject") {
-        names = {"GetComponent"};
+        names = {"GetComponent", "IsDescendantOf", "SetParent"};
         if (!methods) names.insert(names.end(), {"id", "transform"});
+    } else if (type == "camera") {
+        names = {"screenToWorld", "traceRay", "worldToScreen"};
+        if (!methods) names.insert(names.end(), {"forward", "fieldOfView", "aspect", "nearClipPlane",
+            "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox"});
     } else if (type == "rigidbody") {
         names = {"AddForce", "SetLinearFactor", "SetAngularFactor"};
         if (!methods) names.insert(names.end(), {"mass", "friction", "restitution", "velocity"});
     } else if (type == "spotLight" && methods) {
         names = {"GetWorldDirection", "SetInnerCutoff", "SetOuterCutoff"};
     } else if (!methods) {
-        if (type == "camera") names = {"fieldOfView", "aspect", "nearClipPlane", "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox"};
-        else if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
+        if (type == "directionalLight") names = {"direction", "ambient", "color", "intensity", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "pointLight") names = {"position", "color", "intensity", "constant", "linear", "quadratic"};
         else if (type == "spotLight") names = {"position", "worldPosition", "direction", "worldDirection", "color", "intensity", "constant", "linear", "quadratic", "innerCutoff", "outerCutoff", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "soundListener") names = {"enabled"};

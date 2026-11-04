@@ -13,6 +13,7 @@
 #include "components/camera.hpp"
 #include "core/ecs.hpp"
 #include "systems/code_system.hpp"
+#include "systems/physics_system.hpp"
 #include "project_creation_system.hpp"
 #include <fstream>
 #include <filesystem>
@@ -139,6 +140,143 @@ TEST(LuaApi, TransformSeparatesWorldAndLocalPosition) {
     )"));
 }
 
+TEST(LuaApi, CameraProjectionRoundTripsWithCurrentPoseAndViewport) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base, sol::lib::math);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    const auto camera = registry->get<commons::camera>(entity.id);
+    camera->viewport({1000, 400});
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+
+    EXPECT_NO_THROW(lua.script(R"(
+        cam = gameObject:GetComponent("Camera")
+        transform.position = Vector3(5, 2, 1)
+        local center = cam:worldToScreen(Vector3(9, 2, 1))
+        assert(math.abs(center.x - 500) < 0.001 and math.abs(center.y - 200) < 0.001)
+        for _, orthographic in ipairs({false, true}) do
+            cam.orthographic = orthographic
+            local target = Vector3(9, 3, 2)
+            local pixel = cam:worldToScreen(target)
+            assert(pixel.x > 500 and pixel.y < 200 and pixel.z > 0 and pixel.z < 1)
+            assert(cam:screenToWorld(pixel):distance(target) < 0.001)
+        end
+        cam.orthographic = false
+        assert(cam:worldToScreen(Vector3(4, 2, 1)) == nil)
+        cam.nearClipPlane = 0
+        assert(cam:screenToWorld(Vector3()) == nil)
+        cam.nearClipPlane = 0.1
+    )"));
+    registry->remove<commons::camera>(entity.id);
+    EXPECT_NO_THROW(lua.script("assert(cam:worldToScreen(Vector3()) == nil)"));
+}
+
+TEST(LuaApi, CameraRayFiltersPlayerAndRemovedColliders) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base, sol::lib::math);
+    auto registry = std::make_shared<commons::ecs>();
+    auto view = registry->create();
+    auto player = registry->create();
+    auto target = registry->create();
+    registry->add<commons::camera>(view);
+    registry->entity_names[player.id] = "Player";
+    registry->entity_names[target.id] = "Target";
+    registry->get<commons::transform>(player.id)->set_position({1, 0, 0});
+    registry->get<commons::transform>(target.id)->set_position({4, 0, 0});
+    registry->add<commons::physics>(player, true);
+    registry->add<commons::physics>(target, true);
+    auto physics = std::make_shared<commons::physics_system>();
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, view.id, physics);
+
+    EXPECT_NO_THROW(lua.script(R"(
+        cam = gameObject:GetComponent("Camera")
+        player = GameObject.Find("Player")
+        local target = GameObject.Find("Target")
+        assert(cam:traceRay().entity.id == player.id)
+        assert(cam:traceRay(3, player) == nil)
+        local hit = cam:traceRay(5, player)
+        assert(hit.entity.id == target.id)
+        assert(math.abs(hit.distance - 3.5) < 0.001)
+        assert(hit.point:distance(Vector3(3.5, 0, 0)) < 0.001)
+        assert(hit.normal:distance(Vector3(-1, 0, 0)) < 0.001)
+        assert(cam:traceRay(5, player, 0, 0) == nil)
+        assert(cam:traceRay(5, player, 0) == nil)
+        assert(cam:traceRay(0/0, player) == nil)
+        cam.orthographic = true
+        local pixel = cam:worldToScreen(target.transform.position)
+        hit = cam:traceRay(5, player, pixel.x, pixel.y)
+        assert(hit.entity.id == target.id)
+        assert(math.abs(hit.distance - 3.4) < 0.001)
+        Destroy(player:GetComponent("Rigidbody"))
+        assert(cam:traceRay().entity.id == target.id)
+    )"));
+    physics.reset();
+    EXPECT_NO_THROW(lua.script("assert(cam:traceRay() == nil)"));
+}
+
+TEST(LuaApi, FlashlightScriptCollectsAndFollowsPlayer) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto player = registry->create();
+    auto camera = registry->create();
+    auto flashlight = registry->create();
+    auto blocker = registry->create();
+    const auto player_pose = registry->get<commons::transform>(player.id);
+    const auto flashlight_pose = registry->get<commons::transform>(flashlight.id);
+    ASSERT_TRUE(registry->get<commons::transform>(camera.id)->set_parent(player.id, false));
+    flashlight_pose->set_position({2, 0, 0});
+    registry->get<commons::transform>(blocker.id)->set_position({1, 0, 0});
+    registry->add<commons::camera>(camera);
+    registry->add<commons::physics>(flashlight, true);
+    registry->add<commons::physics>(blocker, true);
+    registry->add<commons::renderer>(flashlight);
+    const auto example = std::filesystem::path(BENGINE_SOURCE_DIR) /
+        "docs/lua-api/examples/flashlight_pickup.lua";
+    registry->add<commons::code>(flashlight, example.string());
+    const auto script = registry->get<commons::code>(flashlight.id);
+    std::string error;
+    ASSERT_TRUE(script->load_properties(error)) << error;
+    ASSERT_TRUE(script->set_property("cam", camera.id));
+    ASSERT_TRUE(script->set_property("player", player.id));
+    ASSERT_TRUE(script->set_property("hold_x", 0.75));
+
+    const auto physics = std::make_shared<commons::physics_system>();
+    commons::code_system scripts(physics);
+    scripts.setup(registry);
+    physics->setup(registry);
+    bool pressed = true;
+    script->estado_lua["Input"].get<sol::table>().set_function("GetKey",
+        [&](const std::string& key) { return key == "E" && pressed; });
+    scripts.update(registry);
+    EXPECT_EQ(flashlight_pose->parent_id, 0u);
+    registry->remove(blocker.id);
+    scripts.update(registry);
+    EXPECT_EQ(flashlight_pose->parent_id, 0u);
+    pressed = false;
+    scripts.update(registry);
+    pressed = true;
+    scripts.update(registry);
+    ASSERT_EQ(flashlight_pose->parent_id, player.id);
+    EXPECT_FALSE(registry->has<commons::physics>(flashlight.id));
+    EXPECT_TRUE(registry->get<commons::renderer>(flashlight.id)->visible);
+    EXPECT_EQ(flashlight_pose->get_position(), (bgui::vec3{0.75f, 0.65f, 0.3f}));
+    player_pose->set_position({10, 0, 0});
+    EXPECT_EQ(flashlight_pose->get_world_position(), (bgui::vec3{10.75f, 0.65f, 0.3f}));
+    EXPECT_NO_THROW(script->estado_lua.script(R"(
+        local player = GameObject.Find(properties.player)
+        assert(not player:SetParent(gameObject))
+        assert(not gameObject:SetParent(gameObject))
+        assert(not gameObject:SetParent("Player"))
+        assert(gameObject:IsDescendantOf(player))
+        assert(gameObject:SetParent(nil))
+        assert(math.abs(transform.position.x - 10.75) < 0.001)
+    )"));
+}
+
 TEST(LuaApi, BuiltinFppTemplateScriptsMoveLookAndCollectUsingTheNewApi) {
     const auto project_directory = std::filesystem::temp_directory_path() /
         ("bengine-lua-template-" +
@@ -249,6 +387,32 @@ TEST(LuaApi, BuiltinFppTemplateScriptsMoveLookAndCollectUsingTheNewApi) {
     EXPECT_FALSE(registry->has<commons::physics>(pickup.id));
     auto repeated = sol::protected_function(game->f_update)();
     EXPECT_TRUE(repeated.valid());
+}
+
+TEST(LuaApi, Vector3OperatorsAndHelpersWorkOnValuesAndTheType) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base, sol::lib::math);
+    auto registry = std::make_shared<commons::ecs>();
+    const auto entity = registry->create();
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+    const auto result = lua.safe_script(R"lua(
+        local a = Vector3(1, 2, 3)
+        local b = Vector3(4, 6, 3)
+        assert((a + b).y == 8 and (b - a).x == 3)
+        assert((-a).z == -3 and (a * 2).y == 4 and (2 * a).z == 6)
+        assert((b / 2).x == 2 and not pcall(function() return a / 0 end))
+        assert(Vector3.distance(a, b) == 5 and a:distance(b) == 5)
+        assert(Vector3.lerp(a, b, 0.5).y == 4 and a:lerp(b, 2).x == 7)
+        assert(a:dot(b) == 25 and a:cross(b).z == -2)
+        assert(Vector3():normalized():length() == 0)
+        assert(math.abs((b - a):normalized():length() - 1) < 0.00001)
+        assert(a.x == 1 and a.y == 2 and a.z == 3)
+        transform.localPosition = a + b
+    )lua", sol::script_pass_on_error);
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
+    EXPECT_EQ(registry->get<commons::transform>(entity.id)->get_position(), (bgui::vec3{5, 8, 6}));
 }
 
 TEST(LuaApi, TranslateUsesTheEngineRotationOrder) {

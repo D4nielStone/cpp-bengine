@@ -7,6 +7,7 @@
 #include "project_context_menu.hpp"
 #include "editor_ui.hpp"
 #include "native_file_dialog.hpp"
+#include "material_unification.hpp"
 #include "project_creation_system.hpp"
 #include "ui_scale_system.hpp"
 
@@ -278,6 +279,15 @@ editor_ui::editor_ui(
                     m_commands->execute(editor_command::redo);
                 else if (m_redo_callback)
                     m_redo_callback();
+            });
+            menu.add_separator();
+            menu.add_button("Unify Identical Materials", [this]() {
+                if (!m_registry || m_is_playing) return;
+                const auto unified = editor::unify_scene_materials(*m_registry);
+                auto& result = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+                result.add<bgui::text>(unified == 0 ? "No duplicate materials found."
+                    : "Duplicate material assignments unified: " + std::to_string(unified), 0.28f);
+                result.set_confirmation_text("OK");
             });
         }
     );

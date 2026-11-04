@@ -5,6 +5,7 @@
 #include <os/resource_files.hpp>
 #include <bgui_backend_gl3.hpp>
 #include <glad.h>
+#include "util/texture.hpp"
 #include <unordered_set>
 
 namespace COMMONS_NS {
@@ -76,7 +77,9 @@ void scene_asset_loader::finish(const std::shared_ptr<ecs>& staging, const pump&
         notify(update);
         const auto resolved = bgui::asset_manager::get_instance().resolve_asset_path(path);
         decoded = wait(std::async(std::launch::async, [resolved] {
-            return std::make_shared<bgui::texture>(bgui::decode_texture_memory(bgui::resource_files::read(resolved), resolved));
+            return std::make_shared<bgui::texture>(resize_texture(
+                bgui::decode_texture_memory(bgui::resource_files::read(resolved), resolved),
+                texture_resolution_percent(resolved)));
         }), update);
         m_status.fraction = .45f + .2f * float(++done) / float(textures.size());
         notify(update);
@@ -99,10 +102,12 @@ void scene_asset_loader::finish(const std::shared_ptr<ecs>& staging, const pump&
         }
     };
     std::unordered_map<const bgui::texture*, GLuint> uploaded_textures;
-    const auto upload_texture = [&](const bgui::texture& decoded, const std::string& path) {
+    const auto upload_texture = [&](const bgui::texture& decoded, const std::string& path, bool embedded = false) {
         const auto found = uploaded_textures.find(&decoded);
         if (found != uploaded_textures.end()) return found->second;
-        const auto id = bgui::gl3_get_texture(decoded);
+        const auto id = embedded
+            ? bgui::gl3_get_texture(resize_texture(decoded, default_texture_resolution_percent))
+            : bgui::gl3_get_texture(decoded);
         if (!id) throw std::runtime_error("Texture upload failed: " + path);
         uploaded_textures.emplace(&decoded, id);
         return id;
@@ -120,7 +125,7 @@ void scene_asset_loader::finish(const std::shared_ptr<ecs>& staging, const pump&
                 }
                 if (texture.embedded) {
                     m_status.current = texture.path;
-                    upload_texture(*texture.embedded, texture.path);
+                    texture.id = upload_texture(*texture.embedded, texture.path, true);
                 }
             }
             mesh->setMaterial(material);

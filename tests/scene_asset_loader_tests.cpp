@@ -313,7 +313,9 @@ TEST_F(SceneAssets, LargeReferencedTextureBindsAndPreservesReloads) {
     const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     std::cout << "20 warm binds of 2048x2048 texture: " << elapsed << " ms\n";
     const auto original_path = tex.path;
-    source.textures.at("tex_albedo").embedded->m_buffer[0] = 0;
+    auto& replacement_pixels = source.textures.at("tex_albedo").embedded->m_buffer;
+    for (const auto offset : {0, 4, 2048 * 4, 2048 * 4 + 4})
+        replacement_pixels[offset] = 0;
     std::filesystem::path replacement;
     ASSERT_TRUE(commons::store_material_asset(directory, source, replacement, error)) << error;
     std::filesystem::copy_file(replacement, file, std::filesystem::copy_options::overwrite_existing);
@@ -321,7 +323,12 @@ TEST_F(SceneAssets, LargeReferencedTextureBindsAndPreservesReloads) {
     tex = loaded.textures.at("tex_albedo");
     EXPECT_NE(tex.path, original_path);
     tex.bind(0);
-    std::vector<unsigned char> pixels(2048 * 2048 * 4);
+    GLint width{}, height{};
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+    ASSERT_EQ(width, 1434);
+    ASSERT_EQ(height, 1434);
+    std::vector<unsigned char> pixels(std::size_t(width) * height * 4);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     EXPECT_EQ(pixels[0], 0);
     EXPECT_EQ(pixels[1], 255);

@@ -1,6 +1,6 @@
 #include "project_preview.hpp"
 
-#include <glad.h>
+#include "camera_frame.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -17,38 +17,6 @@
 
 namespace editor::ui {
 namespace {
-
-std::vector<unsigned char> read_camera_frame(
-    const commons::camera& camera,
-    const int width,
-    const int height
-) {
-    const auto byte_count = static_cast<std::size_t>(width) *
-        static_cast<std::size_t>(height) * 3;
-    std::vector<unsigned char> pixels(byte_count);
-
-    GLint previous_texture = 0;
-    GLint previous_pack_alignment = 4;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_texture);
-    glGetIntegerv(GL_PACK_ALIGNMENT, &previous_pack_alignment);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glBindTexture(GL_TEXTURE_2D, camera.framebuffer_texture());
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous_texture));
-    glPixelStorei(GL_PACK_ALIGNMENT, previous_pack_alignment);
-
-    const auto row_size = static_cast<std::size_t>(width) * 3;
-    std::vector<unsigned char> row(row_size);
-    for (int y = 0; y < height / 2; ++y) {
-        auto* top = pixels.data() + static_cast<std::size_t>(y) * row_size;
-        auto* bottom = pixels.data() +
-            static_cast<std::size_t>(height - y - 1) * row_size;
-        std::copy_n(top, row_size, row.data());
-        std::copy_n(bottom, row_size, top);
-        std::copy_n(row.data(), row_size, bottom);
-    }
-    return pixels;
-}
 
 bool write_png(
     const std::filesystem::path& path,

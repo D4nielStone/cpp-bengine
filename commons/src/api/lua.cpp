@@ -10,6 +10,11 @@
 #include "components/sound_player.hpp"
 #include "core/ecs.hpp"
 #include "components/hud.hpp"
+#include "systems/physics_system.hpp"
+
+#include <cmath>
+#include <stdexcept>
+#include <unordered_set>
 
 namespace commons::api {
 
@@ -25,6 +30,43 @@ void setNamespaces(sol::state& lua) {
 
 namespace commons::api {
 namespace {
+float vector_length(const bgui::vec3& value) {
+    return std::hypot(value.x, value.y, value.z);
+}
+
+void register_vector_type(sol::state& lua) {
+    lua.new_usertype<bgui::vec3>("Vector3",
+        sol::call_constructor, sol::factories(
+            []() { return bgui::vec3{0.f, 0.f, 0.f}; },
+            [](float x, float y, float z) { return bgui::vec3{x, y, z}; }),
+        "x", &bgui::vec3::x, "y", &bgui::vec3::y, "z", &bgui::vec3::z,
+        sol::meta_function::addition, [](const bgui::vec3& a, const bgui::vec3& b) { return a + b; },
+        sol::meta_function::subtraction, [](const bgui::vec3& a, const bgui::vec3& b) { return a - b; },
+        sol::meta_function::unary_minus, [](const bgui::vec3& value) { return value * -1.f; },
+        sol::meta_function::multiplication, sol::overload(
+            [](const bgui::vec3& value, float scalar) { return value * scalar; },
+            [](float scalar, const bgui::vec3& value) { return value * scalar; }),
+        sol::meta_function::division, [](const bgui::vec3& value, float scalar) {
+            if (scalar == 0.f) throw std::domain_error("Cannot divide a Vector3 by zero.");
+            return value / scalar;
+        },
+        "length", vector_length,
+        "normalized", [](const bgui::vec3& value) {
+            const auto length = vector_length(value);
+            return length == 0.f ? bgui::vec3{} : value / length;
+        },
+        "distance", [](const bgui::vec3& a, const bgui::vec3& b) { return vector_length(a - b); },
+        "lerp", [](const bgui::vec3& a, const bgui::vec3& b, float t) {
+            return bgui::vec3{std::lerp(a.x, b.x, t), std::lerp(a.y, b.y, t), std::lerp(a.z, b.z, t)};
+        },
+        "dot", [](const bgui::vec3& a, const bgui::vec3& b) {
+            return a.x * b.x + a.y * b.y + a.z * b.z;
+        },
+        "cross", [](const bgui::vec3& a, const bgui::vec3& b) {
+            return bgui::vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+        });
+}
+
 struct game_object {
     std::weak_ptr<ecs> registry;
     std::uint32_t id;
@@ -32,15 +74,75 @@ struct game_object {
         auto owner = registry.lock();
         return owner ? owner->get<transform>(id) : nullptr;
     }
+    bool is_descendant_of(const game_object& ancestor) const {
+        const auto owner = registry.lock();
+        if (!owner || owner != ancestor.registry.lock() || !owner->is_alive(ancestor.id))
+            return false;
+        std::unordered_set<std::uint32_t> visited{id};
+        auto current = get_transform();
+        while (current && current->parent_id && visited.insert(current->parent_id).second) {
+            if (current->parent_id == ancestor.id) return true;
+            current = owner->get<transform>(current->parent_id);
+        }
+        return false;
+    }
+    bool set_parent(const sol::object& parent, sol::optional<bool> preserve_world) const {
+        const auto owner = registry.lock();
+        const auto pose = get_transform();
+        if (!owner || !pose) return false;
+        if (!parent.valid()) return pose->set_parent(0, preserve_world.value_or(true));
+        if (!parent.is<game_object>()) return false;
+        const auto target = parent.as<game_object>();
+        return owner == target.registry.lock() && target.get_transform() &&
+            pose->set_parent(target.id, preserve_world.value_or(true));
+    }
 };
+
+std::shared_ptr<ecs> camera_owner(const camera& value) {
+    auto owner = value.reg.lock();
+    if (!owner || owner->get<camera>(value.my_object).get() != &value ||
+        !owner->has<transform>(value.my_object))
+        return nullptr;
+    return owner;
 }
 
-void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id) {
-    lua.new_usertype<bgui::vec3>("Vector3",
-        sol::call_constructor, sol::factories(
-            []() { return bgui::vec3{0.f, 0.f, 0.f}; },
-            [](float x, float y, float z) { return bgui::vec3{x, y, z}; }),
-        "x", &bgui::vec3::x, "y", &bgui::vec3::y, "z", &bgui::vec3::z);
+sol::object trace_camera_ray(camera& value, sol::optional<float> range,
+    sol::optional<game_object> ignore, sol::optional<float> x, sol::optional<float> y,
+    sol::this_state state) {
+    const auto miss = sol::make_object(state, sol::nil);
+    const auto owner = camera_owner(value);
+    const auto world = sol::state_view(state).registry()["bengine.physics_world"]
+        .get<std::weak_ptr<physics_system>>().lock();
+    const float max_distance = range.value_or(300.f);
+    if (!owner || !world || !std::isfinite(max_distance) || max_distance <= 0.f ||
+        x.has_value() != y.has_value() || (ignore && ignore->registry.lock() != owner))
+        return miss;
+
+    const auto size = value.viewport_size();
+    const bgui::vec3 screen{x.value_or(size.x * 0.5f), y.value_or(size.y * 0.5f), 0.f};
+    const auto near_point = value.screen_to_world(screen);
+    if (!near_point) return miss;
+    const bool orthographic = value.config.flag_orth;
+    const auto origin = orthographic ? *near_point : value.position;
+    const auto direction = orthographic
+        ? bgui::vec3{-value.viewMatrix[0][2], -value.viewMatrix[1][2], -value.viewMatrix[2][2]}
+        : *near_point - origin;
+    const auto length = vector_length(direction);
+    if (!std::isfinite(length) || length <= 0.f) return miss;
+    const auto hit = world->cast_scene_ray({origin, direction / length}, max_distance,
+        owner, ignore ? ignore->id : 0);
+    if (!hit.atingiu) return miss;
+
+    const auto id = static_cast<std::uint32_t>(hit.objetoAtingido->getUserIndex());
+    return sol::state_view(state).create_table_with(
+        "entity", game_object{owner, id}, "point", hit.pontoDeColisao,
+        "normal", hit.normalAtingida, "distance", vector_length(hit.pontoDeColisao - origin));
+}
+
+void register_types(sol::state& lua) {
+    // Re-registering usertypes invalidates metatables when setup runs again.
+    if (lua.registry()["bengine.lua_types_registered"].get_or(false)) return;
+    register_vector_type(lua);
     lua.new_usertype<hud_element>("HudElement", sol::no_constructor,
         "text", &hud_element::text, "width", &hud_element::width,
         "height", &hud_element::height, "scale", &hud_element::scale,
@@ -85,6 +187,17 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
         sol::constructors<color(), color(const float&, const float&, const float&, const float&)>(),
         "r", &color::r, "g", &color::g, "b", &color::b, "a", &color::a);
     lua.new_usertype<camera>("Camera", sol::no_constructor,
+        "traceRay", trace_camera_ray,
+        "worldToScreen", [](camera& value, const bgui::vec3& point) -> std::optional<bgui::vec3> {
+            return camera_owner(value) ? value.world_to_screen(point) : std::nullopt;
+        },
+        "screenToWorld", [](camera& value, const bgui::vec3& point) -> std::optional<bgui::vec3> {
+            return camera_owner(value) ? value.screen_to_world(point) : std::nullopt;
+        },
+        "forward", sol::property([](camera& value) {
+            const auto view = value.getViewMatrix();
+            return bgui::vec3{-view[0][2], -view[1][2], -view[2][2]};
+        }),
         "fieldOfView", sol::property([](camera& value) { return value.config.fov; },
             [](camera& value, float field_of_view) { value.config.fov = field_of_view; }),
         "aspect", sol::property([](camera& value) { return value.config.aspecto; }),
@@ -144,15 +257,11 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
         "radius", &sound_player::radius,
         "looping", &sound_player::looping,
         "playOnAwake", &sound_player::play_on_awake);
-    lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
-        if (body) {
-            if (const auto registry = body->reg.lock())
-                registry->remove<physics>(body->my_object);
-        }
-    });
     lua.new_usertype<game_object>("GameObject", sol::no_constructor,
         "id", sol::readonly(&game_object::id),
         "transform", sol::property(&game_object::get_transform),
+        "IsDescendantOf", &game_object::is_descendant_of,
+        "SetParent", &game_object::set_parent,
         "AddHUD", [](const game_object& object) -> std::shared_ptr<hud> {
             auto owner = object.registry.lock();
             if (!owner || !owner->is_alive(object.id)) return nullptr;
@@ -177,6 +286,25 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
             if (name == "Rigidbody") return sol::make_object(state, owner->get<physics>(object.id));
             return sol::make_object(state, sol::nil);
         });
+    lua.registry()["bengine.lua_types_registered"] = true;
+}
+}
+
+void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id) {
+    setUpApi(lua, registry, id, {});
+}
+
+void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id,
+    const std::weak_ptr<physics_system>& physics_world) {
+    register_types(lua);
+    lua.registry()["bengine.physics_world"] = physics_world;
+    lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
+        if (body) {
+            if (const auto registry = body->reg.lock(); registry &&
+                registry->get<physics>(body->my_object) == body)
+                registry->remove<physics>(body->my_object);
+        }
+    });
     const std::weak_ptr<ecs> weak_registry = registry;
     lua["GameObject"]["Find"] = sol::overload(
         [weak_registry](std::uint32_t entity_id) -> sol::optional<game_object> {

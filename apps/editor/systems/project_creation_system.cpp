@@ -1,4 +1,5 @@
 #include "project_creation_system.hpp"
+#include "script_templates.hpp"
 
 #include "components/camera.hpp"
 #include "components/code.hpp"
@@ -35,63 +36,14 @@ bool write_template_file(
 }
 
 bool write_fpp_scripts(const std::filesystem::path& project_folder, std::string& error) {
-    constexpr std::string_view player_script = R"lua(--@property {"name":"move_speed", "type":"number", "default":5}
-local yaw = -90.0
-local body
-local rigidbody
-
-function setup()
-    body = gameObject:GetComponent("Transform")
-    rigidbody = gameObject:GetComponent("Rigidbody")
-    yaw = body.localEulerAngles.y
-    Input.SetMouseCaptured(true)
-    Debug.Log("FPP player body ready.")
-end
-
-function update()
-    local mouse_x = Input.GetMouseDelta()
-    yaw = yaw - mouse_x * 0.12
-    body.localEulerAngles = Vector3(0.0, yaw, 0.0)
-
-    local forward = Input.GetAxis("Vertical")
-    local right = Input.GetAxis("Horizontal")
-    local length = math.sqrt(forward * forward + right * right)
-    if length > 1.0 then
-        forward = forward / length
-        right = right / length
-    end
-    forward = forward * properties.move_speed
-    right = right * properties.move_speed
-    local angle = math.rad(yaw)
-    local velocity = rigidbody.velocity
-    rigidbody.velocity = Vector3(
-        math.cos(angle) * forward + math.sin(angle) * right,
-        velocity.y,
-        -math.sin(angle) * forward + math.cos(angle) * right
-    )
-end
-)lua";
-    constexpr std::string_view camera_script = R"lua(local pitch = 0.0
-
-function setup()
-    pitch = transform.localEulerAngles.x
-    Input.SetMouseCaptured(true)
-end
-
-function update()
-    local _, mouse_y = Input.GetMouseDelta()
-    pitch = math.max(-89.0, math.min(89.0, pitch - mouse_y * 0.12))
-    transform.localEulerAngles = Vector3(pitch, 0.0, 0.0)
-end
-)lua";
     return write_template_file(
                project_folder / "scripts" / "fpp_player.lua",
-               player_script,
+               script_template(lua_script_preset::fpp_player).source,
                error
            ) &&
         write_template_file(
             project_folder / "scripts" / "fpp_camera.lua",
-            camera_script,
+            script_template(lua_script_preset::fpp_camera).source,
             error
         );
 }

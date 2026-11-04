@@ -126,6 +126,10 @@ TEST_F(EditorInteractionTest, TrackpadPrimaryDragPanAndKeyboardNavigationUseLerp
 
 TEST_F(EditorInteractionTest, EntityDeleteActionHasAVisibleIconAndSupportsUndo) {
     auto entity = registry->create();
+    auto owner = registry->create();
+    registry->add<commons::code>(owner, "Control.lua");
+    auto script = registry->get<commons::code>(owner.id);
+    script->properties.push_back({"player", "entity", entity.id});
     context->selected_entity = entity.id;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::entities_view panel(context);
@@ -139,8 +143,10 @@ TEST_F(EditorInteractionTest, EntityDeleteActionHasAVisibleIconAndSupportsUndo) 
     remove->on_released();
     bgui::on_update();
     EXPECT_FALSE(registry->is_alive(entity.id));
+    EXPECT_EQ(std::get<std::uint32_t>(script->properties.front().value), 0u);
     ASSERT_TRUE(context->undo());
     EXPECT_TRUE(registry->is_alive(entity.id));
+    EXPECT_EQ(std::get<std::uint32_t>(script->properties.front().value), entity.id);
     EXPECT_TRUE(registry->validate_invariants());
 }
 
@@ -811,16 +817,19 @@ TEST_F(EditorInteractionTest, SpotShadowControlsSupportUndoRedoAndClampValues) {
     editor::ui::components_view panel(context);
     panel.build(dock);
     panel.update();
-    auto* toggle = find_element<bgui::checkbox>(dock, [](auto& item) {
-        return item.get_label().get_buffer() == "Shadows";
-    });
-    ASSERT_NE(toggle, nullptr);
-    toggle->on_clicked();
-    EXPECT_FALSE(light->shadows);
-    ASSERT_TRUE(context->undo());
-    EXPECT_TRUE(light->shadows);
-    ASSERT_TRUE(context->redo());
-    EXPECT_FALSE(light->shadows);
+    for (const auto& [label, member] : {
+        std::pair{"Shadows", &commons::spot_light::shadows}}) {
+        auto* toggle = find_element<bgui::checkbox>(dock, [label](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(toggle, nullptr);
+        toggle->on_clicked();
+        EXPECT_FALSE(light.get()->*member);
+        ASSERT_TRUE(context->undo());
+        EXPECT_TRUE(light.get()->*member);
+        ASSERT_TRUE(context->redo());
+        EXPECT_FALSE(light.get()->*member);
+    }
     for (const auto& [label, member, initial, updated, maximum] : {
         std::tuple{"Shadow Distance", &commons::spot_light::shadow_distance, 50.f, 75.f, 10000.f},
         {"Shadow Bias", &commons::spot_light::shadow_bias, 0.001f, 0.002f, 0.1f},
@@ -838,6 +847,29 @@ TEST_F(EditorInteractionTest, SpotShadowControlsSupportUndoRedoAndClampValues) {
         field->get_inputbox().m_enter_func("99999");
         EXPECT_FLOAT_EQ(light.get()->*member, maximum);
     }
+}
+
+TEST_F(EditorInteractionTest, CameraPostProcessingControlsSupportUndoAndRedo) {
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    const auto camera = registry->get<commons::camera>(entity.id);
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    using mode = commons::ambient_occlusion_mode;
+    auto* picker = find_element<bgui::combo_box>(dock, [](auto& item) {
+        return item.get_selected_option() == "Off";
+    });
+    ASSERT_NE(picker, nullptr);
+    picker->set_selected_index(static_cast<std::size_t>(mode::gtao));
+    EXPECT_EQ(camera->config.post_processing.occlusion, mode::gtao);
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(camera->config.post_processing.occlusion, mode::off);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(camera->config.post_processing.occlusion, mode::gtao);
 }
 
 TEST_F(EditorInteractionTest, SpotLightColorUsesColorPickerAndSupportsUndoRedo) {
@@ -1391,4 +1423,43 @@ TEST_F(EditorInteractionTest, HierarchyGroupsSelectionAndUndoesInOneStep) {
     ASSERT_TRUE(context->redo());
     EXPECT_TRUE(registry->is_alive(group));
     EXPECT_EQ(registry->get<commons::transform>(first.id)->parent_id, group);
+}
+
+TEST_F(EditorInteractionTest, InspectorSavesMaterialFileAndNotifiesFilesView) {
+    namespace fs = std::filesystem;
+    struct temporary_folder {
+        fs::path path = fs::temp_directory_path() /
+            ("bengine-material-inspector-" + std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~temporary_folder() { std::error_code error; fs::remove_all(path, error); }
+    } folder;
+    ASSERT_TRUE(fs::create_directory(folder.path));
+    context->project_root = fs::canonical(folder.path);
+    const auto path = editor::ui::create_material_file(context->project_root, context->project_root, "Stone");
+    context->selected_material = path;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view inspector(context);
+    fs::path saved;
+    inspector.set_material_saved_callback([&](const auto& file) { saved = file; });
+    inspector.build(dock);
+    inspector.update();
+
+    auto* roughness = find_element<bgui::field>(dock, [](auto& field) {
+        return field.get_label().get_buffer() == "Roughness";
+    });
+    ASSERT_NE(roughness, nullptr);
+    ASSERT_TRUE(roughness->get_inputbox().m_enter_func);
+    roughness->get_inputbox().m_enter_func("0.32");
+    EXPECT_EQ(saved, path);
+    commons::material material;
+    std::string error;
+    ASSERT_TRUE(commons::load_material_asset(path, material, error)) << error;
+    EXPECT_FLOAT_EQ(material.getUniforme("material.roughness").valor.f, .32f);
+
+    context->is_playing = true;
+    saved.clear();
+    roughness->get_inputbox().m_enter_func("0.87");
+    EXPECT_TRUE(saved.empty());
+    ASSERT_TRUE(commons::load_material_asset(path, material, error)) << error;
+    EXPECT_FLOAT_EQ(material.getUniforme("material.roughness").valor.f, .32f);
 }

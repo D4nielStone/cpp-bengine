@@ -7,7 +7,7 @@
 #include "viewport_input_state.hpp"
 
 #include "components/camera.hpp"
-#include "systems/render_system.hpp"
+#include "render_viewport.hpp"
 #include <glm/gtx/euler_angles.hpp>
 
 #include <elem/image.hpp>
@@ -97,12 +97,11 @@ void update_game_view(const std::shared_ptr<game_view_state>& state, bool render
         view.skybox_asset_root = source.skybox_asset_root;
         view.viewMatrix = source.viewMatrix;
         view.position = source.position;
-        view.request_framebuffer_size({width, height});
-        state->renderer.render_view(state->context->registry, view);
-        const auto texture = view.framebuffer_texture();
-        const bgui::vec2 size{float(view.viewportFBO.x), float(view.viewportFBO.y)};
-        if (state->image->get_texture().m_id != texture || state->image->get_texture().m_size != size)
-            state->image->set_external_texture(texture, size);
+        const auto frame = render_viewport(state->renderer, state->context->registry,
+            view, width, height);
+        const bgui::vec2 size{float(frame.width), float(frame.height)};
+        if (state->image->get_texture().m_id != frame.texture || state->image->get_texture().m_size != size)
+            state->image->set_external_texture(frame.texture, size);
     }
 
     const auto name = state->context->entity_names.find(camera_entity);

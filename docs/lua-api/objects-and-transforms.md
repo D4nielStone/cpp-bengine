@@ -9,6 +9,8 @@ código pertence.
 |---|---|---|
 | `gameObject.id` | inteiro | Identificador da entidade; somente leitura. |
 | `gameObject.transform` | `Transform` ou `nil` | Transformação da própria entidade. |
+| `gameObject:IsDescendantOf(other)` | booleano | Verifica se o objeto está abaixo de outro na hierarquia. |
+| `gameObject:SetParent(parent, preserveWorld)` | booleano | Define um pai da mesma cena ou desvincula com `nil`. Retorna `false` se a mudança for inválida. |
 | `gameObject:GetComponent(name)` | componente ou `nil` | Busca um componente existente pelo nome registrado. |
 
 Nomes aceitos por `GetComponent`:
@@ -33,6 +35,11 @@ entidade válida. O valor retornado é uma referência não proprietária: uma
 entidade pode desaparecer depois da busca; consulte novamente o membro ou
 componente antes de usá-lo.
 
+`SetParent` preserva a transformação global por padrão. Passe `false`
+para manter os valores locais atuais ao trocar de pai. Depois da troca,
+você pode definir `transform.localPosition` e `transform.localEulerAngles`
+no referencial do novo pai.
+
 ## `Vector3`
 
 `Vector3()` cria `(0, 0, 0)`; `Vector3(x, y, z)` cria um vetor com os valores
@@ -41,6 +48,30 @@ fornecidos. Os campos `x`, `y` e `z` podem ser lidos e escritos.
 ```lua
 local offset = Vector3(1, 0, -2)
 offset.y = 3
+```
+
+Use `a + b`, `a - b`, `-a`, `a * número`, `número * a` e
+`a / número`. As operações retornam novos vetores. Dividir por zero gera
+um erro Lua.
+
+| Método | Resultado |
+|---|---|
+| `a:length()` | Comprimento do vetor. |
+| `a:normalized()` | Vetor unitário na mesma direção. Para o vetor zero, retorna zero. |
+| `a:distance(b)` | Distância euclidiana entre dois pontos. |
+| `a:lerp(b, t)` | Interpolação linear. `t = 0` retorna o início e `t = 1` retorna o fim. Valores fora desse intervalo extrapolam. |
+| `a:dot(b)` | Produto escalar. |
+| `a:cross(b)` | Produto vetorial. |
+
+Os auxiliares também aceitam a forma `Vector3.distance(a, b)` ou
+`Vector3.lerp(a, b, t)`.
+
+```lua
+local atual = transform.position
+local alvo = Vector3(10, 0, 5)
+if atual:distance(alvo) > 0.1 then
+    transform.position = atual:lerp(alvo, 0.1)
+end
 ```
 
 ## `Transform`

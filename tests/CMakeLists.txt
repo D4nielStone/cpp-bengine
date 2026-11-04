@@ -60,7 +60,7 @@ target_compile_features(editor_persistence_tests PRIVATE cxx_std_20)
 gtest_discover_tests(editor_persistence_tests)
 
 add_executable(editor_interaction_tests editor_interaction_tests.cpp editor_lua_properties_tests.cpp)
-target_link_libraries(editor_interaction_tests PRIVATE GTest::gtest_main project_persistence)
+target_link_libraries(editor_interaction_tests PRIVATE GTest::gtest_main project_persistence editor_services)
 target_include_directories(editor_interaction_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/core
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
@@ -84,7 +84,7 @@ target_include_directories(editor_asset_workflow_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
     ${CMAKE_SOURCE_DIR}/apps/editor/tools
 )
-target_link_libraries(editor_asset_workflow_tests PRIVATE GTest::gtest_main project_persistence)
+target_link_libraries(editor_asset_workflow_tests PRIVATE GTest::gtest_main project_persistence editor_services)
 gtest_discover_tests(editor_asset_workflow_tests)
 
 add_executable(editor_render_tests
@@ -139,7 +139,7 @@ target_include_directories(editor_menu_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
-target_link_libraries(editor_menu_tests PRIVATE GTest::gtest_main project_persistence bgui)
+target_link_libraries(editor_menu_tests PRIVATE GTest::gtest_main project_persistence editor_services bgui)
 target_compile_definitions(editor_menu_tests PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
 if(WIN32)
     target_link_libraries(editor_menu_tests PRIVATE ole32 shell32 uuid)
@@ -266,3 +266,12 @@ add_executable(scene_asset_loader_tests scene_asset_loader_tests.cpp)
 target_include_directories(scene_asset_loader_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(scene_asset_loader_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(scene_asset_loader_tests PROPERTIES TIMEOUT 30)
+
+# Compile the public core with only its declared dependencies.
+add_executable(editor_core_tests editor_core_tests.cpp)
+target_link_libraries(editor_core_tests PRIVATE GTest::gtest_main editor_core)
+gtest_discover_tests(editor_core_tests)
+
+add_executable(editor_api_tests editor_api_tests.cpp)
+target_link_libraries(editor_api_tests PRIVATE GTest::gtest_main editor_services commons)
+gtest_discover_tests(editor_api_tests)

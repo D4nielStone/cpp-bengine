@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -19,6 +20,143 @@ inline mesh_edge ordered_mesh_edge(
     const unsigned int second
 ) {
     return std::minmax(first, second);
+}
+
+struct mesh_element_clipboard {
+    commons::editable_mesh_data geometry;
+    std::set<mesh_edge> edges;
+};
+
+inline mesh_element_clipboard copy_mesh_elements(
+    const commons::editable_mesh_data& mesh,
+    const std::set<std::size_t>& faces,
+    const std::set<std::size_t>& vertices,
+    const std::set<mesh_edge>& edges
+) {
+    mesh_element_clipboard copy;
+    std::map<unsigned int, unsigned int> vertex_map;
+    std::map<unsigned int, unsigned int> face_map;
+    const auto copy_vertex = [&](unsigned int index) {
+        const auto [entry, added] = vertex_map.try_emplace(index, copy.geometry.vertices.size());
+        if (added) copy.geometry.vertices.push_back(mesh.vertices[index]);
+        return entry->second;
+    };
+
+    for (auto index : vertices)
+        if (index < mesh.vertices.size()) copy_vertex(index);
+
+    if (faces.empty() && edges.empty()) return copy;
+    for (std::size_t index = 0; index < mesh.faces.size(); ++index) {
+        const auto& face = mesh.faces[index];
+        bool selected = faces.contains(index);
+        for (std::size_t corner = 0; !edges.empty() && corner < face.size(); ++corner) {
+            const auto edge = ordered_mesh_edge(face[corner], face[(corner + 1) % face.size()]);
+            if (edges.contains(edge)) {
+                const auto first = copy_vertex(edge.first);
+                const auto second = copy_vertex(edge.second);
+                copy.edges.insert(ordered_mesh_edge(first, second));
+                selected = true;
+            }
+        }
+        if (!selected) continue;
+        face_map.emplace(index, copy.geometry.faces.size());
+        auto& polygon = copy.geometry.faces.emplace_back();
+        for (auto vertex : face) polygon.push_back(copy_vertex(vertex));
+    }
+
+    for (const auto& group : mesh.face_groups) {
+        commons::editable_face_group copied_group{group.name, {}};
+        for (auto index : group.faces)
+            if (const auto found = face_map.find(index); found != face_map.end())
+                copied_group.faces.push_back(found->second);
+        if (!copied_group.faces.empty()) copy.geometry.face_groups.push_back(std::move(copied_group));
+    }
+    return copy;
+}
+
+inline bool append_mesh_elements(commons::editable_mesh_data& mesh,
+    const mesh_element_clipboard& clipboard, std::string& error
+) {
+    const auto& geometry = clipboard.geometry;
+    if (geometry.vertices.empty()) return false;
+    auto result = mesh;
+    const auto vertex_offset = static_cast<unsigned int>(result.vertices.size());
+    const auto face_offset = static_cast<unsigned int>(result.faces.size());
+    result.vertices.insert(result.vertices.end(), geometry.vertices.begin(), geometry.vertices.end());
+    for (auto face : geometry.faces) {
+        for (auto& index : face) index += vertex_offset;
+        result.faces.push_back(std::move(face));
+    }
+    for (auto group : geometry.face_groups) {
+        for (auto& index : group.faces) index += face_offset;
+        result.face_groups.push_back(std::move(group));
+    }
+    if (!result.validate(error)) return false;
+    result.recalculate_normals();
+    mesh = std::move(result);
+    return true;
+}
+
+inline bool delete_mesh_elements(
+    commons::editable_mesh_data& mesh,
+    const std::set<std::size_t>& faces,
+    const std::set<std::size_t>& vertices,
+    const std::set<mesh_edge>& edges,
+    std::string& error
+) {
+    error.clear();
+    if (!mesh.validate(error)) return false;
+
+    auto result = mesh;
+    result.faces.clear();
+    std::vector<std::optional<unsigned int>> face_map(mesh.faces.size());
+    std::vector<bool> removed_vertices(mesh.vertices.size());
+    std::vector<bool> used_vertices(mesh.vertices.size());
+    bool changed = false;
+    for (const auto vertex : vertices) {
+        if (vertex >= mesh.vertices.size()) continue;
+        removed_vertices[vertex] = true;
+        changed = true;
+    }
+    for (std::size_t index = 0; index < mesh.faces.size(); ++index) {
+        const auto& face = mesh.faces[index];
+        bool remove = faces.contains(index);
+        for (std::size_t corner = 0; corner < face.size(); ++corner) {
+            const auto first = face[corner], second = face[(corner + 1) % face.size()];
+            remove |= vertices.contains(first) || edges.contains(ordered_mesh_edge(first, second));
+        }
+        if (remove) {
+            changed = true;
+            for (const auto vertex : face) removed_vertices[vertex] = true;
+        } else {
+            face_map[index] = static_cast<unsigned int>(result.faces.size());
+            result.faces.push_back(face);
+            for (const auto vertex : face) used_vertices[vertex] = true;
+        }
+    }
+    if (!changed) return false;
+
+    result.vertices.clear();
+    std::vector<unsigned int> vertex_map(mesh.vertices.size());
+    for (std::size_t index = 0; index < mesh.vertices.size(); ++index) {
+        if (removed_vertices[index] && !used_vertices[index]) continue;
+        vertex_map[index] = static_cast<unsigned int>(result.vertices.size());
+        result.vertices.push_back(mesh.vertices[index]);
+    }
+    for (auto& face : result.faces)
+        for (auto& vertex : face) vertex = vertex_map[vertex];
+
+    for (auto& group : result.face_groups) {
+        std::vector<unsigned int> remaining;
+        for (const auto face : group.faces)
+            if (face_map[face]) remaining.push_back(*face_map[face]);
+        group.faces = std::move(remaining);
+    }
+    std::erase_if(result.face_groups, [](const auto& group) { return group.faces.empty(); });
+    result.recalculate_normals();
+    if (!result.validate(error)) return false;
+    mesh = std::move(result);
+    return true;
 }
 
 inline bgui::vec3 face_normal(

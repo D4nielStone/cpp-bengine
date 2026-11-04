@@ -6,10 +6,14 @@
 #include "../systems/viewport_input_state.hpp"
 #include "../systems/asset_drag_state.hpp"
 #include "../systems/script_tools.hpp"
+#include <elem/combo_box.hpp>
 #include "project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
 #include "model_import_dialog.hpp"
 #include "context_action_button.hpp"
+#include "../systems/material_file.hpp"
+#include "material_thumbnail.hpp"
+#include "util/texture.hpp"
 
 #include <bgui.hpp>
 #include <elem/button.hpp>
@@ -185,7 +189,7 @@ public:
 
     ~files_view() override {
         if (m_delete_modal) bgui::get_layout().remove(m_delete_modal);
-        if (m_script_modal) bgui::get_layout().remove(m_script_modal);
+        if (m_new_asset_modal) bgui::get_layout().remove(m_new_asset_modal);
     }
 
     files_view(const files_view&) = delete;
@@ -252,21 +256,40 @@ public:
 
     void update() override {
         update_document_editor();
+        const auto now = std::chrono::steady_clock::now();
+        if (!m_material_thumbnails.empty() && now >= m_next_material_check) {
+            m_next_material_check = now + std::chrono::milliseconds(500);
+            if (std::any_of(m_material_thumbnails.begin(), m_material_thumbnails.end(), [](const auto& entry) {
+                return entry.second.modified != material_modified(entry.first);
+            })) m_refresh_requested = true;
+        }
         refresh_if_needed();
+    }
+
+    void material_file_changed(const std::filesystem::path& path) {
+        if (m_material_thumbnails.erase(path)) m_refresh_requested = true;
+    }
+
+    void set_file_selection_callback(std::function<void(const std::filesystem::path&)> callback) {
+        m_on_file_selected = std::move(callback);
     }
 
     void set_project_file(const std::filesystem::path& project_file) {
         if (m_delete_modal) { bgui::get_layout().remove(m_delete_modal); m_delete_modal = nullptr; }
-        if (m_script_modal) { bgui::get_layout().remove(m_script_modal); m_script_modal = nullptr; }
+        if (m_new_asset_modal) { bgui::get_layout().remove(m_new_asset_modal); m_new_asset_modal = nullptr; }
         for (auto& [path, doc] : m_documents)
             if (doc.window && m_dock) m_dock->remove_window(doc.window);
         m_documents.clear();
+        m_legacy_material_drafts.clear();
         m_active_document = nullptr;
         m_document_window = nullptr;
         m_document_body = nullptr;
         m_document_status = nullptr;
         m_active_content.clear();
         m_model_importer.close();
+        m_thumbnail_directory.clear();
+        m_thumbnails.clear();
+        m_material_thumbnails.clear();
         m_project_root = resolve_project_root(project_file);
         m_current_directory = m_project_root;
         m_selected_file.clear();
@@ -289,6 +312,8 @@ public:
             data << std::quoted(file.string()) << ' ' << dirty << ' '
                  << std::quoted(dirty ? doc.buffer : "") << '\n';
         }
+        for (const auto& [file, draft] : m_legacy_material_drafts)
+            data << std::quoted(file) << " 1 " << std::quoted(draft) << '\n';
         try {
             project_files::stage({path, data.str()});
             project_files::replace(path);
@@ -315,7 +340,12 @@ public:
         bgui::set_global_scale(scale);
         std::error_code error;
         if (std::filesystem::is_directory(directory, error)) m_current_directory = directory;
-        for (const auto& value : entries) {
+        m_legacy_material_drafts.clear();
+        for (auto& value : entries) {
+            if (is_material_file(value.file)) {
+                if (value.dirty) m_legacy_material_drafts.emplace(std::move(value.file), std::move(value.buffer));
+                continue;
+            }
             if (!std::filesystem::is_regular_file(value.file, error)) continue;
             open_document(value.file);
             auto found = m_documents.find(value.file);
@@ -325,6 +355,8 @@ public:
                 found->second.window->set_title(found->second.path.filename().string() + "*");
             }
         }
+        if (!m_legacy_material_drafts.empty())
+            m_asset_status = "Rascunhos de materiais do editor de texto foram preservados no arquivo da sessão.";
         if (auto found = m_documents.find(active); found != m_documents.end() && found->second.window)
             activate_document(active);
         request_refresh();
@@ -355,6 +387,8 @@ private:
         )
             : context_action_button(label, 0.28f, on_click),
               m_on_drop(std::move(on_drop)) {}
+
+        void stack_contents() { m_orientation = bgui::orientation::vertical; }
 
         void on_pressed() override {
             asset_drag_active = false;
@@ -396,10 +430,11 @@ private:
     drop_callback m_on_drop;
     files_view_filter m_filter{files_view_filter::all_files};
     std::function<void(const std::filesystem::path&)> m_on_model_selected;
+    std::function<void(const std::filesystem::path&)> m_on_file_selected;
     file_moved_callback m_on_file_moved;
     std::function<bool()> m_can_modify_files;
     bgui::modal* m_delete_modal{nullptr};
-    bgui::modal* m_script_modal{nullptr};
+    bgui::modal* m_new_asset_modal{nullptr};
     bool m_import_another_copy{false};
     model_import_dialog m_model_importer;
     std::function<void(const std::filesystem::path&, const std::filesystem::path&)> m_on_model_imported;
@@ -408,6 +443,15 @@ private:
     std::string m_new_script_name{"NewScript.lua"};
     std::filesystem::path m_current_directory;
     std::filesystem::path m_selected_file;
+    std::filesystem::path m_thumbnail_directory;
+    std::map<std::filesystem::path, bgui::texture> m_thumbnails;
+    struct material_thumbnail {
+        std::filesystem::file_time_type modified;
+        bgui::texture image;
+    };
+    std::map<std::filesystem::path, material_thumbnail> m_material_thumbnails;
+    std::chrono::steady_clock::time_point m_next_material_check{};
+    material_thumbnail_renderer m_material_renderer;
     std::filesystem::path m_main_scene;
     std::unordered_set<std::filesystem::path> m_expanded_directories;
     bgui::linear* m_root{nullptr};
@@ -429,6 +473,8 @@ private:
         bgui::element* rendered{nullptr};
         bool image{false};
     };
+    // Older sessions may contain unsaved JSON from before the material inspector.
+    std::map<std::string, std::string> m_legacy_material_drafts;
     std::map<std::filesystem::path, document> m_documents;
     document* m_active_document{nullptr};
     std::vector<bgui::element*> m_active_content;
@@ -490,7 +536,7 @@ private:
     }
 
     void open_document(const std::filesystem::path& path) {
-        if (is_model_file(path)) return;
+        if (is_model_file(path) || is_material_file(path)) return;
         if (!m_dock) return;
         auto found = m_documents.find(path);
         if (found == m_documents.end()) {
@@ -545,6 +591,8 @@ private:
                     bgui::asset_manager::get_instance().load_texture(
                         std::filesystem::absolute(doc.path).string()));
                 image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+                image.style.visual.border_radius = 6.f;
+                image.style.visual.border_size = 0.f;
                 image.style.layout.align = bgui::vec<2, bgui::alignment>{bgui::alignment::center, bgui::alignment::center};
                 m_active_content.push_back(&image);
             } catch (const std::exception& error) {
@@ -1017,39 +1065,46 @@ private:
             add_message("Esta pasta não contém arquivos.");
             return;
         }
+        if (m_thumbnail_directory != m_current_directory) {
+            m_thumbnail_directory = m_current_directory;
+            m_thumbnails.clear();
+            m_material_thumbnails.clear();
+        }
+        std::erase_if(m_material_thumbnails, [&files](const auto& entry) {
+            return std::find(files.begin(), files.end(), entry.first) == files.end();
+        });
+        const auto has_thumbnail = [](const auto& file) {
+            return is_image_file(file) || is_material_file(file);
+        };
+        bgui::grid* images = nullptr;
+        if (std::any_of(files.begin(), files.end(), has_thumbnail)) {
+            images = &m_file_area->add<bgui::grid>(bgui::vec2i{112, 104}, bgui::vec2i{6, 6});
+            images->add_class("file-image-grid");
+            images->style.visual.visible = false;
+            images->receives_input(false);
+            images->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        }
         for (const auto& file : files) {
+            const bool is_material = is_material_file(file);
+            const bool preview_tile = has_thumbnail(file);
             const bool selected = file == m_selected_file;
-            auto& item = entries.add<file_button>(
+            auto& item = (preview_tile ? *images : entries).add<file_button>(
                 "",
-                [this, file]() {
-                    m_selected_file = file;
-                    if (m_on_model_selected)
-                        m_on_model_selected(file);
-                    else
-                        open_document(file);
-                    request_refresh();
-                },
+                [this, file]() { select_file(file); },
                 [this, file](const bgui::vec2i& position) {
                     if (const auto directory = folder_at(position)) {
                         bgui::add_function([this, file, directory = *directory]() {
                             try { move_file(file, directory); }
                             catch (const std::exception& error) { set_asset_status(error.what()); }
                         });
-                    } else if (m_on_drop && (is_model_file(file) || is_image_file(file) || is_lua_script(file))) {
+                    } else if (m_on_drop && (is_model_file(file) || is_image_file(file) || is_lua_script(file) || is_material_file(file))) {
                         m_on_drop(file, position);
                     }
                 }
             );
             item.context_options = [this, file]() {
                 context_actions actions{
-                    {"Abrir / Editar", [this, file]() {
-                        m_selected_file = file;
-                        if (m_on_model_selected)
-                            m_on_model_selected(file);
-                        else
-                            open_document(file);
-                        request_refresh();
-                    }},
+                    {"Abrir / Editar", [this, file]() { select_file(file); }},
                     {"Duplicar arquivo", [this, file]() {
                         try {
                             if (m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução antes de duplicar arquivos.");
@@ -1063,13 +1118,15 @@ private:
                 return actions;
             };
             item.get_label().set_enable(false);
-            auto& icon = item.add<bgui::icon>(file_icon(file), 0.27f);
-            icon.receives_input(false);
-            icon.style.layout.require_mode(
-                bgui::mode::wrap_content,
-                bgui::mode::wrap_content
-            );
-            icon.style.layout.padding = bgui::vec4i{2, 0, 6, 0};
+            if (preview_tile) item.stack_contents();
+            const bool added = is_material ? add_material_thumbnail(item, file)
+                : is_image_file(file) && add_image_thumbnail(item, file);
+            if (!added) {
+                auto& icon = item.add<bgui::icon>(file_icon(file), 0.27f);
+                icon.receives_input(false);
+                icon.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
+                icon.style.layout.padding = bgui::vec4i{2, 0, 6, 0};
+            }
             auto& label = item.add<bgui::text>(
                 file.filename().string(),
                 0.28f
@@ -1077,7 +1134,7 @@ private:
             label.receives_input(false);
             label.set_wrap(false);
             label.style.layout.require_mode(
-                bgui::mode::stretch,
+                preview_tile ? bgui::mode::match_parent : bgui::mode::stretch,
                 bgui::mode::wrap_content
             );
             label.style.layout.align = bgui::vec<2, bgui::alignment>{
@@ -1098,8 +1155,72 @@ private:
         }
     }
 
+    void select_file(const std::filesystem::path& file) {
+        m_selected_file = file;
+        if (m_on_file_selected) m_on_file_selected(file);
+        if (!is_material_file(file)) {
+            if (m_on_model_selected) m_on_model_selected(file);
+            else open_document(file);
+        }
+        request_refresh();
+    }
+
+    static std::filesystem::file_time_type material_modified(const std::filesystem::path& file) {
+        std::error_code error;
+        return std::filesystem::last_write_time(file, error);
+    }
+
+    bool add_material_thumbnail(file_button& item, const std::filesystem::path& file) {
+        if (!material_thumbnail_renderer::available()) return false;
+        const auto modified = material_modified(file);
+        auto found = m_material_thumbnails.find(file);
+        if (found == m_material_thumbnails.end() || found->second.modified != modified) {
+            material_thumbnail thumbnail{modified, {}};
+            try {
+                commons::material material;
+                std::string error;
+                if (commons::load_material_asset(file, material, error))
+                    thumbnail.image = m_material_renderer.render(file, material);
+            } catch (const std::exception& error) {
+                std::cerr << "[material preview] " << error.what() << '\n';
+            }
+            found = m_material_thumbnails.insert_or_assign(file, std::move(thumbnail)).first;
+        }
+        const auto& image = found->second.image;
+        return !image.m_buffer.empty() && add_thumbnail(item, image, "file-material-thumbnail");
+    }
+
+    static bool add_thumbnail(file_button& item, const bgui::texture& texture, const char* widget_class) {
+        const float longest = std::max(texture.m_size[0], texture.m_size[1]);
+        auto& preview = item.add<bgui::image>(texture);
+        preview.add_class(widget_class);
+        preview.set_size(std::max(1.f, 76.f * texture.m_size[0] / longest),
+                     std::max(1.f, 76.f * texture.m_size[1] / longest));
+        preview.style.layout.align = {bgui::alignment::center, bgui::alignment::center};
+        preview.style.visual.border_radius = 6.f;
+        preview.style.visual.border_size = 0.f;
+        return true;
+    }
+
+    bool add_image_thumbnail(file_button& item, const std::filesystem::path& file) {
+        try {
+            auto found = m_thumbnails.find(file);
+            if (found == m_thumbnails.end()) {
+                const auto& source = bgui::asset_manager::get_instance().load_texture(file.string());
+                const float longest = std::max(source.m_size[0], source.m_size[1]);
+                if (longest <= 0.f) return false;
+                const int percent = std::clamp(static_cast<int>(16000.f / longest), 1, 100);
+                found = m_thumbnails.emplace(file, commons::resize_texture(source, percent)).first;
+            }
+            return add_thumbnail(item, found->second, "file-image-thumbnail");
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
     context_actions file_actions() {
         context_actions actions{
+            {"Novo material...", [this]() { show_new_material_dialog(); }},
             {"Novo script Lua...", [this]() { show_new_script_dialog(); }},
             {m_import_another_copy
                 ? "Importar outra cópia: ativado"
@@ -1123,20 +1244,55 @@ private:
         return actions;
     }
 
-    void show_new_script_dialog() {
-        if (m_script_modal) return;
+    void show_new_material_dialog() {
+        if (m_new_asset_modal) return;
+        if (m_can_modify_files && !m_can_modify_files()) {
+            set_asset_status("Pare a execução antes de criar materiais.");
+            return;
+        }
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
-        m_script_modal = &modal;
+        m_new_asset_modal = &modal;
+        modal.add<bgui::text>("Nome do novo material", .3f);
+        auto& filename = panel::add_input(modal.content(), "", "Material.bmat", .27f);
+        filename.add_class("new-material-name");
+        modal.set_confirmation_text("Criar");
+        modal.set_on_confirm([this, input = &filename, directory = m_current_directory]() {
+            m_new_asset_modal = nullptr;
+            try {
+                if (m_can_modify_files && !m_can_modify_files())
+                    throw std::runtime_error("Pare a execução antes de criar materiais.");
+                const auto created = create_material_file(directory, m_project_root, input->get_buffer());
+                m_asset_status = "Material criado.";
+                select_file(created);
+            } catch (const std::exception& error) { set_asset_status(error.what()); }
+        });
+        modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
+            m_new_asset_modal = nullptr;
+            bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
+        });
+    }
+
+    void show_new_script_dialog() {
+        if (m_new_asset_modal) return;
+        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+        m_new_asset_modal = &modal;
         modal.add<bgui::text>("Nome do novo script Lua", .3f);
         auto& filename = panel::add_input(modal.content(), m_new_script_name, "Script.lua", .27f);
         filename.add_class("new-script-name");
+        std::vector<std::string> template_names;
+        for (const auto& entry : lua_script_templates) template_names.emplace_back(entry.name);
+        auto& preset = modal.content().add<bgui::combo_box>(std::move(template_names), .27f);
+        preset.add_class("new-script-template");
+        preset.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
+        preset.style.layout.require_height(bgui::mode::pixel, 30.f);
         modal.set_confirmation_text("Criar");
-        modal.set_on_confirm([this, input = &filename]() {
-            m_script_modal = nullptr;
+        modal.set_on_confirm([this, input = &filename, choice = &preset]() {
+            m_new_asset_modal = nullptr;
             m_new_script_name = input->get_buffer();
             std::filesystem::path created;
             std::string error;
-            if (create_lua_script(m_current_directory, m_new_script_name, created, error)) {
+            const auto selected = static_cast<lua_script_preset>(choice->get_selected_index());
+            if (create_lua_script(m_current_directory, m_new_script_name, created, error, selected)) {
                 m_selected_file = created;
                 m_asset_status = "Script criado. Arraste-o para uma entidade na Scene.";
                 open_document(created);
@@ -1146,7 +1302,7 @@ private:
             request_refresh();
         });
         modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
-            if (m_script_modal == surface) m_script_modal = nullptr;
+            if (m_new_asset_modal == surface) m_new_asset_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         }).add_class("cancel-new-script");
     }
@@ -1181,6 +1337,7 @@ private:
                     m_active_content.clear();
                 }
                 if (m_main_scene == file) m_main_scene.clear();
+                if (is_material_file(file) && m_on_file_selected) m_on_file_selected({});
                 m_selected_file.clear();
                 set_asset_status("Arquivo excluído definitivamente.");
             } catch (const std::exception& error) { set_asset_status(error.what()); }

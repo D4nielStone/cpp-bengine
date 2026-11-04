@@ -319,7 +319,8 @@ public:
                 bgui::get_pressed(bgui::input_key::right_shift);
             const bool pan_drag = dragging && trackpad_modifier && shift;
             const bool rotate_camera = dragging && !pan_drag;
-            const bool move_keys = dragging || (trackpad_modifier && mouse_over_viewport);
+            const bool move_keys = (dragging || (trackpad_modifier && mouse_over_viewport)) &&
+                !(m_input_state && m_input_state->movement_shortcut_active);
 
             if (rotate_camera) {
                 m_yaw += static_cast<float>(mouse_delta.x)

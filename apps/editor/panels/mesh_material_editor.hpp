@@ -31,53 +31,33 @@ struct mesh_material_binding {
     void write(const commons::material& material) const {
         if (const auto value = current()) value->m_modelo->meshes[index].setMaterial(material);
     }
-    void commit(const commons::material& next) const {
+    bool commit(const commons::material& next) const {
         const auto owner = context.lock();
-        if (!owner || owner->is_playing || !current()) return;
+        if (!owner || owner->is_playing || !current()) return false;
         const auto before = read();
         write(next);
         owner->record_action([binding = *this, before] { binding.write(before); },
             [binding = *this, next] { binding.write(next); });
+        return true;
     }
 };
 
 using material_drop_target = std::function<void(bgui::element*, std::function<void(const std::filesystem::path&)>)>;
 
-inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
-    const std::shared_ptr<editor_context>& context, const std::shared_ptr<commons::renderer>& renderer,
-    std::size_t index, const material_drop_target& register_target,
-    const std::function<void(std::string)>& status) {
-    const mesh_material_binding binding{context, renderer, renderer->m_modelo, index};
+template<class Binding>
+void build_material_properties(panel& owner, bgui::linear& content,
+    const std::shared_ptr<editor_context>& context, const Binding& binding,
+    const material_drop_target& register_target, const std::function<void(std::string)>& status,
+    bool use_scene_history) {
     const auto material = binding.read();
-    content.add<bgui::text>("Material .bmat", .27f).receives_input(false);
-    auto& material_row = content.add<bgui::linear>(bgui::orientation::horizontal);
-    panel::configure_property_row(material_row);
-    auto& material_input = panel::add_input(material_row, "", "Carregar .bmat", .26f);
-    material_input.add_class("material-asset-path");
-    panel::configure_property_input(material_input);
-    const auto load = [binding, context, status](const std::filesystem::path& requested) {
-        if (!binding.current() || context->is_playing || requested.empty()) return;
-        const auto path = requested.is_absolute() ? requested : context->project_root / requested;
-        commons::material next;
-        std::string error;
-        if (!commons::load_material_asset(path, next, error)) { status(error); return; }
-        binding.commit(next);
-        status("Material carregado: " + path.filename().string());
-    };
-    material_input.m_enter_func = [load](const std::string& path) { load(path); };
-    if (register_target) register_target(&material_input, load);
-    material_row.add<bgui::button>("Salvar .bmat", .26f, [binding, context, status] {
-        if (!binding.current() || context->is_playing) return;
-        std::filesystem::path path;
-        std::string error;
-        if (!commons::store_material_asset(context->project_root / "assets/materials", binding.read(), path, error))
-            status(error);
-        else status("Material salvo: " + path.string());
-    });
     const auto albedo = material.getUniforme("material.albedo");
-    commons::color color;
+    commons::color color{1.f, 1.f, 1.f, 1.f};
     if (albedo.m_type == commons::uniform::type::Cor) color = albedo.valor.color_value;
     else if (albedo.m_type == commons::uniform::type::Cor_ptr && albedo.ponteiro.color_ptr) color = *albedo.ponteiro.color_ptr;
+    else if (albedo.m_type == commons::uniform::type::Vet4) {
+        const auto& value = albedo.valor.vec4;
+        color = {value.x, value.y, value.z, value.w};
+    }
     content.add<bgui::text>("Base Color", .27f).receives_input(false);
     auto& picker = panel::add_color(content, {color.r, color.g, color.b, color.a});
     picker.set_on_change([binding](const bgui::color& value) {
@@ -98,7 +78,7 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
                 auto next = binding.read();
                 next.set_uniform(std::string("material.") + factor.name, unit_range ? std::clamp(value,0.f,1.f) : value);
                 binding.write(next);
-            });
+            }, use_scene_history);
     };
     for (const auto& factor : commons::pbr_factors) add_factor(factor, true);
     auto& world = panel::add_checkbox(content, "WorldTexture", .29f, commons::world_texture(material));
@@ -130,8 +110,10 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
                 preview->set_enable(true);
             } catch (const std::exception&) {}
         };
-        show_preview(material.getTextura(map.name).path);
-        const auto assign = [binding, map, show_preview, context, status, input = &input](const std::filesystem::path& requested) {
+        const auto texture = material.getTextura(map.name);
+        if (texture.embedded) preview.set_texture(*texture.embedded);
+        else show_preview(texture.path);
+        const auto assign = [binding, map, show_preview, context, status, use_scene_history, input = &input](const std::filesystem::path& requested) {
             if (!binding.current() || context->is_playing) return;
             auto next = binding.read();
             if (requested.empty()) {
@@ -140,13 +122,15 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
             } else try {
                 const auto path = requested.is_absolute() ? requested : context->project_root / requested;
                 const auto& decoded = bgui::asset_manager::get_instance().load_texture(path.string());
-                next.set_texture(map.name, commons::texture{0, decoded.m_path});
+                commons::texture texture{0, decoded.m_path};
+                texture.filtering = next.getTextura(map.name).filtering;
+                next.set_texture(map.name, texture);
                 next.set_uniform(std::string("use_") + map.name, true);
             } catch (const std::exception& error) { status(error.what()); return; }
-            binding.commit(next);
+            if (!binding.commit(next)) return;
             input->set_buffer(next.getTextura(map.name).path);
             show_preview(next.getTextura(map.name).path);
-            status("");
+            if (use_scene_history) status("");
         };
         input.m_enter_func = [assign](const std::string& path) { assign(path); };
         if (register_target) register_target(&input, assign);
@@ -154,5 +138,37 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
         clear.style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);
         clear.style.layout.require_size(22.f,22.f);
     }
+}
+inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
+    const std::shared_ptr<editor_context>& context, const std::shared_ptr<commons::renderer>& renderer,
+    std::size_t index, const material_drop_target& register_target,
+    const std::function<void(std::string)>& status) {
+    const mesh_material_binding binding{context, renderer, renderer->m_modelo, index};
+    content.add<bgui::text>("Material .bmat", .27f).receives_input(false);
+    auto& material_row = content.add<bgui::linear>(bgui::orientation::horizontal);
+    panel::configure_property_row(material_row);
+    auto& material_input = panel::add_input(material_row, "", "Carregar .bmat", .26f);
+    material_input.add_class("material-asset-path");
+    panel::configure_property_input(material_input);
+    const auto load = [binding, context, status](const std::filesystem::path& requested) {
+        if (!binding.current() || context->is_playing || requested.empty()) return;
+        const auto path = requested.is_absolute() ? requested : context->project_root / requested;
+        commons::material next;
+        std::string error;
+        if (!commons::load_material_asset(path, next, error)) { status(error); return; }
+        binding.commit(next);
+        status("Material carregado: " + path.filename().string());
+    };
+    material_input.m_enter_func = [load](const std::string& path) { load(path); };
+    if (register_target) register_target(&material_input, load);
+    material_row.add<bgui::button>("Salvar .bmat", .26f, [binding, context, status] {
+        if (!binding.current() || context->is_playing) return;
+        std::filesystem::path path;
+        std::string error;
+        if (!commons::store_material_asset(context->project_root / "assets/materials", binding.read(), path, error))
+            status(error);
+        else status("Material salvo: " + path.string());
+    });
+    build_material_properties(owner, content, context, binding, register_target, status, true);
 }
 }

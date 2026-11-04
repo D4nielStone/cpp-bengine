@@ -169,31 +169,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
     }
 
     if (name == "camera") {
-        if (value.HasMember("skybox_image") && (!value["skybox_image"].IsString() ||
-            value["skybox_image"].GetStringLength() != std::char_traits<char>::length(value["skybox_image"].GetString()))) return false;
-        if (value.HasMember("skybox_faces")) {
-            const auto& faces = value["skybox_faces"];
-            if (!faces.IsArray() || faces.Size() != 6) return false;
-            for (const auto& face : faces.GetArray()) if (!face.IsString()) return false;
-        }
-        if (value.HasMember("atmosphere_zenith") && !is_vector3(value["atmosphere_zenith"])) return false;
-        if ((value.HasMember("fov") && !is_number(value["fov"])) ||
-            (value.HasMember("znear") && !is_number(value["znear"])) ||
-            (value.HasMember("zfar") && !is_number(value["zfar"])) ||
-            (value.HasMember("scale") && !is_number(value["scale"])) ||
-            (value.HasMember("ortho") && !value["ortho"].IsBool()) ||
-            (value.HasMember("skybox") && !value["skybox"].IsBool()))
-            return false;
-
-        if (value.HasMember("ceu")) {
-            const auto& color = value["ceu"];
-            if (!color.IsArray() || color.Size() != 4)
-                return false;
-            for (const auto& channel : color.GetArray())
-                if (!is_number(channel))
-                    return false;
-        }
-        return true;
+        commons::camera camera;
+        return camera.analyze(value);
     }
 
     if (name == "directional_light") {
@@ -1212,6 +1189,45 @@ bool project_persistence_system::load(
         }
     }
 
+    // Legacy spotlights applied AO per cone. Use the first enabled setting by entity ID
+    // for cameras that do not already declare their own post-processing.
+    std::optional<commons::camera_post_processing> legacy_occlusion;
+    std::uint32_t legacy_light_id = 0;
+    for (const auto& item : (*scene_data)["entities"].GetArray()) {
+        const auto id = item["id"].GetUint();
+        const auto& components = item["components"];
+        if (id == m_editor_camera_id || !components.HasMember("spot_light") ||
+            (legacy_occlusion && id >= legacy_light_id))
+            continue;
+        const auto& light = components["spot_light"];
+        if (!light.HasMember("ssao_enabled") && !light.HasMember("ssao_radius") &&
+            !light.HasMember("ssao_strength"))
+            continue;
+        if (light.HasMember("ssao_enabled") &&
+            (!light["ssao_enabled"].IsBool() || !light["ssao_enabled"].GetBool()))
+            continue;
+        commons::camera_post_processing settings;
+        settings.occlusion = commons::ambient_occlusion_mode::ssao;
+        if (light.HasMember("ssao_radius"))
+            settings.radius = is_number(light["ssao_radius"]) ? light["ssao_radius"].GetFloat() : 0.f;
+        if (light.HasMember("ssao_strength"))
+            settings.strength = is_number(light["ssao_strength"]) ? light["ssao_strength"].GetFloat() : -1.f;
+        if (!settings.valid() || settings.strength == 0.f ||
+            staged_registry->get<commons::spot_light>(id)->intensity == 0.f)
+            continue;
+        legacy_occlusion = settings;
+        legacy_light_id = id;
+    }
+    if (legacy_occlusion) {
+        for (const auto& item : (*scene_data)["entities"].GetArray()) {
+            const auto id = item["id"].GetUint();
+            const auto& components = item["components"];
+            if (id != m_editor_camera_id && components.HasMember("camera") &&
+                !components["camera"].HasMember("post_processing"))
+                staged_registry->get<commons::camera>(id)->config.post_processing = *legacy_occlusion;
+        }
+    }
+
     if (m_asset_hooks.finish) {
         try { m_asset_hooks.finish(staged_registry); }
         catch (const std::exception& failure) { error = failure.what(); return false; }
@@ -1263,8 +1279,12 @@ bool project_persistence_system::load(
     m_registry->live_entities = std::move(staged_registry->live_entities);
     m_registry->entity_names = std::move(staged_registry->entity_names);
     if (is_project_document && document.HasMember("settings") &&
-        document["settings"].HasMember("editor_camera"))
-        active_camera->analyze(document["settings"]["editor_camera"]);
+        document["settings"].HasMember("editor_camera")) {
+        const auto& editor_camera = document["settings"]["editor_camera"];
+        active_camera->analyze(editor_camera);
+        if (legacy_occlusion && !editor_camera.HasMember("post_processing"))
+            active_camera->config.post_processing = *legacy_occlusion;
+    }
     active_camera->skybox_asset_root = project_directory.string();
     if (staged_editor_camera_transform)
         active_transform->analyze(*staged_editor_camera_transform);

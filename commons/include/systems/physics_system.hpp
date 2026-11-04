@@ -39,7 +39,11 @@ namespace COMMONS_NS {
         const bgui::vec3& gravity() const noexcept;
         float speed;
         ray_result cast_ray(const ray& ray);
+        ray_result cast_scene_ray(const ray& ray, float distance,
+            const std::shared_ptr<ecs>& registry, std::uint32_t ignored_entity);
     private:
+        ray_result cast_ray(const ray& ray, float distance, ecs* registry,
+            std::uint32_t ignored_entity);
         void ensure_world();
         void synchronize_entities(const std::shared_ptr<ecs>& registry);
 

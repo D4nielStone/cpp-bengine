@@ -10,7 +10,7 @@ using namespace COMMONS_NS;
 
 
 mesh::mesh(const std::vector<vertex>& vertices, const std::vector<unsigned int>& indices, const material& material) :
-    m_vertices(vertices), m_indices(indices), m_material(material) {
+    m_vertices(vertices), m_indices(indices), m_material(std::make_shared<commons::material>(material)) {
 }
 
 std::vector<vertex> mesh::getVertices() const {
@@ -26,7 +26,7 @@ std::vector<unsigned int> mesh::getIndices() const  {
 }
 
 material mesh::getMaterial() const {
-    return m_material;
+    return *m_material;
 }
 
 unsigned int mesh::getVertexArray() const {
@@ -61,7 +61,7 @@ void mesh::set_indices(const std::vector<unsigned int>& i) {
 }
 
 void mesh::setMaterial(const material& m) {
-    m_material = m;
+    m_material = std::make_shared<material>(m);
 }
 
 void mesh::setSobreposition(const bool s) {
@@ -83,15 +83,6 @@ void mesh::unload() {
 void mesh::load() {
     if(m_loaded) return;
 
-    if (m_instances.empty()) {
-        m_material.set_uniform("instance", false);
-    } else {
-        m_material.set_uniform("instance", true);
-        for (size_t i = 0; i < m_instances.size(); i++) {
-            m_material.set_uniform("transformacoes[" + std::to_string(i) + "]", m_instances[i].get_model_matrix());
-        }
-    }
-
     glGenVertexArrays(1, &m_VAO);
     glGenBuffers(1, &m_VBO);
     glGenBuffers(1, &m_EBO);
@@ -99,11 +90,11 @@ void mesh::load() {
     glBindVertexArray(m_VAO);
     glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
 
-    glBufferData(GL_ARRAY_BUFFER, m_vertices.size() * sizeof(vertex), &m_vertices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, m_vertices.size() * sizeof(vertex), m_vertices.data(), GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_indices.size() * sizeof(unsigned int),
-        &m_indices[0], GL_STATIC_DRAW);
+        m_indices.data(), GL_STATIC_DRAW);
 
     // vertex positions
     glEnableVertexAttribArray(0);
@@ -119,67 +110,33 @@ void mesh::load() {
     m_loaded = true;
 }
 
-void mesh::draw(shader &shader) {
-    if(m_overlayed)
-        glDepthFunc(GL_ALWAYS);
+void mesh::draw(shader& shader) {
+    material_binding binding(*m_material, shader);
+    shader.setBool("instance", !m_instances.empty());
+    for (std::size_t index = 0; index < m_instances.size(); ++index) {
+        shader.setMat4("transformacoes[" + std::to_string(index) + "]",
+            glm::value_ptr(m_instances[index].get_model_matrix()));
+    }
+    draw_geometry();
+}
 
-    m_material.usar(shader);
-    // Restore texture parameters after drawing: BGUI shares these texture objects.
-    struct texture_wrap { GLuint slot; GLint s, t, min_filter, mag_filter; };
-    std::vector<texture_wrap> previous_wraps;
-    GLint active_texture = 0;
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
-    GLuint next_slot = 0;
-    for (const auto& [name, tex] : m_material.textures) {
-        const GLuint slot = next_slot++;
-        glActiveTexture(GL_TEXTURE0 + slot);
-        GLint id = 0;
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &id);
-        if (!id) continue;
-        texture_wrap previous{slot, 0, 0, 0, 0};
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &previous.s);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &previous.t);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &previous.min_filter);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &previous.mag_filter);
-        previous_wraps.push_back(previous);
-        if (tex.filtering != texture_filter::original) {
-            if (tex.filtering == texture_filter::trilinear) {
-                GLint width = 0;
-                glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &width);
-                if (!width) {
-                    GLint base_width = 0, base_height = 0;
-                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &base_width);
-                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &base_height);
-                    if (base_width > 1 || base_height > 1) glGenerateMipmap(GL_TEXTURE_2D);
-                }
-            }
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-                tex.filtering == texture_filter::trilinear ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+void mesh::draw_geometry() const {
+    GLint depth_function = GL_LESS;
+    if (m_overlayed) {
+        glGetIntegerv(GL_DEPTH_FUNC, &depth_function);
+        glDepthFunc(GL_ALWAYS);
     }
 
     glBindVertexArray(m_VAO);
-
     if (m_instances.empty()) {
-        glDrawElements(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, nullptr);
     } else {
-        glDrawElementsInstanced(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, 0, m_instances.size());
+        glDrawElementsInstanced(GL_TRIANGLES, m_indices.size(), GL_UNSIGNED_INT, nullptr, m_instances.size());
     }
     glBindVertexArray(0);
 
-    for (auto it = previous_wraps.rbegin(); it != previous_wraps.rend(); ++it) {
-        glActiveTexture(GL_TEXTURE0 + it->slot);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, it->min_filter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, it->mag_filter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, it->s);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, it->t);
-    }
-    glActiveTexture(active_texture);
-    if(m_overlayed)
-        glDepthFunc(GL_LESS);
+    if (m_overlayed)
+        glDepthFunc(depth_function);
 }
 
 bool mesh::isLoaded() const {

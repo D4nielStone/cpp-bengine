@@ -163,6 +163,20 @@ public:
                 for (const auto& create : value.components) create(*registry, created.at(value.id));
             for (const auto& value : m_entities) {
                 const auto id = created.at(value.id).id;
+                if (const auto script = registry->get<commons::code>(id)) {
+                    const auto remap = [&](commons::code& entry) {
+                        for (auto& property : entry.properties) {
+                            auto* target = std::get_if<std::uint32_t>(&property.value);
+                            if (!target || !*target) continue;
+                            if (const auto copy = created.find(*target); copy != created.end())
+                                *target = copy->second.id;
+                            else if (!previously_alive.contains(*target))
+                                *target = 0;
+                        }
+                    };
+                    remap(*script);
+                    for (const auto& entry : script->scripts) remap(*entry);
+                }
                 auto transform = registry->get<commons::transform>(id);
                 if (created.contains(value.parent)) transform->parent_id = created.at(value.parent).id;
                 else if (value.parent && previously_alive.contains(value.parent) && registry->get<commons::transform>(value.parent)) transform->parent_id = value.parent;

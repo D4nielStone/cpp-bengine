@@ -79,9 +79,28 @@ camera::camera(const bool orth)
 	config.flag_orth = orth;
 }
 
+bool camera_post_processing::valid() const {
+    return occlusion >= ambient_occlusion_mode::off && occlusion <= ambient_occlusion_mode::gtao &&
+        std::isfinite(radius) && radius >= min_radius && radius <= max_radius &&
+        std::isfinite(strength) && strength >= 0.f && strength <= 1.f;
+}
+
 bool camera::analyze(const rapidjson::Value& value)
 {
+    if (!value.IsObject()) return false;
     camera_config next = config;
+    next.post_processing = {};
+    if (value.HasMember("post_processing")) {
+        const auto& post = value["post_processing"];
+        if (!post.IsObject() || !post.HasMember("occlusion") || !post["occlusion"].IsUint() ||
+            post["occlusion"].GetUint() > static_cast<unsigned>(ambient_occlusion_mode::gtao) ||
+            !post.HasMember("radius") || !post["radius"].IsNumber() ||
+            !post.HasMember("strength") || !post["strength"].IsNumber())
+            return false;
+        next.post_processing = {static_cast<ambient_occlusion_mode>(post["occlusion"].GetUint()),
+            post["radius"].GetFloat(), post["strength"].GetFloat()};
+        if (!next.post_processing.valid()) return false;
+    }
     next.use_skybox = false;
     next.skybox_image.clear();
     next.fog_enabled = false;
@@ -294,7 +313,8 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
     const auto valid_channel = [](float channel) {
         return std::isfinite(channel) && channel >= 0.f && channel <= 1.f;
     };
-    if (config.skybox_image.find('\0') != std::string::npos ||
+    if (!value.IsObject() || !config.post_processing.valid() ||
+        config.skybox_image.find('\0') != std::string::npos ||
         !std::isfinite(config.fov) || config.fov < 1.f || config.fov > 179.f ||
         !std::isfinite(config.corte_curto) || !std::isfinite(config.corte_longo) ||
         !std::isfinite(config.scale) || config.scale <= 0.f ||
@@ -307,6 +327,12 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
         return false;
     for (unsigned index = 0; index < 3; ++index)
         if (!std::isfinite(config.atmosphere_zenith[index])) return false;
+    rapidjson::Value post(rapidjson::kObjectType);
+    post.AddMember("occlusion", static_cast<unsigned>(config.post_processing.occlusion), allocator);
+    post.AddMember("radius", config.post_processing.radius, allocator);
+    post.AddMember("strength", config.post_processing.strength, allocator);
+    value.AddMember("post_processing", post, allocator);
+
     // fov
     value.AddMember("fov", config.fov, allocator);
 
@@ -421,8 +447,12 @@ glm::mat4 camera::getViewMatrix() {
     viewMatrix = glm::lookAt(glm::vec3(position.x, position.y, position.z), glm::vec3(target.x, target.y, target.z), glm::vec3(up.x, up.y, up.z));
     return viewMatrix;
 }
+bgui::vec2i camera::viewport_size() const {
+    return viewport_ptr ? *viewport_ptr : viewportFBO;
+}
+
 glm::mat4 camera::obtProjectionMatrix() {
-    const bgui::vec2i viewp = viewport_ptr ? *viewport_ptr : viewportFBO;
+    const auto viewp = viewport_size();
 
     if (viewp.x <= 0 || viewp.y <= 0)
         return glm::mat4(1.f);
@@ -456,6 +486,50 @@ glm::mat4 camera::obtProjectionMatrix() {
     }
 
     return projMatriz;
+}
+
+std::optional<glm::mat4> camera::view_projection() {
+    const auto size = viewport_size();
+    if (size.x <= 0 || size.y <= 0 || !std::isfinite(config.corte_curto) ||
+        !std::isfinite(config.corte_longo) || config.corte_curto <= 0.f ||
+        config.corte_longo <= config.corte_curto)
+        return std::nullopt;
+    if (config.flag_orth ? (!std::isfinite(config.scale) || config.scale <= 0.f)
+                         : (!std::isfinite(config.fov) || config.fov <= 0.f || config.fov >= 180.f))
+        return std::nullopt;
+    const auto matrix = obtProjectionMatrix() * getViewMatrix();
+    const auto determinant = glm::determinant(matrix);
+    if (!std::isfinite(determinant) || determinant == 0.f)
+        return std::nullopt;
+    return matrix;
+}
+
+std::optional<bgui::vec3> camera::world_to_screen(const bgui::vec3& point) {
+    const auto matrix = view_projection();
+    if (!matrix) return std::nullopt;
+    const auto clip = *matrix * glm::vec4(point.x, point.y, point.z, 1.f);
+    if (clip.w <= 0.f || !std::isfinite(clip.w)) return std::nullopt;
+    const auto ndc = glm::vec3(clip) / clip.w;
+    const auto size = viewport_size();
+    const bgui::vec3 screen{(ndc.x + 1.f) * 0.5f * size.x,
+        (1.f - ndc.y) * 0.5f * size.y, (ndc.z + 1.f) * 0.5f};
+    if (!std::isfinite(screen.x) || !std::isfinite(screen.y) || !std::isfinite(screen.z))
+        return std::nullopt;
+    return screen;
+}
+
+std::optional<bgui::vec3> camera::screen_to_world(const bgui::vec3& point) {
+    const auto matrix = view_projection();
+    if (!matrix) return std::nullopt;
+    const auto size = viewport_size();
+    const auto world = glm::inverse(*matrix) * glm::vec4(
+        2.f * (point.x / size.x) - 1.f, 1.f - 2.f * (point.y / size.y),
+        2.f * point.z - 1.f, 1.f);
+    if (world.w == 0.f || !std::isfinite(world.w)) return std::nullopt;
+    const auto result = glm::vec3(world) / world.w;
+    if (!std::isfinite(result.x) || !std::isfinite(result.y) || !std::isfinite(result.z))
+        return std::nullopt;
+    return bgui::vec3{result.x, result.y, result.z};
 }
 
 ray camera::point_to_ray(const bgui::vec2& screenPoint) const

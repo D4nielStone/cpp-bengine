@@ -37,6 +37,7 @@ pelo formato de cena.
 
 | Propriedade | Acesso | Semântica |
 |---|---|---|
+| `forward` | leitura | Direção mundial atual da visão, como `Vector3`. |
 | `fieldOfView` | leitura/escrita | Campo de visão em graus. |
 | `aspect` | somente leitura | Aspecto calculado/armazenado pela câmera. |
 | `nearClipPlane` | leitura/escrita | Plano próximo. |
@@ -53,6 +54,27 @@ pelo formato de cena.
 O binding escreve diretamente nas configurações da câmera; não faz validação
 adicional para cada atribuição Lua. A validade final depende do uso pelo
 renderizador.
+
+| Método | Resultado |
+|---|---|
+| `camera:worldToScreen(position)` | `Vector3(x, y, depth)` para uma posição global, ou `nil` se a projeção for inválida ou o ponto estiver atrás de uma câmera em perspectiva. |
+| `camera:screenToWorld(Vector3(x, y, depth))` | Posição global como `Vector3`, ou `nil` se a conversão for inválida. |
+| `camera:traceRay(maxDistance, ignore, x, y)` | Primeiro impacto no mundo de física, ou `nil`. O impacto contém `entity` (`GameObject`), `point`, `normal` e `distance`. |
+
+As coordenadas de tela são pixels da imagem da câmera, com origem no canto
+superior esquerdo. A profundidade projetada vai de 0 no plano próximo a 1 no
+plano distante. Pontos fora da imagem podem produzir valores fora desses
+limites. A profundidade em perspectiva varia de forma não linear.
+
+`traceRay()` usa o centro da imagem e alcance de 300 unidades. Passe um
+`GameObject` como segundo argumento para ignorar seu colisor, como no caso
+do jogador. Para mirar em outro ponto, informe os dois pixels e use `nil`
+no segundo argumento se desejar incluir todos os colisores. A distância é
+medida a partir da câmera em perspectiva ou do plano próximo em ortográfica.
+A consulta usa os colisores ativos do runtime e retorna o impacto mais
+próximo, inclusive em sensores com colisão habilitada.
+
+Veja o [exemplo de coleta de lanterna](./getting-started.md#coletar-uma-lanterna).
 
 ## Iluminação
 

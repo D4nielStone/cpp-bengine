@@ -32,11 +32,14 @@
 namespace COMMONS_NS {
 	struct code_system : system {
     	code_system() = default;
+        explicit code_system(const std::shared_ptr<physics_system>& physics_world)
+            : m_physics_world(physics_world) {}
     	~code_system();
         void update(const std::shared_ptr<ecs>&) override;
         void setup(const std::shared_ptr<ecs>&) override;
 
     private:
+        std::weak_ptr<physics_system> m_physics_world;
         struct script_state {
             std::weak_ptr<code> instance;
             bool failed{};

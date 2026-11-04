@@ -15,6 +15,8 @@
 
 namespace editor::ui {
 
+enum class model_shortcut { copy, paste, save, extract };
+
 class undo_redo_shortcuts_system final : public bgui::element {
 public:
     explicit undo_redo_shortcuts_system(
@@ -26,9 +28,11 @@ public:
 
     explicit undo_redo_shortcuts_system(
         std::shared_ptr<editor_commands> commands,
-        std::function<bool(bool)> model_history = {}
+        std::function<bool(bool)> model_history = {},
+        std::function<bool(model_shortcut)> model_action = {}
     )
-        : m_commands(std::move(commands)), m_model_history(std::move(model_history)) {
+        : m_commands(std::move(commands)), m_model_history(std::move(model_history)),
+          m_model_action(std::move(model_action)) {
         receives_input(false);
         set_flex(false);
     }
@@ -62,11 +66,20 @@ public:
 
         const bool copy_down = control_down && bgui::get_pressed(bgui::input_key::c);
         const bool paste_down = control_down && bgui::get_pressed(bgui::input_key::v);
+        const bool save_down = control_down && bgui::get_pressed(bgui::input_key::s);
+        const bool extract_down = control_down && bgui::get_pressed(bgui::input_key::e);
         const auto context = m_context();
         if (!editing_text && context && !context->is_playing && !viewport_input_blocked_by_modal()) {
             std::string error;
-            if (copy_down && !m_c_was_down) m_clipboard.copy(context, error);
-            if (paste_down && !m_v_was_down) m_clipboard.paste(context, error);
+            const auto model_handles = [this](model_shortcut action) {
+                return m_model_action && m_model_action(action);
+            };
+            if (copy_down && !m_c_was_down && !model_handles(model_shortcut::copy))
+                m_clipboard.copy(context, error);
+            if (paste_down && !m_v_was_down && !model_handles(model_shortcut::paste))
+                m_clipboard.paste(context, error);
+            if (save_down && !m_s_was_down) model_handles(model_shortcut::save);
+            if (extract_down && !m_e_was_down) model_handles(model_shortcut::extract);
             if (!error.empty()) {
                 bgui::add_function([error]() {
                     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
@@ -75,6 +88,8 @@ public:
                 });
             }
         }
+        m_s_was_down = save_down;
+        m_e_was_down = extract_down;
         m_c_was_down = copy_down;
         m_v_was_down = paste_down;
         m_z_was_down = z_down;
@@ -88,7 +103,9 @@ private:
 
     std::shared_ptr<editor_commands> m_commands;
     std::function<bool(bool)> m_model_history;
+    std::function<bool(model_shortcut)> m_model_action;
     entity_clipboard m_clipboard;
+    bool m_s_was_down{false}, m_e_was_down{false};
     bool m_c_was_down{false}, m_v_was_down{false};
     bool m_z_was_down{false};
     bool m_y_was_down{false};

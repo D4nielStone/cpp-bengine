@@ -67,6 +67,11 @@ TEST_F(EditorAssetWorkflowTest, CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiL
     });
     ASSERT_NE(name, nullptr);
     name->set_buffer("Movement");
+    auto* preset = find<bgui::combo_box>(bgui::get_layout(), [](auto& value) {
+        return value.has_class("new-script-template");
+    });
+    ASSERT_NE(preset, nullptr);
+    preset->set_selected_index(static_cast<std::size_t>(editor::ui::lua_script_preset::wasd));
     auto* confirm = find<bgui::button>(bgui::get_layout(), [](auto& value) {
         return value.has_class("modal-confirm");
     });
@@ -74,6 +79,11 @@ TEST_F(EditorAssetWorkflowTest, CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiL
     confirm->on_released();
     bgui::on_update();
     ASSERT_TRUE(std::filesystem::exists(folder / "Movement.lua"));
+    {
+        std::ifstream script(folder / "Movement.lua");
+        const std::string contents{std::istreambuf_iterator<char>(script), {}};
+        EXPECT_NE(contents.find("Input.GetAxis"), std::string::npos);
+    }
     auto* window = find<bgui::window>(dock, [](auto& value) {
         return value.get_title().get_buffer() == "Movement.lua";
     });
@@ -257,6 +267,35 @@ void write_test_png(const std::filesystem::path& path) {
     std::ofstream out(path, std::ios::binary);
     out.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
 }
+}
+
+TEST_F(EditorAssetWorkflowTest, ImageGridShowsRoundedThumbnailsAndKeepsFileSelection) {
+    const auto image = folder / "color.png";
+    write_test_png(image);
+    std::ofstream(folder / "broken.png") << "invalid image";
+    std::ofstream(folder / "script.lua") << "return {}";
+    std::filesystem::path selected;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.set_file_selection_callback([&](const auto& path) { selected = path; });
+    files.build(dock);
+
+    auto* grid = find<bgui::grid>(dock, [](auto& item) { return item.has_class("file-image-grid"); });
+    ASSERT_NE(grid, nullptr);
+    auto* thumbnail = find<bgui::image>(*grid, [](auto& item) {
+        return item.has_class("file-image-thumbnail");
+    });
+    ASSERT_NE(thumbnail, nullptr);
+    EXPECT_FALSE(thumbnail->get_texture().m_buffer.empty());
+    EXPECT_GT(thumbnail->style.visual.border_radius.value_or(0.f), 0.f);
+    EXPECT_NE(find<bgui::text>(*grid, [](auto& item) { return item.get_buffer() == "broken.png"; }), nullptr);
+    EXPECT_EQ(find<bgui::text>(*grid, [](auto& item) { return item.get_buffer() == "script.lua"; }), nullptr);
+
+    auto* tile = dynamic_cast<bgui::button*>(thumbnail->get_parent());
+    ASSERT_NE(tile, nullptr);
+    tile->on_released();
+    bgui::on_update();
+    EXPECT_EQ(selected, image);
 }
 
 TEST_F(EditorAssetWorkflowTest, ModelImportKeepsMaterialsAndRelativeTexturesAfterSourceIsRemoved) {
@@ -766,6 +805,8 @@ TEST_F(EditorAssetWorkflowTest, ClipboardCopiesAnIndependentHierarchyAndUndoesAs
     renderer->m_modelo->meshes.emplace_back(std::vector<commons::vertex>{{{1, 2, 3}, {0, 1, 0}, {0, 0}}}, std::vector<unsigned>{0}, material);
     registry->add<commons::physics>(child);
     registry->add<commons::camera>(root);
+    registry->add<commons::code>(root, "Control.lua");
+    registry->get<commons::code>(root.id)->properties.push_back({"player", "entity", child.id});
     context->entity_names[root.id] = "Root";
     context->entity_names[child.id] = "Child";
     context->entity_names[grandchild.id] = "Grandchild";
@@ -788,6 +829,9 @@ TEST_F(EditorAssetWorkflowTest, ClipboardCopiesAnIndependentHierarchyAndUndoesAs
         if (name == "Grandchild (cópia)") pasted_grandchild = id;
     }
     ASSERT_NE(pasted_child, 0u); ASSERT_NE(pasted_grandchild, 0u);
+    const auto copied_script = registry->get<commons::code>(pasted_root);
+    ASSERT_NE(copied_script, nullptr);
+    EXPECT_EQ(std::get<std::uint32_t>(copied_script->properties.front().value), pasted_child);
     EXPECT_EQ(registry->get<commons::transform>(pasted_root)->parent_id, parent.id);
     EXPECT_EQ(registry->get<commons::transform>(pasted_child)->parent_id, pasted_root);
     EXPECT_EQ(registry->get<commons::transform>(pasted_grandchild)->parent_id, pasted_child);
@@ -1041,4 +1085,94 @@ TEST_F(EditorAssetWorkflowTest, ImportsNativeModelAndMaterialWithPortableTexture
     commons::material standalone_result;
     ASSERT_TRUE(commons::load_material_asset(standalone,standalone_result,error)) << error;
     EXPECT_TRUE(std::filesystem::exists(standalone_result.getTextura("tex_albedo").path));
+}
+
+TEST_F(EditorAssetWorkflowTest, CreatesMaterialAndRoutesSelectionWithoutOpeningJson) {
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    std::filesystem::path selected;
+    files.set_file_selection_callback([&](const auto& path) { selected = path; });
+    files.build(dock);
+    auto* actions = find<editor::ui::context_action_surface>(dock, [](auto&) { return true; });
+    ASSERT_NE(actions, nullptr);
+    actions->open_context();
+    bgui::on_update();
+    bgui::on_update();
+    auto* create = find<bgui::button>(bgui::get_layout(), [](auto& value) {
+        return value.get_label().get_buffer() == "Novo material...";
+    });
+    ASSERT_NE(create, nullptr);
+    create->on_released();
+    bgui::on_update();
+    bgui::on_update();
+    auto* name = find<bgui::inputbox>(bgui::get_layout(), [](auto& value) {
+        return value.has_class("new-material-name");
+    });
+    ASSERT_NE(name, nullptr);
+    name->set_buffer("Stone");
+    auto* confirm = find<bgui::button>(bgui::get_layout(), [](auto& value) {
+        return value.has_class("modal-confirm");
+    });
+    ASSERT_NE(confirm, nullptr);
+    confirm->on_released();
+    bgui::on_update();
+
+    EXPECT_EQ(selected, folder / "Stone.bmat");
+    commons::material material;
+    std::string error;
+    ASSERT_TRUE(commons::load_material_asset(selected, material, error)) << error;
+    EXPECT_FLOAT_EQ(material.getUniforme("material.roughness").valor.f, .5f);
+    EXPECT_EQ(find<bgui::window>(dock, [](auto& value) {
+        return value.get_title().get_buffer() == "Stone.bmat";
+    }), nullptr);
+    EXPECT_THROW(editor::ui::create_material_file(folder, folder, "Stone"), std::runtime_error);
+    EXPECT_THROW(editor::ui::create_material_file(folder, folder, "../Stone"), std::runtime_error);
+}
+
+TEST_F(EditorAssetWorkflowTest, MaterialEditPreservesInlineTextureAndRejectsStaleSave) {
+    using namespace editor::ui;
+    const auto path = folder / "Paint.bmat";
+    const std::string original = R"({
+        "format":"bengine-material","version":1,"uniforms":{},
+        "textures":{"tex_albedo":{"path":"","filtering":2,"width":1,"height":1,"rgba":"ff0000ff"}}
+    })";
+    std::ofstream(path) << original;
+    commons::material material;
+    std::string error;
+    ASSERT_TRUE(commons::load_material_asset(path, material, error)) << error;
+    material.set_uniform("material.roughness", .27f);
+    save_material_file(path, folder, original, encode_material_edit(material, folder, original));
+
+    commons::material saved;
+    ASSERT_TRUE(commons::load_material_asset(path, saved, error)) << error;
+    EXPECT_FLOAT_EQ(saved.getUniforme("material.roughness").valor.f, .27f);
+    const auto texture = saved.getTextura("tex_albedo");
+    ASSERT_TRUE(texture.embedded);
+    EXPECT_EQ(texture.embedded->m_buffer, (std::vector<unsigned char>{255, 0, 0, 255}));
+    EXPECT_EQ(texture.filtering, material.getTextura("tex_albedo").filtering);
+    const auto current = project_files::read(path);
+    EXPECT_THROW(save_material_file(path, folder, original, original), std::runtime_error);
+    EXPECT_EQ(project_files::read(path), current);
+}
+
+TEST_F(EditorAssetWorkflowTest, KeepsUnsavedMaterialDraftFromAnOlderTextEditorSession) {
+    const auto material = folder / "Old.bmat";
+    const auto session = folder / "session.cfg";
+    const std::string draft = "{\n  \"unsaved\": true\n}";
+    const auto entry = material.string();
+    std::ostringstream encoded;
+    encoded << std::quoted(entry) << " 1 " << std::quoted(draft) << '\n';
+    std::ofstream(material) << "{}";
+    std::ofstream(session) << "bengine-session-1\n1\n" << std::quoted(folder.string())
+        << '\n' << std::quoted(entry) << '\n' << encoded.str();
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(folder);
+    files.build(dock);
+    files.restore_session(session);
+    EXPECT_EQ(find<bgui::window>(dock, [](auto& window) {
+        return window.get_title().get_buffer().starts_with("Old.bmat");
+    }), nullptr);
+    ASSERT_TRUE(files.save_session(session));
+    EXPECT_NE(editor::ui::project_files::read(session).find(encoded.str()), std::string::npos);
+    EXPECT_EQ(editor::ui::project_files::read(material), "{}");
 }

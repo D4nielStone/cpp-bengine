@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(apps LANGUAGES CXX)
 
-include_directories(${CMAKE_SOURCE_DIR}/commons/include)
-
 set(EDITOR_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/editor
@@ -11,6 +9,22 @@ set(EDITOR_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/editor/systems
     ${CMAKE_CURRENT_SOURCE_DIR}/editor/tools
 )
+
+if(BUILD_EDITOR OR BUILD_TESTING)
+    # The public editor layer can see the ECS headers without inheriting
+    # commons' GUI, graphics backend or platform include paths and libraries.
+    add_library(editor_core INTERFACE)
+    target_compile_features(editor_core INTERFACE cxx_std_20)
+    target_include_directories(editor_core INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/editor/core
+        ${CMAKE_SOURCE_DIR}/commons/include
+        ${CMAKE_SOURCE_DIR}/external/rapidjson/include
+    )
+
+    add_library(editor_services STATIC editor/services/editor_api.cpp)
+    target_include_directories(editor_services PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/editor/systems)
+    target_link_libraries(editor_services PUBLIC editor_core PRIVATE commons)
+endif()
 
 if(BUILD_RUNTIME OR BUILD_EDITOR OR BUILD_TESTING)
     add_library(project_persistence STATIC project/project_persistence_system.cpp)
@@ -49,11 +63,12 @@ if(BUILD_EDITOR)
         editor/panels/runtime_tools_view.cpp
         editor/panels/game_view.cpp
         editor/panels/scene_view.cpp
+        editor/presenters/scene_presenter.cpp
         editor/systems/ui_persistence_system.cpp
     )
     target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
     find_package(CURL REQUIRED)
-    target_link_libraries(editor_app PRIVATE project_persistence CURL::libcurl)
+    target_link_libraries(editor_app PRIVATE project_persistence editor_services CURL::libcurl)
     add_dependencies(editor_app game_packager)
     if(TARGET runtime_app)
         add_dependencies(editor_app runtime_app)

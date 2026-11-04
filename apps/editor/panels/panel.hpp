@@ -189,13 +189,14 @@ public:
         const std::string& label,
         const float value,
         const std::function<float()>& get_value,
-        const std::function<void(float)>& on_change
+        const std::function<void(float)>& on_change,
+        bool record_history = true
     ) {
         auto& field = parent.add<bgui::field>(
             label,
             format_value(value),
             0.27f,
-            [this, on_change, get_value, label](const std::string& buffer) {
+            [this, on_change, get_value, label, record_history](const std::string& buffer) {
                 float parsed{};
                 const auto result = std::from_chars(
                     buffer.data(),
@@ -217,6 +218,7 @@ public:
                     on_change(next);
                 };
                 apply_value(parsed);
+                if (!record_history) return;
                 record_edit(
                     [apply_value, previous]() { apply_value(previous); },
                     [apply_value, parsed]() { apply_value(parsed); }

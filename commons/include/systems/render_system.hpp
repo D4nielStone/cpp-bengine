@@ -12,6 +12,7 @@
 namespace COMMONS_NS {
     class camera;
     class renderer;
+    class transform;
     struct hud_element;
   /**
    * @brief Classe responsável por gerenciar o sistema de renderização do jogo.
@@ -29,6 +30,10 @@ namespace COMMONS_NS {
       // Render an explicit camera without inserting editor entities into the scene.
       void render_view(const std::shared_ptr<ecs>& registry, camera& view,
           std::uint32_t replacement_entity = 0, std::shared_ptr<renderer> replacement = {});
+
+      void render_view(const std::shared_ptr<ecs>& registry, camera& view,
+          std::uint32_t replacement_entity, std::shared_ptr<renderer> replacement,
+          const std::shared_ptr<transform>& replacement_transform);
 
       // An empty filter preserves rendering to every camera.
       void set_camera_filter(std::function<bool(std::uint32_t)> filter) {
@@ -48,13 +53,17 @@ namespace COMMONS_NS {
       }
 
     private:
-      void render(const std::shared_ptr<ecs>&, camera*, std::uint32_t, const std::shared_ptr<renderer>&);
+      void render(const std::shared_ptr<ecs>&, camera*, std::uint32_t,
+          const std::shared_ptr<renderer>&, const std::shared_ptr<transform>& = {});
       std::function<bool(std::uint32_t)> m_camera_filter;
-      struct shadow_map {
+      struct depth_map {
         unsigned int fbo{0}, texture{0};
-        int resolution{0};
+        int width{0}, height{0};
       };
-      shadow_map m_directional_shadow, m_spot_shadow;
+      depth_map m_directional_shadow, m_spot_shadow;
+      unsigned int m_occlusion_depth{0}, m_occlusion_vao{0};
+      int m_occlusion_width{0}, m_occlusion_height{0};
+      void apply_camera_occlusion(const camera& view);
       struct text_mesh {
         std::weak_ptr<hud_element> owner;
         std::string text;
@@ -63,7 +72,7 @@ namespace COMMONS_NS {
       };
       std::unordered_map<const hud_element*, text_mesh> m_text_meshes;
       void draw_world_text(const std::shared_ptr<ecs>&, camera&);
-      bool prepare_shadow_map(shadow_map& map, int resolution);
+      bool prepare_depth_map(depth_map& map, int width, int height);
       double m_last_render_time_ms{0.0};
       std::size_t m_last_camera_count{0};
       std::size_t m_last_rendered_entity_count{0};

@@ -40,9 +40,12 @@
 
 namespace COMMONS_NS {
     struct ecs;
+    struct physics_system;
     namespace api {
         void setUnityApi(sol::state&, const std::shared_ptr<ecs>&, std::uint32_t);
         void setUpApi(sol::state&, const std::shared_ptr<ecs>&, std::uint32_t);
+        void setUpApi(sol::state&, const std::shared_ptr<ecs>&, std::uint32_t,
+            const std::weak_ptr<physics_system>&);
 	     /**  Define as classes da api */
 	  	void setClasses(sol::state&);
          /**  Define os namespaces da api como math e inputs */

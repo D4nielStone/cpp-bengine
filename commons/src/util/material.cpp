@@ -25,6 +25,7 @@
  */
 
 #include "util/material.hpp"
+#include <utils/texture.hpp>
 #include "util/pbr_material.hpp"
 #include <unordered_set>
 #include <algorithm>
@@ -64,6 +65,10 @@ texture material::getTextura(const std::string& nome) const {
         return texture();
 }
 void material::usar(shader& shader) {
+    apply(shader);
+}
+
+void material::apply(shader& shader) const {
     shader.use();
 
     // Reset optional state for each draw: materials share the shader program.
@@ -133,4 +138,121 @@ void material::usar(shader& shader) {
                 std::cerr << "[material] " << error.what() << '\n';
         }
     }
+}
+
+namespace {
+bool same_uniform(const uniform& left, const uniform& right) {
+    if (left.m_type != right.m_type) return false;
+    using enum uniform::type;
+    switch (left.m_type) {
+        case Float: return left.valor.f == right.valor.f;
+        case Int: return left.valor.i == right.valor.i;
+        case Bool: return left.valor.b == right.valor.b;
+        case Vet2: return left.valor.vec2 == right.valor.vec2;
+        case Vet3: return left.valor.vec3 == right.valor.vec3;
+        case Vet4: return left.valor.vec4 == right.valor.vec4;
+        case Cor: {
+            const auto& a = left.valor.color_value;
+            const auto& b = right.valor.color_value;
+            return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+        }
+        case Mat4: return left.valor.mat4 == right.valor.mat4;
+        case Float_ptr: return left.ponteiro.f_ptr == right.ponteiro.f_ptr;
+        case Int_ptr: return left.ponteiro.i_ptr == right.ponteiro.i_ptr;
+        case Bool_ptr: return left.ponteiro.b_ptr == right.ponteiro.b_ptr;
+        case Vet2_ptr: return left.ponteiro.vec2_ptr == right.ponteiro.vec2_ptr;
+        case Vet3_ptr: return left.ponteiro.vec3_ptr == right.ponteiro.vec3_ptr;
+        case Vet4_ptr: return left.ponteiro.vec4_ptr == right.ponteiro.vec4_ptr;
+        case Cor_ptr: return left.ponteiro.color_ptr == right.ponteiro.color_ptr;
+        case Mat4_ptr: return left.ponteiro.mat4_ptr == right.ponteiro.mat4_ptr;
+    }
+    return false;
+}
+
+bool same_texture(const texture& left, const texture& right) {
+    if (!(left == right) || left.filtering != right.filtering) return false;
+    if (left.embedded == right.embedded) return true;
+    if (!left.embedded || !right.embedded) return false;
+    const auto& a = *left.embedded;
+    const auto& b = *right.embedded;
+    return a.m_size == b.m_size && a.m_path == b.m_path && a.m_id == b.m_id &&
+        a.m_external == b.m_external && a.m_has_alpha == b.m_has_alpha &&
+        a.m_use_red_channel == b.m_use_red_channel &&
+        a.m_generate_mipmap == b.m_generate_mipmap && a.m_buffer == b.m_buffer;
+}
+}
+
+bool material::same_configuration(const material& other) const {
+    if (this == &other) return true;
+    if (uniforms.size() != other.uniforms.size() || textures.size() != other.textures.size())
+        return false;
+    for (const auto& [name, value] : uniforms) {
+        const auto match = other.uniforms.find(name);
+        if (match == other.uniforms.end() || !same_uniform(value, match->second))
+            return false;
+    }
+    for (const auto& [name, value] : textures) {
+        const auto match = other.textures.find(name);
+        if (match == other.textures.end() || !same_texture(value, match->second))
+            return false;
+    }
+    return true;
+}
+
+material_binding::material_binding(const material& material, shader& shader)
+    : m_textures(material.textures.size()) {
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &m_active_texture);
+    for (std::size_t slot = 0; slot < m_textures.size(); ++slot) {
+        glActiveTexture(GL_TEXTURE0 + slot);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &m_textures[slot].binding);
+    }
+    glActiveTexture(m_active_texture);
+    material.apply(shader);
+
+    std::size_t slot = 0;
+    for (const auto& [name, tex] : material.textures) {
+        auto& state = m_textures[slot];
+        glActiveTexture(GL_TEXTURE0 + slot++);
+        GLint id = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &id);
+        if (!id) continue;
+        state.parameters_changed = true;
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &state.s);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &state.t);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &state.min_filter);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &state.mag_filter);
+        if (tex.filtering != texture_filter::original) {
+            if (tex.filtering == texture_filter::trilinear) {
+                GLint width = 0;
+                glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &width);
+                if (!width) {
+                    GLint base_width = 0, base_height = 0;
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &base_width);
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &base_height);
+                    if (base_width > 1 || base_height > 1) glGenerateMipmap(GL_TEXTURE_2D);
+                }
+            }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                tex.filtering == texture_filter::trilinear ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
+    glActiveTexture(m_active_texture);
+}
+
+material_binding::~material_binding() {
+    for (std::size_t slot = m_textures.size(); slot-- > 0;) {
+        const auto& state = m_textures[slot];
+        glActiveTexture(GL_TEXTURE0 + slot);
+        if (state.parameters_changed) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, state.min_filter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, state.mag_filter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, state.s);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, state.t);
+        }
+        glBindTexture(GL_TEXTURE_2D, state.binding);
+    }
+    glActiveTexture(m_active_texture);
 }

@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/panel.hpp"
+#include "panel.hpp"
 #include "../systems/editable_model_import.hpp"
 #include "loaders/model_import.hpp"
 #include <bgui.hpp>

@@ -37,9 +37,12 @@ TEST_F(LuaPropertiesInspectorTest, InspectorLuaPropertiesSupportTypedFieldsAndUn
 --@property {"name":"title","type":"text","default":"Player"}
 --@property {"name":"tint","type":"color","default":[1,0.5,0,1]}
 --@property {"name":"icon","type":"image","default":""}
+--@property {"name":"player","type":"entity","default":null}
 error('inspector must never execute this')
 )";
     auto entity = registry->create();
+    auto target = registry->create();
+    context->entity_names[target.id] = "Player";
     registry->add<commons::code>(entity, path.string());
     auto script = registry->get<commons::code>(entity.id);
     context->selected_entity = entity.id;
@@ -85,6 +88,17 @@ error('inspector must never execute this')
     ASSERT_TRUE(context->undo());
     icon->get_inputbox().m_enter_func(path.string());
     EXPECT_EQ(std::get<std::string>(script->properties[4].value), "");
+    auto* player = find_element<bgui::combo_box>(dock, [](auto& value) {
+        return value.has_class("lua-entity-player");
+    });
+    ASSERT_NE(player, nullptr);
+    player->set_selected_index(2);
+    EXPECT_EQ(player->get_selected_option(), "Player (#" + std::to_string(target.id) + ")");
+    EXPECT_EQ(std::get<std::uint32_t>(script->properties[5].value), target.id);
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(std::get<std::uint32_t>(script->properties[5].value), 0u);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(std::get<std::uint32_t>(script->properties[5].value), target.id);
     context->locked_entities.insert(entity.id);
     speed->get_inputbox().m_enter_func("20");
     EXPECT_DOUBLE_EQ(std::get<double>(script->properties[0].value), 12.5);

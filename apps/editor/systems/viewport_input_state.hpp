@@ -7,6 +7,7 @@ namespace editor::ui {
 
 struct viewport_input_state {
     bool gizmo_active{false};
+    bool movement_shortcut_active{false};
 };
 
 inline bool viewport_camera_modifier() {

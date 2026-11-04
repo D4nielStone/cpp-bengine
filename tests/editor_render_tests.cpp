@@ -5,6 +5,7 @@
 #include <assimp/material.h>
 #include <assimp/scene.h>
 #include <bgui.hpp>
+#include <os/asset_manager.hpp>
 #include <bgui_backend_freetype.hpp>
 #include <gtest/gtest.h>
 #include "components/camera.hpp"
@@ -19,6 +20,8 @@
 #include "systems/render_system.hpp"
 #include "project_persistence_system.hpp"
 #include "viewport_sync.hpp"
+#include "camera_viewport.hpp"
+#include "material_thumbnail.hpp"
 #include "guizmo/grid_gizmo.hpp"
 #include "components/physics.hpp"
 #include "project_creation_system.hpp"
@@ -59,6 +62,32 @@ protected:
         }
     }
 };
+}
+
+TEST_F(EditorRenderTest, TextureResolutionDefaultsToSeventyPercentAndReadsImageOverride) {
+    namespace fs = std::filesystem;
+    const auto folder = fs::temp_directory_path() /
+        ("bengine-texture-scale-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directory(folder);
+    const auto path = folder / "image.png";
+    fs::copy_file(fs::path(BENGINE_SOURCE_DIR) / "tests/fixtures/cubemap_cross.png", path);
+    const auto& source = bgui::asset_manager::get_instance().load_texture(path.string());
+    const auto expect_dimensions = [&](int percent) {
+        commons::texture texture{0, path.string()};
+        texture.bind(0);
+        GLint width{}, height{};
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+        EXPECT_EQ(width, std::max(1, int(std::lround(source.m_size[0] * percent / 100))));
+        EXPECT_EQ(height, std::max(1, int(std::lround(source.m_size[1] * percent / 100))));
+    };
+    expect_dimensions(70);
+    const auto settings = commons::texture_resolution_path(path);
+    std::ofstream(settings) << "100";
+    expect_dimensions(100);
+    std::ofstream(settings) << "101";
+    expect_dimensions(70);
+    fs::remove_all(folder);
 }
 
 TEST_F(EditorRenderTest, UploadsTexturePathsAndRoundTripsPbrMaterials) {
@@ -151,6 +180,16 @@ TEST_F(EditorRenderTest, FrustumCullingSkipsEntitiesOutsideCameraView) {
     commons::render_system render;
     render.update(registry);
 
+    EXPECT_EQ(render.last_rendered_entity_count(), 1u);
+
+    auto parent = registry->create();
+    auto parent_transform = registry->get<commons::transform>(parent.id);
+    parent_transform->set_position({5.f, 0.f, -3.f});
+    parent_transform->set_scale({5.f, 1.f, 1.f});
+    auto visible_transform = registry->get<commons::transform>(visible.id);
+    visible_transform->set_position({});
+    ASSERT_TRUE(visible_transform->set_parent(parent.id, false));
+    render.update(registry);
     EXPECT_EQ(render.last_rendered_entity_count(), 1u);
 }
 
@@ -347,13 +386,38 @@ TEST_F(EditorRenderTest, NeutralNormalMapPreservesLightingOnAHorizontalSurface) 
     glDeleteTextures(1, &normal);
 }
 
+TEST(EditorViewport, UsesLatestFrameAndIgnoresEmptyLayout) {
+    struct test_viewport final : editor::ui::editor_viewport {
+        editor::ui::viewport_frame current{42, 32, 24};
+        bgui::vec2i requested{};
+        editor::ui::viewport_frame frame() const override { return current; }
+        void request_size(int width, int height) override { requested = {width, height}; }
+    } viewport;
+    bgui::scoped_interface ui_scope;
+    auto& image = bgui::get_layout().add<bgui::image>();
+    editor::ui::viewport_sync_system sync(viewport, image);
+    image.set_final_rect(0, 0, 0, 20);
+    sync.update({});
+    EXPECT_EQ(viewport.requested, (bgui::vec2i{0, 0}));
+    image.set_final_rect(0, 0, 80, 60);
+    sync.update({});
+    EXPECT_EQ(viewport.requested, (bgui::vec2i{80, 60}));
+    EXPECT_EQ(image.get_texture().m_id, 42u);
+    EXPECT_EQ(image.get_texture().m_size, (bgui::vec2{32, 24}));
+    viewport.current = {43, 80, 60};
+    sync.update({});
+    EXPECT_EQ(image.get_texture().m_id, 43u);
+    EXPECT_EQ(image.get_texture().m_size, (bgui::vec2{80, 60}));
+}
+
 TEST_F(EditorRenderTest, DeferredViewportResizePreservesRenderedPixelsUntilNextCameraPass) {
     bgui::scoped_interface ui_scope;
     auto camera = std::make_shared<commons::camera>();
     camera->viewport({32, 24});
     camera->createFB();
     auto& image = bgui::get_layout().add<bgui::image>();
-    editor::ui::viewport_sync_system sync(camera, image);
+    editor::ui::camera_viewport viewport(camera);
+    editor::ui::viewport_sync_system sync(viewport, image);
     camera->config.sky_solid_color = {1.f, 0.f, 0.f, 1.f};
     camera->drawFB();
     for (const bgui::vec2i size : {bgui::vec2i{40, 30}, {63, 47}, {29, 17}}) {
@@ -447,23 +511,28 @@ TEST_F(EditorRenderTest, SpotShadowsRespectCasterReceiverAndLightControls) {
     registry->add<commons::renderer>(cube_entity, make_plane());
     auto cube = registry->get<commons::renderer>(cube_entity.id);
     commons::render_system system;
-    auto render = [&]() {
+    auto render = [&](int width = 128, int height = 128) {
         system.update(registry);
-        std::vector<unsigned char> pixels(128*128*3);
-        glReadPixels(0,0,128,128,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+        std::vector<unsigned char> pixels(width * height * 3);
+        glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
         EXPECT_EQ(glGetError(), GL_NO_ERROR);
         return pixels;
     };
-    const auto darkened = [](const auto& a, const auto& b) {
+    const auto darkened = [](const auto& a, const auto& b, int threshold = 10) {
         int count = 0;
         for (size_t i = 0; i < a.size(); i += 3)
-            if (int(b[i]) - int(a[i]) > 10) ++count;
+            if (int(b[i]) - int(a[i]) > threshold) ++count;
         return count;
     };
     const auto shadowed = render();
+    light->shadow_bias = 0.1f;
+    const auto high_bias_shadowed = render();
+    light->shadow_bias = 0.001f;
     light->shadows = false;
     const auto lit = render();
     EXPECT_GT(darkened(shadowed, lit), 20);
+    EXPECT_GT(darkened(high_bias_shadowed, lit), 20);
+    EXPECT_LT(darkened(shadowed, high_bias_shadowed), 10);
     light->shadows = true;
     floor->receive_shadows = false;
     EXPECT_LT(darkened(render(), lit), 10);
@@ -511,6 +580,51 @@ TEST_F(EditorRenderTest, SpotShadowsRespectCasterReceiverAndLightControls) {
     render();
     light->direction = {0, 0, 0};
     render();
+
+    // Camera-space occlusion uses visible geometry even without a spotlight or shadow receivers.
+    registry->remove(light_entity.id);
+    floor->receive_shadows = false;
+    cube->cast_shadows = false;
+    registry->get<commons::transform>(cube_entity.id)->set_position({0, 0.25f, 0});
+    auto& post = camera->config.post_processing;
+    using mode = commons::ambient_occlusion_mode;
+    for (bool orthographic : {true, false}) {
+        camera->config.flag_orth = orthographic;
+        camera->request_framebuffer_size(orthographic ? bgui::vec2i{160, 96} : bgui::vec2i{144, 96});
+        const int width = orthographic ? 160 : 144;
+        post.occlusion = mode::off;
+        const auto unoccluded = render(width, 96);
+        std::vector<unsigned char> previous;
+        for (auto effect : {mode::ssao, mode::hbao, mode::gtao}) {
+            post.occlusion = effect;
+            const auto occluded = render(width, 96);
+            EXPECT_GT(darkened(occluded, unoccluded, 0), 4) << orthographic << ' ' << int(effect);
+            EXPECT_NE(occluded, previous);
+            previous = occluded;
+            post.strength = 0.5f;
+            const auto partial = render(width, 96);
+            EXPECT_GT(darkened(occluded, partial, 0), 4);
+            post.strength = 0.f;
+            EXPECT_EQ(render(width, 96), unoccluded);
+            post.strength = 1.f;
+            post.radius = 0.05f;
+            EXPECT_EQ(render(width, 96), unoccluded);
+            post.radius = 0.75f;
+        }
+    }
+    cube->visible = false;
+    const auto isolated_plane = render(144, 96);
+    post.occlusion = mode::off;
+    EXPECT_EQ(render(144, 96), isolated_plane);
+
+    // The same pass also works with the default framebuffer and an offset viewport.
+    camera->deleteFB();
+    camera->viewport({56, 56});
+    glViewport(4, 4, 56, 56);
+    cube->visible = true;
+    const auto direct = render(64, 64);
+    post.occlusion = mode::gtao;
+    EXPECT_GT(darkened(render(64, 64), direct, 0), 4);
 }
 
 TEST(ShadowSettings, SpotSettingsValidateAndDefaultForLegacyScenes) {
@@ -532,6 +646,7 @@ TEST(ShadowSettings, SpotSettingsValidateAndDefaultForLegacyScenes) {
     data["shadow_strength"].SetFloat(1.f);
     data["shadow_bias"].SetFloat(-1.f);
     EXPECT_FALSE(light.analyze(data));
+    data["shadow_bias"].SetFloat(0.001f);
     for (const auto* key : {"shadows", "shadow_distance", "shadow_bias", "shadow_strength"})
         data.RemoveMember(key);
     light.shadows = false;
@@ -1251,6 +1366,10 @@ TEST_F(EditorRenderTest, ModelModesCacheDenseGeometryAndUseGpuPreview) {
     auto registry=std::make_shared<commons::ecs>();
     auto context=std::make_shared<editor::ui::editor_context>(registry);
     auto entity=registry->create();
+    auto parent = registry->create();
+    auto parent_transform = registry->get<commons::transform>(parent.id);
+    parent_transform->set_scale({2.f, 1.f, .5f});
+    ASSERT_TRUE(registry->get<commons::transform>(entity.id)->set_parent(parent.id, false));
     auto model=std::make_unique<commons::model>();
     std::vector<commons::vertex> vertices;
     std::vector<unsigned> indices;
@@ -1284,6 +1403,10 @@ TEST_F(EditorRenderTest, ModelModesCacheDenseGeometryAndUseGpuPreview) {
         EXPECT_EQ(glGetError(),GL_NO_ERROR);
     }
     context->model_view_mode = 0;
+    parent_transform->move({3.f, 0.f, 0.f});
+    bgui::on_update();
+    EXPECT_EQ(panel.geometry_upload_count(), uploads);
+    EXPECT_GT(panel.projection_update_count(), projections);
     const auto original_size = panel.preview_camera().viewportFBO;
     bgui::get_context().m_size = {750, 510};
     for (int i = 0; i < 3; ++i) bgui::on_update();
@@ -1315,4 +1438,73 @@ TEST_F(EditorRenderTest, CameraReleaseClearsHandlesAndAllowsRecreation) {
     EXPECT_TRUE(camera.flag_fb);
     EXPECT_NE(camera.framebuffer_texture(), 0u);
     EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST_F(EditorRenderTest, MaterialThumbnailRendersSphereAndReflectsEdits) {
+    editor::ui::material_thumbnail_renderer preview;
+    commons::material material;
+    material.set_uniform("material.albedo", commons::color{.8f, .05f, .03f, 1.f});
+    const auto red = preview.render("paint.bmat", material);
+    material.set_uniform("material.albedo", commons::color{.03f, .05f, .8f, 1.f});
+    const auto blue = preview.render("paint.bmat", material);
+
+    ASSERT_EQ(red.m_buffer.size(), 96u * 96u * 3u);
+    ASSERT_EQ(blue.m_buffer.size(), red.m_buffer.size());
+    const auto center = (48u * 96u + 48u) * 3u;
+    EXPECT_GT(red.m_buffer[center], red.m_buffer[center + 2]);
+    EXPECT_GT(blue.m_buffer[center + 2], blue.m_buffer[center]);
+    EXPECT_TRUE(std::equal(red.m_buffer.begin(), red.m_buffer.begin() + 3, blue.m_buffer.begin()));
+    EXPECT_NE(red.m_buffer[center], red.m_buffer[0]);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST_F(EditorRenderTest, ConsecutiveEntitiesReuseMaterialUniformsUntilConfigurationChanges) {
+    auto registry = std::make_shared<commons::ecs>();
+    const auto add_triangle = [&](float x, float red) {
+        auto object = registry->create();
+        registry->get<commons::transform>(object.id)->set_position({x, 0, 0});
+        auto model = std::make_unique<commons::model>();
+        commons::material material;
+        material.set_uniform("material.albedo", commons::color{red, 0.1f, 0.1f, 1.f});
+        model->meshes.emplace_back(std::vector<commons::vertex>{
+            {{-.2f,-.2f,0},{0,0,1},{}}, {{.2f,-.2f,0},{0,0,1},{}}, {{0,.2f,0},{0,0,1},{}}},
+            std::vector<unsigned>{0,1,2}, material);
+        registry->add<commons::renderer>(object, model.release());
+    };
+    add_triangle(-.5f, 1.f);
+    add_triangle(0.f, 1.f);
+    add_triangle(.5f, .5f);
+
+    commons::camera view;
+    view.position = {0,0,3};
+    view.viewMatrix = glm::lookAt(glm::vec3{0,0,3}, glm::vec3{}, glm::vec3{0,1,0});
+    view.request_framebuffer_size({64,64});
+    commons::render_system rendering;
+
+    struct uniform_probe {
+        static PFNGLUNIFORM4FPROC& original() {
+            static PFNGLUNIFORM4FPROC function;
+            return function;
+        }
+        static int& uploads() {
+            static int count;
+            return count;
+        }
+        static void APIENTRY record(GLint location, GLfloat r, GLfloat g, GLfloat b, GLfloat a) {
+            if (location >= 0 && g == 0.1f && b == 0.1f && a == 1.f)
+                ++uploads();
+            original()(location, r, g, b, a);
+        }
+        uniform_probe() {
+            original() = glad_glUniform4f;
+            uploads() = 0;
+            glad_glUniform4f = record;
+        }
+        ~uniform_probe() { glad_glUniform4f = original(); }
+    } probe;
+
+    rendering.render_view(registry, view);
+    EXPECT_EQ(rendering.last_rendered_entity_count(), 3u);
+    EXPECT_EQ(probe.uploads(), 2);
+    EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
 }
