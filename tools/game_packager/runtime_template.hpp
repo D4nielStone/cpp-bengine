@@ -8,7 +8,7 @@ namespace game_package {
 inline std::string template_key(const fs::path& repository,const std::string& target,const std::string& format) {
     std::vector<fs::path> files;
     for(const auto& relative:{"commons","external/cpp-bgui/core","external/cpp-bgui/backend","external/glad",
-            "external/rapidjson/include","external/sol2/include","apps/runtime"}) {
+            "external/rapidjson/include","external/sol2/include","apps/runtime","apps/project"}) {
         const auto folder=repository/relative;
         if(!fs::exists(folder)) continue;
         for(fs::recursive_directory_iterator it(folder),end;it!=end;++it) {
@@ -18,8 +18,7 @@ inline std::string template_key(const fs::path& repository,const std::string& ta
             if(ext==".h" || ext==".hpp" || ext==".cpp" || ext==".c" || ext==".cmake" || it->path().filename()=="CMakeLists.txt") files.push_back(it->path());
         }
     }
-    for(const auto* relative:{"CMakeLists.txt","apps/CMakeLists.txt","apps/runtime_app.cpp","external/cpp-bgui/CMakeLists.txt","scripts/compile_runtime.sh","scripts/compile_runtime.ps1","apps/editor/systems/project_persistence_system.cpp",
-            "apps/editor/systems/project_persistence_system.hpp","apps/editor/systems/project_file_transaction.hpp"})
+    for(const auto* relative:{"CMakeLists.txt","apps/CMakeLists.txt","apps/runtime_app.cpp","external/cpp-bgui/CMakeLists.txt","scripts/compile_runtime.sh","scripts/compile_runtime.ps1"})
         if(fs::exists(repository/relative)) files.push_back(repository/relative);
     std::sort(files.begin(),files.end());
     std::uint64_t hash=14695981039346656037ull;

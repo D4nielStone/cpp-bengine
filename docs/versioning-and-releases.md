@@ -10,9 +10,10 @@ release.
 
 ## Manifesto de projeto
 
-Projetos `.bengine` incluem `format`, `engine_version`,
-`minimum_engine_version` e `project_version`. O formato atual do manifesto é
-2. Projetos com formato 1 recebem a migração registrada no
+O campo `format` identifica o tipo de documento como
+`bubble-engine-project`. O campo numérico `version` identifica a versão
+do formato, atualmente 2. O manifesto também inclui `engine_version`,
+`minimum_engine_version` e `project_version`. Projetos com formato 1 recebem a migração registrada no
 `project_migration_manager`; versões desconhecidas ou versões mínimas/engine
 mais novas que a instalada são rejeitadas.
 

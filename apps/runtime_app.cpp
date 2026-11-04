@@ -8,7 +8,7 @@
 #include "guizmo/grid_gizmo.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
-#include "editor/systems/project_persistence_system.hpp"
+#include "project/project_persistence_system.hpp"
 #include "systems/system.hpp"
 
 #include <bgui.hpp>

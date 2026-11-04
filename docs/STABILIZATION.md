@@ -19,10 +19,9 @@ Windows:
 .\scripts\build.ps1 -RunTests
 ```
 
-On Windows, the test helper excludes the upstream BGUI `MenuBarTests` and
-`ImageTests`: their current geometry and JPEG fixture assertions fail on the
-Windows runner. These exclusions are explicit and do not indicate that those
-third-party tests passed.
+No Windows, `build.ps1 -RunTests` executa a suíte CTest completa, incluindo
+`MenuBarTests` e `ImageTests` da BGUI. As exclusões desses testes foram
+removidas na versão 0.1.3.
 
 Para validar um alvo focado em um build CMake já configurado:
 

@@ -166,6 +166,22 @@ TEST_F(SceneAssets, ModalLoadsSavedSceneAndClosingWindowCancelsTransaction) {
     EXPECT_NE(error.find("cancelled"), std::string::npos);
     EXPECT_EQ(registry->get<commons::renderer>(23), renderer);
     window.reopen();
+    renderer.reset();
+
+    const auto scene_file = (directory / "project.scene").string();
+    for (unsigned attempt = 0; attempt < 32; ++attempt) {
+        SCOPED_TRACE(attempt);
+        const std::weak_ptr<commons::renderer> previous = registry->get<commons::renderer>(23);
+        ASSERT_TRUE(editor::ui::load_project_with_modal(
+            project, attempt % 2 == 0 ? scene_file : file, error)) << error;
+        const auto current = registry->get<commons::renderer>(23);
+        ASSERT_NE(current, nullptr);
+        ASSERT_FALSE(current->m_modelo->meshes.empty());
+        EXPECT_TRUE(current->m_modelo->meshes[0].isLoaded());
+        EXPECT_TRUE(previous.expired());
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    }
+
 }
 
 TEST_F(SceneAssets, DeferredLoadStartsAfterUiCallbackReturns) {

@@ -37,14 +37,13 @@ add_executable(
     editor_persistence_tests
     editor_persistence_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_preview.cpp
 )
 
 target_link_libraries(editor_persistence_tests
     PRIVATE
         GTest::gtest_main
-        commons
+        project_persistence
 )
 
 target_include_directories(editor_persistence_tests
@@ -61,7 +60,7 @@ target_compile_features(editor_persistence_tests PRIVATE cxx_std_20)
 gtest_discover_tests(editor_persistence_tests)
 
 add_executable(editor_interaction_tests editor_interaction_tests.cpp editor_lua_properties_tests.cpp)
-target_link_libraries(editor_interaction_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_interaction_tests PRIVATE GTest::gtest_main project_persistence)
 target_include_directories(editor_interaction_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/core
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
@@ -75,7 +74,7 @@ target_include_directories(editor_script_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/core
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
-target_link_libraries(editor_script_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_script_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(editor_script_tests)
 
 add_executable(editor_asset_workflow_tests editor_asset_workflow_tests.cpp)
@@ -85,16 +84,15 @@ target_include_directories(editor_asset_workflow_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
     ${CMAKE_SOURCE_DIR}/apps/editor/tools
 )
-target_link_libraries(editor_asset_workflow_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_asset_workflow_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(editor_asset_workflow_tests)
 
 add_executable(editor_render_tests
     editor_render_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/panels/game_view.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
-target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main project_persistence)
 target_include_directories(editor_render_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/core
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
@@ -124,7 +122,7 @@ add_executable(editable_model_tests editable_model_tests.cpp)
 target_include_directories(editable_model_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
-target_link_libraries(editable_model_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editable_model_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(editable_model_tests)
 
 add_executable(editor_menu_tests
@@ -132,7 +130,6 @@ add_executable(editor_menu_tests
     ${CMAKE_SOURCE_DIR}/apps/editor/panels/game_view.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/panels/editor_ui.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/ui_persistence_system.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/build_process.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/native_file_dialog.cpp
@@ -142,7 +139,7 @@ target_include_directories(editor_menu_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
-target_link_libraries(editor_menu_tests PRIVATE GTest::gtest_main commons bgui)
+target_link_libraries(editor_menu_tests PRIVATE GTest::gtest_main project_persistence bgui)
 target_compile_definitions(editor_menu_tests PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
 if(WIN32)
     target_link_libraries(editor_menu_tests PRIVATE ole32 shell32 uuid)
@@ -152,10 +149,9 @@ gtest_discover_tests(editor_menu_tests)
 add_executable(lua_api_tests
     lua_api_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
 target_include_directories(lua_api_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
-target_link_libraries(lua_api_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(lua_api_tests PRIVATE GTest::gtest_main project_persistence)
 target_compile_definitions(lua_api_tests PRIVATE BENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 gtest_discover_tests(lua_api_tests)
 
@@ -173,18 +169,17 @@ target_include_directories(editor_document_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/core
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
 )
-target_link_libraries(editor_document_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_document_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(editor_document_tests)
 
 add_executable(editor_persistence_transaction_tests
     editor_persistence_transaction_tests.cpp
     persistence_integrity_tests.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp
 )
 target_include_directories(editor_persistence_transaction_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
-target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_persistence_transaction_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(editor_persistence_transaction_tests)
 
 # Native window delivery is kept separate from the GPU-free asset workflow tests.
@@ -204,12 +199,12 @@ gtest_discover_tests(engine_foundations_tests)
 # Drop hints must not intercept pointer events; no native window required.
 add_executable(editor_overlay_input_tests editor_overlay_input_tests.cpp)
 target_include_directories(editor_overlay_input_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
-target_link_libraries(editor_overlay_input_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(editor_overlay_input_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(editor_overlay_input_tests)
 
 # Import configuration/pose/UI tests are GPU-free; one upload test requires a display.
 add_executable(model_import_tests model_import_tests.cpp)
-target_link_libraries(model_import_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(model_import_tests PRIVATE GTest::gtest_main project_persistence)
 target_include_directories(model_import_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
 gtest_discover_tests(model_import_tests)
 
@@ -240,25 +235,23 @@ target_include_directories(game_export_tests PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE
 target_link_libraries(game_export_tests PRIVATE GTest::gtest_main ZLIB::ZLIB)
 gtest_discover_tests(game_export_tests)
 
-add_executable(executable_archive_tests executable_archive_tests.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
+add_executable(executable_archive_tests executable_archive_tests.cpp)
 target_include_directories(executable_archive_tests PRIVATE ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/editor/systems)
-target_link_libraries(executable_archive_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(executable_archive_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(executable_archive_tests)
 
 add_executable(version_migration_tests version_migration_tests.cpp)
 target_include_directories(version_migration_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
-target_link_libraries(version_migration_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(version_migration_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(version_migration_tests)
 
 add_executable(runtime_process_helper runtime_process_helper.cpp)
 add_executable(runtime_process_tests runtime_process_tests.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/runtime_process.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp)
 target_include_directories(runtime_process_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
-target_link_libraries(runtime_process_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(runtime_process_tests PRIVATE GTest::gtest_main project_persistence)
 target_compile_definitions(runtime_process_tests PRIVATE
     RUNTIME_PROCESS_HELPER="$<TARGET_FILE:runtime_process_helper>")
 add_dependencies(runtime_process_tests runtime_process_helper)
@@ -269,8 +262,7 @@ if(TARGET runtime_app)
 endif()
 gtest_discover_tests(runtime_process_tests)
 
-add_executable(scene_asset_loader_tests scene_asset_loader_tests.cpp
-    ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_persistence_system.cpp)
+add_executable(scene_asset_loader_tests scene_asset_loader_tests.cpp)
 target_include_directories(scene_asset_loader_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/systems)
-target_link_libraries(scene_asset_loader_tests PRIVATE GTest::gtest_main commons)
+target_link_libraries(scene_asset_loader_tests PRIVATE GTest::gtest_main project_persistence)
 gtest_discover_tests(scene_asset_loader_tests PROPERTIES TIMEOUT 30)

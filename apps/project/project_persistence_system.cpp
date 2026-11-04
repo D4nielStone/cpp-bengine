@@ -18,8 +18,6 @@
 #include "util/pbr_material.hpp"
 
 #include <rapidjson/document.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/stringbuffer.h>
 
 #include <fstream>
 #include <filesystem>
@@ -664,7 +662,7 @@ bool project_persistence_system::serialize_project(
     snapshot = "[";
     std::vector<project_files::document> pending_documents;
     const auto emit = [&](const std::filesystem::path& target,
-                          const rapidjson::Document& document, const char* type) {
+                          const rapidjson::Document& document) {
         rapidjson::Document canonical;
         canonical.CopyFrom(document, canonical.GetAllocator());
         if (canonical.HasMember("entities")) {
@@ -673,16 +671,12 @@ bool project_persistence_system::serialize_project(
                 return a["id"].GetUint() < b["id"].GetUint();
             });
         }
-        rapidjson::StringBuffer buffer;
-        rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
-        canonical.Accept(writer);
+        auto encoded = project_files::encode(canonical);
         if (snapshot.size() > 1)
             snapshot += ',';
-        snapshot.append(buffer.GetString(), buffer.GetSize());
-        (void)type;
+        snapshot += encoded;
         if (write_files)
-            pending_documents.push_back({target, std::string(buffer.GetString(), buffer.GetSize())});
-        return true;
+            pending_documents.push_back({target, std::move(encoded)});
     };
     if (!m_registry) {
         error = "Cannot save a project without an ECS registry.";
@@ -928,8 +922,7 @@ bool project_persistence_system::serialize_project(
     }
 
     scene_document.AddMember("entities", entities, allocator);
-    if (!emit(scene_target, scene_document, "scene"))
-        return false;
+    emit(scene_target, scene_document);
 
     if (writing_scene) {
         snapshot += ']';
@@ -980,12 +973,7 @@ bool project_persistence_system::serialize_project(
     );
     project_document.AddMember("scene", scene_path_value, project_allocator);
 
-    if (!emit(
-            absolute_target,
-            project_document,
-            "project"
-        ))
-        return false;
+    emit(absolute_target, project_document);
 
     snapshot += ']';
     if (write_files) {
@@ -1255,23 +1243,6 @@ bool project_persistence_system::load(
 
     auto editor_camera_entity = staged_registry->create(m_editor_camera_id);
     staged_registry->add<commons::camera>(editor_camera_entity);
-    auto& editor_components = staged_registry->entities[m_editor_camera_id];
-    editor_components[commons::transform::mask] = active_transform;
-    editor_components[commons::camera::mask] = active_camera;
-
-    auto staged_registry_copy = std::make_shared<commons::ecs>();
-    staged_registry_copy->entities = staged_registry->entities;
-    staged_registry_copy->mascaras = staged_registry->mascaras;
-    staged_registry_copy->live_entities = staged_registry->live_entities;
-    staged_registry_copy->entity_names = staged_registry->entity_names;
-    for (auto& [id, components] : staged_registry_copy->entities) {
-        for (auto& [mask, component] : components) {
-            (void)mask;
-            component->reg = staged_registry_copy;
-            component->my_object = id;
-        }
-    }
-
     auto staged_scene_entity_names = staged_entity_names;
     const auto staged_asset_root = project_directory.lexically_normal();
     const auto staged_global_gravity = staged_gravity;
@@ -1283,10 +1254,14 @@ bool project_persistence_system::load(
         !project_migration_manager::commit(absolute_project_path, document, error, &contents)) return false;
     m_project_version = is_project_document ? document["project_version"].GetString() : "0.1.0";
 
-    m_registry->entities = std::move(staged_registry_copy->entities);
-    m_registry->mascaras = std::move(staged_registry_copy->mascaras);
-    m_registry->live_entities = std::move(staged_registry_copy->live_entities);
-    m_registry->entity_names = std::move(staged_registry_copy->entity_names);
+    auto& editor_components = staged_registry->entities[m_editor_camera_id];
+    editor_components[commons::transform::mask] = active_transform;
+    editor_components[commons::camera::mask] = active_camera;
+
+    m_registry->entities = std::move(staged_registry->entities);
+    m_registry->mascaras = std::move(staged_registry->mascaras);
+    m_registry->live_entities = std::move(staged_registry->live_entities);
+    m_registry->entity_names = std::move(staged_registry->entity_names);
     if (is_project_document && document.HasMember("settings") &&
         document["settings"].HasMember("editor_camera"))
         active_camera->analyze(document["settings"]["editor_camera"]);

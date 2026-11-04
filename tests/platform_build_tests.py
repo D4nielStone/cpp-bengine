@@ -95,10 +95,10 @@ class PlatformBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="bengine cmake ") as directory:
             root = Path(directory)
             apps = root / "apps"
-            (apps / "editor/systems").mkdir(parents=True)
+            (apps / "project").mkdir(parents=True)
             shutil.copyfile(REPO / "apps/CMakeLists.txt", apps / "CMakeLists.txt")
             (apps / "runtime_app.cpp").write_text("int main() {}")
-            (apps / "editor/systems/project_persistence_system.cpp").write_text("")
+            (apps / "project/project_persistence_system.cpp").write_text("")
             (root / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.20)\nproject(BuildContract LANGUAGES CXX)\n"
                 "add_library(commons INTERFACE)\nadd_subdirectory(apps)\n")

@@ -6,7 +6,7 @@
 #include "../systems/viewport_input_state.hpp"
 #include "../systems/asset_drag_state.hpp"
 #include "../systems/script_tools.hpp"
-#include "../systems/project_file_transaction.hpp"
+#include "project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
 #include "model_import_dialog.hpp"
 #include "context_action_button.hpp"

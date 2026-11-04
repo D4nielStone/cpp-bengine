@@ -1,7 +1,6 @@
 #include "systems/code_system.hpp"
 #include "debugging/script_log.hpp"
 
-#include <iostream>
 #include <algorithm>
 #include <chrono>
 #include <unordered_set>
@@ -10,31 +9,41 @@ namespace commons {
 
 code_system::~code_system() = default;
 
+code_system::script_state& code_system::initialize(
+    const std::shared_ptr<code>& script, std::uint32_t id
+) {
+    auto& state = m_scripts[script.get()];
+    if (!state.instance.expired())
+        return state;
+
+    state = {script, false};
+    try {
+        script->setup();
+    } catch (const sol::error& error) {
+        state.failed = true;
+        script_log::instance().write(id, std::string("Initialization failed: ") + error.what());
+    }
+    return state;
+}
+
 void code_system::setup(const std::shared_ptr<ecs>& registry) {
-    m_initialized.clear();
-    m_failed.clear();
+    m_scripts.clear();
     m_last_update = std::chrono::steady_clock::now();
     if (!registry)
         return;
 
-    registry->cada<code>([this, &registry](const std::uint32_t id) {
+    registry->cada<code>([this, &registry](std::uint32_t id) {
         const auto component = registry->get<code>(id);
-        if (!component) return;
+        if (!component)
+            return;
         auto entries = component->scripts;
         entries.insert(entries.begin(), component);
         for (const auto& script : entries) {
-        if (!script)
-            return;
-
-        script->reg = registry;
-        script->my_object = id;
-        m_initialized.insert(script.get());
-        try {
-            script->setup();
-        } catch (const sol::error& error) {
-            m_failed.insert(script.get());
-            script_log::instance().write(id, std::string("Initialization failed: ") + error.what());
-        }
+            if (!script)
+                continue;
+            script->reg = registry;
+            script->my_object = id;
+            initialize(script, id);
         }
     });
 }
@@ -61,48 +70,31 @@ void code_system::update(const std::shared_ptr<ecs>& registry) {
             auto entries = component->scripts;
             entries.insert(entries.begin(), component);
             for (const auto& script : entries) {
-            script->reg = registry;
-            script->my_object = id;
-            if (!script)
-                continue;
-
-            present.insert(script.get());
-            if (!m_initialized.contains(script.get())) {
-                m_initialized.insert(script.get());
-                try {
-                    script->setup();
-                } catch (const sol::error& error) {
-                    m_failed.insert(script.get());
-                    script_log::instance().write(id, std::string("Initialization failed: ") + error.what());
+                if (!script)
                     continue;
-                }
-            }
+                script->reg = registry;
+                script->my_object = id;
+                present.insert(script.get());
+                auto& state = initialize(script, id);
+                if (state.failed)
+                    continue;
 
-            if (m_failed.contains(script.get()))
-                continue;
-            try {
-                auto bubble = script->estado_lua["bubble"].get<sol::table>();
-                bubble["delta_time"] = delta_time;
-                auto time = script->estado_lua["Time"].get<sol::table>();
-                time["deltaTime"] = delta_time;
-                time["time"] = time["time"].get<float>() + delta_time;
-                script->update();
-            } catch (const sol::error& error) {
-                m_failed.insert(script.get());
-                script_log::instance().write(id, std::string("Update failed: ") + error.what());
-            }
+                try {
+                    auto bubble = script->estado_lua["bubble"].get<sol::table>();
+                    bubble["delta_time"] = delta_time;
+                    auto time = script->estado_lua["Time"].get<sol::table>();
+                    time["deltaTime"] = delta_time;
+                    time["time"] = time["time"].get<float>() + delta_time;
+                    script->update();
+                } catch (const sol::error& error) {
+                    state.failed = true;
+                    script_log::instance().write(id, std::string("Update failed: ") + error.what());
+                }
             }
         }
     );
 
-    for (auto script = m_initialized.begin(); script != m_initialized.end();) {
-        if (!present.contains(*script)) {
-            m_failed.erase(*script);
-            script = m_initialized.erase(script);
-        } else {
-            ++script;
-        }
-    }
+    std::erase_if(m_scripts, [&](const auto& entry) { return !present.contains(entry.first); });
 }
 
 }

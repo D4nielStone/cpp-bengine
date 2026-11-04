@@ -15,7 +15,7 @@
 #include "editor/panels/project_context_menu.hpp"
 #include "editor/systems/native_file_dialog.hpp"
 #include "editor/core/editor_context.hpp"
-#include "editor/systems/project_persistence_system.hpp"
+#include "project/project_persistence_system.hpp"
 #include "editor/systems/project_creation_system.hpp"
 #include "editor/systems/project_preview.hpp"
 #include "editor/panels/files_view.hpp"

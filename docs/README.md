@@ -16,8 +16,9 @@
 - [Benchmarks](./BENCHMARKS.md)
 - [Estabilização e validação](./STABILIZATION.md)
 - [Avaliação de estabilidade](./STABILITY_ASSESSMENT.md)
-- [Notas da versão 0.1.2](./RELEASE_v0.1.2.md)
 
-Os contratos documentados aqui descrevem o código da versão atual do repositório.
-Quando a documentação disser que uma capacidade não está disponível, isso não
-impede que ela seja adicionada em versões futuras.
+## Histórico
+
+- [Notas da versão 0.1.3](./RELEASE_v0.1.3.md)
+- [Notas da versão 0.1.2](./RELEASE_v0.1.2.md)
+- [Atualizações do pacote portátil a partir da versão 0.1.4](../README.md#portable-updates)

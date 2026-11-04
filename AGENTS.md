@@ -14,7 +14,7 @@ Main technologies:
 - Lua scripting
 - Assimp for 3D assets
 
-The current development objective is a stable v0.1.2 release.
+The current development objective is to stabilize the version declared in the root CMakeLists.txt.
 
 Prioritize reliability, maintainability, correctness and backward compatibility over new features.
 
@@ -22,6 +22,7 @@ Repository Structure
 
 - "commons/": reusable engine components, rendering, ECS, resources and runtime functionality.
 - "apps/editor/": native editor, panels, tools and editor systems.
+- "apps/project/": project and scene persistence shared by the editor and standalone runtime.
 - "apps/": executable applications.
 - "external/cpp-bgui/": GUI framework.
 - "tests/": automated tests.

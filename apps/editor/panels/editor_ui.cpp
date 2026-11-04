@@ -1,4 +1,3 @@
-#include "../../editor/core/distribution_paths.hpp"
 #include "scene_loading_modal.hpp"
 #define GLFW_INCLUDE_NONE
 #include <glad.h>
@@ -1221,14 +1220,16 @@ bool editor_ui::load_project_selection() {
     }
 
     std::string load_error;
-    if (!stop_runtime_for_edit(load_error)) { report_result("Stopping runtime", false, load_error); return false; }
-    if (m_project_unloading_callback && !m_project_unloading_callback(load_error)) {
-        report_result("Saving workspace", false, load_error); return false;
+    if (!prepare_project_transition(load_error)) {
+        m_project_picker_status->set_buffer(load_error);
+        return false;
     }
+    m_project_modal->set_enable(false);
     return dispatch_load(selected_path.string(), [this, selected_path](bool success, const std::string& load_error) {
         if (!success) {
             report_result("Loading project", false, load_error);
             m_project_picker_status->set_buffer(load_error);
+            m_project_modal->set_enable(true);
             return;
         }
         m_project_path = selected_path.string();
@@ -1239,6 +1240,20 @@ bool editor_ui::load_project_selection() {
     });
 }
 
+bool editor_ui::prepare_project_transition(std::string& error) {
+    if (m_project_load_pending) {
+        error = "A project is already loading.";
+        return false;
+    }
+    if (!stop_runtime_for_edit(error))
+        return false;
+    if (!m_project_path.empty() && m_project_persistence.has_unsaved_changes(m_project_path)) {
+        error = "Save the current project before switching projects or scenes.";
+        return false;
+    }
+    return !m_project_unloading_callback || m_project_unloading_callback(error);
+}
+
 bool editor_ui::dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete) {
     if (!m_load_dispatcher) {
         std::string error;
@@ -1246,9 +1261,11 @@ bool editor_ui::dispatch_load(const std::string& path, std::function<void(bool, 
         complete(result, error);
         return result;
     }
+    m_project_load_pending = true;
     m_load_dispatcher([this, path, complete = std::move(complete)] {
         std::string error;
         const bool result = load_project_with_modal(m_project_persistence, path, error);
+        m_project_load_pending = false;
         complete(result, error);
     });
     return true;
@@ -1330,28 +1347,12 @@ void editor_ui::create_project_modal(
         status,
         0.28f
     );
-    m_project_modal->set_confirmation_text("Open");
+    path_actions.add<bgui::button>("Open", 0.3f, [this]() { load_project_selection(); });
+    m_project_modal->set_confirmation_text("Cancel");
     m_project_modal->set_on_confirm([this]() {
-        const auto selected_path = m_project_directory_input
-            ? m_project_directory_input->get_buffer()
-            : std::string{};
-        const bool loaded = load_project_selection();
-        if (loaded) {
-            m_project_modal = nullptr;
-            m_project_directory_input = nullptr;
-            m_project_picker_status = nullptr;
-            return;
-        }
-
-        const auto status = m_project_picker_status
-            ? m_project_picker_status->get_buffer()
-            : std::string{"Could not load the selected project."};
-        create_project_modal(selected_path, status);
-        if (m_project_directory_input)
-            m_project_directory_input->set_buffer(selected_path);
-        if (m_project_picker_status)
-            m_project_picker_status->set_buffer(status);
-        m_project_modal->set_enable(true);
+        m_project_modal = nullptr;
+        m_project_directory_input = nullptr;
+        m_project_picker_status = nullptr;
     });
 }
 
@@ -1396,8 +1397,13 @@ void editor_ui::create_new_project_modal() {
         if (!error.empty())
             status.set_buffer(error);
     });
-    m_new_project_modal->set_confirmation_text("Create Project");
-    m_new_project_modal->set_on_confirm([this, &status]() {
+    m_new_project_modal->set_confirmation_text("Cancel");
+    m_new_project_modal->set_on_confirm([this]() {
+        m_new_project_modal = nullptr;
+        m_new_project_name_input = nullptr;
+        m_new_project_location_input = nullptr;
+    });
+    actions.add<bgui::button>("Create Project", 0.3f, [this, &status]() {
         const auto name = m_new_project_name_input->get_buffer();
         const auto first = name.find_first_not_of(" \t\r\n");
         const std::filesystem::path name_path(name);
@@ -1414,15 +1420,23 @@ void editor_ui::create_new_project_modal() {
             m_new_project_location_input->get_buffer()
         ) / name;
         std::string error;
-        if (!create_project_files(folder, error)) {
+        if (!prepare_project_transition(error) || !create_project_files(folder, error)) {
             status.set_buffer(error);
             return;
         }
         const auto project_file = project_file_path(folder).string();
-        if (!stop_runtime_for_edit(error)) { status.set_buffer(error); return; }
-        if (m_project_unloading_callback && !m_project_unloading_callback(error)) { status.set_buffer(error); return; }
-        dispatch_load(project_file, [this, project_file, status_ptr = &status](bool success, const std::string& error) {
-            if (!success) { status_ptr->set_buffer(error); return; }
+        m_new_project_modal->set_enable(false);
+        const bool manager_was_open = m_project_modal && m_project_modal->is_enabled();
+        if (manager_was_open)
+            m_project_modal->set_enable(false);
+        dispatch_load(project_file, [this, project_file, manager_was_open, status_ptr = &status](bool success, const std::string& error) {
+            if (!success) {
+                status_ptr->set_buffer(error);
+                m_new_project_modal->set_enable(true);
+                if (manager_was_open)
+                    m_project_modal->set_enable(true);
+                return;
+            }
             m_project_path = project_file;
             remember_project(m_project_path);
             if (m_project_loaded_callback) m_project_loaded_callback(m_project_path);

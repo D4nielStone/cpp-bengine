@@ -4,6 +4,8 @@
 #include "components/camera.hpp"
 #include "components/physics.hpp"
 #include "components/code.hpp"
+#include "systems/code_system.hpp"
+#include "systems/physics_system.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <fstream>
@@ -38,7 +40,7 @@ protected:
         ASSERT_TRUE(persistence.save(project.string(), error)) << error;
     }
     void TearDown() override {
-        // Explicit scene shutdown is required by the current shared ownership API.
+        // Exercise explicit removal before destroying the fixture registry.
         const auto ids = registry->live_entities;
         for (const auto id : ids) registry->remove(id);
         std::error_code ignored;
@@ -145,6 +147,98 @@ TEST_F(PersistenceIntegrity, RepeatedSuccessfulLoadReleasesSupersededTransformLu
         EXPECT_EQ(registry->live_entities.size(), 2u);
         EXPECT_TRUE(registry->validate_invariants());
     }
+}
+
+TEST_F(PersistenceIntegrity, FailedMigrationKeepsActiveCameraAndTransformBound) {
+    const auto camera = registry->get<commons::camera>(17);
+    const auto transform = registry->get<commons::transform>(17);
+    const auto legacy = directory / "legacy.bengine";
+    const std::string before =
+        R"({"format":"bubble-engine-project","version":1,"scene":"project.scene"})";
+    write(legacy, before);
+    bool reached_commit = false;
+    Persistence::asset_loading_hooks hooks;
+    hooks.finish = [&](const auto&) {
+        reached_commit = true;
+        write(legacy, before + " ");
+    };
+    persistence.set_asset_loading_hooks(std::move(hooks));
+    expect_rejected_without_mutation(legacy);
+    ASSERT_TRUE(reached_commit);
+    EXPECT_EQ(files::read(legacy), before + " ");
+    EXPECT_EQ(camera->reg.lock(), registry);
+    EXPECT_EQ(transform->reg.lock(), registry);
+}
+
+TEST_F(PersistenceIntegrity, AlternatingProjectsAndScenesReleasesResourcesAndPreservesFiles) {
+    const auto second_directory = directory / "second";
+    std::filesystem::create_directory(second_directory);
+    const auto second_project = second_directory / "project.bengine";
+    const auto second_scene = second_directory / "project.scene";
+    const auto broken = directory / "broken.scene";
+    write(broken, "{");
+
+    const auto script = directory / "transition.lua";
+    write(script, "function setup() ready = true end\n"
+                  "function update() updated = ready and GameObject.Find(gameObject.id) ~= nil end\n");
+    commons::entity object{23};
+    registry->add<commons::code>(object, script.string());
+    ASSERT_TRUE(persistence.save(project.string(), error)) << error;
+
+    const auto second_script = second_directory / script.filename();
+    write(second_script, files::read(script));
+    registry->add<commons::code>(object, second_script.string());
+    names[23] = "Second";
+    ASSERT_TRUE(persistence.save(second_project.string(), error)) << error;
+
+    const auto first_manifest_bytes = files::read(project);
+    const auto second_manifest_bytes = files::read(second_project);
+    const auto first_scene_bytes = files::read(scene);
+    const auto second_scene_bytes = files::read(second_scene);
+    const auto camera = registry->get<commons::camera>(17);
+    commons::code_system scripts;
+    commons::physics_system physics;
+    scripts.setup(registry);
+    physics.setup(registry);
+
+    const std::array paths{project, second_project, scene, second_scene};
+    for (unsigned attempt = 0; attempt < 240; ++attempt) {
+        SCOPED_TRACE(attempt);
+        const auto& target = paths[attempt % paths.size()];
+        std::weak_ptr<commons::code> old_script = registry->get<commons::code>(23);
+        std::weak_ptr<commons::physics> old_body = registry->get<commons::physics>(23);
+        std::weak_ptr<commons::transform> old_transform = registry->get<commons::transform>(23);
+        expect_rejected_without_mutation(broken);
+        ASSERT_TRUE(persistence.load(target.string(), error)) << error;
+        EXPECT_FALSE(persistence.has_unsaved_changes(target.string()));
+        EXPECT_EQ(names.at(23), attempt % 2 == 0 ? "Original" : "Second");
+        EXPECT_EQ(registry->get<commons::camera>(17), camera);
+        EXPECT_TRUE(registry->validate_invariants());
+
+        scripts.update(registry);
+        const auto current_script = registry->get<commons::code>(23);
+        ASSERT_NE(current_script, nullptr);
+        EXPECT_TRUE(current_script->estado_lua["ready"].get_or(false));
+        EXPECT_TRUE(current_script->estado_lua["updated"].get_or(false));
+        physics.update(registry);
+        EXPECT_EQ(physics.world()->getNumCollisionObjects(), 1);
+        EXPECT_TRUE(old_script.expired());
+        EXPECT_TRUE(old_transform.expired());
+        EXPECT_TRUE(old_body.expired());
+    }
+
+    const std::weak_ptr<commons::physics> last_body = registry->get<commons::physics>(23);
+    const std::weak_ptr<commons::code> last_script = registry->get<commons::code>(23);
+    registry->remove(23);
+    scripts.update(registry);
+    physics.update(registry);
+    EXPECT_EQ(physics.world()->getNumCollisionObjects(), 0);
+    EXPECT_TRUE(last_body.expired());
+    EXPECT_TRUE(last_script.expired());
+    EXPECT_EQ(files::read(project), first_manifest_bytes);
+    EXPECT_EQ(files::read(second_project), second_manifest_bytes);
+    EXPECT_EQ(files::read(scene), first_scene_bytes);
+    EXPECT_EQ(files::read(second_scene), second_scene_bytes);
 }
 
 TEST_F(PersistenceIntegrity, ExplicitSceneShutdownReleasesRegistryLuaAndBulletComponents) {

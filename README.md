@@ -28,8 +28,8 @@ it remains dedicated to icon glyphs.
 
 The engine also uses the BGUI API to build its own transform gizmos.
 
-The editor's **Files** menu saves and loads the dock layout through BGUI in
-`editor-ui.cfg`. Project settings and the main-scene reference live in
+The editor’s **View** menu saves and loads the dock layout through BGUI in
+`.editor-ui.cfg`. Project settings and the main-scene reference live in
 `project.bengine`; entity/component data lives in the referenced `.scene` file.
 The **Edit** menu and `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo
 scene edits, including Inspector changes, entity and component creation or

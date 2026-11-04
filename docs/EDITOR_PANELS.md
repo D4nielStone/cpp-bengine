@@ -7,10 +7,13 @@ continuam pertencendo às árvores de elementos do BGUI.
 
 ## Painéis principais
 
-- **Project Manager**: oferece `Empty Project` e `FPP - First Person`. O
-  template FPP cria uma cena inicial com jogador cápsula, câmera, física e
-  scripts Lua de movimento e controle de câmera; os arquivos gerados ficam
-  dentro do novo projeto.
+- **Project Manager**: abre projetos e cenas existentes. Salve as alterações
+  do projeto atual antes de abrir ou criar outro. Se o carregamento falhar,
+  o editor mantém a cena ativa e reabre o diálogo com a mensagem de erro.
+  Na tela inicial, é possível escolher entre `Empty Project` e
+  `FPP - First Person`. O template FPP gera uma cena com jogador cápsula,
+  câmera, física e scripts Lua de movimento e controle de câmera. O comando
+  **File → New Project** dentro do editor cria um projeto vazio.
 - **Scene**: viewport de edição, seleção, gizmos, grade e navegação da câmera
   do editor.
 - **Game**: prévia da primeira câmera de cena, seguindo a escolha do

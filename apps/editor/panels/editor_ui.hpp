@@ -90,6 +90,7 @@ public:
 
 private:
     std::function<void(std::function<void()>)> m_load_dispatcher;
+    bool prepare_project_transition(std::string& error);
     bool dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete);
     bgui::dock& m_dock;
     bgui::dock& m_model_dock;
@@ -102,6 +103,7 @@ private:
     project_persistence_system& m_project_persistence;
     std::shared_ptr<commons::ecs> m_registry;
     std::string m_project_path;
+    bool m_project_load_pending{false};
     std::function<void(const std::string&)> m_project_loaded_callback;
     std::function<bool(bool, std::string&)> m_play_state_callback;
     std::function<bool(std::string&)> m_runtime_running_callback;

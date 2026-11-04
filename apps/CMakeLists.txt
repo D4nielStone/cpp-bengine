@@ -12,11 +12,16 @@ set(EDITOR_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/editor/tools
 )
 
+if(BUILD_RUNTIME OR BUILD_EDITOR OR BUILD_TESTING)
+    add_library(project_persistence STATIC project/project_persistence_system.cpp)
+    target_include_directories(project_persistence PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/project)
+    target_link_libraries(project_persistence PUBLIC commons)
+endif()
+
 if(BUILD_RUNTIME)
     add_executable(runtime_app runtime_app.cpp)
-    target_sources(runtime_app PRIVATE editor/systems/project_persistence_system.cpp)
     target_include_directories(runtime_app PRIVATE ${EDITOR_INCLUDE_DIRS})
-    target_link_libraries(runtime_app PRIVATE commons)
+    target_link_libraries(runtime_app PRIVATE project_persistence)
     if(BENGINE_SINGLE_FILE_RUNTIME AND UNIX)
         target_link_options(runtime_app PRIVATE -static-libstdc++ -static-libgcc)
     endif()
@@ -39,7 +44,6 @@ if(BUILD_EDITOR)
         editor/panels/editor_ui.cpp
         editor/systems/build_process.cpp
         editor/systems/project_creation_system.cpp
-        editor/systems/project_persistence_system.cpp
         editor/systems/project_preview.cpp
         editor/systems/runtime_process.cpp
         editor/panels/runtime_tools_view.cpp
@@ -49,7 +53,7 @@ if(BUILD_EDITOR)
     )
     target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
     find_package(CURL REQUIRED)
-    target_link_libraries(editor_app PRIVATE commons CURL::libcurl)
+    target_link_libraries(editor_app PRIVATE project_persistence CURL::libcurl)
     add_dependencies(editor_app game_packager)
     if(TARGET runtime_app)
         add_dependencies(editor_app runtime_app)

@@ -947,6 +947,77 @@ TEST_F(EditorMenuTest, PlayDispatchesAfterClickAndAllowsRetryAfterFailure) {
     }
 }
 
+TEST(EditorProjectTransition, KeepsUnsavedChangesAndReopensPickerAfterDeferredFailure) {
+    namespace fs = std::filesystem;
+    const auto folder = fs::temp_directory_path() / ("bengine-project-transition-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(folder);
+    struct cleanup_folder {
+        fs::path path;
+        ~cleanup_folder() { std::error_code ignored; fs::remove_all(path, ignored); }
+    } cleanup{folder};
+    const auto active = folder / "active.bengine";
+    const auto broken = folder / "broken.scene";
+    std::ofstream(broken) << "{";
+
+    bgui::scoped_interface ui;
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    std::string error;
+    ASSERT_TRUE(persistence.save(active.string(), error)) << error;
+
+    auto& root = bgui::get_layout();
+    auto& menu = root.add<bgui::menu_bar>(root);
+    auto& side = root.add<bgui::linear>();
+    auto& dock = root.add<bgui::dock>();
+    auto& models = root.add<bgui::dock>();
+    auto& management = root.add<bgui::dock>();
+    editor::ui::ui_persistence_system layout;
+    editor::ui::editor_ui editor(dock, models, management, menu, side, layout, persistence,
+        registry, active.string(), folder);
+    std::function<void()> pending;
+    editor.set_load_dispatcher([&](auto task) { pending = std::move(task); });
+
+    auto* picker = find<bgui::modal>(root, [](auto& modal) {
+        return find<bgui::text>(modal, [](auto& text) { return text.get_buffer() == "Project Manager"; });
+    });
+    ASSERT_NE(picker, nullptr);
+    picker->set_enable(true);
+    auto* input = find<bgui::inputbox>(*picker, [&](auto& item) { return item.get_buffer() == active.string(); });
+    auto* open = find<bgui::button>(*picker, [](auto& item) { return item.get_label().get_buffer() == "Open"; });
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(open, nullptr);
+    input->set_buffer(broken.string());
+    const auto click_open = [&] {
+        open->on_pressed();
+        open->on_released();
+        bgui::on_update();
+    };
+
+    registry->create(23);
+    click_open();
+    EXPECT_FALSE(pending);
+    EXPECT_TRUE(registry->is_alive(23));
+    EXPECT_TRUE(picker->is_enabled());
+    EXPECT_NE(find<bgui::text>(*picker, [](auto& item) {
+        return item.get_buffer().find("Save the current project") != std::string::npos;
+    }), nullptr);
+
+    ASSERT_TRUE(persistence.save(active.string(), error)) << error;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        click_open();
+        ASSERT_TRUE(pending);
+        EXPECT_FALSE(picker->is_enabled());
+        auto load = std::move(pending);
+        load();
+        EXPECT_TRUE(picker->is_enabled());
+        EXPECT_EQ(input->get_buffer(), broken.string());
+        EXPECT_TRUE(registry->is_alive(23));
+    }
+}
+
 TEST(HudEditor, SelectedWidgetPropertiesAppearInInspector) {
     bgui::scoped_interface ui;
     auto registry=std::make_shared<commons::ecs>();

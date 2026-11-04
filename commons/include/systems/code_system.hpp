@@ -27,7 +27,7 @@
 #include "components/code.hpp"
 
 #include <chrono>
-#include <unordered_set>
+#include <unordered_map>
 
 namespace COMMONS_NS {
 	struct code_system : system {
@@ -37,8 +37,12 @@ namespace COMMONS_NS {
         void setup(const std::shared_ptr<ecs>&) override;
 
     private:
-        std::unordered_set<const code*> m_initialized;
-        std::unordered_set<const code*> m_failed;
+        struct script_state {
+            std::weak_ptr<code> instance;
+            bool failed{};
+        };
+        script_state& initialize(const std::shared_ptr<code>& script, std::uint32_t id);
+        std::unordered_map<const code*, script_state> m_scripts;
         std::chrono::steady_clock::time_point m_last_update{};
     };
 }
