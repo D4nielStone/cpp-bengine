@@ -1,5 +1,6 @@
 #include "guizmo/collision_debug.hpp"
 #include "components/physics.hpp"
+#include "components/pathfinder.hpp"
 #include "components/renderer.hpp"
 #include "components/transform.hpp"
 
@@ -33,6 +34,11 @@ std::vector<collision_line> collision_lines(const std::shared_ptr<commons::ecs>&
         const auto color = !body->collision_enabled ? btVector3(0.5f,0.5f,0.5f) :
             body->trigger ? btVector3(0.2f,0.7f,1.f) : btVector3(0.2f,1.f,0.3f);
         world.debugDrawObject(pose, body->collision_shape, color);
+    });
+    registry->cada<commons::pathfinder>([&](uint32_t id) {
+        const auto points = registry->get<commons::pathfinder>(id)->path();
+        for (std::size_t i=1; i<points.size(); ++i)
+            collector.lines.push_back({points[i-1],points[i],{1.f,.65f,.05f}});
     });
     return std::move(collector.lines);
 }

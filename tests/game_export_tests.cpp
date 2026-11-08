@@ -75,6 +75,26 @@ TEST_F(GameExportTest, RelocatesAbsoluteAssetPathsButPreservesOrdinaryTextProper
     EXPECT_EQ(std::string(data["text"]["value"].GetString()), (project / "assets/texture.png").string());
 }
 
+TEST_F(GameExportTest, PackagesSoundClipWithAPathRelativeToTheGame) {
+    const auto clip = project / "audio/ambience.ogg";
+    put(clip, "audio");
+    rapidjson::Document components;
+    components.Parse(R"({"sound_player":{"clip":""}})");
+    const auto absolute = clip.string();
+    components["sound_player"]["clip"].SetString(absolute.c_str(),
+        static_cast<rapidjson::SizeType>(absolute.size()), components.GetAllocator());
+    rapidjson::StringBuffer json;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(json);
+    components.Accept(writer);
+    scene(json.GetString());
+
+    prepare();
+    EXPECT_TRUE(fs::is_regular_file(staging / "game/audio/ambience.ogg"));
+    const auto packed = game_package::read_json(staging / "game/main.scene");
+    EXPECT_STREQ(packed["entities"][0]["components"]["sound_player"]["clip"].GetString(),
+        "audio/ambience.ogg");
+}
+
 TEST_F(GameExportTest, ExternalAndMissingAssetsFailWithoutReplacingPreviousGame) {
     prepare(); put(staging / "old.marker", "previous"); game_package::publish(staging, output);
     put(root / "external.lua", "external");
@@ -197,6 +217,37 @@ TEST_F(GameExportTest, ExistingBuildDirectoryIsNeverClearedOrMixedIntoGameOutput
     EXPECT_FALSE(fs::exists(output));
 }
 
+TEST_F(GameExportTest, PreservesDesktopDirectoryMetadataAcrossExports) {
+    const auto metadata = output.parent_path() / ".directory";
+    const std::string contents = "[Dolphin]\nViewMode=1\n";
+    put(metadata, contents);
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_NO_THROW(prepare());
+        ASSERT_NO_THROW(game_package::publish(staging, output));
+        EXPECT_TRUE(fs::is_regular_file(output / "game.json"));
+        EXPECT_FALSE(fs::exists(output / ".directory"));
+        std::ifstream input(metadata);
+        EXPECT_EQ((std::string{std::istreambuf_iterator<char>(input), {}}), contents);
+    }
+}
+
+TEST_F(GameExportTest, RejectsDirectoryNamedLikeDesktopMetadata) {
+    const auto personal = output.parent_path() / ".directory/personal.txt";
+    put(personal, "keep");
+    EXPECT_THROW(prepare(), std::runtime_error);
+    EXPECT_TRUE(fs::is_regular_file(personal));
+    EXPECT_FALSE(fs::exists(output));
+}
+
+TEST_F(GameExportTest, DesktopMetadataDoesNotAllowOtherUnrelatedFiles) {
+    put(output.parent_path() / ".directory", "[Dolphin]\n");
+    const auto personal = output.parent_path() / ".personal.txt";
+    put(personal, "keep");
+    EXPECT_THROW(prepare(), std::runtime_error);
+    EXPECT_TRUE(fs::is_regular_file(personal));
+    EXPECT_FALSE(fs::exists(output));
+}
+
 TEST_F(GameExportTest, CachePreparationCannotDeleteEngineCheckout) {
     EXPECT_THROW(game_package::prepare(repo, project / "project.bengine", repo, output), std::runtime_error);
     EXPECT_TRUE(fs::exists(repo / "commons/assets/models/cube.obj"));
@@ -248,4 +299,19 @@ TEST_F(GameExportTest, PackagesNativeModelsAndMaterialsWithPortableReferences) {
     EXPECT_STREQ(result["meshes"][0]["material"].GetString(),"materials/surface.bmat");
     result=game_package::read_json(staging/"game/main.scene");
     EXPECT_STREQ(result["entities"][0]["components"]["renderer"]["materials"][0]["file"].GetString(),"assets/materials/surface.bmat");
+}
+
+TEST_F(GameExportTest, PackagesExternalAnimationClipsWithPortableSceneReferences) {
+    put(project / "assets/animations/Walk.banim", R"({"format":"bubble-animation-clip","version":1,"duration":1,"loop":true,"tracks":[]})");
+    const auto absolute=(project/"assets/animations/Walk.banim").generic_string();
+    scene("{\"animation\":{\"clip\":\""+absolute+"\",\"autoplay\":true,\"speed\":1}}");
+    prepare();
+    auto saved=game_package::read_json(staging/"game/main.scene");
+    EXPECT_STREQ(saved["entities"][0]["components"]["animation"]["clip"].GetString(),"assets/animations/Walk.banim");
+    EXPECT_TRUE(fs::is_regular_file(staging/"game/assets/animations/Walk.banim"));
+}
+
+TEST_F(GameExportTest, RejectsMissingAnimationClipBeforePublishingPackage) {
+    scene(R"({"animation":{"clip":"assets/animations/missing.banim","autoplay":true,"speed":1}})");
+    EXPECT_THROW(prepare(),std::runtime_error);
 }

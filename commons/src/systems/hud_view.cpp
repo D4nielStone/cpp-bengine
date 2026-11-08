@@ -20,13 +20,11 @@ void hud_view::on_update() {
         registry->cada<hud>([&](uint32_t id) {
             auto h = registry->get<hud>(id);
             if (!h->enabled) return;
-            std::vector<int> indices(h->elements.size(), -1);
+            const auto first = static_cast<int>(nodes.size());
             for (std::size_t index = 0; index < h->elements.size(); ++index) {
                 const auto& e = h->elements[index];
-                if (e->kind == "text3d") continue;
-                indices[index] = static_cast<int>(nodes.size());
                 nodes.push_back(e);
-                parents.push_back(e->parent >= 0 && std::size_t(e->parent) < index ? indices[e->parent] : -1);
+                parents.push_back(e->parent >= 0 && std::size_t(e->parent) < index ? first + e->parent : -1);
             }
         });
     }

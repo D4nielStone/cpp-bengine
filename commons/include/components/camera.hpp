@@ -33,6 +33,8 @@ namespace COMMONS_NS {
 		bool fog_enabled	{ false };
 		color fog_color		{ 0.43F, 0.78F, 0.86F, 1.0F };
 		float fog_density	{ 0.01f };
+		float fog_min_distance{ 0.f };
+		float fog_max_distance{ 300.f };
 		float fov			{ 75.f };
 		float aspecto		{ 0.f };
 		float corte_curto	{ 0.1f };

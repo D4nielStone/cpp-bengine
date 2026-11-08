@@ -212,7 +212,7 @@ public:
     void rewrite(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator,
                  const std::string& role = "") const {
         if (value.IsString() && (role == "scene" || role == "model" || role == "directory" || role == "scripts" ||
-                                role == "maps" || role == "file" || role == "skybox_faces" || role == "skybox_image" || role == "image")) {
+                                role == "maps" || role == "file" || role == "skybox_faces" || role == "skybox_image" || role == "image" || role == "sound_clip" || role == "animation_clip")) {
             const auto path = asset(value.GetString(), role == "model");
             value.SetString(path.c_str(), static_cast<rapidjson::SizeType>(path.size()), allocator);
         } else if (value.IsArray()) {
@@ -223,7 +223,9 @@ public:
             for (auto& member : value.GetObject()) {
                 const std::string key(member.name.GetString());
                 rewrite(member.value, allocator, role == "maps" ? "maps" :
-                    image && key == "value" ? "image" : key);
+                    image && key == "value" ? "image" :
+                    role == "sound_player" && key == "clip" ? "sound_clip" :
+                    role == "animation" && key == "clip" ? "animation_clip" : key);
             }
         }
     }
@@ -244,6 +246,8 @@ inline void prepare(const fs::path& repository, const fs::path& project_file,
     if (fs::exists(output.parent_path())) {
         for (const auto& entry : fs::directory_iterator(output.parent_path())) {
             const auto name = entry.path().filename().string();
+            // Dolphin stores folder metadata beside the platform exports.
+            if (name == ".directory" && entry.is_regular_file()) continue;
             if (name != "linux" && name != "windows")
                 throw std::runtime_error("Choose an empty export directory; unrelated files exist: " + entry.path().string());
             validate_destination(entry.path());

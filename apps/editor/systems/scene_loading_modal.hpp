@@ -11,13 +11,14 @@
 namespace editor::ui {
 // Call between UI frames, on the GL context owner, with gameplay systems paused.
 inline bool run_project_with_modal(project_persistence_system& project,
-    const std::string& path, std::string& error, bool saving) {
+    const std::string& path, std::string& error, bool saving,
+    const std::filesystem::path& scene = {}) {
     commons::scene_asset_loader assets;
     bool cancelled = false;
     auto* modal = &bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
     modal->set_confirmation_text("Cancelar");
     modal->set_on_confirm([&] { cancelled = true; modal = nullptr; });
-    modal->add<bgui::text>((saving ? "Preparando Play — " : "Carregando cena — ") + std::filesystem::path(path).filename().string(), .36f);
+    modal->add<bgui::text>((saving ? "Preparando Play — " : "Carregando cena — ") + (scene.empty() ? std::filesystem::path(path) : scene).filename().string(), .36f);
     auto& status = modal->add<bgui::text>("Preparando recursos", .27f);
     auto& bar = modal->add<bgui::progress_bar>(0.f, 100.f, 0.f);
     bar.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
@@ -82,7 +83,8 @@ inline bool run_project_with_modal(project_persistence_system& project,
             if (modal) bgui::get_layout().remove(modal);
         }
     } cleanup{project, modal};
-    return saving ? project.save(path, error) : project.load(path, error);
+    if (saving) return project.save_snapshot(path, error);
+    return scene.empty() ? project.load(path, error) : project.switch_scene(path, scene, error);
 }
 inline bool load_project_with_modal(project_persistence_system& project,
     const std::string& path, std::string& error) {

@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/localization.hpp"
 
 #include "panel.hpp"
 #include "editor_context.hpp"
@@ -144,7 +145,7 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
     std::size_t index, const material_drop_target& register_target,
     const std::function<void(std::string)>& status) {
     const mesh_material_binding binding{context, renderer, renderer->m_modelo, index};
-    content.add<bgui::text>("Material .bmat", .27f).receives_input(false);
+    content.add<bgui::text>(tr("Material .bmat"), .27f).receives_input(false);
     auto& material_row = content.add<bgui::linear>(bgui::orientation::horizontal);
     panel::configure_property_row(material_row);
     auto& material_input = panel::add_input(material_row, "", "Carregar .bmat", .26f);
@@ -161,7 +162,7 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
     };
     material_input.m_enter_func = [load](const std::string& path) { load(path); };
     if (register_target) register_target(&material_input, load);
-    material_row.add<bgui::button>("Salvar .bmat", .26f, [binding, context, status] {
+    material_row.add<bgui::button>(tr("Salvar .bmat"), .26f, [binding, context, status] {
         if (!binding.current() || context->is_playing) return;
         std::filesystem::path path;
         std::string error;

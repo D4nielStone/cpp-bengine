@@ -170,6 +170,9 @@ class PlatformBuildTests(unittest.TestCase):
             other_project = root / "Other Game"
             shutil.copytree(project, other_project)
             other_output = root / "another export"
+            other_output.mkdir()
+            metadata = other_output / ".directory"
+            metadata.write_text("[Dolphin]\nViewMode=1\n")
             result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"), "linux",
                 str(REPO), str(other_output), str(progress), str(other_project / "project.bengine"),
                 str(root / "second workspace"), "folder", "", str(workspace / "packager/game_packager")],
@@ -178,6 +181,8 @@ class PlatformBuildTests(unittest.TestCase):
             self.assertIn("Using precompiled runtime template", result.stdout)
             self.assertEqual((root / "runtime-count").read_text().count("runtime configure"), 1)
             self.assertTrue((other_output / "linux/game.json").is_file())
+            self.assertEqual(metadata.read_text(), "[Dolphin]\nViewMode=1\n")
+            self.assertEqual({p.name for p in other_output.iterdir()}, {"linux", ".directory"})
 
     def powershell(self):
         pwsh = shutil.which("pwsh")

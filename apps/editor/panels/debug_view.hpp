@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/localization.hpp"
 
 #include "panel.hpp"
 #include "debugging/script_log.hpp"
@@ -28,10 +29,10 @@ public:
 class debug_view final : public panel {
 public:
     void build(bgui::dock& dock) override {
-        auto& window = dock.add_window("Debug", bgui::dock_area::bottom, .3f);
+        auto& window = dock.add_window(tr("Debug"), bgui::dock_area::bottom, .3f);
         window.add_class("editor-panel");
         window.add_class("editor-surface");
-        auto& content = window.add<debug_view_layout>();
+        auto& content = bgui::panel_content(window).add<debug_view_layout>();
         content.before_update = [this]() { update(); };
         content.add_class("editor-surface");
         content.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
@@ -39,11 +40,11 @@ public:
         auto& toolbar = content.add<bgui::linear>(bgui::orientation::horizontal);
         toolbar.add_class("debug-toolbar");
         toolbar.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        m_status = &toolbar.add<bgui::text>("0 registros", .27f);
+        m_status = &toolbar.add<bgui::text>(tr("0 registros"), .27f);
         m_status->add_class("debug-log-status");
         m_status->style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
         auto& clear = toolbar.add<bgui::button>(
-            "Limpar", .28f, [] { commons::script_log::instance().clear(); }
+            tr("Limpar"), .28f, [] { commons::script_log::instance().clear(); }
         );
         clear.add_class("debug-clear-button");
         clear.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);
@@ -56,7 +57,7 @@ public:
         m_text->add_class("debug-log-text");
         m_text->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         auto config = dock.get_configuration();
-        config.tab_groups.push_back({"Arquivos", "Arquivos", {"Arquivos", "Debug"}});
+        config.tab_groups.push_back({tr("Arquivos"), tr("Arquivos"), {tr("Arquivos"), tr("Debug")}});
         dock.apply_configuration(config);
         update();
     }

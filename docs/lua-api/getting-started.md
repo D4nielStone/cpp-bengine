@@ -115,6 +115,11 @@ Copie [flashlight_pickup.lua](./examples/flashlight_pickup.lua) para a pasta
 detectá-la. No Inspector, atribua as entidades da câmera e do jogador a
 `cam` e `player`. Em Play, mire na lanterna e pressione **E**.
 
+O texto **E** acompanha a lanterna enquanto ela está ao alcance e dentro da
+imagem da câmera. O script projeta um ponto acima dela com `worldToScreen`
+e move o texto 2D com `SetScreenPosition`. Ajuste `prompt_height` para mudar
+a altura do aviso.
+
 Na coleta, a lanterna vira filha do jogador e seu `Rigidbody` é removido,
 assim ela acompanha a transformação do jogador. Ajuste `hold_x`, `hold_y`
 e `hold_z` no Inspector para posicioná-la no referencial do jogador.

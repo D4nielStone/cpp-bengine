@@ -1,3 +1,4 @@
+#include "../core/localization.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
 #include "runtime_tools_view.hpp"
@@ -45,13 +46,13 @@ runtime_tools_view::runtime_tools_view(
 
 void runtime_tools_view::build(bgui::dock& dock) {
     auto& runtime_window = dock.add_window(
-        "Editor Diagnostics",
+        tr("Editor Diagnostics"),
         bgui::dock_area::right,
         0.24f
     );
     runtime_window.add_class("editor-panel");
 
-    auto& content = runtime_window.add<runtime_tools_layout>();
+    auto& content = bgui::panel_content(runtime_window).add<runtime_tools_layout>();
     content.before_update = [this]() { update(); };
     content.add_class("editor-surface");
     content.style.layout.require_mode(

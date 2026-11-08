@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace commons { struct hud_element; }
+namespace commons { struct hud_element; struct animation_clip; }
 
 namespace editor::ui {
 
@@ -34,6 +34,7 @@ struct editor_context {
     editor_events events;
     std::shared_ptr<commons::ecs> registry;
     std::filesystem::path project_root;
+    std::vector<std::shared_ptr<commons::animation_clip>> animation_assets;
     std::vector<history_action> undo_stack;
     std::vector<history_action> redo_stack;
     std::optional<entity_id> selected_entity;

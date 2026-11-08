@@ -1,14 +1,18 @@
 #pragma once
+#include "../core/localization.hpp"
 
 #include "panel.hpp"
 #include "../systems/asset_import.hpp"
 #include "../systems/asset_file_operations.hpp"
+#include "../systems/scene_files.hpp"
 #include "../systems/viewport_input_state.hpp"
 #include "../systems/asset_drag_state.hpp"
 #include "../systems/script_tools.hpp"
 #include <elem/combo_box.hpp>
 #include "project_file_transaction.hpp"
 #include "lua_inputbox.hpp"
+#include "api_reference.hpp"
+#include "markdown.hpp"
 #include "model_import_dialog.hpp"
 #include "context_action_button.hpp"
 #include "../systems/material_file.hpp"
@@ -114,6 +118,107 @@ public:
     void set_file_moved_callback(file_moved_callback callback) { m_on_file_moved = std::move(callback); }
     void set_file_operation_guard(std::function<bool()> guard) { m_can_modify_files = std::move(guard); }
 
+    void set_scene_open_action(std::function<void(const std::filesystem::path&)> action) {
+        m_open_scene = std::move(action);
+    }
+
+    void set_scene_delete_guard(std::function<void(const std::filesystem::path&)> guard) {
+        m_check_scene_delete = std::move(guard);
+    }
+
+    std::string document_contents(const std::filesystem::path& path) {
+        update_document_editor();
+        if(const auto found=m_documents.find(path);found!=m_documents.end()) return found->second.buffer;
+        return project_files::read(path);
+    }
+    // Shared source for the textual and visual Lua editors. Drafts use the
+    // existing document session and never bypass its recovery mechanism.
+    std::string script_source(const std::filesystem::path& requested) {
+        const auto path=asset_files::editable_file(requested,m_project_root);
+        if (!is_lua_script(path)) throw std::runtime_error("Escolha um script Lua.");
+        update_document_editor();
+        if (!m_documents.contains(path)) open_document(path);
+        const auto found=m_documents.find(path);
+        if(found==m_documents.end()) throw std::runtime_error("Não foi possível abrir o script.");
+        found->second.visual=true;
+        return found->second.buffer;
+    }
+    void discard_script_draft_and_reload(const std::filesystem::path& requested) {
+        const auto path=asset_files::editable_file(requested,m_project_root);
+        (void)script_source(path);
+        auto& doc=m_documents.at(path);
+        const auto source=project_files::read(path);
+        if(source.find('\0')!=std::string::npos) throw std::runtime_error("O arquivo contém dados binários.");
+        doc.original=source; doc.buffer=source;
+        if(doc.editor) doc.editor->set_buffer(source);
+        if(doc.window) doc.window->set_title(path.filename().string());
+    }
+    void edit_script_source(const std::filesystem::path& requested, const std::string& expected, const std::string& source) {
+        const auto path=asset_files::editable_file(requested,m_project_root);
+        if(m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução para editar scripts.");
+        if(script_source(path)!=expected) throw std::runtime_error("O documento mudou. Reabra a visualização antes de editar.");
+        auto& doc=m_documents.at(path); doc.buffer=source;
+        if(doc.editor) doc.editor->set_buffer(source);
+        if(doc.window) doc.window->set_title(path.filename().string()+(source!=doc.original?"*":""));
+    }
+    void save_script_source(const std::filesystem::path& requested, const std::string& expected) {
+        const auto path=asset_files::editable_file(requested,m_project_root);
+        if(m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução para salvar scripts.");
+        if(script_source(path)!=expected) throw std::runtime_error("O documento mudou. Atualize a visualização antes de salvar.");
+        auto& doc=m_documents.at(path);
+        if(project_files::read(path)!=doc.original) throw std::runtime_error("O script mudou no disco. A versão visual foi mantida; resolva o conflito antes de salvar.");
+        auto* previous=m_active_document;
+        auto* previous_window=m_document_window;
+        auto* previous_body=m_document_body;
+        auto* previous_status=m_document_status;
+        m_active_document=&doc; m_document_window=doc.window; m_document_body=doc.body; m_document_status=doc.status;
+        save_active_document();
+        const bool saved=doc.original==doc.buffer;
+        m_active_document=previous; m_document_window=previous_window; m_document_body=previous_body; m_document_status=previous_status;
+        if(!saved) throw std::runtime_error("Não foi possível salvar. Alterações mantidas no documento.");
+    }
+
+    bool has_document_edits(const std::filesystem::path& path) {
+        update_document_editor();
+        const auto found = m_documents.find(path);
+        return found != m_documents.end() && found->second.buffer != found->second.original;
+    }
+
+    void refresh_files() { m_refresh_requested = true; }
+
+    void reload_clean_document(const std::filesystem::path& path) {
+        const auto found = m_documents.find(path);
+        if (found == m_documents.end() || has_document_edits(path)) return;
+        auto& doc = found->second;
+        doc.original = project_files::read(path);
+        doc.buffer = doc.original;
+        if (doc.editor) doc.editor->set_buffer(doc.buffer);
+    }
+
+    void delete_file(const std::filesystem::path& file) {
+        if (m_can_modify_files && !m_can_modify_files())
+            throw std::runtime_error("Pare a execução antes de excluir arquivos.");
+        if (is_scene_file(file) && m_check_scene_delete)
+            m_check_scene_delete(file);
+        asset_files::erase(file, m_project_root);
+        if (auto found = m_documents.find(file); found != m_documents.end()) {
+            auto& doc = found->second;
+            if (m_active_document == &doc) m_active_document = nullptr;
+            if (m_document_window == doc.window) {
+                m_document_window = nullptr;
+                m_document_body = nullptr;
+                m_document_status = nullptr;
+            }
+            if (doc.window && m_dock) m_dock->remove_window(doc.window);
+            m_documents.erase(found);
+            m_active_content.clear();
+        }
+        if (m_main_scene == file) m_main_scene.clear();
+        if (is_material_file(file) && m_on_file_selected) m_on_file_selected({});
+        if (m_selected_file == file) m_selected_file.clear();
+        refresh_files();
+    }
+
     std::filesystem::path move_file(const std::filesystem::path& requested, const std::filesystem::path& directory) {
         if (m_can_modify_files && !m_can_modify_files())
             throw std::runtime_error("Pare a execução antes de mover arquivos.");
@@ -201,12 +306,12 @@ public:
 
         auto& window = parent.add_window(
             m_filter == files_view_filter::models_only
-                ? "Arquivos 3D"
-                : "Arquivos",
+                ? tr("Arquivos 3D")
+                : tr("Arquivos"),
             bgui::dock_area::bottom,
             0.3f
         );
-        auto& browser = window.add<frame_layout>(bgui::orientation::horizontal);
+        auto& browser = bgui::panel_content(window).add<frame_layout>(bgui::orientation::horizontal);
         browser.after_update = [this]() { update(); };
         m_root = &browser;
         m_root->style.layout.require_mode(
@@ -307,7 +412,7 @@ public:
         data << "bengine-session-1\n" << bgui::get_global_scale() << '\n' << std::quoted(m_current_directory.string()) << '\n'
              << std::quoted(m_active_document ? m_active_document->path.string() : "") << '\n';
         for (const auto& [file, doc] : m_documents) {
-            if (!doc.window) continue;
+            if (!doc.window && !doc.visual) continue;
             const bool dirty = doc.buffer != doc.original;
             data << std::quoted(file.string()) << ' ' << dirty << ' '
                  << std::quoted(dirty ? doc.buffer : "") << '\n';
@@ -433,6 +538,8 @@ private:
     std::function<void(const std::filesystem::path&)> m_on_file_selected;
     file_moved_callback m_on_file_moved;
     std::function<bool()> m_can_modify_files;
+    std::function<void(const std::filesystem::path&)> m_open_scene;
+    std::function<void(const std::filesystem::path&)> m_check_scene_delete;
     bgui::modal* m_delete_modal{nullptr};
     bgui::modal* m_new_asset_modal{nullptr};
     bool m_import_another_copy{false};
@@ -469,6 +576,7 @@ private:
         bgui::linear* body{nullptr};
         bgui::text* status{nullptr};
         bool opened{false};
+        bool visual{false};
         bgui::inputbox* editor{nullptr};
         bgui::element* rendered{nullptr};
         bool image{false};
@@ -508,7 +616,7 @@ private:
             return;
         m_document_window = &m_dock->add_window("Editor", bgui::dock_area::center, 0.3f);
         m_document_window->set_tabbed(true);
-        auto& root = m_document_window->add<frame_layout>(bgui::orientation::vertical);
+        auto& root = bgui::panel_content(*m_document_window).add<frame_layout>(bgui::orientation::vertical);
         root.after_update = [this]() { update_document_editor(); };
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         root.style.layout.padding = bgui::vec4i{0};
@@ -523,6 +631,7 @@ private:
             bgui::mode::wrap_content
         );
         status_row.style.layout.padding = bgui::vec4i{6, 2, 6, 2};
+        status_row.add<bgui::button>(tr("API Reference"), .28f, []() { open_api_reference(); });
         m_document_status = &status_row.add<bgui::text>("", 0.25f);
         m_document_status->style.layout.require_mode(
             bgui::mode::stretch,
@@ -648,42 +757,7 @@ private:
     }
 
     void render_markdown(document& doc) {
-        std::istringstream lines(doc.buffer);
-        std::string line;
-        bool in_code_block = false;
-        while (std::getline(lines, line)) {
-            std::string display = line;
-            int heading = 0;
-            while (heading < static_cast<int>(line.size()) && heading < 6 && line[heading] == '#') ++heading;
-            if (line.rfind("```", 0) == 0 || line.rfind("~~~", 0) == 0) {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if (in_code_block) {
-                display = "    " + line;
-            } else if (heading && heading < static_cast<int>(line.size()) && line[heading] == ' ') {
-                display = line.substr(static_cast<size_t>(heading + 1));
-            } else if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
-                display = "•  " + line.substr(2);
-            } else if (line.rfind("> ", 0) == 0) {
-                display = "│  " + line.substr(2);
-            } else if (line.size() > 2 && std::isdigit(static_cast<unsigned char>(line[0]))) {
-                const auto marker = line.find(". ");
-                if (marker != std::string::npos) display = "•  " + line.substr(marker + 2);
-            } else if (line == "---" || line == "***" || line == "___") {
-                display = "────────────────────────────────────────";
-            }
-            if (!in_code_block) {
-                display = std::regex_replace(display, std::regex(R"(\[([^\]]+)\]\(([^)]+)\))"), "$1 ($2)");
-                display = std::regex_replace(display, std::regex(R"(`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_)"), "$1$2$3$4$5");
-                display = std::regex_replace(display, std::regex(R"(~~([^~]+)~~)"), "$1");
-            }
-            auto& paragraph = m_document_body->add<bgui::text>(display, heading ? 0.28f + (6 - heading) * 0.035f : 0.28f);
-            paragraph.set_wrap(true);
-            paragraph.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-            if (heading) paragraph.style.visual.text.normal = bgui::color{0.78f, 0.84f, 0.96f, 1.f};
-            m_active_content.push_back(&paragraph);
-        }
+        m_active_content = editor::ui::render_markdown(*m_document_body, doc.buffer);
     }
 
     void update_document_editor() {
@@ -843,16 +917,7 @@ private:
     }
 
     static bool is_scene_file(const std::filesystem::path& path) {
-        auto extension = path.extension().string();
-        std::transform(
-            extension.begin(),
-            extension.end(),
-            extension.begin(),
-            [](const unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            }
-        );
-        return extension == ".world" || extension == ".scene";
+        return scene_files::is_scene(path);
     }
 
     static bool is_project_file(const std::filesystem::path& path) {
@@ -1235,10 +1300,13 @@ private:
             actions.emplace_back("Excluir arquivo...", [this, file]() { confirm_file_delete(file); });
             if (is_model_file(file))
                 actions.emplace_back("Configurar importação 3D...", [this, file]() { show_model_importer(file); });
-            if (is_scene_file(file) && file != m_main_scene)
+            if (is_scene_file(file) && (m_open_scene || file != m_main_scene))
                 actions.emplace_back("Tornar cena principal", [this, file]() {
-                    m_selected_file = file;
-                    set_main_scene();
+                    if (m_open_scene) m_open_scene(file);
+                    else {
+                        m_selected_file = file;
+                        set_main_scene();
+                    }
                 });
         }
         return actions;
@@ -1252,10 +1320,10 @@ private:
         }
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_new_asset_modal = &modal;
-        modal.add<bgui::text>("Nome do novo material", .3f);
+        modal.add<bgui::text>(tr("Nome do novo material"), .3f);
         auto& filename = panel::add_input(modal.content(), "", "Material.bmat", .27f);
         filename.add_class("new-material-name");
-        modal.set_confirmation_text("Criar");
+        modal.set_confirmation_text(tr("Criar"));
         modal.set_on_confirm([this, input = &filename, directory = m_current_directory]() {
             m_new_asset_modal = nullptr;
             try {
@@ -1266,7 +1334,7 @@ private:
                 select_file(created);
             } catch (const std::exception& error) { set_asset_status(error.what()); }
         });
-        modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
+        modal.add<bgui::button>(tr("Cancelar"), .3f, [this, surface = &modal]() {
             m_new_asset_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         });
@@ -1276,7 +1344,7 @@ private:
         if (m_new_asset_modal) return;
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_new_asset_modal = &modal;
-        modal.add<bgui::text>("Nome do novo script Lua", .3f);
+        modal.add<bgui::text>(tr("Nome do novo script Lua"), .3f);
         auto& filename = panel::add_input(modal.content(), m_new_script_name, "Script.lua", .27f);
         filename.add_class("new-script-name");
         std::vector<std::string> template_names;
@@ -1285,7 +1353,7 @@ private:
         preset.add_class("new-script-template");
         preset.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         preset.style.layout.require_height(bgui::mode::pixel, 30.f);
-        modal.set_confirmation_text("Criar");
+        modal.set_confirmation_text(tr("Criar"));
         modal.set_on_confirm([this, input = &filename, choice = &preset]() {
             m_new_asset_modal = nullptr;
             m_new_script_name = input->get_buffer();
@@ -1301,7 +1369,7 @@ private:
             }
             request_refresh();
         });
-        modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
+        modal.add<bgui::button>(tr("Cancelar"), .3f, [this, surface = &modal]() {
             if (m_new_asset_modal == surface) m_new_asset_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         }).add_class("cancel-new-script");
@@ -1316,33 +1384,16 @@ private:
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_delete_modal = &modal;
         modal.add<bgui::text>("Excluir definitivamente “" + file.lexically_relative(m_project_root).generic_string() + "”?", .32f);
-        modal.add<bgui::text>("Esta ação não pode ser desfeita. Alterações não salvas serão descartadas. Referências ao arquivo poderão ficar ausentes.", .27f);
-        modal.set_confirmation_text("Excluir definitivamente");
+        modal.add<bgui::text>(tr("Esta ação não pode ser desfeita. Alterações não salvas serão descartadas. Referências ao arquivo poderão ficar ausentes."), .27f);
+        modal.set_confirmation_text(tr("Excluir definitivamente"));
         modal.set_on_confirm([this, file]() {
             m_delete_modal = nullptr;
             try {
-                if (m_can_modify_files && !m_can_modify_files())
-                    throw std::runtime_error("Pare a execução antes de excluir arquivos.");
-                asset_files::erase(file, m_project_root);
-                if (auto found = m_documents.find(file); found != m_documents.end()) {
-                    auto& doc = found->second;
-                    if (m_active_document == &doc) m_active_document = nullptr;
-                    if (m_document_window == doc.window) {
-                        m_document_window = nullptr;
-                        m_document_body = nullptr;
-                        m_document_status = nullptr;
-                    }
-                    if (doc.window && m_dock) m_dock->remove_window(doc.window);
-                    m_documents.erase(found);
-                    m_active_content.clear();
-                }
-                if (m_main_scene == file) m_main_scene.clear();
-                if (is_material_file(file) && m_on_file_selected) m_on_file_selected({});
-                m_selected_file.clear();
+                delete_file(file);
                 set_asset_status("Arquivo excluído definitivamente.");
             } catch (const std::exception& error) { set_asset_status(error.what()); }
         });
-        modal.add<bgui::button>("Cancelar", .3f, [this, surface = &modal]() {
+        modal.add<bgui::button>(tr("Cancelar"), .3f, [this, surface = &modal]() {
             m_delete_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         }).add_class("cancel-file-delete");

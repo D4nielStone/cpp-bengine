@@ -32,6 +32,16 @@ struct scene_ray_callback : btCollisionWorld::ClosestRayResultCallback {
     std::uint32_t ignored_entity;
 };
 
+struct pair_contact_callback : btCollisionWorld::ContactResultCallback {
+    bool touching{false};
+
+    btScalar addSingleResult(btManifoldPoint& point, const btCollisionObjectWrapper*, int, int,
+        const btCollisionObjectWrapper*, int, int) override {
+        touching |= point.getDistance() <= btScalar(0);
+        return btScalar(0);
+    }
+};
+
 btTransform entity_pose(physics& body, const transform& value, const std::shared_ptr<ecs>& registry, uint32_t id) {
     const auto visual = registry->get<renderer>(id);
     return body.synchronize_transform(value, visual ? visual->m_modelo : nullptr);
@@ -240,11 +250,42 @@ ray_result physics_system::cast_ray(const ray& ray_value) {
 
 ray_result physics_system::cast_scene_ray(const ray& ray_value, float distance,
     const std::shared_ptr<ecs>& registry, std::uint32_t ignored_entity) {
-    if (!dynamic_world) {
-        ensure_world();
-        synchronize_entities(registry);
-    }
+    if (!dynamic_world) setup(registry);
     return cast_ray(ray_value, distance, registry.get(), ignored_entity);
+}
+
+bool physics_system::has_contact(const std::shared_ptr<ecs>& registry, std::uint32_t first,
+    std::uint32_t second, bool second_is_trigger) {
+    if (!registry || first == second) return false;
+    if (!dynamic_world) setup(registry);
+    const auto active_body = [&](std::uint32_t id) -> std::shared_ptr<physics> {
+        const auto found = m_bodies.find(id);
+        if (found == m_bodies.end() || found->second != registry->get<physics>(id) ||
+            !registry->has<transform>(id) || !found->second->collision_enabled ||
+            !found->second->m_rigid_body ||
+            !found->second->m_rigid_body->getBroadphaseHandle())
+            return nullptr;
+        return found->second;
+    };
+    const auto a = active_body(first);
+    const auto b = active_body(second);
+    if (!a || !b || b->trigger != second_is_trigger || (!second_is_trigger && a->trigger))
+        return false;
+
+    // Each Rigidbody wraps its shape in a compound for the local collider pose.
+    // Query the children directly because Bullet can miss contacts between two compounds.
+    const auto place_shape = [](btCollisionObject& query, const physics& body) {
+        query.setCollisionShape(body.collision_shape->getChildShape(0));
+        query.setWorldTransform(body.m_rigid_body->getWorldTransform() *
+            body.collision_shape->getChildTransform(0));
+    };
+    btCollisionObject first_shape;
+    btCollisionObject second_shape;
+    place_shape(first_shape, *a);
+    place_shape(second_shape, *b);
+    pair_contact_callback contact;
+    dynamic_world->contactPairTest(&first_shape, &second_shape, contact);
+    return contact.touching;
 }
 
 ray_result physics_system::cast_ray(const ray& ray_value, float distance, ecs* registry,

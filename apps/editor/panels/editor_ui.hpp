@@ -28,10 +28,14 @@ class checkbox;
 
 namespace editor::ui {
 
+class files_view;
+class scenes_view;
+
 enum class editor_workspace_mode {
     editor,
     model_editing,
-    scene_management
+    scene_management,
+    visual_scripting
 };
 
 class editor_ui final {
@@ -69,6 +73,10 @@ public:
     void set_editor_commands(std::shared_ptr<editor_commands> commands);
     void set_exit_callback(std::function<void()> callback);
     void confirm_exit();
+    void set_project_manager_callback(std::function<void()> callback) { m_project_manager_callback = std::move(callback); }
+    void set_animation_callback(std::function<void()> callback) { m_animation_callback = std::move(callback); }
+    void open_project(const std::string& path);
+    void set_loaded_project_path(const std::string& path);
     void set_editor_context(std::shared_ptr<editor_context> context);
     void set_workspace_mode(editor_workspace_mode mode);
     void set_project_unloading_callback(std::function<bool(std::string&)> callback) {
@@ -85,18 +93,29 @@ public:
         return m_model_panel_manager.add<T>(std::forward<Args>(args)...);
     }
 
+    void setup_scene_management(files_view& files, std::function<void()> scene_loaded);
     void update();
     void reset_ui();
 
 private:
     std::function<void(std::function<void()>)> m_load_dispatcher;
     bool prepare_project_transition(std::string& error);
-    bool dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete);
+    bool dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete,
+        const std::filesystem::path& scene = {});
+    void open_managed_scene(const std::filesystem::path& path);
+    std::filesystem::path project_root() const;
     bgui::dock& m_dock;
     bgui::dock& m_model_dock;
     bgui::dock& m_management_dock;
+    bgui::dock& m_scripting_dock;
     panel_manager m_panel_manager;
     panel_manager m_model_panel_manager;
+    panel_manager m_management_panel_manager;
+    panel_manager m_scripting_panel_manager;
+    scenes_view* m_scenes{};
+    std::function<void()> m_show_scene_workflow, m_show_scripting;
+    files_view* m_files{};
+    std::function<void()> m_scene_loaded;
     std::shared_ptr<editor_context> m_context;
     std::function<bool(std::string&)> m_project_unloading_callback;
     std::shared_ptr<editor_commands> m_commands;
@@ -114,7 +133,7 @@ private:
     bgui::icon* m_play_icon{nullptr};
     bgui::button* m_pause_button{nullptr};
     bgui::icon* m_pause_icon{nullptr};
-    std::array<bgui::icon*, 3> m_workspace_icons{};
+    std::array<bgui::icon*, 4> m_workspace_icons{};
     bgui::text* m_build_status{nullptr};
     bgui::progress_bar* m_build_progress{nullptr};
     bgui::modal* m_build_modal{nullptr};
@@ -146,6 +165,7 @@ private:
     std::filesystem::path m_repository_root;
     std::unique_ptr<build_process> m_build_process;
     std::function<void()> m_exit_callback;
+    std::function<void()> m_project_manager_callback, m_animation_callback;
 
     void create_project_modal(
         const std::string& selected_path,

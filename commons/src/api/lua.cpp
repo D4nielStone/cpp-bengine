@@ -11,6 +11,8 @@
 #include "core/ecs.hpp"
 #include "components/hud.hpp"
 #include "systems/physics_system.hpp"
+#include "components/animation.hpp"
+#include "components/pathfinder.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -30,6 +32,11 @@ void setNamespaces(sol::state& lua) {
 
 namespace commons::api {
 namespace {
+std::shared_ptr<scene_control> script_scenes(sol::this_state state) {
+    const auto owner = sol::state_view(state).registry()["bengine.scene_registry"].get<std::weak_ptr<ecs>>().lock();
+    return owner ? owner->scenes : nullptr;
+}
+
 float vector_length(const bgui::vec3& value) {
     return std::hypot(value.x, value.y, value.z);
 }
@@ -106,13 +113,27 @@ std::shared_ptr<ecs> camera_owner(const camera& value) {
     return owner;
 }
 
+std::shared_ptr<physics_system> script_physics_world(sol::this_state state) {
+    return sol::state_view(state).registry()["bengine.physics_world"]
+        .get<std::weak_ptr<physics_system>>().lock();
+}
+
+bool objects_have_contact(const game_object& a, const sol::object& other,
+    bool second_is_trigger, sol::this_state state) {
+    const auto owner = a.registry.lock();
+    if (!owner || !other.is<game_object>()) return false;
+    const auto b = other.as<game_object>();
+    const auto world = script_physics_world(state);
+    return owner == b.registry.lock() && world &&
+        world->has_contact(owner, a.id, b.id, second_is_trigger);
+}
+
 sol::object trace_camera_ray(camera& value, sol::optional<float> range,
     sol::optional<game_object> ignore, sol::optional<float> x, sol::optional<float> y,
     sol::this_state state) {
     const auto miss = sol::make_object(state, sol::nil);
     const auto owner = camera_owner(value);
-    const auto world = sol::state_view(state).registry()["bengine.physics_world"]
-        .get<std::weak_ptr<physics_system>>().lock();
+    const auto world = script_physics_world(state);
     const float max_distance = range.value_or(300.f);
     if (!owner || !world || !std::isfinite(max_distance) || max_distance <= 0.f ||
         x.has_value() != y.has_value() || (ignore && ignore->registry.lock() != owner))
@@ -147,8 +168,9 @@ void register_types(sol::state& lua) {
         "text", &hud_element::text, "width", &hud_element::width,
         "height", &hud_element::height, "scale", &hud_element::scale,
         "visible", &hud_element::visible, "position", &hud_element::position,
-        "rotation", &hud_element::rotation, "world_scale", &hud_element::world_scale,
-        "depth", &hud_element::depth, "ConsumeClick", &hud_element::consume_click);
+        "absolute", &hud_element::absolute,
+        "SetScreenPosition", &hud_element::set_screen_position,
+        "ConsumeClick", &hud_element::consume_click);
     lua.new_usertype<hud>("HUD", sol::no_constructor,
         "enabled", &hud::enabled, "Add", &hud::add,
         "count", sol::property([](const hud& h) { return h.elements.size(); }),
@@ -187,6 +209,8 @@ void register_types(sol::state& lua) {
         sol::constructors<color(), color(const float&, const float&, const float&, const float&)>(),
         "r", &color::r, "g", &color::g, "b", &color::b, "a", &color::a);
     lua.new_usertype<camera>("Camera", sol::no_constructor,
+        "viewportWidth", sol::property([](const camera& value) { return value.viewport_size().x; }),
+        "viewportHeight", sol::property([](const camera& value) { return value.viewport_size().y; }),
         "traceRay", trace_camera_ray,
         "worldToScreen", [](camera& value, const bgui::vec3& point) -> std::optional<bgui::vec3> {
             return camera_owner(value) ? value.world_to_screen(point) : std::nullopt;
@@ -257,11 +281,32 @@ void register_types(sol::state& lua) {
         "radius", &sound_player::radius,
         "looping", &sound_player::looping,
         "playOnAwake", &sound_player::play_on_awake);
+    lua.new_usertype<pathfinder>("Pathfinder", sol::no_constructor,
+        "Configure", &pathfinder::configure, "FindPath", &pathfinder::find_path, "Clear", &pathfinder::clear,
+        "GetPath", [](const pathfinder& p) { return sol::as_table(p.path()); });
+    lua.new_usertype<animation>("Animation", sol::no_constructor,
+        "Play", [](animation& value, sol::optional<std::string> clip) { return value.play(clip.value_or("")); },
+        "Pause", &animation::pause,
+        "Stop", &animation::stop,
+        "Seek", &animation::seek,
+        "CrossFade", &animation::cross_fade,
+        "SetSpeed", &animation::set_speed,
+        "time", sol::property(&animation::playback_time),
+        "isPlaying", sol::property(&animation::is_playing),
+        "isBlending", sol::property(&animation::is_blending),
+        "speed", sol::property([](const animation& value) { return value.speed; },
+            [](animation& value, double speed) { if (!value.set_speed(speed)) throw sol::error("Animation speed must be between 0 and 100 on a live component."); }));
     lua.new_usertype<game_object>("GameObject", sol::no_constructor,
         "id", sol::readonly(&game_object::id),
         "transform", sol::property(&game_object::get_transform),
         "IsDescendantOf", &game_object::is_descendant_of,
         "SetParent", &game_object::set_parent,
+        "IsCollidingWith", [](const game_object& a, const sol::object& b, sol::this_state state) {
+            return objects_have_contact(a, b, false, state);
+        },
+        "IsOverlappingTrigger", [](const game_object& a, const sol::object& trigger, sol::this_state state) {
+            return objects_have_contact(a, trigger, true, state);
+        },
         "AddHUD", [](const game_object& object) -> std::shared_ptr<hud> {
             auto owner = object.registry.lock();
             if (!owner || !owner->is_alive(object.id)) return nullptr;
@@ -275,6 +320,8 @@ void register_types(sol::state& lua) {
             auto owner = object.registry.lock();
             if (!owner) return sol::make_object(state, sol::nil);
             if (name == "Transform") return sol::make_object(state, object.get_transform());
+            if (name == "Pathfinder") return sol::make_object(state, owner->get<pathfinder>(object.id));
+            if (name == "Animation") return sol::make_object(state, owner->get<animation>(object.id));
             if (name == "HUD") return sol::make_object(state, owner->get<hud>(object.id));
             if (name == "Renderer") return sol::make_object(state, owner->get<renderer>(object.id));
             if (name == "Camera") return sol::make_object(state, owner->get<camera>(object.id));
@@ -319,6 +366,28 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
             if (!found) return sol::nullopt;
             return game_object{owner, *found};
         });
+    lua.registry()["bengine.scene_registry"] = weak_registry;
+    auto scenes = lua.create_named_table("SceneManager");
+    scenes.set_function("LoadScene", +[](const std::string& path, sol::this_state state) {
+        auto control = script_scenes(state);
+        return control && control->load && control->load(path);
+    });
+    scenes.set_function("ReloadScene", +[](sol::this_state state) {
+        auto control = script_scenes(state);
+        return control && control->load && control->load(control->active);
+    });
+    scenes.set_function("GetActiveScene", +[](sol::this_state state) {
+        auto control = script_scenes(state);
+        return control ? control->active : std::string{};
+    });
+    scenes.set_function("GetLastError", +[](sol::this_state state) {
+        auto control = script_scenes(state);
+        return control ? control->last_error : std::string("Scene management is unavailable.");
+    });
+    scenes.set_function("IsLoading", +[](sol::this_state state) {
+        auto control = script_scenes(state);
+        return control && control->loading;
+    });
     lua["gameObject"] = game_object{registry, id};
     lua["transform"] = registry ? registry->get<transform>(id) : nullptr;
     auto bubble = lua["bubble"].get<sol::table>();

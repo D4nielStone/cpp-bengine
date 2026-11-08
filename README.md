@@ -10,6 +10,11 @@
 
 An experimental C++ engine for windowing, rendering, physics, and component-based entities. The project is still under development and provides both runtime and editor applications.
 
+## MCP for AI agents
+
+Use `bengine_mcp` to let a local AI agent inspect a saved project's main scene
+and its entities. See the [MCP setup guide](docs/MCP.md).
+
 ## Portable updates
 
 Open `editor_app` (Linux) or `editor_app.exe` (Windows) from the official
@@ -54,6 +59,12 @@ displays the game camera framebuffer, along with frame time, FPS, CPU render
 time, and draw counts. Press the stop icon in the editor to close the runtime
 window. The **Editor Diagnostics** panel continues to show metrics for the
 editor viewport.
+
+For scene audio, add a **Sound Player** to an entity, set **Audio Clip** to a
+WAV, MP3, FLAC, or Ogg Vorbis file, and enable **Play On Awake**. **Area
+Radius** controls how far the sound can be heard. The runtime uses the game
+camera as the listener by default. Add an enabled **Sound Listener** to hear
+from another entity.
 
 # Dependencies
 

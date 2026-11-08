@@ -263,8 +263,17 @@ TEST(WindowLifetimeTest, RecreatesEngineAndUiShadersAfterContextShutdown) {
             text_shader->bind();
             GLint program{};
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
-            EXPECT_GE(glGetUniformLocation(program, "text_color"), 0);
+            EXPECT_NE(glGetUniformBlockIndex(program, "BguiMaterial"), GL_INVALID_INDEX);
             text_shader->unbind();
+
+            bgui::element widget;
+            widget.style.visual.background.normal = bgui::color{1, 0, 0, 1};
+            widget.compute_style();
+            widget.set_final_rect(0, 0, 16, 16);
+            bgui::draw_data data;
+            data.m_clip_rect = {0, 0, 100, 100};
+            widget.get_requires(&data);
+            bgui::gl3_render(&data);
             EXPECT_EQ(glGetError(), GL_NO_ERROR) << "cycle " << cycle;
         }
         EXPECT_TRUE(commons::shaders.empty());

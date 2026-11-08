@@ -56,7 +56,9 @@ public:
             bgui::get_pressed(bgui::input_key::left_shift) ||
             bgui::get_pressed(bgui::input_key::right_shift);
 
-        const bool editing_text = dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) != nullptr;
+        const auto* focus=bgui::get_keyboard_focus();
+        const bool editing_text = dynamic_cast<const bgui::inputbox*>(focus) != nullptr ||
+            visual_script_has_keyboard_focus();
         if (!editing_text && m_commands && !viewport_input_blocked_by_modal()) {
             const bool undo = z_down && !m_z_was_down && !shift_down;
             const bool redo = (z_down && !m_z_was_down && shift_down) || (y_down && !m_y_was_down);

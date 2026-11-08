@@ -101,7 +101,7 @@ private:
                 !doc["version"].IsInt() || doc["version"].GetInt() != 1)
                 throw std::runtime_error("Invalid editor workflow file: " + path.string());
             if (doc.HasMember("workspace") && doc["workspace"].IsInt() &&
-                doc["workspace"].GetInt() >= 0 && doc["workspace"].GetInt() <= 2)
+                doc["workspace"].GetInt() >= 0 && doc["workspace"].GetInt() <= 3)
                 m_context->workspace_mode = doc["workspace"].GetInt();
             if (doc.HasMember("model_view_mode") && doc["model_view_mode"].IsInt() && doc["model_view_mode"].GetInt()>=0 && doc["model_view_mode"].GetInt()<=2) m_context->model_view_mode=doc["model_view_mode"].GetInt();
             if (doc.HasMember("model_selection") && doc["model_selection"].IsInt() &&

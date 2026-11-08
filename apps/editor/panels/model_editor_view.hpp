@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/localization.hpp"
 
 #include "editable_model_import.hpp"
 #include "mesh_topology_edit.hpp"
@@ -57,12 +58,12 @@ public:
             return;
 
         m_window = &parent.add_window(
-            "Edição do modelo",
+            tr("Edição do modelo"),
             bgui::dock_area::center,
             0.3f
         );
         m_window->add_class("editor-panel");
-        auto& root = m_window->add<model_surface>(*this);
+        auto& root = bgui::panel_content(*m_window).add<model_surface>(*this);
         root.add_class("editor-surface");
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         root.style.layout.padding = bgui::vec4i{0};
@@ -72,11 +73,11 @@ public:
         identity.style.layout.require_height(bgui::mode::pixel, 30.f);
         identity.style.layout.padding = bgui::vec4i{4};
         identity.style.visual.background.normal = bgui::color{.12f, .12f, .12f, 1.f};
-        m_selection_label = &identity.add<bgui::text>("Nenhum objeto selecionado", .30f);
+        m_selection_label = &identity.add<bgui::text>(tr("Nenhum objeto selecionado"), .30f);
         m_selection_label->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
         m_selection_label->set_wrap(false);
         m_selection_label->receives_input(false);
-        m_source_label = &identity.add<bgui::text>("Selecione um objeto na Hierarquia.", .25f);
+        m_source_label = &identity.add<bgui::text>(tr("Selecione um objeto na Hierarquia."), .25f);
         m_source_label->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
         m_source_label->set_wrap(false);
         m_source_label->style.visual.text.normal = bgui::color{.6f, .6f, .6f, 1.f};
@@ -116,22 +117,23 @@ public:
         m_image->add_class("model-editor-preview");
         m_image->add_class("editor-viewport-surface");
         m_image->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
-        m_image->style.visual.background.normal = bgui::color{.055f, .06f, .07f, 1.f};
+        m_image->style.visual.background.normal = bgui::color{.055f, .055f, .055f, 1.f};
         m_image->receives_input(false);
-        m_pick_overlay = &m_window->add<pick_overlay, bgui::layer::overlay>(*this, *m_image);
+        m_pick_overlay = &bgui::panel_content(*m_window).add<pick_overlay, bgui::layer::overlay>(*this, *m_image);
 
-        auto& mesh_window = parent.add_window("Malhas", bgui::dock_area::right, .27f);
+        auto& mesh_window = parent.add_window(tr("Malhas"), bgui::dock_area::right, .27f);
         mesh_window.add_class("editor-panel");
-        auto& tools = mesh_window.add<bgui::linear>(bgui::orientation::vertical);
+        bgui::panel_facade mesh_panel(mesh_window);
+        auto& tools = mesh_panel.content().native();
         tools.add_class("editor-surface");
         tools.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         tools.style.layout.padding = bgui::vec4i{12, 8, 4, 8};
         tools.set_scrollable(true);
-        tools.add<bgui::text>("GEOMETRIA", .28f).receives_input(false);
-        m_mesh_label = &tools.add<bgui::text>("Nenhum modelo", .26f);
+        tools.add<bgui::text>(tr("GEOMETRIA"), .28f).receives_input(false);
+        m_mesh_label = &tools.add<bgui::text>(tr("Nenhum modelo"), .26f);
         m_mesh_label->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         m_mesh_label->receives_input(false);
-        tools.add<bgui::text>("Distância de extrusão", .26f).receives_input(false);
+        tools.add<bgui::text>(tr("Distância de extrusão"), .26f).receives_input(false);
         m_extrude_distance = &tools.add<bgui::inputbox>("0.25", "Distância", .28f);
         m_extrude_distance->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         m_extrude_distance->style.layout.require_height(bgui::mode::pixel, 28.f);
@@ -142,8 +144,8 @@ public:
         actions.style.layout.padding = bgui::vec4i{0};
         auto& undo_button = actions.add<bgui::button>("Desfazer", .28f, [this] { restore_geometry(false); });
         auto& redo_button = actions.add<bgui::button>("Refazer", .28f, [this] { restore_geometry(true); });
-        m_extrude_button = &actions.add<bgui::button>("Extrudar face", .28f, [this] { extrude(); });
-        auto& group_button = actions.add<bgui::button>("Agrupar faces", .28f, [this] {
+        m_extrude_button = &actions.add<bgui::button>(tr("Extrudar face"), .28f, [this] { extrude(); });
+        auto& group_button = actions.add<bgui::button>(tr("Agrupar faces"), .28f, [this] {
             if (m_gizmo.is_dragging() || m_extrusion_before || m_cut_before || !is_native_model(m_source_path) ||
                 m_selected_faces.empty() || m_active_mesh >= m_model.meshes.size()) return;
             auto before = capture_geometry();
@@ -155,20 +157,20 @@ public:
             set_status("Grupo de faces criado. Salve o modelo.");
         });
         m_loop_button = &actions.add<bgui::button>("Loop Cut", .28f, [this] { start_loop_cut(); });
-        auto& save_button = actions.add<bgui::button>("Salvar .bmodel", .28f, [this] { save(); });
+        auto& save_button = actions.add<bgui::button>(tr("Salvar .bmodel"), .28f, [this] { save(); });
         auto& export_button = actions.add<bgui::button>("Extract (Ctrl+E)", .28f, [this] { request_extract(); });
         for (auto* button : {&undo_button, &redo_button, m_extrude_button, &group_button, m_loop_button, &save_button, &export_button}) {
             button->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
             button->style.layout.require_height(bgui::mode::pixel, 30.f);
             button->style.layout.margin = bgui::vec4i{2, 0, 2, 0};
         }
-        tools.add<bgui::text>("NAVEGAÇÃO", .28f).receives_input(false);
+        tools.add<bgui::text>(tr("NAVEGAÇÃO"), .28f).receives_input(false);
         m_navigation_button = &tools.add<bgui::button>("Visão: Normal (O)", .28f, [this] {
             m_context->orbital_view = !m_context->orbital_view;
         });
         m_navigation_button->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
         m_navigation_button->style.layout.require_height(bgui::mode::pixel,30.f);
-        auto& frame = tools.add<bgui::button>("Enquadrar modelo", .28f, [this] {
+        auto& frame = tools.add<bgui::button>(tr("Enquadrar modelo"), .28f, [this] {
             m_frame_preview = true;m_projection_dirty=true;
             mark_preview_dirty();
         });
@@ -180,7 +182,7 @@ public:
         help.receives_input(false);
         m_mesh_controls = &tools.add<bgui::linear>(bgui::orientation::vertical);
         m_mesh_controls->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-        m_status = &root.add<bgui::text>("Selecione um objeto com modelo 3D.", .26f);
+        m_status = &root.add<bgui::text>(tr("Selecione um objeto com modelo 3D."), .26f);
         m_status->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         m_status->receives_input(false);
         m_preview_registry = std::make_shared<commons::ecs>();
@@ -190,7 +192,7 @@ public:
         m_navigation = std::make_unique<camera_movement_system>(m_preview_camera, *m_image, m_navigation_input);
         m_navigation->set_primary_drag_enabled(false);
         m_navigation->setup(m_preview_registry);
-        m_window->add<direction_gizmo, bgui::layer::overlay>(m_preview_camera, *m_image);
+        bgui::panel_content(*m_window).add<direction_gizmo, bgui::layer::overlay>(m_preview_camera, *m_image);
         refresh_mode_buttons();
         refresh_preview();
     }
@@ -314,7 +316,7 @@ public:
             mark_preview_dirty();
             for(std::size_t i=0;i<m_view_buttons.size();++i) {
                 m_view_buttons[i]->style.visual.background.normal=static_cast<int>(i)==m_view_mode
-                    ? bgui::color{.17f,.36f,.58f,1.f}:bgui::color{.12f,.12f,.12f,1.f};
+                    ? bgui::color{.35f,.22f,.49f,1.f}:bgui::color{.12f,.12f,.12f,1.f};
                 m_view_buttons[i]->mark_style_dirty();
             }
         }
@@ -595,7 +597,7 @@ private:
             for (std::size_t i = 0; i < m_model.meshes.size(); ++i) {
                 auto& group = m_mesh_controls->add<bgui::tree>("Malha " + std::to_string(i+1), .28f, i<expansion.size() && expansion[i]);
                 group.add_class("model-mesh-section");
-                group.children().add<bgui::button>("Selecionar malha", .26f, [this, i] {
+                group.children().add<bgui::button>(tr("Selecionar malha"), .26f, [this, i] {
                     if (m_extrusion_before || m_cut_before) return;
                     set_active_mesh(i);
                     m_mode = model_selection_mode::faces;
@@ -1116,7 +1118,7 @@ private:
             auto& background = m_mode_buttons[index]->style.visual.background;
             const bool active = static_cast<std::size_t>(m_mode) == index;
             background.normal = active
-                ? bgui::color{0.17f, 0.36f, 0.58f, 1.f}
+                ? bgui::color{0.35f, 0.22f, 0.49f, 1.f}
                 : bgui::color{0.f, 0.f, 0.f, 0.f};
             background.hover = bgui::color{0.17f, 0.17f, 0.17f, 1.f};
             m_mode_buttons[index]->mark_style_dirty();
@@ -1753,7 +1755,7 @@ private:
                 set_status(error.what());
             }
         });
-        modal.add<bgui::button>("Cancelar", .28f, [surface = &modal] {
+        modal.add<bgui::button>(tr("Cancelar"), .28f, [surface = &modal] {
             bgui::add_function([surface] { bgui::get_layout().remove(surface); });
         });
     }

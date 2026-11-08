@@ -48,7 +48,9 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
     ASSERT_NE(first, nullptr);
     auto* editor = find<editor::ui::lua_inputbox>(*first, [](auto&) { return true; });
     ASSERT_NE(editor, nullptr);
-    EXPECT_EQ(find<bgui::button>(first->get_context(), [](auto&) { return true; }), nullptr);
+    EXPECT_NE(find<bgui::button>(first->get_context(), [](auto& button) {
+        return button.get_label().get_buffer() == editor::ui::tr("API Reference");
+    }), nullptr);
     EXPECT_EQ(editor->processed_x(), first->get_context().processed_x());
     EXPECT_EQ(editor->processed_y(), first->get_context().processed_y());
     EXPECT_EQ(editor->get_parent()->computed_style.layout.padding, bgui::vec4i{0});
@@ -84,7 +86,7 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
 TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
     bgui::scoped_interface ui_scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
-    dock.add_window("Arquivos", bgui::dock_area::bottom, .3f);
+    dock.add_window(editor::ui::tr("Arquivos"), bgui::dock_area::bottom, .3f);
     editor::ui::debug_view debug;
     auto& log = commons::script_log::instance();
     log.clear();
@@ -94,7 +96,7 @@ TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
     EXPECT_TRUE(window->has_class("editor-surface"));
     auto config = dock.get_configuration();
     ASSERT_EQ(config.tab_groups.size(), 1u);
-    EXPECT_EQ(config.tab_groups.front().windows, (std::vector<std::string>{"Arquivos", "Debug"}));
+    EXPECT_EQ(config.tab_groups.front().windows, (std::vector<std::string>{editor::ui::tr("Arquivos"), "Debug"}));
     config.tab_groups.front().active = "Debug";
     dock.apply_configuration(config);
     log.write(12, "script message");
@@ -112,7 +114,7 @@ TEST(EditorDocuments, DebugSharesFilesTabAndDisplaysScriptHistory) {
         return text.get_buffer() == "1 registro";
     }), nullptr);
     auto* clear = find<bgui::button>(dock, [](auto& button) {
-        return button.get_label().get_buffer() == "Limpar";
+        return button.get_label().get_buffer() == editor::ui::tr("Limpar");
     });
     ASSERT_NE(clear, nullptr);
     clear->on_released();
@@ -178,7 +180,7 @@ TEST(EditorDocuments, SessionRestoresOpenFilesDirtyBuffersAndScale) {
         EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .35f);
         const auto restored = dock.get_configuration();
         const auto floating = std::find_if(restored.windows.begin(), restored.windows.end(),
-            [](const auto& window) { return window.title == "Arquivos"; });
+            [](const auto& window) { return window.title == editor::ui::tr("Arquivos"); });
         ASSERT_NE(floating, restored.windows.end());
         EXPECT_TRUE(floating->floating);
         EXPECT_NE(find<bgui::window>(dock, [](auto& value) {

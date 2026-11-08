@@ -42,7 +42,7 @@ montados dinamicamente pelo script.
   arbitrários.
 - Não existe binding Lua genérico para criar entidade, adicionar componentes,
   instanciar prefab ou enumerar todas as entidades.
-- Não existe API de desenho de HUD/interface de jogo.
+- A [API de HUD](../HUD.md) oferece widgets de layout, texto e botão.
 - `SoundPlayer` permite editar propriedades, mas não iniciar/interromper áudio
   por Lua.
 - Os componentes `Text`, `Image` e `Terrain` não estão entre os nomes aceitos

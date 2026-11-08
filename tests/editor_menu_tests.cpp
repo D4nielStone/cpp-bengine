@@ -2,6 +2,7 @@
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include "editor_ui.hpp"
+#include "files_view.hpp"
 #include "game_view.hpp"
 #include "components_view.hpp"
 #include "undo_redo_shortcuts_system.hpp"
@@ -143,7 +144,7 @@ TEST_F(EditorMenuTest, WorkspaceModeSelectsItsOwnDock) {
             EXPECT_FLOAT_EQ(button->style.visual.background.normal->a, 0.f);
         }
     }
-    EXPECT_EQ(workspace_button_count, 3u);
+    EXPECT_EQ(workspace_button_count, 4u);
 
     EXPECT_TRUE(dock.is_enabled());
     EXPECT_FALSE(model_dock.is_enabled());
@@ -279,6 +280,28 @@ TEST(GameViewTest, PreviewsRuntimeCameraWhileTheRuntimeIsRunning) {
     EXPECT_FALSE(panel.needs_camera_render(game_camera.id));
 }
 
+TEST(GameViewTest, ClosingDockedGamePanelStopsUpdates) {
+    bgui::scoped_interface ui_scope;
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::game_view panel(context);
+    panel.build(dock);
+    auto* window = find<bgui::window>(dock, [](auto& value) {
+        return value.get_title().get_buffer() == "Game";
+    });
+    ASSERT_NE(window, nullptr);
+    ASSERT_TRUE(panel.needs_camera_render(camera.id));
+
+    bgui::on_update();
+    ASSERT_TRUE(dock.remove_window(window));
+    panel.update();
+    bgui::on_update();
+    EXPECT_FALSE(panel.needs_camera_render(camera.id));
+}
+
 TEST_F(EditorMenuTest, UnsavedProjectRequiresConfirmationAndCancelKeepsEditorOpen) {
     bool exited = false;
     editor.set_exit_callback([&]() { exited = true; });
@@ -294,7 +317,7 @@ TEST_F(EditorMenuTest, UnsavedProjectRequiresConfirmationAndCancelKeepsEditorOpe
 TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
     dock.add_window("Scene", bgui::dock_area::left);
     dock.add_window("Hierarchy", bgui::dock_area::center);
-    dock.add_window("Arquivos", bgui::dock_area::right);
+    dock.add_window(editor::ui::tr("Arquivos"), bgui::dock_area::right);
     dock.add_window("Debug", bgui::dock_area::right);
     click("Layout: Wide Scene");
     auto configuration = dock.get_configuration();
@@ -304,10 +327,10 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
         EXPECT_FALSE(window.floating);
         if (window.title == "Scene") EXPECT_EQ(window.area, bgui::dock_area::center);
         if (window.title == "Hierarchy") EXPECT_EQ(window.area, bgui::dock_area::left);
-        if (window.title == "Arquivos") EXPECT_EQ(window.area, bgui::dock_area::bottom);
+        if (window.title == editor::ui::tr("Arquivos")) EXPECT_EQ(window.area, bgui::dock_area::bottom);
     }
     ASSERT_EQ(configuration.tab_groups.size(), 1u);
-    EXPECT_EQ(configuration.tab_groups.front().windows, (std::vector<std::string>{"Arquivos", "Debug"}));
+    EXPECT_EQ(configuration.tab_groups.front().windows, (std::vector<std::string>{editor::ui::tr("Arquivos"), "Debug"}));
     click("Layout: Standard");
     EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .24f);
 }
@@ -641,7 +664,7 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
     auto context = std::make_shared<editor::ui::editor_context>(registry);
     context->editor_camera_entity = entity.id;
     context->selected_entity = entity.id;
-    context->workspace_mode = 2;
+    context->workspace_mode = 3;
     context->model_selection = 3;
     context->model_view_mode = 2;
     context->orbital_view = true;
@@ -661,7 +684,7 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
     camera->config.atmosphere_zenith = {};
     ASSERT_TRUE(workspace.load_workspace(files, error)) << error;
     EXPECT_EQ(context->selected_entity, entity.id);
-    EXPECT_EQ(context->workspace_mode, 2);
+    EXPECT_EQ(context->workspace_mode, 3);
     EXPECT_EQ(context->model_selection, 3);
     EXPECT_EQ(context->model_view_mode, 2);
     EXPECT_TRUE(context->orbital_view);
@@ -1175,6 +1198,9 @@ TEST(HudEditor, RightClickAddsWidgetToGameCamera) {
     bgui::on_update();
     auto* option=find<bgui::button>(bgui::get_layout(),[](auto& button){return button.get_label().get_buffer()=="Add text";});
     ASSERT_NE(option,nullptr);
+    EXPECT_EQ(find<bgui::button>(bgui::get_layout(), [](auto& button) {
+        return button.get_label().get_buffer() == "Add 3D text";
+    }), nullptr);
     option->on_pressed(); option->on_released(); bgui::on_update(); bgui::on_update();
     auto widget=context->selected_hud_widget.lock(); ASSERT_NE(widget,nullptr);
     EXPECT_EQ(widget->kind,"text"); EXPECT_TRUE(widget->absolute);
@@ -1210,4 +1236,206 @@ TEST_F(EditorMenuTest, UnifiesOnlyIdenticalSceneMaterialsAndKeepsEditsIndependen
     EXPECT_NE(&first.material_configuration(), &duplicate.material_configuration());
     EXPECT_EQ(first.material_configuration().textures.at("tex_albedo").filtering,
         commons::texture_filter::original);
+}
+
+TEST(EditorSceneManagement, CreatesOpensAndDeletesScenesThroughTheWorkspace) {
+    namespace fs = std::filesystem;
+    const auto folder = fs::temp_directory_path() / ("bengine-scene-workspace-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(folder);
+    struct cleanup_folder {
+        fs::path path;
+        ~cleanup_folder() { std::error_code ignored; fs::remove_all(path, ignored); }
+    } cleanup{folder};
+
+    bgui::scoped_interface ui;
+    bgui::get_context().m_size = {1200, 800};
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(1);
+    registry->add<commons::camera>(camera);
+    registry->create(22);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    const auto project = folder / "project.bengine";
+    std::string error;
+    ASSERT_TRUE(persistence.save(project.string(), error)) << error;
+    const auto initial_scene = persistence.active_scene();
+
+    auto& root = bgui::get_layout();
+    auto& menu = root.add<bgui::menu_bar>(root);
+    auto& side = root.add<bgui::linear>();
+    auto& dock = root.add<bgui::dock>();
+    auto& models = root.add<bgui::dock>();
+    auto& management = root.add<bgui::dock>();
+    editor::ui::ui_persistence_system layout;
+    editor::ui::editor_ui editor(dock, models, management, menu, side, layout, persistence,
+        registry, project.string(), folder);
+    auto& files = editor.add_panel<editor::ui::files_view>(project);
+    int scene_changes = 0;
+    editor.setup_scene_management(files, [&] { ++scene_changes; });
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::scene_management);
+    bgui::on_update();
+
+    auto* name = find<bgui::inputbox>(management, [](auto& input) {
+        return input.has_class("scene-file-name");
+    });
+    ASSERT_NE(name, nullptr);
+    name->set_buffer("Level 2");
+    const auto click = [](bgui::element& scope, const std::string& label) {
+        auto* button = find<bgui::button>(scope, [&](auto& item) {
+            return item.get_label().get_buffer() == label;
+        });
+        ASSERT_NE(button, nullptr) << label;
+        button->on_pressed();
+        button->on_released();
+        bgui::on_update();
+    };
+    click(management, "Criar cena");
+    ASSERT_TRUE(fs::exists(folder / "Level 2.scene"));
+    click(management, "Abrir e tornar inicial");
+    EXPECT_EQ(persistence.active_scene(), folder / "Level 2.scene");
+    EXPECT_EQ(scene_changes, 1);
+    EXPECT_FALSE(registry->is_alive(22));
+
+    click(management, "Excluir...");
+    EXPECT_TRUE(fs::exists(initial_scene));
+    click(root, editor::ui::tr("Cancelar"));
+    EXPECT_TRUE(fs::exists(initial_scene));
+    click(management, "Excluir...");
+    click(root, "Excluir definitivamente");
+    EXPECT_FALSE(fs::exists(initial_scene));
+    EXPECT_TRUE(fs::exists(persistence.active_scene()));
+}
+
+TEST(EditorProjectManagerTest, MainManagerCallbackPreservesUnsavedProjectGuard) {
+    bgui::scoped_interface scope;
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create();
+    registry->add<commons::camera>(camera);
+    editor::ui::project_persistence_system project(registry, camera.id);
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("bengine-manager-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    const auto path = directory / "project.bengine";
+    std::string error;
+    ASSERT_TRUE(project.save(path.string(), error)) << error;
+    auto& root = bgui::get_layout().add<bgui::linear>();
+    auto& menu = root.add<bgui::menu_bar>(root);
+    auto& side = root.add<bgui::linear>();
+    auto& dock = root.add<bgui::dock>();
+    auto& model = root.add<bgui::dock>();
+    auto& management = root.add<bgui::dock>();
+    editor::ui::ui_persistence_system ui_persistence;
+    editor::ui::editor_ui ui(dock, model, management, menu, side, ui_persistence,
+        project, registry, path.string(), {});
+    int opened = 0;
+    ui.set_project_manager_callback([&] { ++opened; });
+    auto* button = find<bgui::button>(root, [](auto& item) {
+        return item.get_label().get_buffer() == "Project Manager";
+    });
+    ASSERT_NE(button, nullptr);
+    button->on_released();
+    bgui::on_update();
+    EXPECT_EQ(opened, 1);
+    auto entity = registry->create();
+    registry->get<commons::transform>(entity.id)->position.x = 2;
+    button->on_released();
+    bgui::on_update();
+    EXPECT_EQ(opened, 1);
+    std::filesystem::remove_all(directory);
+}
+
+TEST_F(EditorMenuTest, DedicatedScriptingModeKeepsScenePanelsSeparateAndUsesSidebarButton) {
+    const auto folder=std::filesystem::temp_directory_path()/("bengine-scripting-mode-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(folder);std::ofstream(folder/"logic.lua")<<"function update()\nend\n";
+    editor.set_loaded_project_path((folder/"project.bengine").string());
+    auto& files=editor.add_panel<editor::ui::files_view>(folder);editor.setup_scene_management(files,[]{});
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::scene_management);bgui::on_update();
+    EXPECT_NE(find<bgui::window>(management_dock,[](auto& w){return w.get_title().get_buffer()=="Conexões entre cenas";}),nullptr);
+    EXPECT_EQ(find<bgui::window>(management_dock,[](auto& w){return w.get_title().get_buffer()=="Script em blocos" || w.get_title().get_buffer()=="Scripts do projeto";}),nullptr);
+    auto* scripting=find<bgui::dock>(root,[](auto& d){return d.id=="visual-scripting-workspace";});ASSERT_TRUE(scripting);
+    auto* button=find<bgui::button>(side_bar,[](auto& b){return b.id=="workspace-mode-3";});ASSERT_TRUE(button);
+    button->on_pressed();button->on_released();bgui::on_update();bgui::on_update();
+    EXPECT_TRUE(scripting->is_enabled());EXPECT_FALSE(management_dock.is_enabled());EXPECT_EQ(context->workspace_mode,3);
+    EXPECT_NE(find<bgui::window>(*scripting,[](auto& w){return w.get_title().get_buffer()=="Script em blocos";}),nullptr);
+    EXPECT_EQ(find<bgui::window>(*scripting,[](auto& w){return w.get_title().get_buffer()=="Conexões entre cenas";}),nullptr);
+    std::filesystem::remove_all(folder);
+}
+
+#include "opengl_test_support.hpp"
+#include "os/window.hpp"
+#include "systems/ui_system.hpp"
+#include <bgui_backend_gl3.hpp>
+#include <bgui_backend_glfw.hpp>
+TEST(EditorScriptingNative, RendersDedicatedWorkspaceAndOneFullSizedDragCard) {
+    if(!test_support::supports_opengl33()) GTEST_SKIP()<<"OpenGL 3.3 unavailable";
+    const auto folder=std::filesystem::temp_directory_path()/("bengine-native-scripting-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder/"movement.lua")<<"function setup()\n Debug.Log(\"Pronto\")\nend\nfunction update()\n gameObject.transform:Translate(Vector3(1, 0, 0))\n if Input.GetKey(\"Space\") then\n  SceneManager.LoadScene(\"next.scene\")\n end\nend\n";
+    std::ofstream(folder/"main.scene")<<R"({"entities":[{"components":{"code":{"directory":"movement.lua"}}}]})";
+    std::ofstream(folder/"next.scene")<<R"({"entities":[]})";
+    commons::window window("Bubble Engine - Visual scripting",1600,1000);window.add<commons::ui_system>();
+    auto registry=std::make_shared<commons::ecs>();auto context=std::make_shared<editor::ui::editor_context>(registry);
+    editor::ui::project_persistence_system persistence(registry,0);editor::ui::ui_persistence_system layout;
+    auto& root=bgui::get_layout().add<bgui::linear>(bgui::orientation::horizontal);
+    root.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::match_parent);
+    auto& side=root.add<bgui::linear>(bgui::orientation::vertical);side.style.layout.require_mode(bgui::mode::pixel,bgui::mode::match_parent);side.style.layout.require_width(bgui::mode::pixel,44);
+    auto& center=root.add<bgui::linear>(bgui::orientation::vertical);center.style.layout.require_mode(bgui::mode::stretch,bgui::mode::match_parent);
+    auto& menu=center.add<bgui::menu_bar>(root);auto& dock=center.add<bgui::dock>();auto& models=center.add<bgui::dock>();auto& scenes=center.add<bgui::dock>();
+    for(auto* surface:{&dock,&models,&scenes}) surface->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::match_parent);
+    editor::ui::editor_ui editor(dock,models,scenes,menu,side,layout,persistence,registry,(folder/"project.bengine").string(),{});
+    editor.set_editor_context(context);
+    auto& files=editor.add_panel<editor::ui::files_view>(folder);editor.setup_scene_management(files,[]{});
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::visual_scripting);
+    auto* scripting=find<bgui::dock>(center,[](auto& d){return d.id=="visual-scripting-workspace";});ASSERT_TRUE(scripting);
+    const auto frame=[&](bool native=true) {
+        if(native) bgui::glfw_update(bgui::get_context());bgui::load_font_queue();editor.update();bgui::on_update();
+        glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,1600,1000);glDisable(GL_FRAMEBUFFER_SRGB);bgui::gl3_clear();bgui::gl3_render(bgui::get_draw_data());
+    };
+    const auto capture=[&](const char* name) {
+        if(const auto* directory=std::getenv("BENGINE_SCRIPTING_SCREENSHOTS")) {
+            std::filesystem::create_directories(directory);
+            std::vector<unsigned char> pixels(1600*1000*3);glReadPixels(0,0,1600,1000,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+            std::ofstream output(std::filesystem::path(directory)/(std::string(name)+".ppm"),std::ios::binary);output<<"P6\n1600 1000\n255\n";
+            for(int y=999;y>=0;--y) output.write(reinterpret_cast<const char*>(pixels.data()+y*1600*3),1600*3);
+        }
+    };
+    frame();frame();
+    auto* script=find<bgui::button>(*scripting,[](auto& b){return b.get_label().get_buffer()=="movement.lua";});ASSERT_TRUE(script);
+    script->on_pressed();script->on_released();frame();frame();
+    auto* categories=find<bgui::linear>(*scripting,[](auto& e){return e.type=="visual-script-categories";});ASSERT_TRUE(categories);
+    auto* palette=find<bgui::linear>(*scripting,[](auto& e){return e.type=="visual-script-palette";});ASSERT_TRUE(palette);
+    auto* tree=find<bgui::linear>(*scripting,[](auto& e){return e.type=="visual-script-tree";});ASSERT_TRUE(tree);
+    EXPECT_GT(palette->processed_x(),categories->processed_x());EXPECT_GT(tree->processed_x(),palette->processed_x());
+    EXPECT_GT(tree->processed_width(),600);EXPECT_GT(tree->processed_height(),500);
+    EXPECT_FALSE(scenes.is_enabled());capture("03-scripting-workspace");
+    auto* mover=find<bgui::button>(*scripting,[](auto& b){return b.get_label().get_buffer()==":: Mover";});ASSERT_TRUE(mover);
+    auto& io=bgui::get_context();io.m_mouse_position={mover->processed_x()+30,mover->processed_y()+10};mover->on_pressed();
+    io.m_mouse_position={1250,430};mover->set_drag({100,100});
+    io.m_input_map[bgui::input_key::mouse_left]=bgui::input_action::press;io.m_last_mouse_left=true;
+    frame(false);frame(false);
+    auto* preview=find<bgui::element>(bgui::get_layout(),[](auto& e){return e.type=="visual-block-drag-preview";});ASSERT_TRUE(preview);
+    EXPECT_TRUE(preview->is_enabled());EXPECT_GT(preview->processed_width(),300);EXPECT_GT(preview->processed_height(),60);
+    bgui::draw_data data;data.m_clip_rect={0,0,1600,1000};preview->get_requires(&data);int cards=0;
+    while(!data.m_quad_requires.empty()) {
+        const auto r=data.m_quad_requires.front().m_rect;data.m_quad_requires.pop();
+        if(int(r.z)==preview->processed_width() && int(r.w)==preview->processed_height()) ++cards;
+    }
+    EXPECT_EQ(cards,1);capture("04-drag-preview");
+    io.m_mouse_position={-100,-100};mover->on_released();io.m_input_map[bgui::input_key::mouse_left]=bgui::input_action::release;frame(false);
+    EXPECT_FALSE(preview->is_enabled());
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::scene_management);frame();frame();
+    EXPECT_TRUE(scenes.is_enabled());EXPECT_FALSE(scripting->is_enabled());capture("05-scenes-only");
+    auto* graph=find<bgui::element>(scenes,[](auto& e){return e.type=="scene-connection-canvas";});ASSERT_TRUE(graph);
+    EXPECT_EQ(find<bgui::window>(scenes,[](auto& w){return w.get_title().get_buffer()=="Script em blocos";}),nullptr);
+    auto* node=find<bgui::button>(*graph,[](auto& b){return b.get_label().get_buffer()=="main.scene";});ASSERT_TRUE(node);
+    node->on_pressed();node->on_released();frame();frame();
+    auto* link=find<bgui::button>(scenes,[](auto& b){return b.get_label().get_buffer()=="Script: movement.lua";});ASSERT_TRUE(link);
+    link->on_pressed();link->on_released();frame();frame();
+    EXPECT_TRUE(scripting->is_enabled());EXPECT_EQ(context->workspace_mode,3);capture("06-return-to-script");
+    auto* properties=find<bgui::button>(*categories,[](auto& b){return b.get_label().get_buffer()=="Propriedades";});ASSERT_TRUE(properties);
+    properties->on_pressed();properties->on_released();frame();frame();capture("07-properties");
+    auto* events=find<bgui::button>(*categories,[](auto& b){return b.get_label().get_buffer()=="Eventos";});ASSERT_TRUE(events);
+    events->on_pressed();events->on_released();frame();frame();capture("08-events");
+    EXPECT_EQ(glGetError(),GL_NO_ERROR);
+    std::filesystem::remove_all(folder);
 }

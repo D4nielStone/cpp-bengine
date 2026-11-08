@@ -216,6 +216,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME release_packaging
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_tests.py)
 endif()
+if(Python3_Interpreter_FOUND AND TARGET bengine_mcp)
+    add_test(NAME mcp_server
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mcp_server_tests.py
+            $<TARGET_FILE:bengine_mcp>)
+endif()
 if(Python3_Interpreter_FOUND AND UNIX)
     add_test(NAME platform_build_scripts
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/platform_build_tests.py)
@@ -275,3 +280,32 @@ gtest_discover_tests(editor_core_tests)
 add_executable(editor_api_tests editor_api_tests.cpp)
 target_link_libraries(editor_api_tests PRIVATE GTest::gtest_main editor_services commons)
 gtest_discover_tests(editor_api_tests)
+
+add_executable(animation_tests animation_tests.cpp)
+target_include_directories(animation_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels
+    ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(animation_tests PRIVATE GTest::gtest_main project_persistence)
+gtest_discover_tests(animation_tests)
+
+add_executable(localization_tests localization_tests.cpp)
+target_include_directories(localization_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor/panels)
+target_link_libraries(localization_tests PRIVATE GTest::gtest_main project_persistence)
+target_compile_definitions(localization_tests PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(localization_tests)
+
+add_executable(navigation_scene_tests navigation_scene_tests.cpp)
+target_link_libraries(navigation_scene_tests PRIVATE GTest::gtest_main project_persistence)
+gtest_discover_tests(navigation_scene_tests)
+
+add_executable(visual_script_tests visual_script_tests.cpp)
+target_link_libraries(visual_script_tests PRIVATE GTest::gtest_main editor_services project_persistence)
+gtest_discover_tests(visual_script_tests)
+
+add_executable(scene_workflow_tests scene_workflow_tests.cpp)
+target_include_directories(scene_workflow_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels ${CMAKE_SOURCE_DIR}/apps/editor/systems)
+target_link_libraries(scene_workflow_tests PRIVATE GTest::gtest_main editor_services project_persistence)
+gtest_discover_tests(scene_workflow_tests)

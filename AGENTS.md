@@ -23,8 +23,11 @@ Repository Structure
 - "commons/": reusable engine components, rendering, ECS, resources and runtime functionality.
 - "apps/editor/": native editor, panels, tools and editor systems.
 - "apps/project/": project and scene persistence shared by the editor and standalone runtime.
-- "apps/": executable applications.
-- "external/cpp-bgui/": GUI framework.
+- "apps/": editor, standalone runtime and optional local MCP server.
+- "apps/editor/core/" and "apps/editor/services/": editor state, commands and services.
+- "apps/mcp/": local MCP tools; keep protocol handling separate from UI and engine state.
+- "docs/": feature guides, API contracts and stabilization evidence.
+- "external/cpp-bgui/": maintained BGUI submodule; follow its own AGENTS.md for changes.
 - "tests/": automated tests.
 - The editor's project creation system provides empty and FPP templates; no sample game assets are bundled.
 
@@ -41,7 +44,8 @@ Architecture Rules
 7. Avoid unnecessary dependencies between modules.
 8. Respect existing namespaces and naming conventions.
 9. Do not replace established systems with unrelated architectures.
-10. Do not modify third-party dependencies unless absolutely necessary.
+10. Do not modify third-party dependencies unless absolutely necessary. BGUI is a maintained submodule: requested BGUI work belongs there, without modifying unrelated dependencies.
+11. Inspect git status in both the engine and affected submodules before editing. Preserve existing uncommitted work and do not reset or stage unrelated changes.
 
 C++ Requirements
 
@@ -65,6 +69,10 @@ ECS Requirements
 - Handle entity deletion and component removal safely.
 - Avoid invalidating active iterators during system updates.
 - Do not duplicate component state without a synchronization strategy.
+- Property animations use commons::animation components referencing reusable .banim animation_clip assets, with playback in animation_system. Keep curves out of scene component records. Expose custom channels through component's optional animation-property methods; validate setters and use stable property names. Never implement playback by reloading serialized components/assets each frame.
+- The animation editor records property changes automatically while Record is enabled; do not add prospective property/channel pickers or manual capture workflows. Keep previews and undo/redo out of automatic recording.
+- Retain dirty animation assets after entity deletion or reassignment, and detect conflicting disk edits before overwriting files.
+- Preserve animation tracks during save/load and entity copy/paste. Resolve live targets on each sample and verify component identity for undo/redo.
 - Preserve serialization compatibility whenever possible.
 
 Rendering Requirements
@@ -80,6 +88,10 @@ Rendering Requirements
 BGUI and Editor Requirements
 
 - Reuse existing BGUI widgets and layout systems.
+- Prefer bgui::panel_facade (panel_facade.hpp) for new custom dock panels and bgui::panel_content for composing existing layouts. Use native() and add<T>() for specialized widgets instead of adding a second UI system.
+- The facade borrows widgets; the BGUI tree owns them. Do not retain facade views or widget references after removing their window or replacing the root layout.
+- Keep editor_panel/panel_manager responsible for editor lifecycle and editor commands/history responsible for edits. The BGUI facade must remain independent of ECS, project state and undo.
+- See docs/EDITOR_PANELS.md and external/cpp-bgui/docs/PANEL_FACADE.md for extension examples.
 - Preserve docking, floating windows and panel modularity.
 - Avoid hardcoded screen coordinates when layout information is available.
 - Prevent intermediate inconsistent layout states.
@@ -97,12 +109,14 @@ Project Persistence
 - Maintain compatibility with existing project formats when possible.
 - Add regression tests for serialization changes.
 - Never silently discard user data.
+- Startup resumes the last successfully opened available project. Keep the menubar Project Manager connected to the main manager and preserve unsaved-change guards and workspace saving. Never nest the native window loop to show it.
 
 Lua API
 
 - Use the current project-loading architecture.
 - Inspect existing Lua bindings before adding new ones.
-- Maintain consistency with the example projects.
+- Every API change (addition, removal, signature, type, default, lifetime or behavior) must update docs/LUA_API.md, the relevant docs/lua-api guides and examples, the in-editor API reference/completion, visual scripting command catalog and argument fields, and affected Empty/FPP templates in the same change. Add regression coverage for the binding and visual representation; document intentional compatibility limits. Never expose visual commands for APIs absent from the runtime, or setters for read-only properties.
+- Maintain consistency with the generated Empty/FPP templates and docs/lua-api examples; inspect the current templates rather than assuming bundled sample assets exist.
 - Validate entity and component references exposed to Lua.
 - Report script errors without crashing the editor.
 - Preserve existing scripts unless an API migration is explicitly requested.
@@ -115,6 +129,8 @@ Build System
 - Preserve supported toolchains.
 - Validate build changes with a clean configuration.
 - Keep editor and runtime builds reproducible.
+- Use scripts/build.sh <build-dir> --test for the integrated build and CTest suite. Check current CMake options before using reduced builds; BGUI also supports standalone headless tests.
+- For BGUI changes made here, record evidence and validation limits in docs/STABILIZATION.md.
 
 Testing and Validation
 

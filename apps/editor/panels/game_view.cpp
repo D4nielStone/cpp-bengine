@@ -1,3 +1,4 @@
+#include "../core/localization.hpp"
 #include "ui/hud_view.hpp"
 #define GLFW_INCLUDE_NONE
 #include <glad.h>
@@ -8,7 +9,6 @@
 
 #include "components/camera.hpp"
 #include "render_viewport.hpp"
-#include <glm/gtx/euler_angles.hpp>
 
 #include <elem/image.hpp>
 #include <elem/text.hpp>
@@ -214,8 +214,8 @@ public:
             context_actions actions;
             const auto id = state->camera_entity;
             const auto camera = std::weak_ptr<commons::camera>(state->camera);
-            for (const std::string kind : {"text", "button", "row", "column", "text3d"}) {
-                actions.emplace_back(kind == "text3d" ? "Add 3D text" : "Add " + kind, [ctx, kind, mouse, r, id, camera] {
+            for (const std::string kind : {"text", "button", "row", "column"}) {
+                actions.emplace_back("Add " + kind, [ctx, kind, mouse, r, id, camera] {
                     const auto owner = camera.lock();
                     if (ctx->is_playing || !owner || ctx->registry->get<commons::camera>(id) != owner)
                         return;
@@ -230,19 +230,8 @@ public:
                     widget->absolute = true;
                     widget->width = 160;
                     widget->height = 40;
-                    if (kind == "text3d") {
-                        widget->text = "3D Text";
-                        widget->depth = .05f;
-                        const auto camera_to_world = glm::inverse(owner->getViewMatrix());
-                        const auto point = camera_to_world * glm::vec4(-.35f, 0.f, -3.f, 1.f);
-                        widget->position = {point.x, point.y, point.z};
-                        float x, y, z;
-                        glm::extractEulerAngleXYZ(camera_to_world, x, y, z);
-                        widget->rotation = {glm::degrees(x), glm::degrees(y), glm::degrees(z)};
-                    } else {
-                        const float unit = bgui::get_global_scale();
-                        widget->position = {(mouse.x-r.x)/unit, (mouse.y-r.y)/unit, 0};
-                    }
+                    const float unit = bgui::get_global_scale();
+                    widget->position = {(mouse.x-r.x)/unit, (mouse.y-r.y)/unit, 0};
                     ctx->record_action([hud, widget] { std::erase(hud->elements, widget); }, [hud, widget] {
                         if (hud->elements.size() < 1024 && std::none_of(hud->elements.begin(), hud->elements.end(),
                             [&](const auto& element) { return element->id == widget->id; }))
@@ -321,18 +310,23 @@ private:
 }
 
 game_view::game_view(std::shared_ptr<editor_context> context)
-    : m_state(std::make_shared<game_view_state>()) {
-    if (!context || !context->registry)
+    : m_context(std::move(context)) {
+    if (!m_context || !m_context->registry)
         throw std::invalid_argument("game_view requires an editor context");
-    m_state->context = std::move(context);
 }
 
 void game_view::build(bgui::dock& dock) {
-    auto& window = dock.add_window("Game", bgui::dock_area::center, 0.3f);
-    window.add_class("editor-panel");
-    m_state->window = &window;
+    auto state = std::make_shared<game_view_state>();
+    state->context = m_context;
+    m_state = state;
 
-    auto& content = window.add<bgui::linear>(bgui::orientation::vertical);
+    auto& window = dock.add_window(tr("Game"), bgui::dock_area::center, 0.3f);
+    window.add_class("editor-panel");
+    state->window = &window;
+
+    bgui::panel_facade facade(window);
+    auto& content = facade.content().native();
+    content.set_scrollable(false);
     content.add_class("editor-surface");
     content.style.layout.require_mode(
         bgui::mode::match_parent,
@@ -347,34 +341,35 @@ void game_view::build(bgui::dock& dock) {
         bgui::mode::match_parent,
         bgui::mode::stretch
     );
-    m_state->image = &image;
-    m_state->status = &content.add<bgui::text>(
-        "Waiting for a game camera.",
+    state->image = &image;
+    state->status = &content.add<bgui::text>(
+        tr("Waiting for a game camera."),
         0.27f
     );
-    m_state->status->add_class("project-manager-muted");
+    state->status->add_class("project-manager-muted");
 
-    const auto weak = std::weak_ptr<game_view_state>(m_state);
+    content.add<game_view_driver, bgui::layer::overlay>(state);
+    const auto weak = std::weak_ptr<game_view_state>(state);
     auto& hud = content.add<commons::hud_view, bgui::layer::overlay>(
-        m_state->context->registry, nullptr, image,
+        state->context->registry, nullptr, image,
         [weak] { auto s = weak.lock(); return s && s->window->is_enabled(); },
         [weak] { auto s = weak.lock(); return s && s->camera ?
             std::shared_ptr<commons::camera>(s, &s->render_camera) : nullptr; });
 
-    m_state->editor_surface = &content.add<hud_editor_surface, bgui::layer::overlay>(m_state, hud);
+    state->editor_surface = &content.add<hud_editor_surface, bgui::layer::overlay>(state, hud);
 
-    bgui::get_layout().add<game_view_driver, bgui::layer::overlay>(m_state);
-    update_game_view(m_state);
+    update_game_view(state);
 }
 
 void game_view::update() {
-    update_game_view(m_state);
+    update_game_view(m_state.lock());
 }
 
 bool game_view::needs_camera_render(const std::uint32_t entity) const noexcept {
-    return m_state && m_state->context &&
-        m_state->window && m_state->window->is_enabled() &&
-        m_state->camera && m_state->camera_entity == entity;
+    const auto state = m_state.lock();
+    return state &&
+        state->window && state->window->is_enabled() &&
+        state->camera && state->camera_entity == entity;
 }
 
 }

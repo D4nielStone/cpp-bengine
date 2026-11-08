@@ -44,7 +44,16 @@ public:
             if (m_consumed[i]) io.m_input_map[keys[i]] = bgui::input_action::none;
             m_key_down[i] = down;
         }
+        // Reuse the inputbox history for the conventional Ctrl+Y redo alias.
+        const auto z=io.m_input_map[bgui::input_key::z], shift=io.m_input_map[bgui::input_key::left_shift];
+        const bool redo_y=is_focused() && bgui::get_pressed(bgui::input_key::y) &&
+            (bgui::get_pressed(bgui::input_key::left_control) || bgui::get_pressed(bgui::input_key::right_control));
+        if(redo_y) {
+            io.m_input_map[bgui::input_key::z]=io.m_input_map[bgui::input_key::y];
+            io.m_input_map[bgui::input_key::left_shift]=bgui::input_action::press;
+        }
         inputbox::on_update();
+        io.m_input_map[bgui::input_key::z]=z;io.m_input_map[bgui::input_key::left_shift]=shift;
         for (std::size_t i = 0; i < keys.size(); ++i) io.m_input_map[keys[i]] = saved[i];
         const auto mouse = bgui::get_mouse_position();
         const bool popup_hover = m_popup->is_enabled() &&
@@ -55,7 +64,12 @@ public:
             return;
         }
         if (m_dismissed_buffer == m_input_buffer && m_dismissed_cursor == m_cursor_position) return;
-        const auto completion = complete_lua(m_input_buffer, m_cursor_position);
+        if (m_completion_source != m_input_buffer || m_completion_cursor != m_cursor_position) {
+            m_completion_source = m_input_buffer;
+            m_completion_cursor = m_cursor_position;
+            m_completion = complete_lua(m_input_buffer, m_cursor_position);
+        }
+        const auto& completion = m_completion;
         if (!completion) { m_popup->set_enable(false); return; }
         m_begin = completion->begin;
         m_end = completion->end;
@@ -102,6 +116,9 @@ public:
     }
 
 private:
+    std::string m_completion_source;
+    std::size_t m_completion_cursor{std::string::npos};
+    std::optional<lua_completion> m_completion;
     bgui::linear* m_popup{};
     std::vector<std::string> m_suggestions;
     std::size_t m_selected{}, m_begin{}, m_end{};

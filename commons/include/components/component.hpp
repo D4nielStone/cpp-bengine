@@ -1,4 +1,7 @@
 #pragma once
+#include "animation_property.hpp"
+#include <optional>
+#include <vector>
 #include <unordered_map>
 #include <cstdint>
 #include <memory>
@@ -37,7 +40,9 @@ namespace COMMONS_NS {
 			COMPONENTE_TERRENO = 1 << 11,
 			COMPONENTE_SOUND_LISTENER = 1 << 12,
 			COMPONENTE_SOUND_PLAYER = 1 << 13,
-            COMPONENTE_HUD = 1 << 14
+            COMPONENTE_HUD = 1 << 14,
+            COMPONENTE_ANIMATION = 1 << 15,
+            COMPONENTE_PATHFINDER = 1 << 16
 		};
 		//  Mapeamento de nomes e mask
         inline static std::unordered_map<mask, std::string> mapa_nomes_componentes = {
@@ -59,6 +64,9 @@ namespace COMMONS_NS {
 		std::weak_ptr<ecs> reg;
 		component() = default;
 		virtual ~component() = default;
+        virtual std::vector<animation_property> animation_properties() const { return {}; }
+        virtual std::optional<double> read_animation_property(const std::string&) const { return {}; }
+        virtual bool write_animation_property(const std::string&, double) { return false; }
         // Called with the owning context current; implementations must be idempotent.
         virtual void release_graphics_resources() {}
 	    virtual bool analyze(const rapidjson::Value& obj) {return true;};

@@ -184,3 +184,58 @@ TEST_F(RuntimeProcessTest, FppTemplateStartsAndRestartsThroughEditorProcess) {
     EXPECT_EQ(fs::file_size(template_project), original);
 }
 #endif
+
+#ifdef BENGINE_RUNTIME_EXECUTABLE
+#include "components/code.hpp"
+#include "components/pathfinder.hpp"
+TEST_F(RuntimeProcessTest, LuaSwitchesScenesFromSetupAndPlansEnemyRoute) {
+    if (!std::getenv("BENGINE_RUNTIME_SMOKE"))
+        GTEST_SKIP() << "Set BENGINE_RUNTIME_SMOKE=1 with an OpenGL display";
+    commons::window window("Scene transition test",100,100);
+    auto registry=window.get_ecs();
+    auto editor_camera=registry->create(1); registry->add<commons::camera>(editor_camera);
+    auto game_camera=registry->create(2); registry->add<commons::camera>(game_camera);
+    auto enemy=registry->create(3); registry->add<commons::pathfinder>(enemy);
+    std::ofstream(root/"first.lua") << R"(
+        function setup()
+            assert(SceneManager.LoadScene("next.scene"))
+        end
+    )";
+    std::ofstream(root/"next.lua") << R"(
+        function setup()
+            assert(SceneManager.GetActiveScene()=="next.scene")
+            local p=gameObject:GetComponent("Pathfinder")
+            assert(p:FindPath(Vector3(2,0,0)))
+            assert(#p:GetPath()>1)
+            Debug.Log("scene transition and enemy route ready")
+        end
+    )";
+    registry->add<commons::code>(enemy,(root/"first.lua").string());
+    editor::ui::project_persistence_system persistence(registry,editor_camera.id);
+    std::string error;
+    fs::create_directory(root/"source");
+    const auto source_project=root/"source/project.bengine";
+    ASSERT_TRUE(persistence.save(source_project.string(),error)) << error;
+    const auto original=editor::ui::project_files::read(source_project);
+    registry->add<commons::code>(enemy,(root/"next.lua").string());
+    ASSERT_TRUE(persistence.save((root/"source/next.scene").string(),error)) << error;
+    registry->add<commons::code>(enemy,(root/"first.lua").string());
+    ASSERT_TRUE(persistence.save_snapshot(project.string(),error)) << error;
+    editor::ui::runtime_process process;
+    ASSERT_TRUE(process.start(BENGINE_RUNTIME_EXECUTABLE,project,error)) << error;
+    bool ready=false;
+    ASSERT_TRUE(wait_for([&] {
+        process.collect_script_logs();
+        for(const auto& line:commons::script_log::instance().lines())
+            ready |= line.find("scene transition and enemy route ready")!=std::string::npos;
+        return ready || !process.running(error);
+    }));
+    EXPECT_TRUE(ready) << error;
+    for(const auto& line:commons::script_log::instance().lines()) {
+        EXPECT_EQ(line.find("Initialization failed:"),std::string::npos) << line;
+        EXPECT_EQ(line.find("Scene load failed:"),std::string::npos) << line;
+    }
+    EXPECT_EQ(editor::ui::project_files::read(source_project),original);
+    ASSERT_TRUE(process.stop(error)) << error;
+}
+#endif

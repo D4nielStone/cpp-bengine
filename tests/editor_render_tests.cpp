@@ -957,6 +957,8 @@ TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
     camera.config.fog_enabled = true;
     camera.config.fog_color = {0.15f, 0.25f, 0.35f, 1.f};
     camera.config.fog_density = 0.04f;
+    camera.config.fog_min_distance = 12.f;
+    camera.config.fog_max_distance = 180.f;
     camera.config.corte_curto = 0.25f;
     ASSERT_TRUE(camera.serialize(data, data.GetAllocator()));
     ASSERT_TRUE(data.HasMember("znear"));
@@ -971,6 +973,8 @@ TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
     EXPECT_TRUE(loaded.config.fog_enabled);
     EXPECT_FLOAT_EQ(loaded.config.fog_color.g, 0.25f);
     EXPECT_FLOAT_EQ(loaded.config.fog_density, 0.04f);
+    EXPECT_FLOAT_EQ(loaded.config.fog_min_distance, 12.f);
+    EXPECT_FLOAT_EQ(loaded.config.fog_max_distance, 180.f);
     EXPECT_EQ(loaded.m_skybox, nullptr); // Loading never allocates GPU resources.
     rapidjson::Document legacy(rapidjson::kObjectType);
     commons::camera legacy_loaded;
@@ -1237,6 +1241,13 @@ TEST(CameraSettings, RejectsInvalidFogSettingsWithoutMutatingConfig) {
     EXPECT_TRUE(camera.config.fog_enabled);
     EXPECT_FLOAT_EQ(camera.config.fog_density, 0.2f);
     EXPECT_FLOAT_EQ(camera.config.fog_color.g, 0.2f);
+
+    rapidjson::Document invalid_range(rapidjson::kObjectType);
+    invalid_range.AddMember("fog_min_distance", 50.f, invalid_range.GetAllocator());
+    invalid_range.AddMember("fog_max_distance", 50.f, invalid_range.GetAllocator());
+    EXPECT_FALSE(camera.analyze(invalid_range));
+    EXPECT_FLOAT_EQ(camera.config.fog_min_distance, 0.f);
+    EXPECT_FLOAT_EQ(camera.config.fog_max_distance, 300.f);
 
     camera.config.fog_density = std::numeric_limits<float>::infinity();
     rapidjson::Document output(rapidjson::kObjectType);

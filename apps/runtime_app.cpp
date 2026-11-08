@@ -1,3 +1,4 @@
+#include "systems/animation_system.hpp"
 #include "ui/hud_view.hpp"
 #include "components/camera.hpp"
 #include "components/renderer.hpp"
@@ -5,6 +6,7 @@
 #include "systems/code_system.hpp"
 #include "debugging/script_log.hpp"
 #include "systems/physics_system.hpp"
+#include "systems/sound_system.hpp"
 #include "guizmo/grid_gizmo.hpp"
 #include "systems/render_system.hpp"
 #include "systems/ui_system.hpp"
@@ -12,6 +14,7 @@
 #include "systems/system.hpp"
 
 #include <bgui.hpp>
+#include <os/resource_files.hpp>
 #include <elem/image.hpp>
 #include <elem/text.hpp>
 #include <lay/linear.hpp>
@@ -54,10 +57,10 @@ public:
 class runtime_viewport_sync_system final : public commons::system {
 public:
     runtime_viewport_sync_system(
-        std::shared_ptr<commons::camera> camera,
+        std::shared_ptr<commons::camera>& camera,
         bgui::image& image
     )
-        : m_camera(std::move(camera)),
+        : m_camera(camera),
           m_image(&image) {}
 
     void setup(const std::shared_ptr<commons::ecs>&) override {
@@ -84,11 +87,12 @@ public:
             return;
 
         if (m_camera->viewportFBO.x == width &&
-            m_camera->viewportFBO.y == height) {
+            m_camera->viewportFBO.y == height && m_texture == m_camera->framebuffer_texture()) {
             return;
         }
 
         m_camera->viewport({width, height});
+        m_texture = m_camera->framebuffer_texture();
         m_image->set_external_texture(
             m_camera->framebuffer_texture(),
             bgui::vec2{
@@ -99,8 +103,9 @@ public:
     }
 
 private:
-    std::shared_ptr<commons::camera> m_camera;
+    std::shared_ptr<commons::camera>& m_camera;
     bgui::image* m_image;
+    unsigned int m_texture{};
 };
 
 class runtime_profiler_text final : public bgui::text {
@@ -213,6 +218,8 @@ int main(const int argc, char** argv) {
         registry->get<commons::camera>(camera_entity.id);
     std::array<float, 3> gravity{0.f, -9.8f, 0.f};
 
+    auto project = std::make_shared<editor::ui::project_persistence_system>(registry, camera_entity.id);
+    project->set_migration_writes_enabled(false);
     if (project_path.empty()) {
         auto cube_entity = registry->create();
         registry->add<commons::renderer>(cube_entity, "assets/models/primitive-cube.bmodel");
@@ -220,17 +227,12 @@ int main(const int argc, char** argv) {
             {0.f, 0.f, 0.f}
         );
     } else {
-        editor::ui::project_persistence_system project(
-            registry,
-            camera_entity.id
-        );
-        project.set_migration_writes_enabled(false);
         std::string error;
-        if (!editor::ui::load_project_with_modal(project, project_path, error)) {
+        if (!editor::ui::load_project_with_modal(*project, project_path, error)) {
             std::cerr << "[runtime] Could not load project: " << error << '\n';
             return 1;
         }
-        gravity = project.global_gravity();
+        gravity = project->global_gravity();
 
         for (const auto& [id, components] : registry->entities) {
             (void)components;
@@ -240,8 +242,6 @@ int main(const int argc, char** argv) {
                 break;
             }
         }
-        if (game_camera->my_object != camera_entity.id)
-            registry->remove(camera_entity.id);
     }
 
     auto& root = bgui::get_layout().add<bgui::linear>(
@@ -253,8 +253,8 @@ int main(const int argc, char** argv) {
     );
 
     auto render_system = std::make_shared<commons::render_system>();
-    render_system->set_camera_filter([id = game_camera->my_object](std::uint32_t entity) {
-        return entity == id;
+    render_system->set_camera_filter([&game_camera](std::uint32_t entity) {
+        return entity == game_camera->my_object;
     });
     if (diagnostics) {
     auto& profiler = root.add<runtime_profiler_text>(
@@ -279,13 +279,77 @@ int main(const int argc, char** argv) {
             static_cast<float>(game_camera->viewportFBO.y)
         }
     );
-    root.add<commons::hud_view, bgui::layer::overlay>(registry, game_camera, game_view);
+    root.add<commons::hud_view, bgui::layer::overlay>(registry, game_camera, game_view,
+        std::function<bool()>{}, [&game_camera] { return game_camera; });
     window.add<runtime_viewport_sync_system>(game_camera, game_view);
     auto physics_system = std::make_shared<commons::physics_system>();
     physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
-    window.add<commons::code_system>(physics_system);
+    auto scripts = std::make_shared<commons::code_system>(physics_system);
+    auto sound = std::make_shared<commons::sound_system>(
+        project_path.empty() ? std::filesystem::current_path() :
+            std::filesystem::absolute(project_path).parent_path(),
+        game_camera->my_object
+    );
+    std::string scene_project = project_path;
+    auto initial_scene = project->active_scene();
+    if (argc == 5 && !bgui::resource_files::embedded()) {
+        rapidjson::Document snapshot;
+        const auto contents = bgui::resource_files::text(project_path);
+        snapshot.Parse(contents.data(), contents.size());
+        if (snapshot.IsObject() && snapshot.HasMember("runtime_source_project") &&
+            snapshot["runtime_source_project"].IsString() && snapshot.HasMember("runtime_source_scene") &&
+            snapshot["runtime_source_scene"].IsString()) {
+            scene_project = snapshot["runtime_source_project"].GetString();
+            initial_scene = snapshot["runtime_source_scene"].GetString();
+        }
+    }
+    if (!project_path.empty()) {
+        registry->scenes = std::make_shared<commons::scene_control>();
+        auto control = registry->scenes;
+        const auto root_path = std::filesystem::absolute(scene_project).parent_path();
+        control->active = initial_scene.lexically_relative(root_path).generic_string();
+        control->load = [&, weak_control = std::weak_ptr<commons::scene_control>(control), root_path, scripts, sound](const std::string& requested) {
+            const auto control = weak_control.lock();
+            if (!control || control->loading) return false;
+            const auto relative = std::filesystem::path(requested).lexically_normal();
+            if (requested.empty() || relative.is_absolute() || relative.empty() || *relative.begin() == ".." ||
+                (relative.extension() != ".scene" && relative.extension() != ".world") ||
+                !bgui::resource_files::exists(root_path / relative)) {
+                control->last_error = "Choose an existing scene inside the project.";
+                return false;
+            }
+            control->loading = true;
+            control->last_error.clear();
+            window.defer([&, control, relative, root_path, scripts, sound] {
+                try {
+                    if (project->load_runtime_scene(scene_project, root_path / relative, control->last_error)) {
+                        game_camera = registry->get<commons::camera>(camera_entity.id);
+                        for (const auto& [id, components] : registry->entities)
+                            if (id != camera_entity.id && registry->get<commons::camera>(id)) {
+                                game_camera = registry->get<commons::camera>(id); break;
+                            }
+                        control->active = relative.generic_string();
+                        auto gravity = project->global_gravity();
+                        physics_system->set_gravity({gravity[0],gravity[1],gravity[2]});
+                        physics_system->setup(registry);
+                        sound->set_asset_root(root_path);
+                        sound->set_camera_entity(game_camera->my_object);
+                        scripts->setup(registry);
+                    } else commons::script_log::instance().write(0, "Scene load failed: " + control->last_error);
+                } catch (const std::exception& failure) {
+                    control->last_error = failure.what();
+                    commons::script_log::instance().write(0, "Scene load failed: " + control->last_error);
+                }
+                control->loading = false;
+            });
+            return true;
+        };
+    }
+    window.add(scripts);
     window.add(physics_system);
+    window.add(sound);
     if (argc == 5) window.add<runtime_preview_publisher>(project_path + ".preview");
+    window.add<commons::animation_system>([&window] { return window.delta_time(); });
     window.add(render_system);
     if (diagnostics) window.add<runtime_collision_overlay>();
     if (!game_camera->flag_fb) {
@@ -294,5 +358,6 @@ int main(const int argc, char** argv) {
     }
     window.loop();
 
+    if (registry->scenes) registry->scenes->load = {};
     return 0;
 }

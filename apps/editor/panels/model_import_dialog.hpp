@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/localization.hpp"
 #include "panel.hpp"
 #include "../systems/editable_model_import.hpp"
 #include "loaders/model_import.hpp"
@@ -40,7 +41,7 @@ public:
         const auto* scene = m_importer->ReadFile(source.string(), m_options.flags());
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_modal = &modal;
-        modal.set_confirmation_text("Fechar / Cancelar");
+        modal.set_confirmation_text(tr("Fechar / Cancelar"));
         modal.set_on_confirm([this]() { m_modal = nullptr; m_importer.reset(); });
         auto& content = modal.content();
         content.style.layout.require_height(bgui::mode::pixel, std::max(100, std::min(520, bgui::get_context().m_size.y - 150)));
@@ -52,8 +53,8 @@ public:
         auto& status = modal.add<bgui::text>(diagnostic, .27f);
         if (!scene || !scene->mRootNode) {
             status.set_buffer(diagnostic + "\nAssimp: " + m_importer->GetErrorString());
-            modal.add<bgui::text>("Corrija o arquivo ou suas dependências e tente novamente. O original foi preservado.", .27f);
-            modal.add<bgui::button>("Tentar novamente", .28f, [this, source, project, destination, complete]() {
+            modal.add<bgui::text>(tr("Corrija o arquivo ou suas dependências e tente novamente. O original foi preservado."), .27f);
+            modal.add<bgui::button>(tr("Tentar novamente"), .28f, [this, source, project, destination, complete]() {
                 bgui::add_function([this, source, project, destination, complete]() { show(source, project, destination, {}, complete); });
             });
             return;
@@ -69,21 +70,21 @@ public:
         settings.set_scrollable(true);
         auto& preview_panel = columns.add<bgui::linear>(bgui::orientation::vertical);
         preview_panel.style.layout.require_mode(bgui::mode::stretch, bgui::mode::stretch);
-        preview_panel.add<bgui::text>("Visualização 3D orbital", .32f);
+        preview_panel.add<bgui::text>(tr("Visualização 3D orbital"), .32f);
         auto& preview = preview_panel.add<bgui::image>(model_import_preview(*scene, m_options));
         preview.set_size(preview_width, preview_width * 260.f / 480.f);
         auto& orbit = preview_panel.add<model_import_orbit>(m_importer, *scene, m_options, preview);
         const auto refresh_preview = [&orbit]() { orbit.refresh(); };
-        preview_panel.add<bgui::text>("Arraste para orbitar · use a roda do mouse para aproximar ou afastar.", .27f);
-        preview_panel.add<bgui::button>("Redefinir órbita", .28f, [&orbit]() { orbit.reset(); });
-        preview_panel.add<bgui::button>("Atualizar prévia da seleção", .28f, refresh_preview);
+        preview_panel.add<bgui::text>(tr("Arraste para orbitar · use a roda do mouse para aproximar ou afastar."), .27f);
+        preview_panel.add<bgui::button>(tr("Redefinir órbita"), .28f, [&orbit]() { orbit.reset(); });
+        preview_panel.add<bgui::button>(tr("Atualizar prévia da seleção"), .28f, refresh_preview);
         const auto check = [&](const std::string& label, bool& value) {
             panel::add_checkbox(settings, &value, value, label, .28f)
                 .set_on_change([refresh_preview](bool) { refresh_preview(); });
         };
         check("Importar outra cópia", m_another_copy);
-        settings.add<bgui::text>("Configurações de malha", .32f);
-        settings.add<bgui::text>("Filtragem de texturas (suavização)", .28f);
+        settings.add<bgui::text>(tr("Configurações de malha"), .32f);
+        settings.add<bgui::text>(tr("Filtragem de texturas (suavização)"), .28f);
         auto& filter_label = settings.add<bgui::text>("", .28f);
         const auto refresh_filter = [this, label = &filter_label]() {
             label->set_buffer(m_options.filtering == commons::texture_filter::bilinear ? "Bilinear" :
@@ -99,8 +100,8 @@ public:
         check("Inverter UVs", m_options.flip_uvs);
         check("Gerar normais suaves quando ausentes", m_options.smooth_normals);
         check("Unir vértices idênticos", m_options.join_vertices);
-        settings.add<bgui::text>("Escala uniforme (> 0)", .28f);
-        auto& scale = panel::add_input(settings, std::to_string(m_options.scale), "Escala uniforme (> 0)", .28f);
+        settings.add<bgui::text>(tr("Escala uniforme (> 0)"), .28f);
+        auto& scale = panel::add_input(settings, std::to_string(m_options.scale), tr("Escala uniforme (> 0)"), .28f);
         scale.m_enter_func = [this, refresh_preview](const std::string& value) {
             double next_scale = 0;
             const auto parsed = std::from_chars(value.data(), value.data() + value.size(), next_scale);
@@ -153,7 +154,7 @@ public:
         settings.add<bgui::text>("Materiais: " + std::to_string(scene->mNumMaterials) +
             "; texturas embutidas: " + std::to_string(scene->mNumTextures) +
             ". Câmeras, luzes e morph targets não são convertidos em entidades.", .27f);
-        modal.add<bgui::button>("Importar como .bmodel", .30f,
+        modal.add<bgui::button>(tr("Importar como .bmodel"), .30f,
             [this, source, project, destination, complete, scale = &scale, status = &status]() {
             try {
                 if (!std::filesystem::is_regular_file(source)) throw std::runtime_error("Arquivo de origem ausente.");

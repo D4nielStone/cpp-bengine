@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/localization.hpp"
 #include "../core/editor_context.hpp"
 #include "../systems/asset_drag_state.hpp"
 #include "../systems/viewport_input_state.hpp"
@@ -19,8 +20,8 @@ public:
         style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         style.visual.background.normal = bgui::color{.015f, .02f, .03f, .68f};
         style.visual.visible = false;
-        m_title = &add<bgui::text>("Arraste aqui", .55f);
-        m_hint = &add<bgui::text>("Arquivos serão copiados para o projeto", .3f);
+        m_title = &add<bgui::text>(tr("Arraste aqui"), .55f);
+        m_hint = &add<bgui::text>(tr("Arquivos serão copiados para o projeto"), .3f);
         for (auto* text : {m_title, m_hint}) {
             text->receives_input(false);
             text->set_flex(false);

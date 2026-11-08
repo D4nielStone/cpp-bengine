@@ -1,4 +1,5 @@
 #include "project_file_transaction.hpp"
+#include "scene_files.hpp"
 #include "project_persistence_system.hpp"
 #include "project_creation_system.hpp"
 #include "project_preview.hpp"
@@ -83,6 +84,8 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     editor_camera->config.fog_enabled = true;
     editor_camera->config.fog_color = {0.2f, 0.4f, 0.6f, 1.f};
     editor_camera->config.fog_density = 0.035f;
+    editor_camera->config.fog_min_distance = 18.f;
+    editor_camera->config.fog_max_distance = 240.f;
     editor_camera->config.fov = 63.f;
     editor_camera->config.corte_curto = 0.25f;
     registry->get<commons::transform>(editor_camera_entity.id)->set_position(
@@ -148,6 +151,8 @@ TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCamera
     EXPECT_TRUE(editor_camera->config.use_skybox);
     EXPECT_TRUE(editor_camera->config.fog_enabled);
     EXPECT_FLOAT_EQ(editor_camera->config.fog_density, 0.035f);
+    EXPECT_FLOAT_EQ(editor_camera->config.fog_min_distance, 18.f);
+    EXPECT_FLOAT_EQ(editor_camera->config.fog_max_distance, 240.f);
     EXPECT_FLOAT_EQ(editor_camera->config.fog_color.g, 0.4f);
     EXPECT_FLOAT_EQ(editor_camera->config.fov, 63.f);
     EXPECT_FLOAT_EQ(editor_camera->config.corte_curto, 0.25f);
@@ -892,6 +897,16 @@ TEST(ProjectPersistenceTest, RoundTripsSoundComponents) {
     EXPECT_FLOAT_EQ(player->radius, 18.f);
     EXPECT_TRUE(player->looping);
     EXPECT_TRUE(player->play_on_awake);
+    const auto snapshot_directory = temporary_project_path();
+    std::filesystem::create_directory(snapshot_directory);
+    const auto snapshot = snapshot_directory / "runtime.bengine";
+    ASSERT_TRUE(persistence.save(snapshot.string(), error)) << error;
+    EXPECT_EQ(player->clip, "audio/ambience.ogg");
+    ASSERT_TRUE(persistence.load(snapshot.string(), error)) << error;
+    player = registry->get<commons::sound_player>(entity.id);
+    ASSERT_NE(player, nullptr);
+    EXPECT_EQ(std::filesystem::path(player->clip), path.parent_path() / "audio/ambience.ogg");
+    std::filesystem::remove_all(snapshot_directory);
     remove_project_files(path);
 }
 
@@ -1091,20 +1106,27 @@ TEST(RuntimeScenePreview, MirrorsTransformsAndRestoresWithoutMovingEditorCamera)
 }
 
 #include "components/hud.hpp"
-TEST(ProjectPersistenceTest, RoundTripsHudLayoutAndWorldLabels) {
+TEST(ProjectPersistenceTest, RoundTripsHudWithMigratedWorldLabel) {
     auto registry = std::make_shared<commons::ecs>();
     auto editor_camera = registry->create(17);
     registry->add<commons::camera>(editor_camera);
     auto owner = registry->create(106);
     registry->add<commons::hud>(owner);
     auto h = registry->get<commons::hud>(owner.id);
-    h->add("column", "", -1);
-    h->add("button", "Continue", 0)->width=120;
-    const auto text = h->add("text3d", "Target", -1);
-    text->position = {1, 2, 3};
-    text->rotation = {20, 30, 40};
-    text->world_scale = {2, 3, 4};
-    text->depth = .25f;
+    rapidjson::Document legacy;
+    legacy.Parse(R"({"enabled":true,"elements":[
+        {"kind":"column","text":"","parent":-1,"visible":true,"width":0,"height":0,"scale":0.35,"position":[0,0,0]},
+        {"kind":"button","text":"Continue","parent":0,"visible":true,"width":120,"height":0,"scale":0.35,"position":[0,0,0]},
+        {"kind":"text3d","text":"Target","id":"target","parent":-1,"visible":true,"absolute":true,
+         "width":160,"height":40,"scale":0.35,"position":[1,2,3],"rotation":[20,30,40],
+         "world_scale":[2,3,4],"depth":0.25}
+    ]})");
+    ASSERT_TRUE(h->analyze(legacy));
+    ASSERT_EQ(h->elements.size(), 3u);
+    EXPECT_EQ(h->elements[2]->kind, "text");
+    EXPECT_FALSE(h->elements[2]->absolute);
+    ASSERT_TRUE(h->elements[2]->set_screen_position({45, 60, 0}));
+    const auto layout_position = h->elements[2]->position;
     editor::ui::project_persistence_system persistence(registry, editor_camera.id);
     const auto path = temporary_project_path(); std::string error;
     ASSERT_TRUE(persistence.save(path.string(), error)) << error;
@@ -1114,9 +1136,94 @@ TEST(ProjectPersistenceTest, RoundTripsHudLayoutAndWorldLabels) {
     ASSERT_EQ(restored->elements.size(),3u);
     EXPECT_EQ(restored->elements[1]->text,"Continue");
     EXPECT_EQ(restored->elements[1]->parent,0);
-    EXPECT_EQ(restored->elements[2]->position.y,2);
-    EXPECT_EQ(restored->elements[2]->rotation, (bgui::vec3{20, 30, 40}));
-    EXPECT_EQ(restored->elements[2]->world_scale, (bgui::vec3{2, 3, 4}));
-    EXPECT_FLOAT_EQ(restored->elements[2]->depth, .25f);
+    const auto& label = restored->elements[2];
+    EXPECT_EQ(label->kind, "text");
+    EXPECT_EQ(label->id, "target");
+    EXPECT_EQ(label->text, "Target");
+    EXPECT_EQ(label->position, layout_position);
+    ASSERT_TRUE(label->legacy_text);
+    EXPECT_EQ(label->legacy_text->position, (bgui::vec3{1, 2, 3}));
+    EXPECT_EQ(label->legacy_text->rotation, (bgui::vec3{20, 30, 40}));
+    EXPECT_EQ(label->legacy_text->scale, (bgui::vec3{2, 3, 4}));
+    EXPECT_FLOAT_EQ(label->legacy_text->depth, .25f);
     remove_project_files(path);
+}
+
+TEST(ProjectPersistenceTest, ManagesSceneFilesAndSwitchesWithoutLosingProjectSettings) {
+    namespace fs = std::filesystem;
+    namespace scenes = editor::ui::scene_files;
+    const auto folder = temporary_project_path().replace_extension();
+    fs::create_directories(folder / "levels");
+    struct cleanup_folder {
+        fs::path path;
+        ~cleanup_folder() { std::error_code ignored; fs::remove_all(path, ignored); }
+    } cleanup{folder};
+    const auto project = folder / "project.bengine";
+
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create(1);
+    registry->add<commons::camera>(editor_camera);
+    registry->create(42);
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const std::array<float, 3> gravity{1.f, -3.f, 0.f};
+    persistence.set_global_gravity(gravity);
+    std::string error;
+    ASSERT_TRUE(persistence.save(project.string(), error)) << error;
+    const auto original_scene = persistence.active_scene();
+    const auto original_contents = read_file(original_scene);
+
+    scenes::create(folder, "Copia", original_scene);
+    EXPECT_EQ(read_file(folder / "Copia.scene"), original_contents);
+    EXPECT_THROW(scenes::create(folder, "Copia"), std::runtime_error);
+    EXPECT_THROW(scenes::create(folder, "../outside"), std::runtime_error);
+    scenes::create(folder / "levels", "Segunda");
+    const auto next = folder / "levels" / "Segunda.scene";
+    EXPECT_EQ(scenes::list(folder, false).size(), 2U);
+    EXPECT_EQ(scenes::list(folder, true).size(), 3U);
+    EXPECT_THROW(scenes::check_deletion(folder, original_scene, original_scene), std::runtime_error);
+    EXPECT_THROW(scenes::check_deletion(folder, original_scene, next), std::runtime_error);
+
+    const auto broken = folder / "broken.scene";
+    std::ofstream(broken) << "{";
+    const auto manifest_before = read_file(project);
+    EXPECT_FALSE(persistence.switch_scene(project.string(), broken, error));
+    EXPECT_EQ(read_file(project), manifest_before);
+    EXPECT_EQ(persistence.active_scene(), original_scene);
+    EXPECT_TRUE(registry->is_alive(42));
+
+    registry->create(51);
+    EXPECT_FALSE(persistence.switch_scene(project.string(), next, error));
+    EXPECT_TRUE(registry->is_alive(51));
+    EXPECT_EQ(read_file(project), manifest_before);
+    ASSERT_TRUE(persistence.save(project.string(), error)) << error;
+    const auto saved_original = read_file(original_scene);
+
+    ASSERT_TRUE(persistence.save_snapshot((folder / "levels" / "preview.bengine").string(), error)) << error;
+    EXPECT_EQ(persistence.active_scene(), original_scene);
+
+    // A blocked project write must leave the current ECS and manifest intact.
+    const auto blocked = editor::ui::project_files::temporary_path(project);
+    fs::create_directory(blocked);
+    const auto saved_manifest = read_file(project);
+    EXPECT_FALSE(persistence.switch_scene(project.string(), next, error));
+    EXPECT_EQ(read_file(project), saved_manifest);
+    EXPECT_TRUE(registry->is_alive(51));
+    fs::remove(blocked);
+
+    std::ofstream(folder / ".bengine-main-scene") << original_scene.filename().string();
+    ASSERT_TRUE(persistence.switch_scene(project.string(), next, error)) << error;
+    EXPECT_FALSE(registry->is_alive(42));
+    EXPECT_FALSE(registry->is_alive(51));
+    EXPECT_EQ(persistence.active_scene(), next);
+    EXPECT_EQ(persistence.global_gravity(), gravity);
+    EXPECT_FALSE(persistence.has_unsaved_changes(project.string()));
+    EXPECT_EQ(scene_file_for_project(project), next);
+    EXPECT_NO_THROW(scenes::check_deletion(folder, original_scene, next));
+
+    registry->create(72);
+    ASSERT_TRUE(persistence.save(project.string(), error)) << error;
+    EXPECT_EQ(read_file(original_scene), saved_original);
+    EXPECT_EQ(scene_file_for_project(project), next);
+    ASSERT_TRUE(persistence.load(project.string(), error)) << error;
+    EXPECT_TRUE(registry->is_alive(72));
 }

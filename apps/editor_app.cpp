@@ -15,6 +15,8 @@
 #include "editor/panels/project_context_menu.hpp"
 #include "editor/systems/native_file_dialog.hpp"
 #include "editor/core/editor_context.hpp"
+#include "editor/core/recent_projects.hpp"
+#include "editor/panels/animation_view.hpp"
 #include "project/project_persistence_system.hpp"
 #include "editor/systems/project_creation_system.hpp"
 #include "editor/systems/project_preview.hpp"
@@ -94,12 +96,15 @@ std::filesystem::path locate_build_directory(
 struct project_choice {
     std::string path;
     bool create{false};
+    bool resume{false};
 };
 
 project_choice show_project_manager(
     commons::window& window,
     bgui::linear*& manager_root,
-    const std::shared_future<std::string>& release_check
+    const std::shared_future<std::string>& release_check,
+    bool allow_return = false,
+    const std::filesystem::path& active_project = {}
 ) {
     project_choice choice;
     const auto resolve_project_path = [](std::filesystem::path selected) {
@@ -127,6 +132,9 @@ project_choice show_project_manager(
     title.style.layout.set_margin(0, 3);
     header.add<editor::ui::release_indicator>(release_check);
 
+    if (allow_return) header.add<bgui::button>("Voltar ao editor", .30f, [&] {
+        choice.resume = true; window.close();
+    });
     auto& project_dock = root.add<bgui::dock>();
     project_dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
     bgui::dock::configuration dock_layout;
@@ -136,7 +144,7 @@ project_choice show_project_manager(
     auto& recent = project_dock.add_window("Recent Projects", bgui::dock_area::left);
     auto& actions = project_dock.add_window("Project Setup", bgui::dock_area::center);
     recent.style.layout.padding = bgui::vec4i{16, 12, 16, 16};
-    auto& recent_title = recent.add<bgui::text>("Your workspaces", 0.42f);
+    auto& recent_title = bgui::panel_content(recent).add<bgui::text>("Your workspaces", 0.42f);
     recent_title.style.layout.set_margin(0, 8);
 
     bgui::text* status = nullptr;
@@ -149,14 +157,14 @@ project_choice show_project_manager(
             recent_projects.push_back(line);
     }
     if (recent_projects.empty())
-        recent.add<bgui::text>("No recent projects", 0.32f);
+        bgui::panel_content(recent).add<bgui::text>("No recent projects", 0.32f);
     for (const auto& path : recent_projects) {
         const std::filesystem::path project_path(path);
         auto project_label = project_path.filename().string();
         const auto folder_name = project_path.parent_path().filename().string();
         if (!folder_name.empty())
             project_label += "  ·  " + folder_name;
-        auto& card = recent.add<editor::ui::context_action_button>("", .34f,
+        auto& card = bgui::panel_content(recent).add<editor::ui::context_action_button>("", .34f,
             [&, path]() { choice = {path, false}; window.close(); });
         card.get_label().set_enable(false);
         card.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
@@ -187,7 +195,7 @@ project_choice show_project_manager(
             [&, path]() { choice = {path, false}; window.close(); }
         );
         editor::ui::configure_project_context_menu(card, path,
-            []() { return std::filesystem::path{}; },
+            [&active_project]() { return active_project; },
             [&, path]() { choice = {path, false}; window.close(); },
             [surface = &card]() { surface->set_enable(false); },
             [&status](const auto& error) { if (status) status->set_buffer(error); });
@@ -198,17 +206,17 @@ project_choice show_project_manager(
     }
 
     actions.style.layout.padding = bgui::vec4i{22, 16, 22, 18};
-    auto& actions_title = actions.add<bgui::text>("Start building", 0.48f);
+    auto& actions_title = bgui::panel_content(actions).add<bgui::text>("Start building", 0.48f);
     actions_title.style.layout.set_margin(0, 8);
-    auto& open_label = actions.add<bgui::text>("Open a project", 0.32f);
+    auto& open_label = bgui::panel_content(actions).add<bgui::text>("Open a project", 0.32f);
     open_label.style.layout.set_margin(0, 5);
-    auto& path_row = actions.add<bgui::linear>(bgui::orientation::horizontal);
+    auto& path_row = bgui::panel_content(actions).add<bgui::linear>(bgui::orientation::horizontal);
     path_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     auto& path_input = path_row.add<bgui::inputbox>("", "Project file or project folder", 0.36f);
     path_input.style.layout.require_width(bgui::mode::stretch);
     path_input.style.layout.require_height(bgui::mode::wrap_content);
 
-    auto& open_button = actions.add<bgui::button>("Open Project", 0.36f, [&]() {
+    auto& open_button = bgui::panel_content(actions).add<bgui::button>("Open Project", 0.36f, [&]() {
         if (path_input.get_buffer().empty()) {
             status->set_buffer("Select a recent project or enter a project path.");
             return;
@@ -224,22 +232,22 @@ project_choice show_project_manager(
     open_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     open_button.style.layout.set_padding(6, 4);
 
-    auto& create_label = actions.add<bgui::text>("Create a new project", 0.32f);
+    auto& create_label = bgui::panel_content(actions).add<bgui::text>("Create a new project", 0.32f);
     create_label.style.layout.set_margin(0, 8);
-    template_selection_label = &actions.add<bgui::text>(
+    template_selection_label = &bgui::panel_content(actions).add<bgui::text>(
         "Template: Empty Project",
         0.28f
     );
     template_selection_label->add_class("project-manager-muted");
-    auto& name_input = actions.add<bgui::inputbox>("New Project", "Project name", 0.36f);
+    auto& name_input = bgui::panel_content(actions).add<bgui::inputbox>("New Project", "Project name", 0.36f);
     name_input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     std::error_code current_path_error;
     auto default_location = std::filesystem::absolute(editor::distribution::user_path("."), current_path_error);
     if (current_path_error)
         default_location = std::filesystem::path(".");
-    auto& location_label = actions.add<bgui::text>("Location", 0.28f);
+    auto& location_label = bgui::panel_content(actions).add<bgui::text>("Location", 0.28f);
     location_label.style.layout.set_margin(0, 4);
-    auto& location_row = actions.add<bgui::linear>(bgui::orientation::horizontal);
+    auto& location_row = bgui::panel_content(actions).add<bgui::linear>(bgui::orientation::horizontal);
     location_row.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     auto& location_input = location_row.add<bgui::inputbox>(
         default_location.string(),
@@ -269,7 +277,7 @@ project_choice show_project_manager(
     });
     location_browse_button.style.layout.require_width(bgui::mode::pixel, 84.f);
     location_browse_button.style.layout.require_height(bgui::mode::wrap_content);
-    auto& create_button = actions.add<bgui::button>("Create Project", 0.36f, [&]() {
+    auto& create_button = bgui::panel_content(actions).add<bgui::button>("Create Project", 0.36f, [&]() {
         const auto project_name = name_input.get_buffer();
         const auto first_non_space = project_name.find_first_not_of(" \t\r\n");
         if (first_non_space == std::string::npos ||
@@ -298,21 +306,21 @@ project_choice show_project_manager(
     });
     create_button.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     create_button.style.layout.set_padding(6, 4);
-    status = &actions.add<bgui::text>("", 0.28f);
+    status = &bgui::panel_content(actions).add<bgui::text>("", 0.28f);
 
     auto& templates = project_dock.add_window("Templates", bgui::dock_area::right);
     templates.style.layout.padding = bgui::vec4i{16, 12, 16, 16};
-    auto& templates_title = templates.add<bgui::text>("Project templates", 0.42f);
+    auto& templates_title = bgui::panel_content(templates).add<bgui::text>("Project templates", 0.42f);
     templates_title.style.layout.set_margin(0, 8);
-    templates.add<bgui::text>(
+    bgui::panel_content(templates).add<bgui::text>(
         "Empty Project",
         0.34f
     );
-    templates.add<bgui::text>(
+    bgui::panel_content(templates).add<bgui::text>(
         "A clean scene with the standard project folders.",
         0.28f
     ).add_class("project-manager-muted");
-    auto& empty_template_button = templates.add<bgui::button>(
+    auto& empty_template_button = bgui::panel_content(templates).add<bgui::button>(
         "Use Empty Project",
         0.32f,
         [&]() {
@@ -327,13 +335,13 @@ project_choice show_project_manager(
     );
     empty_template_button.style.layout.set_margin(0, 4);
 
-    templates.add<bgui::text>("FPP - First Person", 0.34f)
+    bgui::panel_content(templates).add<bgui::text>("FPP - First Person", 0.34f)
         .style.layout.set_margin(0, 12);
-    templates.add<bgui::text>(
+    bgui::panel_content(templates).add<bgui::text>(
         "A capsule player with mouse look, WASD movement, and a physics floor.",
         0.28f
     ).add_class("project-manager-muted");
-    auto& fpp_template_button = templates.add<bgui::button>(
+    auto& fpp_template_button = bgui::panel_content(templates).add<bgui::button>(
         "Use FPP Template",
         0.32f,
         [&]() {
@@ -396,7 +404,9 @@ public:
             &m_context->locked_entities
         );
 
+        m_project_persistence->set_animation_assets_provider([context=m_context] { return context->animation_assets; });
         auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::horizontal);
+        m_root = &root;
         root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         m_side_bar = &root.add<bgui::linear>(bgui::orientation::vertical);
         m_center_area = &root.add<bgui::linear>(bgui::orientation::vertical);
@@ -426,14 +436,27 @@ public:
         m_editor->set_editor_context(m_context);
         m_editor->set_editor_commands(m_commands);
         m_editor->set_exit_callback([this]() { m_window.close(); });
+        m_editor->set_project_manager_callback([this] { m_show_manager = true; m_window.close(); });
         m_window.set_close_request_callback([this]() { m_editor->confirm_exit(); });
     }
 
-    bool load_project(std::string& error) {
+    bool load_project(std::string& error, const std::string& path = {}) {
+        if (!path.empty()) m_project_path = path;
         if (!editor::ui::load_project_with_modal(*m_project_persistence, m_project_path, error))
             return false;
-        remember_recent_project();
+        m_context->project_root = std::filesystem::absolute(m_project_path).parent_path();
+        m_editor->set_loaded_project_path(m_project_path);
         return true;
+    }
+
+    project_choice select_recovery_project() {
+        m_root->set_enable(false);
+        m_window.set_close_request_callback({});
+        bgui::linear* manager_root = nullptr;
+        const auto choice = show_project_manager(m_window, manager_root, m_release_check);
+        m_root->set_enable(true);
+        m_window.set_close_request_callback([this] { m_editor->confirm_exit(); });
+        return choice;
     }
 
     void register_default_panels() {
@@ -540,6 +563,12 @@ public:
                 kind = editor_asset_kind::image;
             editor::ui::editor_api(m_context).select_asset(kind, file);
         });
+        m_editor->setup_scene_management(*m_files, [this] {
+            m_context->selected_entity.reset();
+            m_context->clear_history();
+            m_entities->refresh();
+            m_components->refresh();
+        });
         m_components->set_material_saved_callback([this](const auto& path) {
             m_files->material_file_changed(path);
         });
@@ -600,6 +629,9 @@ public:
             [this]() { return m_window.file_drag_hovered(); }, m_context
         );
         m_editor->add_panel<editor::ui::debug_view>();
+        m_animation = &m_editor->add_panel<editor::ui::animation_view>(m_context);
+        m_editor->set_animation_callback([this] { m_animation->show(); });
+        m_components->set_animation_editor_callback([this] { m_animation->show(); });
 
         m_render_system = m_window.add<commons::render_system>();
         m_render_system->set_camera_filter([this](std::uint32_t entity) {
@@ -633,6 +665,7 @@ public:
             return m_workspace->save_workspace(*m_files, error);
         });
         m_editor->set_project_loaded_callback([this](const std::string& path) {
+            m_context->animation_assets.clear();
             m_context->clear_history();
             m_context->selected_image.clear();
             m_context->selected_material.clear();
@@ -665,7 +698,21 @@ public:
     }
 
     int run() {
-        m_window.loop(signal_update_ready);
+        for (;;) {
+            m_window.loop(signal_update_ready);
+            if (!m_show_manager) break;
+            m_show_manager = false;
+            m_root->set_enable(false);
+            m_window.set_close_request_callback({});
+            m_window.reopen();
+            bgui::linear* manager = nullptr;
+            const auto choice = show_project_manager(m_window, manager, m_release_check, true, m_project_path);
+            m_root->set_enable(true);
+            m_window.set_close_request_callback([this] { m_editor->confirm_exit(); });
+            if (choice.path.empty() && !choice.resume) break;
+            if (!choice.path.empty()) m_editor->open_project(choice.create
+                ? editor::ui::project_file_path(choice.path).string() : choice.path);
+        }
         m_window.set_file_drop_callback({});
 
         std::string error;
@@ -680,18 +727,6 @@ public:
     }
 
 private:
-    void remember_recent_project() const {
-        std::vector<std::string> projects{m_project_path};
-        std::ifstream previous(editor::distribution::user_path("editor-recent-projects.cfg"));
-        for (std::string path; std::getline(previous, path);) {
-            if (!path.empty() && path != m_project_path && projects.size() < 12)
-                projects.push_back(path);
-        }
-        std::ofstream recent(editor::distribution::user_path("editor-recent-projects.cfg"), std::ios::trunc);
-        for (const auto& path : projects)
-            recent << path << '\n';
-    }
-
     void register_runtime_commands() {
         m_runtime_process = std::make_shared<editor::ui::runtime_process>();
         const auto runtime_executable = m_executable.parent_path() /
@@ -783,6 +818,9 @@ private:
     std::filesystem::path m_runtime_preview_path;
     std::filesystem::file_time_type m_runtime_preview_last_write{};
     std::string m_runtime_preview_before;
+    bgui::linear* m_root{};
+    bool m_show_manager{false};
+    editor::ui::animation_view* m_animation{};
 };
 
 }
@@ -806,12 +844,15 @@ int main(int argc, char** argv) {
         release_check = std::async(std::launch::async, editor::ui::check_latest_release).share();
     commons::window window(
         "Bubble Engine " BUBBLE_VERSION_COMPLETA_STR " - Editor",
-        argc == 1 ? 980 : 1200,
+        1200,
         600
     );
     window.add<commons::ui_system>();
     bgui::get_layout().add<editor::ui::ui_scale_system>();
-    if (argc == 1) {
+    const auto last_project = editor::ui::recent_projects(
+        editor::distribution::user_path("editor-recent-projects.cfg")).last();
+    if (argc == 1 && last_project) project_path = *last_project;
+    if (argc == 1 && !last_project) {
         bgui::linear* manager_root = nullptr;
         const auto choice = show_project_manager(window, manager_root, release_check);
         if (choice.path.empty())
@@ -826,12 +867,18 @@ int main(int argc, char** argv) {
         project_path,
         locate_build_directory(argv[0]),
         std::filesystem::absolute(argv[0]),
-        std::move(release_check)
+        release_check
     );
     std::string error;
     if (!application.load_project(error)) {
         std::cerr << "[editor] Could not load project: " << error << '\n';
-        return 1;
+        // A stale or malformed recent project must not prevent recovery through the manager.
+        for (;;) {
+            const auto choice = application.select_recovery_project();
+            if (choice.path.empty()) return 1;
+            if (application.load_project(error, choice.create ? editor::ui::project_file_path(choice.path).string() : choice.path)) break;
+            std::cerr << "[editor] " << error << '\n';
+        }
     }
     application.register_default_panels();
     if (!application.load_workspace(error))

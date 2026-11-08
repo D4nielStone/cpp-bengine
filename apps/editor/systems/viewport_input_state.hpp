@@ -10,9 +10,15 @@ struct viewport_input_state {
     bool movement_shortcut_active{false};
 };
 
+inline bool visual_script_has_keyboard_focus() {
+    for(auto* e=bgui::get_keyboard_focus();e;e=e->get_parent())
+        if(e->type=="visual-script-tree") return true;
+    return false;
+}
+
 inline bool viewport_camera_modifier() {
     return bgui::get_pressed(bgui::input_key::left_control) &&
-        !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus());
+        !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) && !visual_script_has_keyboard_focus();
 }
 
 inline bool viewport_input_blocked_by_modal() {

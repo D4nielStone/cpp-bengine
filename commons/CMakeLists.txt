@@ -95,3 +95,25 @@ elseif(UNIX AND NOT APPLE)
         target_link_libraries(commons PRIVATE X11::X11)
     endif()
 endif()
+
+# Build the playback backend into the runtime without an extra shared library.
+include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+FetchContent_Declare(miniaudio
+    URL https://codeload.github.com/mackron/miniaudio/tar.gz/refs/tags/0.11.25
+    URL_HASH SHA256=b900edcffe979816e2560a0580b9b1216d674b4f17fbadeca8f777a7f8ab0274
+    SOURCE_SUBDIR unused
+)
+FetchContent_MakeAvailable(miniaudio)
+
+add_library(bengine_audio_backend STATIC src/audio/miniaudio_backend.c)
+target_include_directories(bengine_audio_backend SYSTEM PUBLIC "${miniaudio_SOURCE_DIR}")
+target_compile_definitions(bengine_audio_backend PUBLIC
+    MA_NO_NULL MA_NO_RESOURCE_MANAGER MA_NO_ENCODING)
+target_link_libraries(bengine_audio_backend PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+if(UNIX)
+    target_link_libraries(bengine_audio_backend PRIVATE m)
+endif()
+target_link_libraries(commons PRIVATE bengine_audio_backend)

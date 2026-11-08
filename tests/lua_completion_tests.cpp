@@ -178,3 +178,80 @@ TEST(LuaCompletion, OffersShadowControls) {
         EXPECT_NE(std::find(result->members.begin(), result->members.end(), expected), result->members.end());
     }
 }
+
+TEST(LuaCompletion, GlobalSymbolsAndNewComponentMembers) {
+    for (const auto& [source, expected] : std::vector<std::pair<std::string, std::string>>{
+            {"Vec", "Vector3"}, {"Des", "Destroy"},
+            {"local c = gameObject:GetComponent('Camera')\nc.fogD", "fogDensity"},
+            {"local h = gameObject:AddHUD()\nh:A", "Add"},
+            {"local h = gameObject:GetComponent('HUD')\nh.c", "count"},
+            {"local h = gameObject:AddHUD()\nlocal b = h:Add('button', 'OK')\nb:Con", "ConsumeClick"},
+            {"local c = Color(1,1,1,1)\nc.r", "r"}}) {
+        const auto result = complete_lua(source, source.size());
+        ASSERT_TRUE(result) << source;
+        EXPECT_EQ(result->members, (std::vector<std::string>{expected}));
+    }
+}
+
+TEST(LuaCompletion, HandlesLongDelimitersAndIgnoresFakeAssignments) {
+    for (const std::string source : {"--[=[\nInput.", "[==[\nInput.", "'escaped\\' Input.",
+            "local thing = unknown:Add()\nthing:"})
+        EXPECT_FALSE(complete_lua(source, source.size())) << source;
+    for (const std::string source : {
+            "local tr = transform\n-- tr = 42\ntr:Tr",
+            "local tr = transform\nlocal text = 'tr = 42'\ntr:Tr",
+            "local tr = transform -- trailing comment\ntr:Tr",
+            "--[=[ignore]=]\ntransform:Tr"}) {
+        const auto result = complete_lua(source, source.size());
+        ASSERT_TRUE(result) << source;
+        EXPECT_EQ(result->members, (std::vector<std::string>{"Translate"}));
+    }
+}
+
+TEST(LuaCompletion, InfersAnimationControlMethodsAndProperties) {
+    const std::string source = "local anim = gameObject:GetComponent(\"Animation\")\nanim:";
+    auto result = complete_lua(source, source.size());
+    ASSERT_TRUE(result);
+    EXPECT_NE(std::find(result->members.begin(), result->members.end(), "CrossFade"), result->members.end());
+    EXPECT_EQ(std::find(result->members.begin(), result->members.end(), "isPlaying"), result->members.end());
+    const auto property = source.substr(0, source.size()-1) + ".is";
+    result = complete_lua(property, property.size());
+    ASSERT_TRUE(result);
+    EXPECT_NE(std::find(result->members.begin(), result->members.end(), "isPlaying"), result->members.end());
+}
+
+TEST(LuaCompletion, SceneManagementAndPathfinderMembers) {
+    const std::string scene="SceneManager.Load";
+    auto result=complete_lua(scene,scene.size());
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->members,(std::vector<std::string>{"LoadScene"}));
+    const std::string navigation="local route = gameObject:GetComponent(\"Pathfinder\")\nroute:Find";
+    result=complete_lua(navigation,navigation.size());
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->members,(std::vector<std::string>{"FindPath"}));
+}
+
+TEST(LuaCompletion, TextEditingClipboardDeleteAndBothRedoShortcuts) {
+    bgui::scoped_interface ui_scope;
+    auto& io=bgui::get_context();io.m_input_map.clear();io.m_char_buffer.clear();
+    std::string clipboard;
+    io.m_set_clipboard=[&](const std::string& value){clipboard=value;};
+    io.m_get_clipboard=[&]{return clipboard;};
+    editor::ui::lua_inputbox input("print(1)");input.set_focused(true);
+    const auto key=[&](bgui::input_key value,bool control) {
+        io.m_input_map.clear();if(control) io.m_input_map[bgui::input_key::left_control]=bgui::input_action::press;
+        io.m_input_map[value]=bgui::input_action::press;input.on_update();
+        io.m_input_map.clear();input.on_update();
+    };
+    key(bgui::input_key::a,true);key(bgui::input_key::c,true);EXPECT_EQ(clipboard,"print(1)");
+    key(bgui::input_key::x,true);EXPECT_TRUE(input.get_buffer().empty());
+    key(bgui::input_key::z,true);EXPECT_EQ(input.get_buffer(),"print(1)");
+    key(bgui::input_key::y,true);EXPECT_TRUE(input.get_buffer().empty());
+    key(bgui::input_key::v,true);EXPECT_EQ(input.get_buffer(),"print(1)");
+    key(bgui::input_key::a,true);key(bgui::input_key::delete_key,false);EXPECT_TRUE(input.get_buffer().empty());
+    key(bgui::input_key::z,true);EXPECT_EQ(input.get_buffer(),"print(1)");
+    io.m_input_map[bgui::input_key::left_control]=bgui::input_action::press;
+    io.m_input_map[bgui::input_key::left_shift]=bgui::input_action::press;
+    io.m_input_map[bgui::input_key::z]=bgui::input_action::press;input.on_update();
+    EXPECT_TRUE(input.get_buffer().empty());
+}

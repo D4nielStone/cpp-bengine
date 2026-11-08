@@ -11,11 +11,13 @@ código pertence.
 | `gameObject.transform` | `Transform` ou `nil` | Transformação da própria entidade. |
 | `gameObject:IsDescendantOf(other)` | booleano | Verifica se o objeto está abaixo de outro na hierarquia. |
 | `gameObject:SetParent(parent, preserveWorld)` | booleano | Define um pai da mesma cena ou desvincula com `nil`. Retorna `false` se a mudança for inválida. |
+| `gameObject:IsCollidingWith(other)` | booleano | Verifica contato entre dois colisores sólidos. |
+| `gameObject:IsOverlappingTrigger(area)` | booleano | Verifica se o colisor do objeto sobrepõe o colisor de uma entidade marcada como Trigger. |
 | `gameObject:GetComponent(name)` | componente ou `nil` | Busca um componente existente pelo nome registrado. |
 
 Nomes aceitos por `GetComponent`:
 `Transform`, `Renderer`, `Camera`, `DirectionalLight`, `PointLight`,
-`SpotLight`, `SoundListener`, `SoundPlayer` e `Rigidbody`.
+`SpotLight`, `SoundListener`, `SoundPlayer`, `Rigidbody` e `HUD`.
 Um componente ausente ou nome desconhecido resulta em `nil`.
 
 ## `GameObject.Find`
@@ -39,6 +41,31 @@ componente antes de usá-lo.
 para manter os valores locais atuais ao trocar de pai. Depois da troca,
 você pode definir `transform.localPosition` e `transform.localEulerAngles`
 no referencial do novo pai.
+
+## Colisões e áreas de trigger
+
+Adicione um `Rigidbody` com colisão habilitada a cada entidade envolvida.
+Para criar uma área que detecta sobreposição sem bloquear o movimento,
+marque **Trigger** no componente da área. As consultas retornam o estado
+mais recente sincronizado no mundo de física. Corpos removidos, desabilitados ou
+de outra cena resultam em `false`. Compare o estado entre atualizações
+para detectar entrada e saída.
+
+```lua
+--@property {"name":"area","type":"entity","default":null}
+local inside = false
+
+function update()
+    local area = properties.area and GameObject.Find(properties.area)
+    local overlapping = area and gameObject:IsOverlappingTrigger(area) or false
+    if overlapping and not inside then
+        Debug.Log("Entrou na área")
+    elseif inside and not overlapping then
+        Debug.Log("Saiu da área")
+    end
+    inside = overlapping
+end
+```
 
 ## `Vector3`
 

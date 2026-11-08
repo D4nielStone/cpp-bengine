@@ -1,17 +1,24 @@
+#include "../core/localization.hpp"
 #include "scene_loading_modal.hpp"
 #define GLFW_INCLUDE_NONE
 #include <glad.h>
 
 #include "panel.hpp"
+#include "recent_projects.hpp"
 #include "../core/distribution_paths.hpp"
 #include "project_context_menu.hpp"
 #include "editor_ui.hpp"
+#include "files_view.hpp"
+#include "scenes_view.hpp"
+#include "scene_workflow.hpp"
 #include "native_file_dialog.hpp"
 #include "material_unification.hpp"
 #include "project_creation_system.hpp"
 #include "ui_scale_system.hpp"
 
 #include <elem/checkbox.hpp>
+#include <elem/combo_box.hpp>
+#include "api_reference.hpp"
 
 #include <components/camera.hpp>
 #include <components/directional_light.hpp>
@@ -46,15 +53,9 @@ std::filesystem::path recent_projects_path() {
 }
 
 void remember_project(const std::string& path) {
-    std::vector<std::string> projects{path};
-    std::ifstream input(recent_projects_path());
-    for (std::string previous; std::getline(input, previous);) {
-        if (!previous.empty() && previous != path && projects.size() < 12)
-            projects.push_back(previous);
-    }
-    std::ofstream output(recent_projects_path(), std::ios::trunc);
-    for (const auto& project : projects)
-        output << project << '\n';
+    std::string error;
+    if (!recent_projects(recent_projects_path()).remember(path, error))
+        std::cerr << "[editor] " << error << '\n';
 }
 
 // Glifos do ícone (Font Awesome: play / stop / pause)
@@ -218,70 +219,83 @@ editor_ui::editor_ui(
     : m_dock(editor_dock),
       m_model_dock(model_dock),
       m_management_dock(management_dock),
+      m_scripting_dock((management_dock.get_parent()?*management_dock.get_parent():bgui::get_layout()).add<bgui::dock>()),
       m_panel_manager(editor_dock),
       m_model_panel_manager(model_dock),
+      m_management_panel_manager(management_dock),
+      m_scripting_panel_manager(m_scripting_dock),
       m_project_persistence(project_persistence),
       m_registry(std::move(registry)),
       m_project_path(std::move(project_path)),
       m_build_directory(std::move(build_directory) / "exports"),
       m_repository_root(editor::distribution::path("source", BENGINE_REPOSITORY_ROOT)),
       m_build_process(std::make_unique<build_process>()) {
+    m_scripting_dock.id="visual-scripting-workspace";
+    m_scripting_dock.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::match_parent);
+    auto scripting_layout=m_scripting_dock.get_configuration();
+    scripting_layout.left_ratio=.16f;scripting_layout.right_ratio=.10f;
+    m_scripting_dock.apply_configuration(scripting_layout);
     create_project_modal(m_project_path, "");
 
     auto& file_menu_button = menu_bar.add_menu(
-        "File",
+        tr("File"),
         0.3f,
         [this](bgui::context_menu& menu) {
-            menu.add_button("New Project...", [this]() {
+            menu.add_button(tr("New Project..."), [this]() {
                 create_new_project_modal();
                 m_new_project_modal->set_enable(true);
             });
-            menu.add_button("Save Project", [this]() {
+            menu.add_button(tr("Save Project"), [this]() {
+                if (m_project_load_pending) return;
                 std::string error;
                 if (!stop_runtime_for_edit(error)) { report_result("Stopping runtime", false, error); return; }
                 const bool success = m_project_persistence.save(m_project_path, error);
                 report_result("Saving project", success, error);
             });
-            menu.add_button("Project Manager", [this]() {
-                if (!m_project_modal)
-                    create_project_modal(m_project_path, "");
-
-                if (m_project_modal)
-                    m_project_modal->set_enable(true);
+            menu.add_button(tr("Project Manager"), [this]() {
+                std::string error;
+                if (!prepare_project_transition(error)) { report_result("Project Manager", false, error); return; }
+                if (m_project_manager_callback) m_project_manager_callback();
+                else { if (!m_project_modal) create_project_modal(m_project_path, ""); m_project_modal->set_enable(true); }
             });
+            menu.add_button(tr("Animação"), [this] { if (m_animation_callback) m_animation_callback(); });
+            menu.add_button(tr("Gerenciar cenas"), [this]() {
+                set_workspace_mode(editor_workspace_mode::scene_management);
+            });
+            menu.add_button(tr("Scripting visual"),[this]{set_workspace_mode(editor_workspace_mode::visual_scripting);});
             menu.add_separator();
-            menu.add_button("Exit", [this]() { confirm_exit(); });
+            menu.add_button(tr("Exit"), [this]() { confirm_exit(); });
         }
     );
     file_menu_button.style.layout.margin = bgui::vec4i{14, 0, 0, 0};
     menu_bar.add_menu(
-        "Build",
+        tr("Build"),
         0.3f,
         [this](bgui::context_menu& menu) {
             menu.add_button(
-                "Export Game",
+                tr("Export Game"),
                     [this]() { open_build_modal(); }
             );
         }
     );
     menu_bar.add_menu(
-        "Edit",
+        tr("Edit"),
         0.3f,
         [this](bgui::context_menu& menu) {
-            menu.add_button("Undo", [this]() {
+            menu.add_button(tr("Undo"), [this]() {
                 if (m_commands)
                     m_commands->execute(editor_command::undo);
                 else if (m_undo_callback)
                     m_undo_callback();
             });
-            menu.add_button("Redo", [this]() {
+            menu.add_button(tr("Redo"), [this]() {
                 if (m_commands)
                     m_commands->execute(editor_command::redo);
                 else if (m_redo_callback)
                     m_redo_callback();
             });
             menu.add_separator();
-            menu.add_button("Unify Identical Materials", [this]() {
+            menu.add_button(tr("Unify Identical Materials"), [this]() {
                 if (!m_registry || m_is_playing) return;
                 const auto unified = editor::unify_scene_materials(*m_registry);
                 auto& result = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
@@ -292,31 +306,31 @@ editor_ui::editor_ui(
         }
     );
     menu_bar.add_menu(
-        "View", 0.3f,
+        tr("View"), 0.3f,
         [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
-            menu.add_button("Editor Camera...", [this]() { open_editor_camera_modal(); });
-            menu.add_button("Show/Hide Colliders    F3", [this]() {
+            menu.add_button(tr("Editor Camera..."), [this]() { open_editor_camera_modal(); });
+            menu.add_button(tr("Show/Hide Colliders    F3"), [this]() {
                 if (m_commands)
                     m_commands->execute(editor_command::toggle_colliders);
                 else if (m_context)
                     m_context->show_colliders = !m_context->show_colliders;
             });
             menu.add_separator();
-            menu.add_button("Zoom In     Ctrl +", []() { change_ui_scale(1); });
-            menu.add_button("Zoom Out    Ctrl -", []() { change_ui_scale(-1); });
-            menu.add_button("Actual Size (100%)    Ctrl 0", []() { reset_ui_scale(); });
+            menu.add_button(tr("Zoom In     Ctrl +"), []() { change_ui_scale(1); });
+            menu.add_button(tr("Zoom Out    Ctrl -"), []() { change_ui_scale(-1); });
+            menu.add_button(tr("Actual Size (100%)    Ctrl 0"), []() { reset_ui_scale(); });
             menu.add_separator();
-            menu.add_button("Layout: Standard", [this]() { apply_layout(false); });
-            menu.add_button("Layout: Wide Scene", [this]() { apply_layout(true); });
-            menu.add_button("Reset UI", [this]() {
+            menu.add_button(tr("Layout: Standard"), [this]() { apply_layout(false); });
+            menu.add_button(tr("Layout: Wide Scene"), [this]() { apply_layout(true); });
+            menu.add_button(tr("Reset UI"), [this]() {
                 reset_ui();
             });
-            menu.add_button("Save Layout", [this, ui_persistence_ptr]() {
+            menu.add_button(tr("Save Layout"), [this, ui_persistence_ptr]() {
                 std::string error;
                 const bool success = ui_persistence_ptr->save((std::filesystem::absolute(m_project_path).parent_path() / ".editor-ui.cfg").string(), error);
                 report_result("Saving UI", success, error);
             });
-            menu.add_button("Load Layout", [this, ui_persistence_ptr]() {
+            menu.add_button(tr("Load Layout"), [this, ui_persistence_ptr]() {
                 std::string error;
                 const bool success = ui_persistence_ptr->load((std::filesystem::absolute(m_project_path).parent_path() / ".editor-ui.cfg").string(), error);
                 report_result("Loading UI", success, error);
@@ -324,20 +338,21 @@ editor_ui::editor_ui(
         }
     );
     menu_bar.add_menu(
-        "Settings",
+        tr("Settings"),
         0.3f,
         [this](bgui::context_menu& menu) {
-            menu.add_button("Editor Preferences...", [this]() { open_preferences_modal(); });
+            menu.add_button(tr("Editor Preferences..."), [this]() { open_preferences_modal(); });
             menu.add_button(
-                "Global Lighting",
+                tr("Global Lighting"),
                 [this]() { open_global_lighting_modal(); }
             );
             menu.add_button(
-                "Global Physics",
+                tr("Global Physics"),
                 [this]() { open_global_physics_modal(); }
             );
         }
     );
+    menu_bar.add<bgui::button>(tr("API Reference"), .3f, []() { open_api_reference(); });
     add_flexible_spacer(menu_bar);
 
     auto& play_container = menu_bar.add<bgui::linear>();
@@ -378,6 +393,7 @@ editor_ui::editor_ui(
 
     m_play_button = &play_container.add<runtime_play_button>(
         [this]() {
+            if (m_project_load_pending) return;
             m_play_button->set_enable(false);
             auto action = [this]() {
                 const bool should_play = !m_is_playing;
@@ -505,6 +521,7 @@ editor_ui::editor_ui(
         button.style.visual.border.normal =
             bgui::color{0.f, 0.f, 0.f, 0.f};
         button.style.visual.border_size = 0.f;
+        button.id="workspace-mode-"+std::to_string(index);
         button.get_label().set_enable(false);
         auto& icon = button.add<bgui::icon>(icon_name, 0.4f);
         icon.receives_input(false);
@@ -530,6 +547,7 @@ editor_ui::editor_ui(
         2
     );
 
+    add_workspace_button("code",editor_workspace_mode::visual_scripting,3);
     add_vertical_spacer();
     set_workspace_mode(editor_workspace_mode::editor);
 }
@@ -537,10 +555,17 @@ editor_ui::editor_ui(
 void editor_ui::set_workspace_mode(const editor_workspace_mode mode) {
     const auto selected_mode =
         mode == editor_workspace_mode::model_editing ||
-                mode == editor_workspace_mode::scene_management
+                mode == editor_workspace_mode::scene_management || mode==editor_workspace_mode::visual_scripting
             ? mode
             : editor_workspace_mode::editor;
     if (m_context) m_context->workspace_mode = static_cast<int>(selected_mode);
+    if (m_scenes && selected_mode == editor_workspace_mode::scene_management) {
+        m_scenes->show();
+        m_scenes->refresh();
+        if (m_show_scene_workflow) m_show_scene_workflow();
+    }
+    if(selected_mode==editor_workspace_mode::visual_scripting && m_show_scripting) m_show_scripting();
+    m_scripting_dock.set_enable(selected_mode==editor_workspace_mode::visual_scripting);
     m_dock.set_enable(selected_mode == editor_workspace_mode::editor);
     m_model_dock.set_enable(
         selected_mode == editor_workspace_mode::model_editing
@@ -555,7 +580,8 @@ void editor_ui::set_workspace_mode(const editor_workspace_mode mode) {
     const std::array modes{
         editor_workspace_mode::editor,
         editor_workspace_mode::model_editing,
-        editor_workspace_mode::scene_management
+        editor_workspace_mode::scene_management,
+        editor_workspace_mode::visual_scripting
     };
     for (std::size_t index = 0; index < modes.size(); ++index) {
         const bool selected = selected_mode == modes[index];
@@ -581,7 +607,7 @@ void editor_ui::create_build_modal() {
         0.3f
     );
     m_build_modal->content().add<bgui::text>(
-        "Game export directory",
+        tr("Game export directory"),
         0.3f
     );
     m_build_directory_input = &panel::add_input(m_build_modal->content(),
@@ -600,7 +626,7 @@ void editor_ui::create_build_modal() {
         bgui::mode::wrap_content
     );
     m_build_directory_browse_button = &directory_actions.add<bgui::button>(
-        "Browse",
+        tr("Browse"),
         0.28f,
         [this]() {
             create_build_directory_modal();
@@ -659,7 +685,7 @@ void editor_ui::create_build_modal() {
         build_target::windows
     );
     m_build_status = &m_build_modal->content().add<bgui::text>(
-        "No build started.",
+        tr("No build started."),
         0.28f
     );
     m_build_progress = &m_build_modal->content().add<bgui::progress_bar>(
@@ -672,7 +698,7 @@ void editor_ui::create_build_modal() {
         bgui::mode::pixel
     );
     m_build_progress->style.layout.require_height(bgui::mode::pixel, 12.f);
-    m_build_modal->set_confirmation_text("Close");
+    m_build_modal->set_confirmation_text(tr("Close"));
     m_build_modal->set_on_confirm([this]() {
         m_build_modal = nullptr;
         m_runtime_template_input = nullptr;
@@ -878,7 +904,7 @@ void editor_ui::create_global_lighting_modal() {
         bgui::layer::overlay
     >();
     m_global_lighting_modal->content().add<bgui::text>(
-        "Configure the scene's global directional light.",
+        tr("Configure the scene's global directional light."),
         0.3f
     );
 
@@ -907,7 +933,7 @@ void editor_ui::create_global_lighting_modal() {
     );
     m_light_intensity_input = &intensity.get_component(0);
     m_light_intensity_input->add_class("editor-input");
-    m_global_lighting_modal->set_confirmation_text("Apply");
+    m_global_lighting_modal->set_confirmation_text(tr("Apply"));
     m_global_lighting_modal->set_on_confirm([this]() {
         auto light = global_directional_light(m_registry);
         std::array<float, 3> direction{};
@@ -995,7 +1021,7 @@ void editor_ui::create_global_physics_modal() {
         bgui::layer::overlay
     >();
     m_global_physics_modal->content().add<bgui::text>(
-        "Configure global gravity for this project.",
+        tr("Configure global gravity for this project."),
         0.3f
     );
     auto& gravity = m_global_physics_modal->content().add<bgui::vector_field>(
@@ -1007,7 +1033,7 @@ void editor_ui::create_global_physics_modal() {
         m_gravity_inputs[axis] = &gravity.get_component(axis);
         m_gravity_inputs[axis]->add_class("editor-input");
     }
-    m_global_physics_modal->set_confirmation_text("Apply");
+    m_global_physics_modal->set_confirmation_text(tr("Apply"));
     m_global_physics_modal->set_on_confirm([this]() {
         std::array<float, 3> gravity_value{};
         bool valid = true;
@@ -1056,7 +1082,7 @@ void editor_ui::open_editor_camera_modal() {
         (void)layer;
         for (const auto& element : elements) {
             auto* window = dynamic_cast<bgui::window*>(element.get());
-            if (window && window->get_title().get_buffer() == "Inspector") {
+            if (window && window->get_title().get_buffer() == tr("Inspector")) {
                 m_dock.focus_window(window);
                 break;
             }
@@ -1070,10 +1096,10 @@ void editor_ui::open_editor_camera_modal() {
 
     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
     m_editor_camera_modal = &modal;
-    modal.add<bgui::text>("Editor Camera Settings", 0.4f);
-    modal.add<bgui::text>("Configure the editor camera projection.", 0.28f);
+    modal.add<bgui::text>(tr("Editor Camera Settings"), 0.4f);
+    modal.add<bgui::text>(tr("Configure the editor camera projection."), 0.28f);
 
-    constexpr std::array labels{"Field of View", "Near Clip", "Far Clip", "Orthographic Scale"};
+    const std::array labels{"Field of View", "Near Clip", "Far Clip", "Orthographic Scale"};
     std::array<bgui::inputbox*, labels.size()> inputs{};
     const std::array values{camera->config.fov, camera->config.corte_curto,
         camera->config.corte_longo, camera->config.scale};
@@ -1086,10 +1112,10 @@ void editor_ui::open_editor_camera_modal() {
         modal.content(), "Orthographic", 0.29f, camera->config.flag_orth
     );
     auto& status = modal.add<bgui::text>("", 0.27f);
-    modal.set_confirmation_text("Cancel");
+    modal.set_confirmation_text(tr("Cancel"));
     modal.set_on_confirm([this]() { m_editor_camera_modal = nullptr; });
 
-    modal.add<bgui::button>("Apply", 0.3f,
+    modal.add<bgui::button>(tr("Apply"), 0.3f,
         [this, camera, camera_id, inputs, orthographic = &orthographic,
          status = &status, surface = &modal]() {
             if (!m_context || !m_context->registry ||
@@ -1264,17 +1290,19 @@ bool editor_ui::prepare_project_transition(std::string& error) {
     return !m_project_unloading_callback || m_project_unloading_callback(error);
 }
 
-bool editor_ui::dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete) {
+bool editor_ui::dispatch_load(const std::string& path, std::function<void(bool, const std::string&)> complete,
+    const std::filesystem::path& scene) {
     if (!m_load_dispatcher) {
         std::string error;
-        const bool result = m_project_persistence.load(path, error);
+        const bool result = scene.empty() ? m_project_persistence.load(path, error)
+            : m_project_persistence.switch_scene(path, scene, error);
         complete(result, error);
         return result;
     }
     m_project_load_pending = true;
-    m_load_dispatcher([this, path, complete = std::move(complete)] {
+    m_load_dispatcher([this, path, scene, complete = std::move(complete)] {
         std::string error;
-        const bool result = load_project_with_modal(m_project_persistence, path, error);
+        const bool result = run_project_with_modal(m_project_persistence, path, error, false, scene);
         m_project_load_pending = false;
         complete(result, error);
     });
@@ -1290,8 +1318,8 @@ void editor_ui::create_project_modal(
         bgui::layer::overlay
     >();
     m_project_modal->set_enable(false);
-    m_project_modal->content().add<bgui::text>("Project Manager", 0.46f);
-    m_project_modal->content().add<bgui::text>("Recent projects", 0.32f);
+    m_project_modal->content().add<bgui::text>(tr("Project Manager"), 0.46f);
+    m_project_modal->content().add<bgui::text>(tr("Recent projects"), 0.32f);
     std::ifstream recent_input(recent_projects_path());
     std::size_t recent_count = 0;
     for (std::string recent; std::getline(recent_input, recent);) {
@@ -1323,9 +1351,9 @@ void editor_ui::create_project_modal(
             break;
     }
     if (recent_count == 0)
-        m_project_modal->content().add<bgui::text>("No recent projects", 0.26f);
+        m_project_modal->content().add<bgui::text>(tr("No recent projects"), 0.26f);
     m_project_modal->content().add<bgui::text>(
-        "Open an existing project",
+        tr("Open an existing project"),
         0.34f
     );
     m_project_directory_input = &panel::add_input(m_project_modal->content(),
@@ -1341,14 +1369,14 @@ void editor_ui::create_project_modal(
         bgui::mode::wrap_content
     );
     path_actions.add<bgui::button>(
-        "Browse",
+        tr("Browse"),
         0.3f,
         [this]() {
             if (m_project_directory_input)
                 refresh_project_picker(m_project_directory_input->get_buffer());
         }
     );
-    path_actions.add<bgui::button>("New Project...", 0.3f, [this]() {
+    path_actions.add<bgui::button>(tr("New Project..."), 0.3f, [this]() {
         create_new_project_modal();
         if (m_new_project_modal)
             m_new_project_modal->set_enable(true);
@@ -1357,8 +1385,8 @@ void editor_ui::create_project_modal(
         status,
         0.28f
     );
-    path_actions.add<bgui::button>("Open", 0.3f, [this]() { load_project_selection(); });
-    m_project_modal->set_confirmation_text("Cancel");
+    path_actions.add<bgui::button>(tr("Open"), 0.3f, [this]() { load_project_selection(); });
+    m_project_modal->set_confirmation_text(tr("Cancel"));
     m_project_modal->set_on_confirm([this]() {
         m_project_modal = nullptr;
         m_project_directory_input = nullptr;
@@ -1375,16 +1403,16 @@ void editor_ui::create_new_project_modal() {
     >();
     m_new_project_modal->set_enable(false);
     auto& content = m_new_project_modal->content();
-    content.add<bgui::text>("Create a project", 0.4f);
+    content.add<bgui::text>(tr("Create a project"), 0.4f);
     content.add<bgui::text>(
-        "A project folder with the starter scene and asset folders will be created.",
+        tr("A project folder with the starter scene and asset folders will be created."),
         0.28f
     );
-    content.add<bgui::text>("Project name", 0.28f);
+    content.add<bgui::text>(tr("Project name"), 0.28f);
     m_new_project_name_input = &panel::add_input(content,
         "New Project", "Project name", 0.32f
     );
-    content.add<bgui::text>("Location", 0.28f);
+    content.add<bgui::text>(tr("Location"), 0.28f);
     const auto default_location = std::filesystem::path(m_project_path).parent_path();
     m_new_project_location_input = &panel::add_input(content,
         default_location.empty()
@@ -1398,7 +1426,7 @@ void editor_ui::create_new_project_modal() {
         bgui::mode::match_parent,
         bgui::mode::wrap_content
     );
-    actions.add<bgui::button>("Browse...", 0.3f, [this, &status]() {
+    actions.add<bgui::button>(tr("Browse..."), 0.3f, [this, &status]() {
         std::string error;
         const auto selected = editor::browse_native(
             m_new_project_location_input->get_buffer(), true, error);
@@ -1407,13 +1435,13 @@ void editor_ui::create_new_project_modal() {
         if (!error.empty())
             status.set_buffer(error);
     });
-    m_new_project_modal->set_confirmation_text("Cancel");
+    m_new_project_modal->set_confirmation_text(tr("Cancel"));
     m_new_project_modal->set_on_confirm([this]() {
         m_new_project_modal = nullptr;
         m_new_project_name_input = nullptr;
         m_new_project_location_input = nullptr;
     });
-    actions.add<bgui::button>("Create Project", 0.3f, [this, &status]() {
+    actions.add<bgui::button>(tr("Create Project"), 0.3f, [this, &status]() {
         const auto name = m_new_project_name_input->get_buffer();
         const auto first = name.find_first_not_of(" \t\r\n");
         const std::filesystem::path name_path(name);
@@ -1463,10 +1491,10 @@ void editor_ui::create_exit_modal() {
         bgui::layer::overlay
     >();
     m_exit_modal->content().add<bgui::text>(
-        "Save changes before closing the editor?",
+        tr("Save changes before closing the editor?"),
         0.34f
     );
-    m_exit_modal->set_confirmation_text("Save and Exit");
+    m_exit_modal->set_confirmation_text(tr("Save and Exit"));
     m_exit_modal->set_on_confirm([this]() {
         std::string error;
         if (!m_project_persistence.save(m_project_path, error)) {
@@ -1488,15 +1516,30 @@ void editor_ui::create_exit_modal() {
         bgui::mode::match_parent,
         bgui::mode::wrap_content
     );
-    exit_actions.add<bgui::button>("Discard and Exit", 0.3f, [this]() {
+    exit_actions.add<bgui::button>(tr("Discard and Exit"), 0.3f, [this]() {
         if (m_exit_modal)
             m_exit_modal->set_enable(false);
         if (m_exit_callback)
             m_exit_callback();
     });
-    exit_actions.add<bgui::button>("Cancel", 0.3f, [this]() {
+    exit_actions.add<bgui::button>(tr("Cancel"), 0.3f, [this]() {
         if (m_exit_modal)
             m_exit_modal->set_enable(false);
+    });
+}
+
+void editor_ui::set_loaded_project_path(const std::string& path) {
+    m_project_path = path;
+    remember_project(path);
+    if (m_project_loaded_callback) m_project_loaded_callback(path);
+}
+
+void editor_ui::open_project(const std::string& path) {
+    std::string error;
+    if (!prepare_project_transition(error)) { report_result("Loading project", false, error); return; }
+    dispatch_load(path, [this, path](bool success, const std::string& error) {
+        if (success) set_loaded_project_path(path);
+        else report_result("Loading project", false, error);
     });
 }
 
@@ -1544,18 +1587,18 @@ void editor_ui::apply_layout(bool wide) {
     for (auto& window : configuration.windows) {
         window.floating = false;
         window.weight = 1.f;
-        if (window.title == "Scene")
+        if (window.title == tr("Scene"))
             window.area = bgui::dock_area::center;
-        else if (window.title == "Hierarchy")
+        else if (window.title == tr("Hierarchy"))
             window.area = bgui::dock_area::left;
-        else if (window.title == "Arquivos" || window.title == "Debug")
+        else if (window.title == tr("Arquivos") || window.title == tr("Debug") || window.title == tr("Animação"))
             window.area = bgui::dock_area::bottom;
-        else if (window.title == "Inspector" || window.title == "Editor Diagnostics")
+        else if (window.title == tr("Inspector") || window.title == tr("Editor Diagnostics"))
             window.area = bgui::dock_area::right;
         else
             window.area = bgui::dock_area::center;
     }
-    configuration.tab_groups.push_back({"Arquivos", "Arquivos", {"Arquivos", "Debug"}});
+    configuration.tab_groups.push_back({tr("Arquivos"), tr("Arquivos"), {tr("Arquivos"), tr("Debug"), tr("Animação")}});
     m_dock.apply_configuration(configuration);
 }
 
@@ -1564,14 +1607,20 @@ void editor_ui::open_preferences_modal() {
         return;
     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
     auto& content = modal.content().add<preferences_content>();
-    content.add<bgui::text>("Editor Preferences", .4f);
-    content.add<bgui::text>("Preferences apply to this editor session.", .26f);
+    content.add<bgui::text>(tr("Editor Preferences"), .4f);
+    content.add<bgui::text>(tr("Preferences apply to this editor session."), .26f);
+    content.add<bgui::text>(tr("Default language (restart editor)"), .28f);
+    const auto languages = available_languages();
+    const auto saved_language = localization::read_preference(language_preference_path());
+    const auto selected = std::find(languages.begin(), languages.end(), saved_language);
+    auto& language = content.add<bgui::combo_box>(languages, .3f,
+        selected == languages.end() ? 0 : static_cast<std::size_t>(selected - languages.begin()));
     auto& grid = panel::add_checkbox(content,
         "Show scene grid", .3f, m_context->preferences.show_grid);
-    constexpr std::array labels{
-        "Movement speed (0.1 - 100)", "Sprint multiplier (1 - 10)",
-        "Mouse sensitivity (0.01 - 2)", "Zoom sensitivity (0.01 - 10)",
-        "Camera smoothing (0.1 - 100)"
+    const std::array labels{
+        tr("Movement speed (0.1 - 100)"), tr("Sprint multiplier (1 - 10)"),
+        tr("Mouse sensitivity (0.01 - 2)"), tr("Zoom sensitivity (0.01 - 10)"),
+        tr("Camera smoothing (0.1 - 100)")
     };
     const auto values = [](const editor_preferences& preferences) {
         return std::array{preferences.movement_speed, preferences.sprint_multiplier,
@@ -1585,13 +1634,13 @@ void editor_ui::open_preferences_modal() {
         inputs[i] = &panel::add_input(content, format_number(current[i]), "", .3f);
     }
     auto& status = content.add<bgui::text>("", .27f);
-    content.add<bgui::button>("Reset Navigation", .3f, [inputs, values]() {
+    content.add<bgui::button>(tr("Reset Navigation"), .3f, [inputs, values]() {
         const auto defaults = values(editor_preferences{});
         for (std::size_t i = 0; i < inputs.size(); ++i)
             inputs[i]->set_buffer(format_number(defaults[i]));
     });
-    content.add<bgui::button>("Apply", .3f,
-        [context = m_context, inputs, &grid, &status, &modal]() {
+    content.add<bgui::button>(tr("Apply"), .3f,
+        [context = m_context, inputs, &language, &grid, &status, &modal]() {
             editor_preferences candidate;
             candidate.show_grid = grid.checked();
             const std::array fields{&candidate.movement_speed, &candidate.sprint_multiplier,
@@ -1599,12 +1648,18 @@ void editor_ui::open_preferences_modal() {
                 &candidate.smoothing_speed};
             for (std::size_t i = 0; i < inputs.size(); ++i) {
                 if (!parse_number(inputs[i]->get_buffer(), *fields[i])) {
-                    status.set_buffer("Enter a finite number in every field.");
+                    status.set_buffer(tr("Enter a finite number in every field."));
                     return;
                 }
             }
             if (!candidate.valid()) {
-                status.set_buffer("Use the range shown beside each setting.");
+                status.set_buffer(tr("Use the range shown beside each setting."));
+                return;
+            }
+            std::string error;
+            if (!localization::save_preference(language_preference_path(),
+                    language.get_selected_option(), error)) {
+                status.set_buffer(error);
                 return;
             }
             context->preferences = candidate;
@@ -1614,7 +1669,7 @@ void editor_ui::open_preferences_modal() {
                     parent->remove(pointer);
             });
         });
-    modal.set_confirmation_text("Cancel");
+    modal.set_confirmation_text(tr("Cancel"));
 }
 
 void editor_ui::set_exit_callback(std::function<void()> callback) {
@@ -1646,9 +1701,117 @@ void editor_ui::confirm_exit() {
         m_exit_modal->set_enable(true);
 }
 
+std::filesystem::path editor_ui::project_root() const {
+    return std::filesystem::absolute(m_project_path).lexically_normal().parent_path();
+}
+
+void editor_ui::setup_scene_management(files_view& files, std::function<void()> scene_loaded) {
+    m_files = &files;
+    m_scene_loaded = std::move(scene_loaded);
+    files.set_scene_open_action([this](const auto& path) { open_managed_scene(path); });
+    files.set_scene_delete_guard([this](const auto& path) {
+        if (m_project_load_pending)
+            throw std::runtime_error("Aguarde o carregamento da cena.");
+        if (m_files->has_document_edits(path))
+            throw std::runtime_error("Salve o documento da cena antes de excluí-la.");
+        scene_files::check_deletion(project_root(), path, m_project_persistence.active_scene());
+        if (m_scenes) m_scenes->refresh();
+    });
+    m_scenes = &m_management_panel_manager.add<scenes_view>(
+        [this](const auto& path) { open_managed_scene(path); },
+        [this](const auto& source, const auto& name) {
+            try {
+                if (m_project_load_pending || m_is_playing)
+                    throw std::runtime_error("Aguarde o carregamento ou pare a execução para criar cenas.");
+                if (!source.empty() &&
+                    (m_files->has_document_edits(source) ||
+                     (source == m_project_persistence.active_scene() &&
+                      m_project_persistence.has_unsaved_changes(m_project_path))))
+                    throw std::runtime_error("Salve as alterações da cena antes de duplicá-la.");
+                scene_files::create(project_root(), name, source);
+                m_scenes->refresh();
+                m_files->refresh_files();
+                m_scenes->status(source.empty() ? "Cena criada." : "Cena duplicada.");
+            } catch (const std::exception& error) {
+                m_scenes->status(error.what());
+            }
+        },
+        [this](const auto& path) {
+            try {
+                m_files->delete_file(path);
+                m_scenes->status("Cena excluída.");
+            } catch (const std::exception& error) {
+                m_scenes->status(error.what());
+            }
+        },
+        [this](scenes_view& view) {
+            view.set_project(m_project_path, m_project_persistence.active_scene(),
+                m_project_persistence.has_project_manifest());
+        });
+    auto workflow=install_scene_workflow(m_management_panel_manager,m_scripting_panel_manager,files,
+        [this]{return m_project_path.empty()?std::filesystem::path{}:project_root();},
+        [this](const auto& path){open_managed_scene(path);},
+        [this]{return !m_is_playing && !m_project_load_pending;},
+        [this]{set_workspace_mode(editor_workspace_mode::visual_scripting);});
+    m_show_scene_workflow=std::move(workflow.scenes);m_show_scripting=std::move(workflow.scripting);
+    m_scenes->set_visual_action(m_show_scene_workflow);
+}
+
+void editor_ui::open_managed_scene(const std::filesystem::path& path) {
+    set_workspace_mode(editor_workspace_mode::scene_management);
+    if (path == m_project_persistence.active_scene()) {
+        m_scenes->status("Esta cena já está ativa.");
+        return;
+    }
+    const auto project = std::filesystem::absolute(m_project_path).lexically_normal();
+    try {
+        (void)scene_files::checked_scene(project_root(), path);
+        if (m_files->has_document_edits(project) || m_files->has_document_edits(path) ||
+            m_files->has_document_edits(m_project_persistence.active_scene()))
+            throw std::runtime_error("Salve os documentos da cena e do projeto antes de trocar de cena.");
+        if (!m_project_persistence.has_project_manifest() && path.parent_path() != project_root())
+            throw std::runtime_error("Abra um projeto .bengine para gerenciar cenas em subpastas.");
+    } catch (const std::exception& error) {
+        m_scenes->status(error.what());
+        return;
+    }
+    std::string error;
+    if (!prepare_project_transition(error)) {
+        m_scenes->status(error);
+        return;
+    }
+
+    const bool manifest = m_project_persistence.has_project_manifest();
+    m_scenes->status("Carregando cena...");
+    dispatch_load(manifest ? project.string() : path.string(),
+        [this, manifest, project, path](bool success, const std::string& message) {
+            if (!success) {
+                m_scenes->status(message);
+                return;
+            }
+            if (manifest) {
+                if (m_scene_loaded) m_scene_loaded();
+                try {
+                    m_files->reload_clean_document(project);
+                } catch (const std::exception& error) {
+                    m_scenes->status(error.what());
+                    return;
+                }
+            } else {
+                m_project_path = path.string();
+                remember_project(m_project_path);
+                if (m_project_loaded_callback) m_project_loaded_callback(m_project_path);
+            }
+            m_scenes->set_project(m_project_path, m_project_persistence.active_scene(), manifest);
+            m_scenes->status("Cena aberta. Use o ícone de início para editar.");
+        }, manifest ? path : std::filesystem::path{});
+}
+
 void editor_ui::update() {
     m_panel_manager.update();
     m_model_panel_manager.update();
+    if (m_management_dock.is_enabled()) m_management_panel_manager.update();
+    if(m_scripting_dock.is_enabled()) m_scripting_panel_manager.update();
 }
 
 }

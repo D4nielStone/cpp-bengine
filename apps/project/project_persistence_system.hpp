@@ -13,6 +13,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace commons { struct animation_clip; }
+
 namespace editor::ui {
 
 class project_persistence_system final {
@@ -42,14 +44,28 @@ public:
 
     using material_save_hook = std::function<std::filesystem::path(const commons::material&, const std::filesystem::path&)>;
     void set_material_save_hook(material_save_hook hook) { m_material_save_hook = std::move(hook); }
+    using animation_assets_provider = std::function<std::vector<std::shared_ptr<commons::animation_clip>>() >;
+    void set_animation_assets_provider(animation_assets_provider provider) { m_animation_assets_provider=std::move(provider); }
     bool save(const std::string& path, std::string& error) const;
+    bool save_snapshot(const std::string& path, std::string& error) const;
     bool load(const std::string& path, std::string& error) const;
+    bool switch_scene(const std::string& project, const std::filesystem::path& scene, std::string& error) const;
+    bool load_runtime_scene(const std::string& project, const std::filesystem::path& scene, std::string& error) const {
+        if (scene.empty() || (scene.extension() != ".scene" && scene.extension() != ".world")) {
+            error = "Choose a project scene (.scene or .world).";
+            return false;
+        }
+        return load_impl(project, scene, error, true);
+    }
+    const std::filesystem::path& active_scene() const noexcept { return m_scene_path; }
+    bool has_project_manifest() const noexcept { return !m_project_path.empty(); }
     void set_migration_writes_enabled(bool enabled) noexcept { m_migration_writes_enabled = enabled; }
     bool has_unsaved_changes(const std::string& path) const;
 
 private:
+    bool load_impl(const std::string& path, const std::filesystem::path& scene, std::string& error, bool runtime = false) const;
     bool serialize_project(const std::string& path, std::string& error,
-        bool write_files, std::string& snapshot) const;
+        bool write_files, std::string& snapshot, bool update_paths = true) const;
     struct saved_state {
         std::string snapshot;
         std::filesystem::path scene_path;
@@ -61,6 +77,7 @@ private:
     entity_state_set* m_hidden_entities;
     entity_state_set* m_locked_entities;
     material_save_hook m_material_save_hook;
+    animation_assets_provider m_animation_assets_provider;
     asset_loading_hooks m_asset_hooks;
     bool m_migration_writes_enabled{true};
     mutable std::string m_project_version{"0.1.0"};

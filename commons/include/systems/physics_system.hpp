@@ -41,6 +41,8 @@ namespace COMMONS_NS {
         ray_result cast_ray(const ray& ray);
         ray_result cast_scene_ray(const ray& ray, float distance,
             const std::shared_ptr<ecs>& registry, std::uint32_t ignored_entity);
+        bool has_contact(const std::shared_ptr<ecs>& registry, std::uint32_t first,
+            std::uint32_t second, bool second_is_trigger);
     private:
         ray_result cast_ray(const ray& ray, float distance, ecs* registry,
             std::uint32_t ignored_entity);

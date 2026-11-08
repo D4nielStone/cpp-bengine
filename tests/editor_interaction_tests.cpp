@@ -150,6 +150,63 @@ TEST_F(EditorInteractionTest, EntityDeleteActionHasAVisibleIconAndSupportsUndo) 
     EXPECT_TRUE(registry->validate_invariants());
 }
 
+TEST_F(EditorInteractionTest, ExpandedHierarchyOnlyInvalidatesRowsWhenTheirStateChanges) {
+    const auto entity = registry->create();
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::entities_view panel(context);
+    panel.build(dock);
+
+    auto* scene = find_element<bgui::tree>(dock, [](auto& item) {
+        return item.label().get_buffer() == "Scene";
+    });
+    ASSERT_NE(scene, nullptr);
+    scene->set_expanded(false);
+    scene->set_expanded(true);
+    auto* node = find_element<bgui::tree>(scene->children(), [](auto&) { return true; });
+    ASSERT_NE(node, nullptr);
+    auto& header = node->header();
+    auto* eye = find_element<bgui::icon>(header, [](auto& item) {
+        return item.get_buffer() == "\xef\x81\xae";
+    });
+    auto* key = find_element<bgui::icon>(header, [](auto& item) {
+        return item.get_buffer() == "\xef\x82\x84";
+    });
+    ASSERT_NE(eye, nullptr);
+    ASSERT_NE(key, nullptr);
+    bgui::element* const widgets[] = {&header, eye, key};
+
+    for (const auto& [selected, hidden, locked] : {
+             std::tuple{false, false, false}, std::tuple{true, true, false},
+             std::tuple{false, true, true}, std::tuple{false, false, false}}) {
+        context->selected_entity.reset();
+        context->selected_entities.clear();
+        context->hidden_entities.clear();
+        context->locked_entities.clear();
+        if (selected)
+            context->selected_entity = entity.id;
+        if (hidden)
+            context->hidden_entities.insert(entity.id);
+        if (locked)
+            context->locked_entities.insert(entity.id);
+        panel.update();
+        EXPECT_EQ(header.has_class("editor-entity-row-selected"), selected);
+        EXPECT_EQ(eye->get_buffer(), hidden ? "\xef\x81\xb0" : "\xef\x81\xae");
+        EXPECT_EQ(key->style.visual.text.normal, locked
+            ? (bgui::color{0.92f, 0.72f, 0.32f, 1.f})
+            : (bgui::color{0.42f, 0.42f, 0.42f, 1.f}));
+
+        for (auto* widget : widgets) {
+            widget->clear_style_dirty();
+            widget->clear_layout_dirty();
+        }
+        panel.update();
+        for (const auto* widget : widgets) {
+            EXPECT_FALSE(widget->is_style_dirty());
+            EXPECT_FALSE(widget->is_layout_dirty());
+        }
+    }
+}
+
 TEST_F(EditorInteractionTest, EntityDeletionHistoryDoesNotKeepItsContextAlive) {
     for (const bool leave_in_redo : {false, true}) {
         auto entity = registry->create();
@@ -1317,6 +1374,24 @@ TEST_F(EditorInteractionTest, EditorCameraInspectorExposesEnvironmentWithoutComp
     EXPECT_FLOAT_EQ(camera->config.fog_density, 0.04f);
     ASSERT_TRUE(context->undo());
     EXPECT_FLOAT_EQ(camera->config.fog_density, 0.01f);
+    auto* fog_min_distance = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Fog Min Distance";
+    });
+    ASSERT_NE(fog_min_distance, nullptr);
+    fog_min_distance->get_inputbox().m_enter_func("25");
+    EXPECT_FLOAT_EQ(camera->config.fog_min_distance, 25.f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->config.fog_min_distance, 0.f);
+    auto* fog_max_distance = find_element<bgui::field>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == "Fog Max Distance";
+    });
+    ASSERT_NE(fog_max_distance, nullptr);
+    fog_max_distance->get_inputbox().m_enter_func("500");
+    EXPECT_FLOAT_EQ(camera->config.fog_max_distance, 500.f);
+    ASSERT_TRUE(context->undo());
+    EXPECT_FLOAT_EQ(camera->config.fog_max_distance, 300.f);
+    fog_max_distance->get_inputbox().m_enter_func("0");
+    EXPECT_FLOAT_EQ(camera->config.fog_max_distance, 300.f);
     auto* fog_picker = find_element<bgui::color_picker>(dock, [](auto& picker) {
         return picker.has_class("inspector-fog-color");
     });
@@ -1462,4 +1537,16 @@ TEST_F(EditorInteractionTest, InspectorSavesMaterialFileAndNotifiesFilesView) {
     EXPECT_TRUE(saved.empty());
     ASSERT_TRUE(commons::load_material_asset(path, material, error)) << error;
     EXPECT_FLOAT_EQ(material.getUniforme("material.roughness").valor.f, .32f);
+}
+
+TEST_F(EditorInteractionTest, BlockEditorFocusProtectsEntitiesFromDeleteAndViewportModifiers) {
+    const auto entity=registry->create();context->selected_entity=entity.id;
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::entities_view panel(context);panel.build(dock);bgui::on_update();
+    auto& blocks=bgui::get_layout().add<bgui::linear>();blocks.type="visual-script-tree";
+    bgui::focus_keyboard(blocks);
+    auto& io=bgui::get_context();io.m_input_map[bgui::input_key::delete_key]=bgui::input_action::press;
+    bgui::on_update();EXPECT_TRUE(registry->is_alive(entity.id));
+    io.m_input_map[bgui::input_key::left_control]=bgui::input_action::press;
+    EXPECT_FALSE(editor::ui::viewport_camera_modifier());
 }

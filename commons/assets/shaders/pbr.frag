@@ -63,6 +63,8 @@ uniform float shadowStrength;
 uniform bool fogEnabled;
 uniform vec3 fogColor;
 uniform float fogDensity;
+uniform float fogMinDistance;
+uniform float fogMaxDistance;
 
 float shadowVisibility(vec3 normal, vec3 lightDirection, bool enabled, sampler2D depthMap,
                        mat4 matrix, float depthBias, float strength, vec2 offset, float scale) {
@@ -272,7 +274,9 @@ void main() {
     // Cálculo da densidade da névoa
     if (fogEnabled) {
         float distanceToCamera = length(viewPos - Position);
-        float visibility = exp(-fogDensity * distanceToCamera);
+        float fogDistance = clamp(distanceToCamera - fogMinDistance,
+            0.0, fogMaxDistance - fogMinDistance);
+        float visibility = exp(-fogDensity * fogDistance);
         result = mix(fogColor, result, clamp(visibility, 0.0, 1.0));
     }
     // Conversão gamma

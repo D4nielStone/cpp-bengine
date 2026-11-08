@@ -40,6 +40,7 @@ pelo formato de cena.
 | `forward` | leitura | Direção mundial atual da visão, como `Vector3`. |
 | `fieldOfView` | leitura/escrita | Campo de visão em graus. |
 | `aspect` | somente leitura | Aspecto calculado/armazenado pela câmera. |
+| `viewportWidth`, `viewportHeight` | somente leitura | Largura e altura da imagem da câmera em pixels. |
 | `nearClipPlane` | leitura/escrita | Plano próximo. |
 | `farClipPlane` | leitura/escrita | Plano distante. |
 | `orthographic` | leitura/escrita | Ativa projeção ortográfica. |
@@ -103,3 +104,17 @@ não registra membros para alterar resolução de sombra.
 `radius`, `looping` e `playOnAwake`. Esses campos editam a configuração do
 componente. A API atualmente não registra `Play`, `Stop`, pausa, nem controle
 de reprodução por script.
+
+## `Animation`
+
+`gameObject:GetComponent("Animation")` retorna o componente existente ou `nil`.
+`Play(clip?)`, `Pause()`, `Stop()`, `Seek(seconds)`, `CrossFade(clip, seconds)` e
+`SetSpeed(multiplier)` retornam booleano. Os comandos são aplicados na próxima
+atualização de animação; caminhos são relativos ao projeto. `speed` é editável
+entre 0 e 100; `time`, `isPlaying` e `isBlending` são somente leitura e refletem
+a última atualização. Controles sobre um componente removido retornam `false`.
+
+Veja [Animação: prévia, controle Lua e blending](../ANIMATION.md#controle-lua-e-blending)
+para contratos de transição, exemplos e comportamento de canais discretos.
+
+- [Gerenciamento de cenas e Pathfinder para inimigos](./scenes-and-navigation.md)

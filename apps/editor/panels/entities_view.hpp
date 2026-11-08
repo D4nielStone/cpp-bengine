@@ -1,4 +1,5 @@
 #pragma once
+#include "../core/localization.hpp"
 
 #include <bgui.hpp>
 
@@ -49,6 +50,14 @@ public:
 private:
     using entry = entities_presenter::entry;
 
+    struct row_state {
+        bool selected;
+        bool hidden;
+        bool locked;
+
+        bool operator==(const row_state&) const = default;
+    };
+
     struct row {
         entity_id id{};
         bgui::element* target{nullptr};
@@ -58,6 +67,7 @@ private:
         bgui::icon* visibility{nullptr};
         bgui::icon* lock{nullptr};
         bgui::tree* node{nullptr};
+        std::optional<row_state> applied_state{};
     };
 
     static constexpr const char* selected_class = "editor-entity-row-selected";
@@ -147,13 +157,20 @@ private:
         const bgui::color transparent{0.f, 0.f, 0.f, 0.f};
         const bgui::color selected_background{0.216f, 0.216f, 0.216f, 1.f};
 
-        for (const auto& item : m_rows) {
+        for (auto& item : m_rows) {
             if (!item.selection)
                 continue;
 
-            const bool is_selected =
-                m_presenter.api().is_selected(item.id);
-            if (is_selected) {
+            const row_state state{
+                m_presenter.api().is_selected(item.id),
+                m_presenter.api().is_hidden(item.id),
+                m_presenter.api().is_locked(item.id)
+            };
+            if (item.applied_state == state)
+                continue;
+            item.applied_state = state;
+
+            if (state.selected) {
                 item.selection->add_class(selected_class);
                 item.selection->add_class(selected_class_legacy);
                 item.selection->style.visual.background.normal = selected_background;
@@ -176,22 +193,18 @@ private:
             item.selection->style.visual.border_size = 0.f;
             item.selection->mark_style_dirty();
 
-            const bool hidden =
-                m_presenter.api().is_hidden(item.id);
             if (item.visibility) {
                 item.visibility->set_buffer(
-                    hidden ? "\xef\x81\xb0" : "\xef\x81\xae"
+                    state.hidden ? "\xef\x81\xb0" : "\xef\x81\xae"
                 );
-                item.visibility->style.visual.text.normal = hidden
+                item.visibility->style.visual.text.normal = state.hidden
                     ? bgui::color{0.42f, 0.42f, 0.42f, 1.f}
                     : bgui::color{0.72f, 0.72f, 0.72f, 1.f};
                 item.visibility->mark_style_dirty();
             }
 
-            const bool locked =
-                m_presenter.api().is_locked(item.id);
             if (item.lock) {
-                item.lock->style.visual.text.normal = locked
+                item.lock->style.visual.text.normal = state.locked
                     ? bgui::color{0.92f, 0.72f, 0.32f, 1.f}
                     : bgui::color{0.42f, 0.42f, 0.42f, 1.f};
                 item.lock->mark_style_dirty();
@@ -294,13 +307,13 @@ public:
             return;
 
         auto& window = parent.add_window(
-            "Hierarchy",
+            tr("Hierarchy"),
             bgui::dock_area::left,
             0.3f
         );
         auto& window_context = window.get_context();
         window_context.set_scrollable(false);
-        m_root = &window_context.add<detail::entities_refreshing_layout>();
+        m_root = &bgui::panel_content(window).add<detail::entities_refreshing_layout>();
         *m_surface_alive = true;
         m_root->alive = m_surface_alive;
         m_root->style.layout.require_mode(
@@ -352,7 +365,7 @@ public:
         };
         add_entity.set_function([button = &add_entity]() { button->open_context(); });
 
-        auto& group_entities = m_toolbar->add<bgui::button>("Agrupar", .26f,
+        auto& group_entities = m_toolbar->add<bgui::button>(tr("Agrupar"), .26f,
             [this] { m_presenter.api().group_selected_entities(); refresh(); });
         group_entities.style.layout.require_size(76.f, 28.f);
         auto& remove_entity = m_toolbar->add<bgui::button>(
@@ -409,7 +422,7 @@ public:
         const auto* mouse_target = bgui::get_mouse_target();
         if (delete_down && !m_delete_was_down &&
             !(mouse_target && mouse_target->has_class("model-editor-viewport-input")) &&
-            !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) &&
+            !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) && !visual_script_has_keyboard_focus() &&
             !viewport_input_blocked_by_modal() && !m_presenter.api().is_playing())
             m_presenter.api().delete_selected_entity();
         m_delete_was_down = delete_down;

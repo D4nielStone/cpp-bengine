@@ -1,3 +1,6 @@
+#include "animation_assets.hpp"
+#include "components/animation.hpp"
+#include "components/pathfinder.hpp"
 #include "components/hud.hpp"
 #include "project_migration_manager.hpp"
 #include <os/resource_files.hpp>
@@ -91,6 +94,9 @@ commons::color material_albedo(const commons::material& material) {
 bool validate_component(const std::string& name, const rapidjson::Value& value) {
     if (!value.IsObject())
         return false;
+
+    if (name == "pathfinder") { commons::pathfinder path; return path.analyze(value); }
+    if (name == "animation") { commons::animation clip; return clip.analyze(value); }
 
     if (name == "transform") {
         return value.HasMember("position") && is_vector3(value["position"]) &&
@@ -202,6 +208,8 @@ bool validate_component(const std::string& name, const rapidjson::Value& value) 
 
 std::string component_name(const component_mask mask) {
     switch (mask) {
+    case commons::component::COMPONENTE_PATHFINDER: return "pathfinder";
+    case commons::component::COMPONENTE_ANIMATION: return "animation";
     case commons::component::COMPONENTE_TRANSFORMACAO:
         return "transform";
     case commons::component::COMPONENTE_RENDER:
@@ -236,6 +244,8 @@ bool serialize_component(
         return false;
 
     switch (mask) {
+    case commons::component::COMPONENTE_PATHFINDER:
+    case commons::component::COMPONENTE_ANIMATION: return component->serialize(destination, allocator);
     case commons::component::COMPONENTE_TRANSFORMACAO:
         return std::static_pointer_cast<commons::transform>(component)->serialize(destination, allocator);
     case commons::component::COMPONENTE_RENDER:
@@ -268,6 +278,14 @@ bool parse_component(
     const std::filesystem::path& project_directory,
     const project_persistence_system::asset_loading_hooks* hooks = nullptr
 ) {
+    if (name == "pathfinder") { registry.add<commons::pathfinder>(entity); return registry.get<commons::pathfinder>(entity.id)->analyze(data); }
+    if (name == "animation") {
+        registry.add<commons::animation>(entity);
+        auto player = registry.get<commons::animation>(entity.id);
+        std::string error;
+        return player->analyze(data) && commons::resolve_animation_clip(registry, *player, project_directory, error);
+    }
+
     if (name == "transform") {
         return registry.get<commons::transform>(entity.id)->analyze(data);
     }
@@ -618,7 +636,20 @@ bool project_persistence_system::save(
     return true;
 }
 
+bool project_persistence_system::save_snapshot(const std::string& path, std::string& error) const {
+    if (bgui::resource_files::embedded()) {
+        error = "Embedded game resources are read-only.";
+        return false;
+    }
+    std::string snapshot;
+    return serialize_project(path, error, true, snapshot, false);
+}
+
 bool project_persistence_system::has_unsaved_changes(const std::string& path) const {
+    if (m_animation_assets_provider) {
+        try { for (const auto& asset : m_animation_assets_provider()) if (asset && asset->dirty()) return true; }
+        catch (...) { return true; }
+    }
     const auto saved = m_saved_states.find(saved_state_key(path));
     if (saved == m_saved_states.end())
         return true;
@@ -633,11 +664,25 @@ bool project_persistence_system::has_unsaved_changes(const std::string& path) co
 
 bool project_persistence_system::serialize_project(
     const std::string& path, std::string& error,
-    bool write_files, std::string& snapshot
+    bool write_files, std::string& snapshot, bool update_paths
 ) const {
     error.clear();
     snapshot = "[";
     std::vector<project_files::document> pending_documents;
+    std::vector<animation_asset_save> animation_assets;
+    const auto flush_animation_assets = [&]() {
+        std::unordered_set<commons::animation_clip*> saved;
+        for (auto& item : animation_assets)
+            if (item.asset && saved.insert(item.asset.get()).second && !save_animation_asset(*item.asset, error)) return false;
+        if (m_animation_assets_provider) {
+            for (const auto& asset : m_animation_assets_provider())
+                if (asset && asset->dirty() && saved.insert(asset.get()).second && !save_animation_asset(*asset,error)) return false;
+        }
+        return true;
+    };
+    const auto finish_animation_assets = [&]() {
+        for (const auto& item : animation_assets) item.finish();
+    };
     const auto emit = [&](const std::filesystem::path& target,
                           const rapidjson::Document& document) {
         rapidjson::Document canonical;
@@ -675,7 +720,7 @@ bool project_persistence_system::serialize_project(
         return false;
     }
 
-    const bool writing_scene = is_scene_path(absolute_target);
+    const bool writing_scene = is_scene_path(absolute_target) && absolute_target != m_project_path;
     auto scene_target = absolute_target;
     if (!writing_scene) {
         const auto saved = m_saved_states.find(absolute_target.string());
@@ -690,13 +735,25 @@ bool project_persistence_system::serialize_project(
             scene_target = absolute_target.parent_path() /
                 (absolute_target.stem().string() + ".scene");
         }
-        if (!bgui::resource_files::embedded() && !m_asset_root.empty() &&
-            absolute_target.parent_path() == m_asset_root) {
-            std::ifstream marker(m_asset_root / ".bengine-main-scene");
-            std::string marker_path;
-            if (marker && std::getline(marker, marker_path) &&
-                !marker_path.empty()) {
-                scene_target = (m_asset_root / marker_path).lexically_normal();
+        if (!bgui::resource_files::embedded() && absolute_target == m_project_path &&
+            !std::filesystem::exists(scene_target, path_error) && !path_error) {
+            // The asset browser updates the manifest when moving a scene.
+            try {
+                const auto contents = project_files::read(absolute_target);
+                rapidjson::Document project;
+                project.Parse(contents.data(), contents.size());
+                if (project.IsObject() && project.HasMember("scene") && project["scene"].IsString()) {
+                    const auto moved = (absolute_target.parent_path() /
+                        project["scene"].GetString()).lexically_normal();
+                    std::ifstream marker(m_asset_root / ".bengine-main-scene");
+                    std::string marker_path;
+                    if (std::getline(marker, marker_path) &&
+                        (m_asset_root / marker_path).lexically_normal() == moved &&
+                        std::filesystem::is_regular_file(moved, path_error))
+                        scene_target = moved;
+                }
+            } catch (const std::runtime_error&) {
+                // A normal save can still restore the missing scene.
             }
         }
     }
@@ -752,6 +809,25 @@ bool project_persistence_system::serialize_project(
                 return false;
             }
 
+            if (mask == commons::animation::mask) {
+                try {
+                    const auto root = m_asset_root.empty() ? absolute_target.parent_path() : m_asset_root;
+                    auto item = prepare_animation_asset(std::static_pointer_cast<commons::animation>(component), *m_registry, root, id);
+                    auto reference = item.reference;
+                    if (!reference.empty() && absolute_target.parent_path() != root)
+                        reference = commons::animation_clip_path(root, reference).string();
+                    component_data.SetObject();
+                    component_data.AddMember("clip", rapidjson::Value(reference.c_str(), allocator), allocator);
+                    component_data.AddMember("autoplay", item.player->autoplay, allocator);
+                    component_data.AddMember("speed", item.player->speed, allocator);
+                    if (item.asset) {
+                        if (snapshot.size() > 1) snapshot += ',';
+                        snapshot += item.asset->encode();
+                    }
+                    animation_assets.push_back(std::move(item));
+                } catch (const std::exception& failure) { error = failure.what(); return false; }
+            }
+
             const bool saving_in_project =
                 absolute_target.parent_path() == m_asset_root;
             if (mask == commons::component::COMPONENTE_CODIGO &&
@@ -787,6 +863,14 @@ bool project_persistence_system::serialize_project(
                         const auto resolved = (path.is_absolute() ? path : m_asset_root / path).lexically_normal().string();
                         entry.SetString(resolved.c_str(), static_cast<rapidjson::SizeType>(resolved.size()), allocator);
                     }
+                }
+            } else if (mask == commons::component::COMPONENTE_SOUND_PLAYER &&
+                       !m_asset_root.empty() && !saving_in_project) {
+                auto& value = component_data["clip"];
+                const std::filesystem::path path(value.GetString());
+                if (!path.empty() && !path.is_absolute()) {
+                    const auto resolved = (m_asset_root / path).lexically_normal().string();
+                    value.SetString(resolved.c_str(), static_cast<rapidjson::SizeType>(resolved.size()), allocator);
                 }
             } else if (mask == commons::component::COMPONENTE_CAM &&
                        !m_asset_root.empty() && !saving_in_project) {
@@ -904,9 +988,10 @@ bool project_persistence_system::serialize_project(
     if (writing_scene) {
         snapshot += ']';
         if (write_files) {
-            if (!project_files::save(absolute_target, pending_documents, error))
+            if (!flush_animation_assets() || !project_files::save(absolute_target, pending_documents, error))
                 return false;
-            m_scene_path = absolute_target;
+            finish_animation_assets();
+            if (update_paths) m_scene_path = absolute_target;
         }
         return true;
     }
@@ -950,14 +1035,23 @@ bool project_persistence_system::serialize_project(
     );
     project_document.AddMember("scene", scene_path_value, project_allocator);
 
+    if (!update_paths && !m_project_path.empty()) {
+        const auto source = m_project_path.generic_string();
+        const auto active = m_scene_path.generic_string();
+        project_document.AddMember("runtime_source_project", rapidjson::Value(source.c_str(), project_allocator), project_allocator);
+        project_document.AddMember("runtime_source_scene", rapidjson::Value(active.c_str(), project_allocator), project_allocator);
+    }
     emit(absolute_target, project_document);
 
     snapshot += ']';
     if (write_files) {
-        if (!project_files::save(absolute_target, pending_documents, error))
+        if (!flush_animation_assets() || !project_files::save(absolute_target, pending_documents, error))
             return false;
-        m_project_path = absolute_target;
-        m_scene_path = scene_target;
+        finish_animation_assets();
+        if (update_paths) {
+            m_project_path = absolute_target;
+            m_scene_path = scene_target;
+        }
     }
     return true;
 }
@@ -966,13 +1060,33 @@ bool project_persistence_system::load(
     const std::string& path,
     std::string& error
 ) const {
+    return load_impl(path, {}, error);
+}
+
+bool project_persistence_system::switch_scene(
+    const std::string& project, const std::filesystem::path& scene, std::string& error
+) const {
+    if (scene.empty() || !is_scene_path(scene) || bgui::resource_files::embedded()) {
+        error = "Choose a writable project scene.";
+        return false;
+    }
+    if (has_unsaved_changes(project)) {
+        error = "Save the current project before switching scenes.";
+        return false;
+    }
+    return load_impl(project, scene, error);
+}
+
+bool project_persistence_system::load_impl(
+    const std::string& path, const std::filesystem::path& scene, std::string& error, bool runtime
+) const {
     error.clear();
     if (!m_registry) {
         error = "Cannot load a project without an ECS registry.";
         return false;
     }
 
-    if (!bgui::resource_files::embedded() && !project_files::recover(path, error))
+    if (!runtime && !bgui::resource_files::embedded() && !project_files::recover(path, error))
         return false;
     if (!bgui::resource_files::exists(path)) { error = "Could not open project file: " + path; return false; }
     auto input = bgui::resource_files::stream(path);
@@ -1016,16 +1130,42 @@ bool project_persistence_system::load(
         document.HasMember("format") &&
         document["format"].IsString() &&
         std::string(document["format"].GetString()) == "bubble-engine-project";
+    std::filesystem::path requested_scene;
+    if (!scene.empty()) {
+        if (!is_project_document || (!runtime && absolute_project_path != m_project_path)) {
+            error = "Scene switching requires the loaded project manifest.";
+            return false;
+        }
+        try {
+            requested_scene = std::filesystem::absolute(scene).lexically_normal();
+            const auto target = bgui::resource_files::embedded() ? requested_scene : std::filesystem::canonical(requested_scene);
+            const auto relative = target.lexically_relative(bgui::resource_files::embedded() ? project_directory : std::filesystem::canonical(project_directory));
+            const auto lexical = requested_scene.lexically_relative(project_directory);
+            if (relative.empty() || *relative.begin() == ".." ||
+                lexical.empty() || *lexical.begin() == ".." ||
+                (!bgui::resource_files::embedded() && std::filesystem::is_symlink(requested_scene)) || !bgui::resource_files::exists(target)) {
+                error = "Choose a scene file inside the project.";
+                return false;
+            }
+        } catch (const std::filesystem::filesystem_error& failure) {
+            error = failure.what();
+            return false;
+        }
+    }
     bool migration_required = false;
     if (is_project_document) {
         if (!project_migration_manager::convert(document, migration_required, error)) return false;
         if (!validate_project(document, error))
             return false;
+        if (!scene.empty() && !document.HasMember("scene")) {
+            error = "Save this project to extract its original scene before switching.";
+            return false;
+        }
 
-        if (document.HasMember("scene")) {
-            const std::filesystem::path referenced_scene(
-                document["scene"].GetString()
-            );
+        if (!scene.empty() || document.HasMember("scene")) {
+            const auto referenced_scene = scene.empty()
+                ? std::filesystem::path(document["scene"].GetString())
+                : requested_scene;
             staged_scene_path = (
                 referenced_scene.is_absolute()
                     ? referenced_scene
@@ -1266,7 +1406,32 @@ bool project_persistence_system::load(
         ? absolute_project_path
         : std::filesystem::path{};
 
-    if (migration_required && m_migration_writes_enabled && !bgui::resource_files::embedded() &&
+    if (!scene.empty() && !runtime) {
+        // Commit the new startup reference only after the scene and its assets were staged.
+        const auto reference = staged_scene_path.lexically_relative(project_directory).generic_string();
+        document["scene"].SetString(reference.c_str(), document.GetAllocator());
+        if (migration_required) {
+            if (!m_migration_writes_enabled) {
+                error = "Reopen the project with migration enabled before switching scenes.";
+                return false;
+            }
+            if (!project_migration_manager::commit(absolute_project_path, document, error, &contents))
+                return false;
+        } else {
+            try {
+                if (project_files::read(absolute_project_path) != contents) {
+                    error = "The project file changed while loading. Reopen it before switching scenes.";
+                    return false;
+                }
+            } catch (const std::runtime_error& failure) {
+                error = failure.what();
+                return false;
+            }
+            if (!project_files::save(absolute_project_path,
+                    {{absolute_project_path, project_files::encode(document)}}, error))
+                return false;
+        }
+    } else if (!runtime && migration_required && m_migration_writes_enabled && !bgui::resource_files::embedded() &&
         !project_migration_manager::commit(absolute_project_path, document, error, &contents)) return false;
     m_project_version = is_project_document ? document["project_version"].GetString() : "0.1.0";
 

@@ -20,7 +20,8 @@ public:
     bool needs_camera_render(std::uint32_t entity) const noexcept;
 
 private:
-    std::shared_ptr<game_view_state> m_state;
+    std::shared_ptr<editor_context> m_context;
+    std::weak_ptr<game_view_state> m_state;
 };
 
 }

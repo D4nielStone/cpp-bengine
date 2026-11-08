@@ -61,3 +61,8 @@ Cache/
 # Local editor workspace state
 .editor-session.cfg*
 .editor-ui.cfg*
+
+# Shipped editor language catalogs
+!commons/assets/locales/
+!commons/assets/locales/*.json
+editor-preferences.json*

@@ -26,6 +26,9 @@ continuam pertencendo às árvores de elementos do BGUI.
 - **Edição do modelo**: edição topológica do modelo 3D da entidade selecionada
   no modo Modelagem.
 - **Debug**: log de scripts Lua.
+- **Animação**: trilhas de propriedades por entidade, arquivos de clipe, gravação automática de alterações e edição de keyframes,
+  interpolação, prévia com desfazer e reprodução no runtime. Veja
+  [o guia de animação](./ANIMATION.md).
 - **Editor Diagnostics**: métricas locais de frame e renderização.
 
 O painel **Game** é ocultado enquanto o runtime externo está executando. O
@@ -57,7 +60,7 @@ widgets ligados a componentes devem usar ownership/callbacks e validar o
 ciclo de vida apropriado.
 
 Convenções de layout, helpers de campos e integração com histórico devem seguir
-os padrões de `apps/editor/core/panel.hpp` e dos painéis existentes.
+os padrões de `apps/editor/panels/panel.hpp` e dos painéis existentes.
 
 O atalho **O**, com o mouse sobre a cena e sem um campo de texto em edição,
 seleciona a visão normal/orbital. Clique com o botão esquerdo no espaço livre da
@@ -111,3 +114,67 @@ As três visualizações usam o renderizador OpenGL da engine. A geometria fica 
 GPU enquanto não é editada; Basic e Material reutilizam a imagem quando parados.
 Render acompanha a cena a cada frame. A seleção calcula a face sob o cursor
 somente no clique, sem manter um mapa de faces do tamanho da imagem.
+
+## Criar um painel personalizado com a fachada
+
+A fachada `bgui::panel_facade` simplifica a construção do conteúdo e mantém
+os widgets nativos disponíveis. Ela não substitui `editor_panel`,
+`panel_manager`, comandos, histórico ou atualização do estado do editor.
+
+```cpp
+#include "panel.hpp"
+#include <panel_facade.hpp>
+
+class custom_panel final : public editor::ui::editor_panel {
+public:
+    explicit custom_panel(std::function<void()> apply)
+        : m_apply(std::move(apply)) {}
+
+    void build(bgui::dock& parent) override {
+        bgui::panel_facade panel(parent, "Ferramentas", bgui::dock_area::right);
+        panel.native().add_class("editor-panel");
+        auto body = panel.content();
+        body.label("Meu painel");
+        body.action("Aplicar", m_apply);
+    }
+
+    void update() override {}
+
+private:
+    std::function<void()> m_apply;
+};
+```
+
+Registre com `editor_ui::add_panel<custom_panel>(acao)` na inicialização da
+interface. `acao` deve encaminhar a operação para os comandos/serviços do
+editor. Para propriedades que precisam de histórico e sincronização, mantenha
+os helpers de `editor_panel`, passando `body.native()` como layout.
+
+A janela e o conteúdo pertencem ao BGUI e continuam existindo quando a fachada
+local sai do escopo. Construir outra fachada cria outro corpo; faça isso uma
+vez no `build`, sem reconstrução por frame. O exemplo não captura o objeto do
+painel em callbacks. Quando callbacks capturarem `this`, remova a janela antes
+de destruir o objeto, seguindo o ciclo de vida dos painéis existentes. Não
+use referências de widgets depois de fechar/remover a janela, trocar o layout
+raiz ou encerrar BGUI.
+
+Use `row()` e `column()` para agrupar controles, `property()` e `toggle()` para
+controles simples e `add<T>()` para widgets especializados. `native()` permite
+ajustar classes, dimensões e rolagem com a API atual. Veja a
+[referência completa da fachada](../external/cpp-bgui/docs/PANEL_FACADE.md)
+para assinaturas, callbacks e limites de ciclo de vida.
+
+
+Os painéis atuais usam `panel_content` para compor suas superfícies retidas e
+`panel_facade` para corpos padrão (Game, Malhas e Animação). Superfícies de
+viewport e drivers de atualização especializados são preservados, com a mesma
+árvore de widgets e as mesmas camadas de overlay. O gerenciador principal também
+usa a fachada de conteúdo; o menu Project Manager retorna a essa interface.
+
+## Grafo de cenas e Lua em blocos
+
+O modo Gestão de cenas inclui **Conexões entre cenas**, **Scripts do projeto** e
+**Script em blocos**. O grafo usa chamadas Lua de transição dos scripts associados
+às cenas. O editor visual compartilha os documentos do painel Arquivos e grava
+Lua após validar a sintaxe. Veja [Gestão visual de cenas e scripts](./SCENE_WORKFLOW.md)
+para navegação, encaixes, limites da conversão e recuperação de conflitos.

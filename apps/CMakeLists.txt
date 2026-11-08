@@ -21,9 +21,20 @@ if(BUILD_EDITOR OR BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/external/rapidjson/include
     )
 
-    add_library(editor_services STATIC editor/services/editor_api.cpp)
-    target_include_directories(editor_services PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/editor/systems)
+    add_library(editor_services STATIC
+        editor/services/editor_api.cpp
+        editor/services/visual_lua.cpp
+        editor/services/scene_graph.cpp
+        editor/panels/scene_workflow.cpp
+    )
+    target_include_directories(editor_services PRIVATE ${EDITOR_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/project)
     target_link_libraries(editor_services PUBLIC editor_core PRIVATE commons)
+endif()
+
+if(BUILD_MCP)
+    add_executable(bengine_mcp mcp/main.cpp mcp/project_snapshot.cpp)
+    target_include_directories(bengine_mcp PRIVATE ${CMAKE_BINARY_DIR}/generated)
+    target_include_directories(bengine_mcp SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/external/rapidjson/include)
 endif()
 
 if(BUILD_RUNTIME OR BUILD_EDITOR OR BUILD_TESTING)

@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "debugging/script_log.hpp"
 #include "api/lua.hpp"
+#include "systems/animation_system.hpp"
 #include "components/code.hpp"
+#include "components/hud.hpp"
 #include "components/transform.hpp"
 #include "components/renderer.hpp"
 #include "components/physics.hpp"
@@ -219,7 +221,62 @@ TEST(LuaApi, CameraRayFiltersPlayerAndRemovedColliders) {
     EXPECT_NO_THROW(lua.script("assert(cam:traceRay() == nil)"));
 }
 
-TEST(LuaApi, FlashlightScriptCollectsAndFollowsPlayer) {
+TEST(LuaApi, ContactQueriesDistinguishSolidCollidersAndTriggers) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto actor = registry->create();
+    auto solid = registry->create();
+    auto sensor = registry->create();
+    registry->entity_names[solid.id] = "Solid";
+    registry->entity_names[sensor.id] = "Sensor";
+    registry->add<commons::physics>(actor, true);
+    registry->add<commons::physics>(solid, true);
+    registry->add<commons::physics>(sensor, true);
+    registry->get<commons::physics>(solid.id)->configure_collision(
+        commons::physics::shapes::box_shape, {1, 1, 1}, {1, 0, 0}, true, false);
+    const auto trigger = registry->get<commons::physics>(sensor.id);
+    trigger->configure_collision(commons::physics::shapes::box_shape, {1, 1, 1}, {1, 0, 0}, true, true);
+    const auto pose = registry->get<commons::transform>(actor.id);
+    pose->set_position({1.25f, 0, 0});
+    auto physics = std::make_shared<commons::physics_system>();
+    physics->speed = 0.f;
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, actor.id, physics);
+    ASSERT_NO_THROW(lua.script(R"(
+        solid = GameObject.Find("Solid")
+        sensor = GameObject.Find("Sensor")
+        assert(gameObject:IsCollidingWith(solid))
+        assert(solid:IsCollidingWith(gameObject))
+        assert(not gameObject:IsCollidingWith(gameObject))
+        assert(not gameObject:IsCollidingWith(sensor))
+        assert(gameObject:IsOverlappingTrigger(sensor))
+        assert(not sensor:IsOverlappingTrigger(gameObject))
+        assert(not gameObject:IsOverlappingTrigger(solid))
+        assert(not gameObject:IsCollidingWith(nil))
+        assert(not gameObject:IsOverlappingTrigger("Sensor"))
+    )"));
+    pose->set_position({3, 0, 0});
+    physics->update(registry);
+    EXPECT_NO_THROW(lua.script(R"(
+        assert(not gameObject:IsCollidingWith(solid))
+        assert(not gameObject:IsOverlappingTrigger(sensor))
+    )"));
+    pose->set_position({1.25f, 0, 0});
+    physics->update(registry);
+    EXPECT_NO_THROW(lua.script("assert(gameObject:IsOverlappingTrigger(sensor))"));
+    trigger->configure_collision(commons::physics::shapes::box_shape, {1, 1, 1}, {0, 0, 0}, false, true);
+    registry->remove(solid.id);
+    EXPECT_NO_THROW(lua.script(R"(
+        assert(not gameObject:IsCollidingWith(solid))
+        assert(not gameObject:IsOverlappingTrigger(sensor))
+    )"));
+    physics.reset();
+    EXPECT_NO_THROW(lua.script("assert(not gameObject:IsOverlappingTrigger(sensor))"));
+}
+
+TEST(LuaApi, FlashlightScriptProjectsPromptAndCollects) {
     auto registry = std::make_shared<commons::ecs>();
     auto player = registry->create();
     auto camera = registry->create();
@@ -248,11 +305,30 @@ TEST(LuaApi, FlashlightScriptCollectsAndFollowsPlayer) {
     commons::code_system scripts(physics);
     scripts.setup(registry);
     physics->setup(registry);
+    const auto hud = registry->get<commons::hud>(flashlight.id);
+    ASSERT_TRUE(hud);
+    ASSERT_EQ(hud->elements.size(), 1u);
+    const auto prompt = hud->elements.front();
+    EXPECT_EQ(prompt->text, "E");
+    EXPECT_FALSE(prompt->visible);
     bool pressed = true;
     script->estado_lua["Input"].get<sol::table>().set_function("GetKey",
         [&](const std::string& key) { return key == "E" && pressed; });
     scripts.update(registry);
     EXPECT_EQ(flashlight_pose->parent_id, 0u);
+    EXPECT_TRUE(prompt->visible);
+    EXPECT_TRUE(prompt->absolute);
+    const auto original_x = prompt->position.x;
+    const auto camera_pose = registry->get<commons::transform>(camera.id);
+    camera_pose->set_position({0, 0, 0.25f});
+    scripts.update(registry);
+    EXPECT_TRUE(prompt->visible);
+    EXPECT_LT(prompt->position.x, original_x);
+    camera_pose->set_rotation({0, 180, 0});
+    scripts.update(registry);
+    EXPECT_FALSE(prompt->visible);
+    camera_pose->set_rotation({0, 0, 0});
+    camera_pose->set_position({0, 0, 0});
     registry->remove(blocker.id);
     scripts.update(registry);
     EXPECT_EQ(flashlight_pose->parent_id, 0u);
@@ -261,6 +337,7 @@ TEST(LuaApi, FlashlightScriptCollectsAndFollowsPlayer) {
     pressed = true;
     scripts.update(registry);
     ASSERT_EQ(flashlight_pose->parent_id, player.id);
+    EXPECT_FALSE(prompt->visible);
     EXPECT_FALSE(registry->has<commons::physics>(flashlight.id));
     EXPECT_TRUE(registry->get<commons::renderer>(flashlight.id)->visible);
     EXPECT_EQ(flashlight_pose->get_position(), (bgui::vec3{0.75f, 0.65f, 0.3f}));
@@ -905,7 +982,6 @@ TEST(LuaApi, SetupAndUpdateFailuresLeaveOtherScriptsRunning) {
     std::filesystem::remove_all(folder);
 }
 
-#include "components/hud.hpp"
 TEST(Hud, LuaCreationPersistenceAndLifetime) {
     auto registry = std::make_shared<commons::ecs>();
     auto entity = registry->create();
@@ -919,11 +995,11 @@ TEST(Hud, LuaCreationPersistenceAndLifetime) {
         row = h:Add("row", "", -1)
         label = h:Add("text", "Vida: 100", 0)
         button = h:Add("button", "Usar", 0)
-        world = h:Add("text3d", "Objetivo", -1)
-        world.position = Vector3(1, 2, 3)
-        world.rotation = Vector3(10, 20, 30)
-        world.world_scale = Vector3(2, 3, 4)
-        world.depth = 0.125
+        prompt = h:Add("text", "Objetivo", -1)
+        assert(prompt:SetScreenPosition(Vector3(60, 80, 1)))
+        assert(prompt.absolute)
+        assert(not prompt:SetScreenPosition(Vector3(1/0, 0, 0)))
+        assert(not pcall(function() h:Add("text3d", "Obsoleto", -1) end))
         assert(h.count == 4); assert(h:Get(1).text == "Vida: 100"); assert(h:Get(-1) == nil)
         assert(not button:ConsumeClick())
     )"));
@@ -937,17 +1013,8 @@ TEST(Hud, LuaCreationPersistenceAndLifetime) {
     ASSERT_TRUE(restored.analyze(doc));
     ASSERT_EQ(restored.elements.size(),4u);
     EXPECT_EQ(restored.elements[1]->parent,0);
-    EXPECT_EQ(restored.elements[3]->position.z,3.f);
-    EXPECT_EQ(restored.elements[3]->rotation.y, 20.f);
-    EXPECT_EQ(restored.elements[3]->world_scale.z, 4.f);
-    EXPECT_FLOAT_EQ(restored.elements[3]->depth, .125f);
-    auto& old_label = doc["elements"][3];
-    old_label.RemoveMember("rotation");
-    old_label.RemoveMember("world_scale");
-    old_label.RemoveMember("depth");
-    ASSERT_TRUE(restored.analyze(doc));
-    EXPECT_EQ(restored.elements[3]->world_scale, (bgui::vec3{1, 1, 1}));
-    EXPECT_FLOAT_EQ(restored.elements[3]->depth, 0.f);
+    EXPECT_TRUE(restored.elements[3]->absolute);
+    EXPECT_EQ(restored.elements[3]->position, h->elements[3]->position);
     doc["elements"][0]["parent"].SetInt(0);
     EXPECT_FALSE(restored.analyze(doc));
     EXPECT_EQ(restored.elements.size(),4u);
@@ -1021,10 +1088,12 @@ TEST(Hud, AbsoluteWidgetUsesViewportOriginAndScale) {
     auto registry=std::make_shared<commons::ecs>();
     auto entity=registry->create(); registry->add<commons::hud>(entity);
     auto e=registry->get<commons::hud>(entity.id)->add("text","Placed");
-    e->absolute=true; e->position={30,40,0}; e->width=160; e->height=40;
+    const auto unit=bgui::get_global_scale();
+    ASSERT_TRUE(e->set_screen_position({30*unit,40*unit,0}));
+    e->width=160; e->height=40;
     bgui::element viewport; viewport.set_final_rect(20,50,640,480);
     commons::hud_view view(registry,nullptr,viewport); view.on_update();
-    auto r=view.element_rect(e); const auto unit=bgui::get_global_scale();
+    auto r=view.element_rect(e);
     EXPECT_EQ(r.x,20+int(30*unit)); EXPECT_EQ(r.y,50+int(40*unit));
     EXPECT_EQ(r.z,int(160*unit)); EXPECT_EQ(r.w,int(40*unit));
 }
@@ -1047,4 +1116,41 @@ TEST(Hud, ButtonCallbacksRunDuringScriptUpdateAndReportErrors) {
     EXPECT_NO_THROW(script.update());
     e->callback=""; e->clicked=true; script.update();
     EXPECT_TRUE(e->consume_click());
+}
+
+TEST(LuaApi, AnimationCommandsAreTypedAndRejectRemovedComponents) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::animation>(entity);
+    auto player = registry->get<commons::animation>(entity.id);
+    player->data = std::make_shared<commons::animation_clip>();
+    player->data->tracks.push_back({commons::transform::mask, "position.x", false, {{0,0},{2,4}}});
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+    auto result = lua.safe_script(R"(
+        anim = gameObject:GetComponent("Animation")
+        assert(anim ~= nil)
+        assert(anim:Play())
+        assert(anim:Seek(1))
+        anim.speed = 2
+        assert(not anim:SetSpeed(-1))
+        assert(not anim:CrossFade("../outside.banim", 0.5))
+    )", sol::script_pass_on_error);
+    ASSERT_TRUE(result.valid());
+    commons::animation_system system([] { return 0.; }); system.update(registry);
+    EXPECT_FLOAT_EQ(registry->get<commons::transform>(entity.id)->position.x, 2);
+    result = lua.safe_script(R"(
+        assert(anim.isPlaying and not anim.isBlending and anim.time == 1)
+        assert(anim:Pause())
+        assert(anim:Stop())
+    )", sol::script_pass_on_error);
+    ASSERT_TRUE(result.valid());
+    system.update(registry);
+    EXPECT_FALSE(player->is_playing());
+    registry->remove<commons::animation>(entity.id);
+    result = lua.safe_script("assert(not anim:Play()); assert(not anim.isPlaying)", sol::script_pass_on_error);
+    EXPECT_TRUE(result.valid());
 }

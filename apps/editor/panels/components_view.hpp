@@ -1,3 +1,6 @@
+#include "../core/localization.hpp"
+#include "animation_editor.hpp"
+#include "components/pathfinder.hpp"
 #pragma once
 
 #include "editor_api.hpp"
@@ -82,16 +85,18 @@ public:
     components_view(const components_view&) = delete;
     components_view& operator=(const components_view&) = delete;
 
+    void set_animation_editor_callback(std::function<void()> callback) { m_open_animation = std::move(callback); }
+
     void build(bgui::dock& parent) override {
         if (m_window)
             return;
 
         m_window = &parent.add_window(
-            "Inspector",
+            tr("Inspector"),
             bgui::dock_area::right,
             0.3f
         );
-        m_root = &m_window->add<detail::refreshing_layout>(
+        m_root = &bgui::panel_content(*m_window).add<detail::refreshing_layout>(
             bgui::orientation::vertical
         );
         m_root->style.layout.require_mode(
@@ -187,6 +192,7 @@ private:
     std::filesystem::path m_rendered_material;
     std::function<void(const std::filesystem::path&)> m_material_saved;
     bool m_refresh_requested{false};
+    std::function<void()> m_open_animation;
     commons::component::mask m_rendered_mask{commons::component::COMPONENTE_NONE};
     std::size_t m_history_revision{0};
     std::uint64_t m_asset_revision{0};
@@ -249,7 +255,7 @@ private:
 
     void build_material_file(const std::filesystem::path& requested) {
         auto& content = add_section(requested.filename().string(), false, {}).children();
-        auto& status = content.add<bgui::text>("Alterações são salvas no arquivo.", .27f);
+        auto& status = content.add<bgui::text>(tr("Alterações são salvas no arquivo."), .27f);
         struct file_binding {
             std::shared_ptr<editor_context> context;
             std::filesystem::path selected;
@@ -344,14 +350,14 @@ private:
 
         if (!image.empty()) {
             auto& content = add_section(image.filename().string(), false, {}).children();
-            auto& status = content.add<bgui::text>("Reopen the scene to apply texture changes.", 0.27f);
+            auto& status = content.add<bgui::text>(tr("Reopen the scene to apply texture changes."), 0.27f);
             int percent = commons::default_texture_resolution_percent;
             try {
                 percent = commons::texture_resolution_percent(image);
             } catch (const std::exception& error) {
                 status.set_buffer(error.what());
             }
-            content.add<bgui::field>("Texture Resolution (%)", std::to_string(percent), 0.27f,
+            content.add<bgui::field>(tr("Texture Resolution (%)"), std::to_string(percent), 0.27f,
                 [image, &status](const std::string& input) {
                     int value{};
                     const auto parsed = std::from_chars(input.data(), input.data() + input.size(), value);
@@ -379,7 +385,7 @@ private:
         }
         if (!selected) {
             auto& message = m_root->add<bgui::text>(
-                "Select an entity to inspect its components.",
+                tr("Select an entity to inspect its components."),
                 0.32f
             );
             message.style.layout.require_mode(
@@ -395,7 +401,7 @@ private:
     void build_entity(const entity_id id) {
         const auto registry = m_context->registry;
         if (m_context->editor_camera_entity == id) {
-            m_toolbar->add<bgui::text>("Editor Camera", 0.3f);
+            m_toolbar->add<bgui::text>(tr("Editor Camera"), 0.3f);
             if (auto camera = registry->get<commons::camera>(id))
                 add_camera(id, camera);
             return;
@@ -419,16 +425,23 @@ private:
         if (auto listener = registry->get<commons::sound_listener>(id))
             add_sound_listener(id, listener);
 
+        if (auto path = registry->get<commons::pathfinder>(id)) {
+            auto& content = add_section("Pathfinder", true, [this,id] { remove_component<commons::pathfinder>(id); }).children();
+            content.add<bgui::text>("A* XZ | Lua: FindPath / GetPath | F3", .25f);
+            add_float(content, "Cell Size", path->cell_size, [path] { return path->cell_size; },
+                [path](float n) { if (std::isfinite(n)) path->configure(std::clamp(n,.05f,100.f),path->agent_radius,path->search_radius); });
+            add_float(content, "Agent Radius", path->agent_radius, [path] { return path->agent_radius; },
+                [path](float n) { if (std::isfinite(n)) path->configure(path->cell_size,std::clamp(n,0.f,100.f),path->search_radius); });
+            add_float(content, "Search Radius (cells)", float(path->search_radius), [path] { return float(path->search_radius); },
+                [path](float n) { if (std::isfinite(n)) path->configure(path->cell_size,path->agent_radius,int(std::clamp(n,1.f,64.f))); });
+        }
+        if (auto animation = registry->get<commons::animation>(id))
+            add_animation(id, animation);
+
         if (auto h = registry->get<commons::hud>(id)) {
             auto& section = add_section("HUD", true,
                 [this, id]() { remove_component<commons::hud>(id); });
             add_toggle(section.children(), "Enabled", h, &commons::hud::enabled);
-            for (const auto& widget : h->elements) {
-                if (widget->kind != "text3d") continue;
-                section.children().add<bgui::button>("3D: " + widget->id, .27f, [this, widget] {
-                    m_context->selected_hud_widget = widget;
-                });
-            }
             auto e=m_context->selected_hud_widget.lock();
             if(e && std::find(h->elements.begin(),h->elements.end(),e)!=h->elements.end()) {
                 auto& content=section.children();
@@ -452,24 +465,16 @@ private:
                     add_float(content,label,e.get()->*member,[e,member]{return e.get()->*member;},[e,member](float n){e.get()->*member=std::clamp(n,0.f,10000.f);});
                 };
                 number("Font size", &commons::hud_element::scale);
-                if (e->kind == "text3d") {
-                    number("Depth", &commons::hud_element::depth);
-                    add_vec_field(content, "Rotation", e->rotation, [e] { return e->rotation; },
-                        [e](size_t axis, float n) { e->rotation[axis] = n; });
-                    add_vec_field(content, "Scale", e->world_scale, [e] { return e->world_scale; },
-                        [e](size_t axis, float n) { e->world_scale[axis] = n; });
-                } else {
-                    number("Width", &commons::hud_element::width);
-                    number("Height", &commons::hud_element::height);
-                    number("Padding", &commons::hud_element::padding);
-                    number("Margin", &commons::hud_element::margin);
-                }
+                number("Width", &commons::hud_element::width);
+                number("Height", &commons::hud_element::height);
+                number("Padding", &commons::hud_element::padding);
+                number("Margin", &commons::hud_element::margin);
                 add_vec_field(content,"Position",e->position,[e]{return e->position;},[e](size_t axis,float n){e->position[axis]=n;});
                 auto& color=panel::add_color(content,e->color);
                 color.set_on_change([this,e](const bgui::color& n){auto old=e->color;e->color=n;m_context->record_action([e,old]{e->color=old;},[e,n]{e->color=n;});});
                 auto& align=content.add<bgui::combo_box>(std::vector<std::string>{"Start","Center","End"},.27f,size_t(e->alignment));
                 align.set_on_change([this,e](size_t n,const std::string&){auto old=e->alignment;e->alignment=int(n);m_context->record_action([e,old]{e->alignment=old;},[e,n]{e->alignment=int(n);});});
-            } else section.children().add<bgui::text>("Select a widget in Game to edit it.",.27f);
+            } else section.children().add<bgui::text>(tr("Select a widget in Game to edit it."),.27f);
         }
         if (auto player = registry->get<commons::sound_player>(id))
             add_sound_player(id, player);
@@ -478,7 +483,7 @@ private:
             auto& section = add_section("Physics", true,
                 [this, id]() { remove_component<commons::physics>(id); });
             auto& content = section.children();
-            content.add<bgui::text>("Body Type", 0.27f);
+            content.add<bgui::text>(tr("Body Type"), 0.27f);
             auto& types = content.add<bgui::combo_box>(
                 std::vector<std::string>{"Rigid Body", "Character Body", "Static Body"},
                 0.29f, static_cast<std::size_t>(physics->type));
@@ -501,7 +506,7 @@ private:
                     physics->setMass(mass); physics->set_body_type(before);
                 }, [physics, after]() { physics->set_body_type(after); });
             });
-            content.add<bgui::text>("Collision Shape", 0.27f);
+            content.add<bgui::text>(tr("Collision Shape"), 0.27f);
             const auto visual = registry->get<commons::renderer>(id);
             std::vector<std::string> shape_options{
                 "Box", "Capsule", "Sphere", "Cylinder", "Cone", "Plane"
@@ -528,7 +533,7 @@ private:
                     [apply, after]() { apply(after); });
             });
             if (physics->e_forma == commons::physics::shapes::mesh_shape) {
-                content.add<bgui::text>("Model Collider", 0.27f);
+                content.add<bgui::text>(tr("Model Collider"), 0.27f);
                 auto& model_colliders = content.add<bgui::combo_box>(
                     std::vector<std::string>{"Convex Hull", "Concave Mesh"},
                     0.29f,
@@ -569,7 +574,7 @@ private:
                 if (physics->model_collider ==
                         commons::physics::model_collider_type::concave)
                     content.add<bgui::text>(
-                        "Concave mesh colliders require a Static Body.", 0.25f
+                        tr("Concave mesh colliders require a Static Body."), 0.25f
                     );
             }
             auto toggle = [this, physics, &content](const char* label, bool commons::physics::*field) {
@@ -689,10 +694,57 @@ private:
 
     }
 
+    void add_animation(entity_id id, const std::shared_ptr<commons::animation>& player) {
+        auto& content = add_section("Animation", true, [this,id] { remove_component<commons::animation>(id); }).children();
+        auto& status = content.add<bgui::text>(tr("Animation Clip (.banim)"), .25f);
+        auto& file = content.add<bgui::inputbox>(player->clip, "assets/animations/MyClip.banim", .27f,
+            [this,id,&status](const std::string value) {
+                std::string error;
+                if (!animation_editor(m_context).assign(id,value,error)) status.set_buffer(error);
+                else refresh();
+            });
+        configure_property_input(file);
+        std::vector<std::string> clips;
+        const auto folder=m_context->project_root / "assets/animations";
+        std::error_code scan_error;
+        if (std::filesystem::is_directory(folder,scan_error)) {
+            for (std::filesystem::recursive_directory_iterator it(folder,scan_error), end;
+                !scan_error && it!=end && clips.size()<1024; it.increment(scan_error))
+                if (it->is_regular_file(scan_error) && it->path().extension()==".banim")
+                    clips.push_back(it->path().lexically_relative(m_context->project_root).generic_string());
+        }
+        if (!clips.empty()) {
+            std::sort(clips.begin(),clips.end());
+            clips.insert(clips.begin(),"Escolher clipe do projeto...");
+            auto& picker=content.add<bgui::combo_box>(clips,.27f);
+            picker.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
+            picker.style.layout.require_height(bgui::mode::pixel,26.f);
+            picker.set_on_change([this,id,&status](std::size_t index,const std::string& path) {
+                if (!index) return;
+                std::string error;
+                if (animation_editor(m_context).assign(id,path,error)) refresh();
+                else status.set_buffer(error);
+            });
+        }
+        add_toggle(content, "Play Automatically", player, &commons::animation::autoplay);
+        auto& speed = content.add<bgui::field>(tr("Speed"),std::to_string(player->speed),.27f,
+            [this,id,&status](const std::string text) {
+                double value{};
+                const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
+                auto current=m_context->registry->get<commons::animation>(id);
+                if(parsed.ec!=std::errc{} || parsed.ptr!=text.data()+text.size() || !current ||
+                    !animation_editor(m_context).settings(id,current->autoplay,value)) status.set_buffer("Speed deve estar entre 0 e 100.");
+            });
+        configure_property_field(speed);
+        content.add<bgui::button>(tr("Editar animação / criar clipe"),.27f,[this] {
+            if(m_open_animation) m_open_animation();
+        });
+    }
+
     void build_add_component(const entity_id id) {
         const auto registry = m_context->registry;
         auto& add_component_button = m_root->add<bgui::button>(
-            "Add Component",
+            tr("Add Component"),
             0.28f,
             [this]() {
                 if (m_component_options)
@@ -724,14 +776,20 @@ private:
         );
         m_component_options->set_enable(false);
         if (!registry->get<commons::transform>(id))
-            m_component_options->add<bgui::button>("Transform", 0.28f,
+            m_component_options->add<bgui::button>(tr("Transform"), 0.28f,
                 [this, id]() { add_component<commons::transform>(id); });
         if (!registry->get<commons::renderer>(id))
-            m_component_options->add<bgui::button>("Renderer", 0.28f,
+            m_component_options->add<bgui::button>(tr("Renderer"), 0.28f,
                 [this, id]() { add_component<commons::renderer>(id); });
+        if (!registry->get<commons::pathfinder>(id))
+            m_component_options->add<bgui::button>("Pathfinder", .28f,
+                [this,id] { add_component<commons::pathfinder>(id); });
+        if (!registry->get<commons::animation>(id))
+            m_component_options->add<bgui::button>(tr("Animation"), .28f,
+                [this,id] { add_component<commons::animation>(id); });
         if (can_add_camera) {
             auto& camera_button = m_component_options->add<bgui::button>(
-                "Camera",
+                tr("Camera"),
                 0.28f,
                 [this, id]() { add_component<commons::camera>(id); }
             );
@@ -739,7 +797,7 @@ private:
         }
         if (can_add_directional_light) {
             auto& light_button = m_component_options->add<bgui::button>(
-                "Directional Light",
+                tr("Directional Light"),
                 0.28f,
                 [this, id]() {
                     add_component<commons::directional_light>(id);
@@ -749,23 +807,23 @@ private:
         }
         if (can_add_spot_light) {
             auto& light_button = m_component_options->add<bgui::button>(
-                "Spot Light",
+                tr("Spot Light"),
                 0.28f,
                 [this, id]() { add_component<commons::spot_light>(id); }
             );
             light_button.add_class("editor-input");
         }
         if (can_add_sound_listener)
-            m_component_options->add<bgui::button>("Sound Listener", 0.28f,
+            m_component_options->add<bgui::button>(tr("Sound Listener"), 0.28f,
                 [this, id]() { add_component<commons::sound_listener>(id); });
         if (!registry->get<commons::hud>(id))
             m_component_options->add<bgui::button>("HUD", 0.28f,
                 [this, id]() { add_component<commons::hud>(id); });
         if (can_add_sound_player)
-            m_component_options->add<bgui::button>("Sound Player", 0.28f,
+            m_component_options->add<bgui::button>(tr("Sound Player"), 0.28f,
                 [this, id]() { add_component<commons::sound_player>(id); });
         if (!registry->get<commons::physics>(id))
-            m_component_options->add<bgui::button>("Physics", 0.28f,
+            m_component_options->add<bgui::button>(tr("Physics"), 0.28f,
                 [this, id]() { add_component<commons::physics>(id); });
         auto& script_input = panel::add_input(*m_component_options,
             "", "Add Lua script: drop a file or enter its path", 0.27f);
@@ -1158,7 +1216,7 @@ private:
             [camera](float value) { if (value > 0.f) camera->config.scale = value; }
         );
 
-        content.add<bgui::text>("With skybox disabled, the atmosphere gradient is used.", 0.25f);
+        content.add<bgui::text>(tr("With skybox disabled, the atmosphere gradient is used."), 0.25f);
         auto& skybox_enabled = panel::add_checkbox(content,
             "Enable Skybox", 0.29f, camera->config.use_skybox);
         skybox_enabled.set_on_change([this, camera](bool enabled) {
@@ -1171,7 +1229,7 @@ private:
         });
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         configure_property_row(row);
-        auto& label = row.add<bgui::text>("Cubemap image (4 x 3 cross)", 0.27f);
+        auto& label = row.add<bgui::text>(tr("Cubemap image (4 x 3 cross)"), 0.27f);
         configure_property_label(label);
         auto& input = panel::add_input(row, camera->config.skybox_image, "Drop a horizontal cross image", 0.26f);
         configure_property_input(input);
@@ -1215,6 +1273,18 @@ private:
                 if (std::isfinite(value) && value >= 0.f)
                     camera->config.fog_density = value;
             });
+        add_float(content, "Fog Min Distance", camera->config.fog_min_distance,
+            [camera]() { return camera->config.fog_min_distance; },
+            [camera](float value) {
+                if (std::isfinite(value) && value >= 0.f && value < camera->config.fog_max_distance)
+                    camera->config.fog_min_distance = value;
+            });
+        add_float(content, "Fog Max Distance", camera->config.fog_max_distance,
+            [camera]() { return camera->config.fog_max_distance; },
+            [camera](float value) {
+                if (std::isfinite(value) && value > camera->config.fog_min_distance)
+                    camera->config.fog_max_distance = value;
+            });
         add_rgb_picker(content, "Fog", [camera] {
             auto c = camera->config.fog_color; return bgui::vec3{c.r,c.g,c.b}; },
             [camera](bgui::vec3 v) { camera->config.fog_color = {v.x,v.y,v.z,1.f}; });
@@ -1222,7 +1292,7 @@ private:
         using commons::ambient_occlusion_mode;
         using commons::camera_post_processing;
         auto& post = add_section("Camera Post-processing", false, {}).children();
-        post.add<bgui::text>("Ambient Occlusion", .27f);
+        post.add<bgui::text>(tr("Ambient Occlusion"), .27f);
         auto& mode = post.add<bgui::combo_box>(std::vector<std::string>{"Off", "SSAO", "HBAO", "GTAO"},
             .27f, static_cast<std::size_t>(camera->config.post_processing.occlusion));
         mode.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
@@ -1349,7 +1419,7 @@ private:
         add_vec_field(content, "Direction", light->direction,
             [light]() { return light->direction; },
             [light](std::size_t axis, float value) { light->direction[axis] = value; });
-        content.add<bgui::text>("Color", 0.27f);
+        content.add<bgui::text>(tr("Color"), 0.27f);
         auto& color_picker = panel::add_color(content,
             bgui::color{light->color.x, light->color.y, light->color.z, 1.f});
         color_picker.set_on_change([this, light](const bgui::color& color) {

@@ -9,6 +9,7 @@
 #include <string>
 #include "commons_namespace.hpp"
 #include "entities/entity.hpp"
+#include "core/scene_control.hpp"
 
 namespace COMMONS_NS {
     /**
@@ -24,7 +25,9 @@ namespace COMMONS_NS {
 	        live_entities.clear();
 	    }
 
-	    std::unordered_set<uint32_t> live_entities;
+	    std::shared_ptr<scene_control> scenes;
+
+        std::unordered_set<uint32_t> live_entities;
 	    /// Armazena mask da entity associada
 	    std::unordered_map<uint32_t, component::mask> mascaras;
 	    /// Armazena components da entity associada

@@ -2,6 +2,8 @@
 #pragma once
 #include "editor_context.hpp"
 #include "components/transform.hpp"
+#include "components/animation.hpp"
+#include "components/pathfinder.hpp"
 #include "components/renderer.hpp"
 #include "components/camera.hpp"
 #include "components/code.hpp"
@@ -86,6 +88,8 @@ public:
                             if (use_target) transform->look_at_vector(target);
                         }); break;
                     }
+                    case commons::pathfinder::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::pathfinder>(component))); break;
+                    case commons::animation::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::animation>(component))); break;
                     case commons::camera::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::camera>(component))); break;
                     case commons::physics::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::physics>(component))); break;
                     case commons::directional_light::mask: value.components.push_back(serialized(std::static_pointer_cast<commons::directional_light>(component))); break;

@@ -1176,3 +1176,19 @@ TEST_F(EditorAssetWorkflowTest, KeepsUnsavedMaterialDraftFromAnOlderTextEditorSe
     EXPECT_NE(editor::ui::project_files::read(session).find(encoded.str()), std::string::npos);
     EXPECT_EQ(editor::ui::project_files::read(material), "{}");
 }
+
+TEST_F(EditorAssetWorkflowTest, BlockEditorShortcutsNeverConsumeSceneHistoryOrEntityClipboard) {
+    auto context=std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
+    bool undone=false;context->record_action([&]{undone=true;},[&]{undone=false;});
+    auto& blocks=bgui::get_layout().add<bgui::linear>();blocks.type="visual-script-tree";
+    bgui::focus_keyboard(blocks);
+    editor::ui::undo_redo_shortcuts_system shortcuts(context);
+    auto& io=bgui::get_context();std::string clipboard="script clipboard";
+    io.m_get_clipboard=[&]{return clipboard;};io.m_set_clipboard=[&](const auto& s){clipboard=s;};
+    for(auto key:{bgui::input_key::z,bgui::input_key::c,bgui::input_key::v}) {
+        io.m_input_map.clear();shortcuts.on_update();
+        io.m_input_map[bgui::input_key::left_control]=bgui::input_action::press;
+        io.m_input_map[key]=bgui::input_action::press;shortcuts.on_update();
+    }
+    EXPECT_FALSE(undone);EXPECT_EQ(context->undo_stack.size(),1u);EXPECT_EQ(clipboard,"script clipboard");
+}

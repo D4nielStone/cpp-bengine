@@ -10,10 +10,6 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "components/camera.hpp"
-#include "components/hud.hpp"
-#include <os/font.hpp>
-#include <codecvt>
-#include <locale>
 #include "components/directional_light.hpp"
 #include "components/point_light.hpp"
 #include "components/spot_light.hpp"
@@ -145,10 +141,6 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
 render_system::~render_system() {
     // Systems may outlive the window during application shutdown.
     if (glad_glGetString && glGetString(GL_VERSION)) {
-        for (auto& [widget, mesh] : m_text_meshes) {
-            glDeleteBuffers(1, &mesh.buffer);
-            glDeleteVertexArrays(1, &mesh.vao);
-        }
         if (m_occlusion_depth) glDeleteTextures(1, &m_occlusion_depth);
         if (m_occlusion_vao) glDeleteVertexArrays(1, &m_occlusion_vao);
         for (auto* map : {&m_directional_shadow, &m_spot_shadow}) {
@@ -338,125 +330,6 @@ void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
     render(reg, &view, replacement_entity, replacement, replacement_transform);
 }
 
-namespace {
-std::vector<float> text_geometry(const bgui::font& font, const std::string& text) {
-    std::u32string codepoints;
-    try {
-        codepoints = std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.from_bytes(text);
-    } catch (const std::range_error&) { return {}; }
-    const int atlas_width = static_cast<int>(font.atlas.m_size.x);
-    const int atlas_height = static_cast<int>(font.atlas.m_size.y);
-    if (!font.atlas.m_use_red_channel || atlas_width <= 0 || atlas_height <= 0 ||
-        font.atlas.m_buffer.size() != std::size_t(atlas_width) * atlas_height) return {};
-    std::vector<float> vertices;
-    const auto quad = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d, float shade) {
-        for (const auto& point : {a, b, c, a, c, d})
-            vertices.insert(vertices.end(), {point.x, point.y, point.z, shade});
-    };
-    float pen_x = 0.f, pen_y = 0.f;
-    const float line_height = font.ascent + font.descent + font.line_gap;
-    for (const auto codepoint : codepoints) {
-        if (vertices.size() >= 1'000'000) break;
-        if (codepoint == U'\n') { pen_x = 0.f; pen_y -= line_height; continue; }
-        auto found = font.chs.find(codepoint);
-        if (found == font.chs.end()) found = font.chs.find(U'?');
-        if (found == font.chs.end()) continue;
-        const auto& glyph = found->second;
-        const int atlas_x = std::lround(glyph.uv_min.x * atlas_width);
-        const int atlas_y = std::lround(glyph.uv_max.y * atlas_height);
-        const int width = glyph.size.x, height = glyph.size.y;
-        const auto filled = [&](int x, int y) {
-            return x >= 0 && x < width && y >= 0 && y < height &&
-                font.atlas.m_buffer[std::size_t(atlas_y + y) * atlas_width + atlas_x + x] >= 128;
-        };
-        if (atlas_x >= 0 && atlas_y >= 0 && atlas_x + width <= atlas_width && atlas_y + height <= atlas_height)
-            for (int y = 0; y < height; ++y) {
-                const float top = pen_y + glyph.bearing.y - y, bottom = top - 1.f;
-                for (int x = 0; x < width;) {
-                    if (!filled(x, y)) { ++x; continue; }
-                    const int start = x;
-                    while (filled(x, y)) ++x;
-                    const float left = pen_x + glyph.bearing.x + start, right = left + x - start;
-                    quad({left,bottom,0}, {right,bottom,0}, {right,top,0}, {left,top,0}, 1.f);
-                    quad({left,bottom,-1}, {right,bottom,-1}, {right,top,-1}, {left,top,-1}, .8f);
-                    quad({left,bottom,0}, {left,top,0}, {left,top,-1}, {left,bottom,-1}, .6f);
-                    quad({right,bottom,0}, {right,top,0}, {right,top,-1}, {right,bottom,-1}, .7f);
-                    for (int column = start; column < x; ++column) {
-                        const float edge = left + column - start;
-                        if (!filled(column, y - 1))
-                            quad({edge,top,0}, {edge+1,top,0}, {edge+1,top,-1}, {edge,top,-1}, .85f);
-                        if (!filled(column, y + 1))
-                            quad({edge,bottom,0}, {edge+1,bottom,0}, {edge+1,bottom,-1}, {edge,bottom,-1}, .55f);
-                    }
-                }
-            }
-        pen_x += glyph.advance;
-    }
-    return vertices;
-}
-}
-
-void render_system::draw_world_text(const std::shared_ptr<ecs>& registry, camera& view) {
-    auto& fonts = bgui::font_manager::get_instance();
-    if (!fonts.has_font("default")) return;
-    const auto& font = fonts.get_font("default");
-    bool drawing = false;
-    shader program(shader::deferred_t{});
-    GLint vao = 0, buffer = 0, previous_program = 0;
-    GLboolean culling = GL_FALSE;
-    registry->cada<hud>([&](std::uint32_t id) {
-        const auto overlay = registry->get<hud>(id);
-        if (!overlay->enabled) return;
-        for (const auto& item : overlay->elements) {
-            if (item->kind != "text3d" || !item->visible || item->text.empty() ||
-                item->scale <= 0.f || item->color.w <= 0.f) continue;
-            if (!drawing) {
-                program.compilar("world_text.vert", "world_text.frag");
-                glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
-                glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
-                glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &buffer);
-                culling = glIsEnabled(GL_CULL_FACE);
-                glDisable(GL_CULL_FACE);
-                program.use();
-                drawing = true;
-            }
-            auto& mesh = m_text_meshes[item.get()];
-            if (!mesh.vao || mesh.owner.lock() != item || mesh.text != item->text) {
-                const auto vertices = text_geometry(font, item->text);
-                if (!mesh.vao) {
-                    glGenVertexArrays(1, &mesh.vao);
-                    glGenBuffers(1, &mesh.buffer);
-                }
-                glBindVertexArray(mesh.vao);
-                glBindBuffer(GL_ARRAY_BUFFER, mesh.buffer);
-                glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
-                glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
-                glEnableVertexAttribArray(0);
-                mesh.owner = item;
-                mesh.text = item->text;
-                mesh.vertices = static_cast<int>(vertices.size() / 4);
-            }
-            transform placement;
-            placement.set_position(item->position);
-            placement.set_rotation(item->rotation);
-            placement.set_scale(item->world_scale);
-            const float size = item->scale / std::max(1u, font.resolution);
-            const auto matrix = view.projMatriz * view.viewMatrix * placement.get_world_model_matrix() *
-                glm::scale(glm::mat4(1.f), glm::vec3(size, size, item->depth));
-            program.setMat4("mvp", glm::value_ptr(matrix));
-            program.setVec4("ink", item->color);
-            glBindVertexArray(mesh.vao);
-            glDrawArrays(GL_TRIANGLES, 0, mesh.vertices);
-        }
-    });
-    if (drawing) {
-        if (culling) glEnable(GL_CULL_FACE);
-        glUseProgram(previous_program);
-        glBindVertexArray(vao);
-        glBindBuffer(GL_ARRAY_BUFFER, buffer);
-    }
-}
-
 void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_view,
     std::uint32_t replacement_entity, const std::shared_ptr<renderer>& replacement,
     const std::shared_ptr<transform>& replacement_transform) {
@@ -468,13 +341,6 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         m_last_render_time_ms = 0.0;
         return;
     }
-
-    std::erase_if(m_text_meshes, [](const auto& entry) {
-        if (!entry.second.owner.expired()) return false;
-        glDeleteBuffers(1, &entry.second.buffer);
-        glDeleteVertexArrays(1, &entry.second.vao);
-        return true;
-    });
 
     directional_light global_direction_light{
         {-0.2f, -1.0f, -0.3f},
@@ -708,6 +574,8 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             shader.setVec3("fogColor", {camera_component->config.fog_color.r,
                 camera_component->config.fog_color.g, camera_component->config.fog_color.b});
             shader.setFloat("fogDensity", camera_component->config.fog_density);
+            shader.setFloat("fogMinDistance", camera_component->config.fog_min_distance);
+            shader.setFloat("fogMaxDistance", camera_component->config.fog_max_distance);
             shader.setVec3("dirLight.direction", direction_light.direction);
             shader.setVec3("dirLight.ambient", direction_light.ambient);
             shader.setVec3("dirLight.color", direction_light.color);
@@ -800,7 +668,6 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             glActiveTexture(active_texture);
         }
         apply_camera_occlusion(*camera_component);
-        draw_world_text(reg, *camera_component);
     };
     if (explicit_view) draw_camera(explicit_view);
     else reg->cada<camera>([&](const std::uint32_t entity) {

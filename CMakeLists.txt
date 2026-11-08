@@ -26,6 +26,7 @@ find_package(ZLIB REQUIRED)
 option(BENGINE_SINGLE_FILE_RUNTIME "Link non-system runtime dependencies statically" OFF)
 option(BUILD_RUNTIME "Build the standalone runtime app" ON)
 option(BUILD_EDITOR "Build the editor app" ON)
+option(BUILD_MCP "Build the local MCP server" ON)
 option(ENABLE_SANITIZERS "Enable ASan/UBSan for development builds when supported" OFF)
 
 if(ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

@@ -105,6 +105,8 @@ bool camera::analyze(const rapidjson::Value& value)
     next.skybox_image.clear();
     next.fog_enabled = false;
     next.fog_density = 0.01f;
+    next.fog_min_distance = 0.f;
+    next.fog_max_distance = 300.f;
     next.fog_color = {0.43f, 0.78f, 0.86f, 1.f};
     auto next_skybox_faces = skybox_faces;
     const float near_clip = value.HasMember("znear")
@@ -133,12 +135,15 @@ bool camera::analyze(const rapidjson::Value& value)
     };
     if (!read_float("fov", next.fov) || !read_float("scale", next.scale) ||
         !read_float("fog_density", next.fog_density) ||
+        !read_float("fog_min_distance", next.fog_min_distance) ||
+        !read_float("fog_max_distance", next.fog_max_distance) ||
         !read_bool("ortho", next.flag_orth) || !read_bool("skybox", next.use_skybox) ||
         !read_bool("fog_enabled", next.fog_enabled))
         return false;
     next.corte_curto = near_clip;
     next.corte_longo = far_clip;
-    if (next.fov < 1.f || next.fov > 179.f || next.scale <= 0.f || next.fog_density < 0.f)
+    if (next.fov < 1.f || next.fov > 179.f || next.scale <= 0.f || next.fog_density < 0.f ||
+        next.fog_min_distance < 0.f || next.fog_max_distance <= next.fog_min_distance)
         return false;
 	if (value.HasMember("ceu")) {
 		const auto& sky_color = value["ceu"];
@@ -319,6 +324,8 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
         !std::isfinite(config.corte_curto) || !std::isfinite(config.corte_longo) ||
         !std::isfinite(config.scale) || config.scale <= 0.f ||
         !std::isfinite(config.fog_density) || config.fog_density < 0.f ||
+        !std::isfinite(config.fog_min_distance) || config.fog_min_distance < 0.f ||
+        !std::isfinite(config.fog_max_distance) || config.fog_max_distance <= config.fog_min_distance ||
         config.corte_curto <= 0.f || config.corte_longo <= config.corte_curto ||
         !valid_channel(config.sky_solid_color.r) || !valid_channel(config.sky_solid_color.g) ||
         !valid_channel(config.sky_solid_color.b) || !valid_channel(config.sky_solid_color.a) ||
@@ -367,6 +374,8 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
 
     value.AddMember("fog_enabled", config.fog_enabled, allocator);
     value.AddMember("fog_density", config.fog_density, allocator);
+    value.AddMember("fog_min_distance", config.fog_min_distance, allocator);
+    value.AddMember("fog_max_distance", config.fog_max_distance, allocator);
     rapidjson::Value fog_color(rapidjson::kArrayType);
     fog_color.PushBack(config.fog_color.r, allocator);
     fog_color.PushBack(config.fog_color.g, allocator);

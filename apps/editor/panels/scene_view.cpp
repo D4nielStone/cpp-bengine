@@ -1,3 +1,4 @@
+#include "../core/localization.hpp"
 #include "scene_view.hpp"
 
 #include "../presenters/scene_presenter.hpp"
@@ -165,10 +166,10 @@ std::optional<editor_context::entity_id> scene_view::entity_at(const bgui::vec2i
 void scene_view::build(bgui::dock& dock) {
     const auto frame = m_presenter->initialize_viewport();
 
-    auto& scene_window = dock.add_window("Scene", bgui::dock_area::center, 0.3f);
+    auto& scene_window = dock.add_window(tr("Scene"), bgui::dock_area::center, 0.3f);
     scene_window.add_class("editor-panel");
 
-    auto& scene_context = scene_window.add<scene_view_surface>(m_state);
+    auto& scene_context = bgui::panel_content(scene_window).add<scene_view_surface>(m_state);
     scene_context.add_class("editor-surface");
     scene_context.style.layout.require_mode(
         bgui::mode::match_parent,
@@ -192,7 +193,7 @@ void scene_view::build(bgui::dock& dock) {
         static_cast<float>(frame.height)});
     m_presenter->attach_overlays(scene_window, image);
 
-    auto& preview_frame = scene_window.add<preview_card, bgui::layer::overlay>();
+    auto& preview_frame = bgui::panel_content(scene_window).add<preview_card, bgui::layer::overlay>();
     preview_frame.add_class("camera-preview-card");
     preview_frame.receives_input(false);
     preview_frame.set_flex(false);
@@ -203,28 +204,28 @@ void scene_view::build(bgui::dock& dock) {
     preview_header.style.layout.padding = bgui::vec4i{0};
     preview_header.receives_input(false);
     preview_header.add<bgui::icon>("camera", 0.24f).receives_input(false);
-    auto& preview_title = preview_header.add<bgui::text>("Camera Preview", 0.27f);
+    auto& preview_title = preview_header.add<bgui::text>(tr("Camera Preview"), 0.27f);
     preview_title.receives_input(false);
     preview_title.style.layout.require_width(bgui::mode::stretch);
     preview_title.set_wrap(false);
     auto& camera_preview = preview_frame.add<bgui::image>();
     camera_preview.add_class("camera-preview-image");
     camera_preview.receives_input(false);
-    scene_window.add<camera_preview_overlay, bgui::layer::overlay>(
+    bgui::panel_content(scene_window).add<camera_preview_overlay, bgui::layer::overlay>(
         preview_frame,
         preview_title,
         camera_preview,
         m_presenter
     );
-    auto& tools = scene_window.add<tools_container, bgui::layer::overlay>(m_state);
-    auto& mode = tools.add<bgui::button>("View: Normal", 0.28f, [] {});
+    auto& tools = bgui::panel_content(scene_window).add<tools_container, bgui::layer::overlay>(m_state);
+    auto& mode = tools.add<bgui::button>(tr("View: Normal"), 0.28f, [] {});
     mode.style.layout.require_size(150.f, 26.f);
     mode.add<bgui::icon>("eye", 0.28f).receives_input(false);
     m_state->mode_button = &mode;
     mode.set_function([presenter = m_presenter] {
         presenter->toggle_orbital();
     });
-    scene_window.add<navigation_hint, bgui::layer::overlay>(m_state);
+    bgui::panel_content(scene_window).add<navigation_hint, bgui::layer::overlay>(m_state);
 }
 
 void scene_view::update() {
