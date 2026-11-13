@@ -17,27 +17,44 @@ std::size_t long_end(const std::string& s, std::size_t at) {
     const auto end = s.find(close, p + 1);
     return end == std::string::npos ? s.size() : end + close.size();
 }
-// Split only at lexical line boundaries: long comments/strings and continued
-// parenthesized expressions stay intact. Unsupported syntax remains opaque Lua.
+// Partition source without rewriting bytes. Control headers can span lines;
+// compact bodies are split at lexical keywords, never inside strings/comments.
 std::vector<std::string> units(const std::string& source) {
     const auto tokens = lex(source);
     std::vector<std::string> result;
-    std::size_t start = 0, ti = 0;
+    std::size_t start = 0;
     int brackets = 0;
-    for (std::size_t p = 0; p < source.size(); ++p) {
-        if (ti < tokens.size() && tokens[ti].begin == p) {
-            const auto& t = tokens[ti++];
-            if (!t.literal) {
-                if (t.text == "(" || t.text == "{" || t.text == "[") ++brackets;
-                if (t.text == ")" || t.text == "}" || t.text == "]") --brackets;
+    bool header = false;
+    const auto split = [&](std::size_t end) {
+        if (end > start) { result.push_back(source.substr(start, end-start)); start=end; }
+    };
+    std::size_t previous = 0;
+    for (std::size_t i=0; i<tokens.size(); ++i) {
+        const auto& t=tokens[i];
+        if (!brackets && !header) {
+            const auto newline=source.find('\n',previous);
+            if(newline<t.begin) split(newline+1);
+        }
+        if (!t.literal && !brackets) {
+            if(t.text=="end" || t.text=="else" || t.text=="elseif" || t.text=="until") split(t.begin);
+            if(t.text=="if" || t.text=="elseif" || t.text=="for" || t.text=="while") header=true;
+            if(t.text=="then" || t.text=="do" || t.text=="else" || t.text=="end") {
+                header=false;
+                // Keep separating whitespace with the header/closing keyword.
+                auto end=t.end;
+                while(end<source.size() && std::isspace(static_cast<unsigned char>(source[end]))) {
+                    if(source[end++]=='\n') break;
+                }
+                split(end);
             }
-            p = t.end - 1;
         }
-        if (source[p] == '\n' && brackets == 0) {
-            result.push_back(source.substr(start, p + 1 - start)); start = p + 1;
+        if(!t.literal) {
+            if(t.text=="(" || t.text=="{" || t.text=="[") ++brackets;
+            if(t.text==")" || t.text=="}" || t.text=="]") --brackets;
         }
+        previous=t.end;
     }
-    if (start < source.size()) result.push_back(source.substr(start));
+    split(source.size());
     return result;
 }
 std::vector<token> code_tokens(const std::string& text) {
@@ -56,7 +73,7 @@ kind classify(const std::vector<token>& t) {
     if (first == "while" && last == "do") return kind::while_loop;
     if (first == "repeat" && t.size() == 1) return kind::repeat;
     if (first == "do" && t.size() == 1) return kind::scope;
-    // Avoid exposing fragments of anonymous functions or compact control flow.
+    // Avoid exposing fragments of unsupported anonymous functions.
     for (const auto& v : t)
         if (!v.literal && (v.text == "function" || v.text == "end" || v.text == "then" || v.text == "do" || v.text == "until")) return kind::raw;
     if (first == "local" || std::any_of(t.begin(), t.end(), [](const token& v) { return v.text == "="; })) return kind::assignment;
@@ -418,7 +435,7 @@ const std::vector<command>& commands() {
         {"Propriedades", "Ler Camera.orthographicSize", "local valor = gameObject:GetComponent(\"Camera\").orthographicSize", {}},
         {"Propriedades", "Definir Camera.orthographicSize", "gameObject:GetComponent(\"Camera\").orthographicSize = 1", {"Valor"}},
         {"Propriedades", "Ler Camera.backgroundColor", "local valor = gameObject:GetComponent(\"Camera\").backgroundColor", {}},
-        {"Propriedades", "Definir Camera.backgroundColor", "gameObject:GetComponent(\"Camera\").backgroundColor = Color(1, 1, 1, 1)", {"Valor"}},
+        {"Propriedades", "Definir Camera.backgroundColor", "gameObject:GetComponent(\"Camera\").backgroundColor = Color(0.16, 0.16, 0.16, 1)", {"Valor"}},
         {"Propriedades", "Ler Camera.useSkybox", "local valor = gameObject:GetComponent(\"Camera\").useSkybox", {}},
         {"Propriedades", "Definir Camera.useSkybox", "gameObject:GetComponent(\"Camera\").useSkybox = true", {"Valor"}},
         {"Propriedades", "Ler Camera.skyboxImage", "local valor = gameObject:GetComponent(\"Camera\").skyboxImage", {}},
@@ -579,6 +596,14 @@ const command* describe(const block& value) {
 std::string title(const block& value) {
     if(const auto* c=describe(value)) return c->title;
     if(value.type==kind::assignment && shape(value.head).key.starts_with("property:")) return "Definir propriedade";
+    const auto t=code_tokens(value.head);
+    if(value.type==kind::raw && t.empty()) return "Comentários / propriedades";
+    if(value.type==kind::command && !t.empty() && t[0].text=="return") return "Retornar";
+    if(value.type==kind::function && t.size()>2) return "Função: "+t[t[0].text=="local"?2:1].text;
+    if(value.type==kind::assignment && t.size()>1) {
+        const auto first=t[0].text=="local"?1u:0u;
+        return std::string(t.size()==2?"Declarar: ":"Calcular: ")+t[first].text;
+    }
     return label(value.type);
 }
 std::vector<slot> slots(const block& b) {
@@ -605,6 +630,8 @@ std::vector<slot> slots(const block& b) {
         return {};
     }
     if(b.type==kind::branch || b.type==kind::scope) return {};
+    if(t[0].text=="return") return t.size()==1?std::vector<slot>{}:std::vector<slot>{{"Valores",t[1].begin,t.back().end,false}};
+    if(b.type==kind::assignment && t.size()==2 && t[0].text=="local") return {{"Variável",t[1].begin,t[1].end,false}};
     for(std::size_t i=1;i+1<t.size();++i) if(t[i].text=="=")
         return {{"Variável",t[0].text=="local"?t[1].begin:t[0].begin,t[i-1].end,false},{"Valor",t[i+1].begin,t.back().end,false}};
     if(t.back().text==")") {

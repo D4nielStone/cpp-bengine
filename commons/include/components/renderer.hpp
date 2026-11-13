@@ -15,21 +15,7 @@ namespace COMMONS_NS {
 		static constexpr mask mask = COMPONENTE_RENDER;
 		renderer(model* mesh) : m_modelo(mesh) {
 		}
-        bool analyze(const rapidjson::Value& value) override
-        {
-            if(value.HasMember("model") && value["model"].IsString())
-            {
-                auto m_directory = std::string(value["model"].GetString());
-                if(m_modelo) delete m_modelo;
-                m_modelo = new model(m_directory.c_str());
-            }
-            else return false;
-            if (value.HasMember("cast_shadows") && value["cast_shadows"].IsBool())
-                cast_shadows = value["cast_shadows"].GetBool();
-            if (value.HasMember("receive_shadows") && value["receive_shadows"].IsBool())
-                receive_shadows = value["receive_shadows"].GetBool();
-			return true;
-        };
+        bool analyze(const rapidjson::Value& value) override;
         bool serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const override
         {
             if (!m_modelo)
@@ -37,8 +23,13 @@ namespace COMMONS_NS {
             value.AddMember("cast_shadows", cast_shadows, allocator);
             value.AddMember("receive_shadows", receive_shadows, allocator);
             value.AddMember("model", rapidjson::Value(m_modelo->get_source_path().c_str(), allocator), allocator);
-            return true;
+            return serialize_rig_pose(value, allocator);
         };
+        std::vector<animation_property> animation_properties() const override;
+        std::optional<double> read_animation_property(const std::string& path) const override;
+        bool write_animation_property(const std::string& path, double value) override;
+        bool analyze_rig_pose(const rapidjson::Value& value);
+        bool serialize_rig_pose(rapidjson::Value&, rapidjson::Document::AllocatorType&) const;
 
 		renderer(const char* m_directory ) : m_modelo(new model(m_directory)) {};
         void release_graphics_resources() override {

@@ -26,8 +26,8 @@ namespace COMMONS_NS {
     };
 
 	struct camera_config {
-		bgui::vec3 atmosphere_zenith{0.08f, 0.25f, 0.55f};
-		color sky_solid_color		{0.43F, 0.78F, 0.86F, 1.0F};
+		bgui::vec3 atmosphere_zenith{0.16f, 0.16f, 0.16f};
+		color sky_solid_color		{0.16F, 0.16F, 0.16F, 1.0F};
         std::string skybox_image;
 		bool use_skybox		{ false };
 		bool fog_enabled	{ false };

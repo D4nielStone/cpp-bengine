@@ -42,37 +42,9 @@ TEST_F(EditorScriptTest, CreatesTemplateWithoutOverwritingOrEscapingFolder) {
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(preserved), {}), original);
 }
 
-TEST_F(EditorScriptTest, WasdPresetMovesWithAndWithoutRigidbody) {
-    const auto registry = context->registry;
-    auto entity = registry->create();
-    std::filesystem::path path;
-    std::string error;
-    ASSERT_TRUE(editor::ui::create_lua_script(folder, "Walk", path, error,
-        editor::ui::lua_script_preset::wasd)) << error;
-    ASSERT_TRUE(editor::ui::attach_lua_script(context, entity.id, path, error)) << error;
-    auto script = registry->get<commons::code>(entity.id);
-    script->setup();
-    sol::table input = script->estado_lua["Input"];
-    input.set_function("GetAxis", [](const std::string&) { return 1.f; });
-    script->estado_lua["Time"]["deltaTime"] = .1f;
-    auto update = sol::protected_function(script->f_update);
-    auto moved = update();
-    ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
-    const auto pose = registry->get<commons::transform>(entity.id);
-    const auto position = pose->get_position();
-    EXPECT_NEAR(std::hypot(position.x, position.z), .5f, .0001f);
-    EXPECT_GT(position.x, 0.f);
-    EXPECT_GT(position.z, 0.f);
-
-    registry->add<commons::physics>(entity);
-    const auto body = registry->get<commons::physics>(entity.id);
-    body->setVelocidade({0.f, -3.f, 0.f});
-    moved = update();
-    ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
-    const auto velocity = body->getVelocidade();
-    EXPECT_NEAR(std::hypot(velocity.x, velocity.z), 5.f, .0001f);
-    EXPECT_FLOAT_EQ(velocity.y, -3.f);
-    EXPECT_EQ(pose->get_position(), position);
+TEST_F(EditorScriptTest, OffersOnlyTheGeneralFppTemplate) {
+    ASSERT_EQ(editor::ui::lua_script_templates.size(), 1u);
+    EXPECT_EQ(editor::ui::lua_script_templates[0].name, "Controle FPP (jogador e câmera)");
 }
 
 TEST_F(EditorScriptTest, FppControllerUsesSelectedCameraYawAndMovesTheSelectedPlayer) {
@@ -318,4 +290,34 @@ TEST_F(EditorScriptTest, InvalidPropertyMetadataDisablesOnlyTheAffectedRuntimeSc
     EXPECT_NO_THROW(system.update(context->registry));
     EXPECT_EQ(log.lines().size(), 1u);
     log.clear();
+}
+
+TEST_F(EditorScriptTest, RemovesIndividualScriptsWithUndoAndPreservesOtherAssociations) {
+    std::filesystem::path first, second;
+    std::string error;
+    ASSERT_TRUE(editor::ui::create_lua_script(folder,"First",first,error));
+    ASSERT_TRUE(editor::ui::create_lua_script(folder,"Second",second,error));
+    const auto entity=context->registry->create();
+    ASSERT_TRUE(editor::ui::attach_lua_script(context,entity.id,first,error));
+    ASSERT_TRUE(editor::ui::attach_lua_script(context,entity.id,second,error));
+    auto original=context->registry->get<commons::code>(entity.id);
+    ASSERT_EQ(original->scripts.size(),1u);
+    ASSERT_TRUE(editor::ui::remove_lua_script(context,entity.id,0,error));
+    EXPECT_EQ(context->registry->get<commons::code>(entity.id)->file,"Second.lua");
+    EXPECT_TRUE(context->undo()); EXPECT_EQ(context->registry->get<commons::code>(entity.id),original);
+    ASSERT_TRUE(editor::ui::remove_lua_script(context,entity.id,1,error));
+    EXPECT_TRUE(original->scripts.empty()); EXPECT_TRUE(context->undo()); EXPECT_EQ(original->scripts.size(),1u);
+    context->locked_entities.insert(entity.id);
+    EXPECT_FALSE(editor::ui::remove_lua_script(context,entity.id,0,error));
+    context->locked_entities.clear(); context->is_playing=true;
+    EXPECT_FALSE(editor::ui::remove_lua_script(context,entity.id,0,error));
+    context->is_playing=false;
+    EXPECT_FALSE(editor::ui::remove_lua_script(context,entity.id,99,error));
+    ASSERT_TRUE(editor::ui::remove_lua_script(context,entity.id,1,error));
+    ASSERT_TRUE(editor::ui::remove_lua_script(context,entity.id,0,error));
+    context->registry->remove(entity.id);
+    const auto replacement=context->registry->create(entity.id);
+    EXPECT_TRUE(context->undo());
+    EXPECT_FALSE(context->registry->has<commons::code>(replacement.id));
+    EXPECT_TRUE(std::filesystem::exists(first)); EXPECT_TRUE(std::filesystem::exists(second));
 }

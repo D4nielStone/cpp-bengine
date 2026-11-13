@@ -26,6 +26,7 @@ if(BUILD_EDITOR OR BUILD_TESTING)
         editor/services/visual_lua.cpp
         editor/services/scene_graph.cpp
         editor/panels/scene_workflow.cpp
+        editor/panels/model_editor_rig.cpp
     )
     target_include_directories(editor_services PRIVATE ${EDITOR_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/project)
     target_link_libraries(editor_services PUBLIC editor_core PRIVATE commons)

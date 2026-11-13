@@ -5,6 +5,7 @@
 #include "files_view.hpp"
 #include "game_view.hpp"
 #include "components_view.hpp"
+#include "animation_view.hpp"
 #include "undo_redo_shortcuts_system.hpp"
 #include <elem/button.hpp>
 #include <elem/checkbox.hpp>
@@ -141,7 +142,13 @@ TEST_F(EditorMenuTest, WorkspaceModeSelectsItsOwnDock) {
             EXPECT_EQ(button->style.layout.margin->x, 0);
             EXPECT_EQ(button->style.layout.margin->z, 0);
             ASSERT_TRUE(button->style.visual.background.normal.has_value());
-            EXPECT_FLOAT_EQ(button->style.visual.background.normal->a, 0.f);
+            EXPECT_FLOAT_EQ(button->style.visual.background.normal->a, button->id == "workspace-mode-0" ? 1.f : 0.f);
+            for (const auto& color : {button->style.visual.background.normal,
+                                      button->style.visual.background.hover}) {
+                ASSERT_TRUE(color.has_value());
+                EXPECT_FLOAT_EQ(color->r, color->g);
+                EXPECT_FLOAT_EQ(color->g, color->b);
+            }
         }
     }
     EXPECT_EQ(workspace_button_count, 4u);
@@ -153,6 +160,9 @@ TEST_F(EditorMenuTest, WorkspaceModeSelectsItsOwnDock) {
     editor.set_workspace_mode(editor::ui::editor_workspace_mode::model_editing);
     EXPECT_FALSE(dock.is_enabled());
     EXPECT_TRUE(model_dock.is_enabled());
+    auto* selected_mode = find<bgui::button>(side_bar, [](auto& button) { return button.id == "workspace-mode-1"; });
+    ASSERT_NE(selected_mode, nullptr);
+    EXPECT_FLOAT_EQ(selected_mode->style.visual.background.normal->a, 1.f);
     EXPECT_FALSE(management_dock.is_enabled());
 
     editor.set_workspace_mode(
@@ -319,20 +329,25 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
     dock.add_window("Hierarchy", bgui::dock_area::center);
     dock.add_window(editor::ui::tr("Arquivos"), bgui::dock_area::right);
     dock.add_window("Debug", bgui::dock_area::right);
+    dock.add_window("Game", bgui::dock_area::bottom);
+    dock.add_window("Inspector", bgui::dock_area::right);
+    dock.add_window("Editor Diagnostics", bgui::dock_area::right);
     click("Layout: Wide Scene");
     auto configuration = dock.get_configuration();
     EXPECT_FLOAT_EQ(configuration.left_ratio, .16f);
-    EXPECT_FLOAT_EQ(configuration.right_ratio, .18f);
+    EXPECT_FLOAT_EQ(configuration.right_ratio, .28f);
     for (const auto& window : configuration.windows) {
         EXPECT_FALSE(window.floating);
         if (window.title == "Scene") EXPECT_EQ(window.area, bgui::dock_area::center);
         if (window.title == "Hierarchy") EXPECT_EQ(window.area, bgui::dock_area::left);
         if (window.title == editor::ui::tr("Arquivos")) EXPECT_EQ(window.area, bgui::dock_area::bottom);
     }
-    ASSERT_EQ(configuration.tab_groups.size(), 1u);
+    ASSERT_EQ(configuration.tab_groups.size(), 3u);
+    EXPECT_EQ(configuration.tab_groups[1].windows, (std::vector<std::string>{"Scene", "Game"}));
+    EXPECT_EQ(configuration.tab_groups[2].windows, (std::vector<std::string>{"Inspector", "Editor Diagnostics"}));
     EXPECT_EQ(configuration.tab_groups.front().windows, (std::vector<std::string>{editor::ui::tr("Arquivos"), "Debug"}));
     click("Layout: Standard");
-    EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .24f);
+    EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .18f);
 }
 
 TEST_F(EditorMenuTest, EditorCameraActionOpensSettingsModalAndAppliesProjection) {
@@ -490,8 +505,8 @@ TEST_F(EditorMenuTest, ResetUiRestoresStandardLayoutAndScaleWithoutClosingDocume
     click("Reset UI");
     const auto configuration = dock.get_configuration();
     EXPECT_FLOAT_EQ(bgui::get_global_scale(), 1.f);
-    EXPECT_FLOAT_EQ(configuration.left_ratio, .24f);
-    EXPECT_FLOAT_EQ(configuration.right_ratio, .24f);
+    EXPECT_FLOAT_EQ(configuration.left_ratio, .18f);
+    EXPECT_FLOAT_EQ(configuration.right_ratio, .28f);
     ASSERT_EQ(configuration.windows.size(), 2u);
     for (const auto& window : configuration.windows) {
         EXPECT_FALSE(window.floating);
@@ -698,8 +713,9 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
 }
 
 #include "model_editor_view.hpp"
+#include "model_rig_edit.hpp"
 
-TEST(ModelEditorLayout, KeepsToolsInSidebarAndHeadersOutsidePreview) {
+TEST(ModelEditorLayout, PlacesIconToolsOverPreviewAndKeepsDistanceInSidebar) {
     bgui::scoped_interface ui_scope;
     bgui::get_context().m_size = {1000, 700};
     auto registry = std::make_shared<commons::ecs>();
@@ -712,22 +728,55 @@ TEST(ModelEditorLayout, KeepsToolsInSidebarAndHeadersOutsidePreview) {
     auto* distance = find<bgui::inputbox>(dock, [](auto& input) { return input.get_buffer() == "0.25"; });
     ASSERT_NE(distance, nullptr);
     EXPECT_LE(distance->processed_height(), 30 * bgui::get_global_scale());
-    auto* extrude = find<bgui::button>(dock, [](auto& button) { return button.get_label().get_buffer() == "Extrudar face"; });
+    auto* extrude = find<bgui::button>(dock, [](auto& button) { return button.get_tooltip() == editor::ui::tr("Extrudar face (E)"); });
     ASSERT_NE(extrude, nullptr);
     auto* image = find<bgui::image>(dock, [](auto& image) { return image.has_class("model-editor-preview"); });
     ASSERT_NE(image, nullptr);
     EXPECT_GE(distance->processed_x(), image->processed_x() + image->processed_width());
-    EXPECT_GE(extrude->processed_x(), image->processed_x() + image->processed_width());
+    EXPECT_GE(extrude->processed_x(), image->processed_x());
+    EXPECT_GE(extrude->processed_y(), image->processed_y());
+    EXPECT_LE(extrude->processed_x() + extrude->processed_width(), image->processed_x() + image->processed_width());
     for (const auto* label : {"Objeto", "Faces", "Vértices", "Arestas", "Sólido", "Material", "Render"}) {
         auto* button = find<bgui::button>(dock, [label](auto& item) {
-            return item.get_label().get_buffer() == label;
+            return item.get_tooltip() == editor::ui::tr(label);
         });
         ASSERT_NE(button, nullptr) << label;
-        EXPECT_LE(button->processed_y() + button->processed_height(), image->processed_y());
+        EXPECT_GE(button->processed_y(), image->processed_y());
+        EXPECT_LE(button->processed_y() + button->processed_height(), image->processed_y() + image->processed_height());
+        EXPECT_FALSE(button->get_label().is_enabled());
+        EXPECT_NE(find<bgui::icon>(*button, [](auto&) { return true; }), nullptr);
         EXPECT_GE(button->processed_x(), image->processed_x());
         EXPECT_LE(button->processed_x() + button->processed_width(), image->processed_x() + image->processed_width());
     }
     EXPECT_GT(image->processed_height(), 200);
+    bgui::get_context().m_mouse_position = {extrude->processed_x() + 10, extrude->processed_y() + 10};
+    bgui::on_update();
+    EXPECT_EQ(bgui::get_mouse_target(), extrude);
+    EXPECT_FALSE(editor::ui::viewport_owns_mouse(image));
+    auto* vertices = find<bgui::button>(dock, [](auto& item) { return item.get_tooltip() == editor::ui::tr("Vértices"); });
+    ASSERT_NE(vertices, nullptr);
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {vertices->processed_x() + 10, vertices->processed_y() + 10};
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+    bgui::on_update();
+    bgui::on_update();
+    EXPECT_EQ(context->model_selection, int(editor::ui::model_selection_mode::vertices));
+    for (const float scale : {1.f, 1.5f}) {
+        bgui::set_global_scale(scale);
+        io.m_size = {900, 700};
+        bgui::on_update();
+        bgui::on_update();
+        for (const auto* label : {"Objeto", "Faces", "Vértices", "Arestas", "Sólido", "Material", "Render"}) {
+            auto* button = find<bgui::button>(dock, [label](auto& item) { return item.get_tooltip() == editor::ui::tr(label); });
+            ASSERT_NE(button, nullptr);
+            EXPECT_GE(button->processed_x(), image->processed_x());
+            EXPECT_GE(button->processed_y(), image->processed_y());
+            EXPECT_LE(button->processed_x() + button->processed_width(), image->processed_x() + image->processed_width());
+            EXPECT_LE(button->processed_y() + button->processed_height(), image->processed_y() + image->processed_height());
+        }
+    }
 }
 
 TEST(FilesContextMenu, OpensOnLeftClickAndRetiresWithSurface) {
@@ -833,7 +882,7 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     io.m_input_map.clear();
     bgui::on_update();
     auto* save = find<bgui::button>(dock, [](auto& button) {
-        return button.get_label().get_buffer() == "Salvar .bmodel";
+        return button.get_label().get_buffer() == editor::ui::tr("Salvar .bmodel");
     });
     ASSERT_NE(save, nullptr);
     editor::ui::undo_redo_shortcuts_system shortcuts(
@@ -1280,13 +1329,17 @@ TEST(EditorSceneManagement, CreatesOpensAndDeletesScenesThroughTheWorkspace) {
     });
     ASSERT_NE(name, nullptr);
     name->set_buffer("Level 2");
-    const auto click = [](bgui::element& scope, const std::string& label) {
+    const auto click = [&editor](bgui::element& scope, const std::string& label) {
+        std::string available;
         auto* button = find<bgui::button>(scope, [&](auto& item) {
-            return item.get_label().get_buffer() == label;
+            available += "[" + item.get_label().get_buffer() + "] ";
+            return item.get_tooltip() == editor::ui::tr(label);
         });
-        ASSERT_NE(button, nullptr) << label;
+        ASSERT_NE(button, nullptr) << label << "; available: " << available;
         button->on_pressed();
         button->on_released();
+        bgui::on_update();
+        editor.update();
         bgui::on_update();
     };
     click(management, "Criar cena");
@@ -1438,4 +1491,525 @@ TEST(EditorScriptingNative, RendersDedicatedWorkspaceAndOneFullSizedDragCard) {
     events->on_pressed();events->on_released();frame();frame();capture("08-events");
     EXPECT_EQ(glGetError(),GL_NO_ERROR);
     std::filesystem::remove_all(folder);
+}
+
+TEST_F(EditorMenuTest, SidebarCentersButtonsAndIconsAtDifferentScales) {
+    for (float scale : {1.f, 1.5f}) {
+        bgui::set_global_scale(scale);
+        for (int frame=0; frame<3; ++frame) bgui::on_update();
+        EXPECT_NEAR(side_bar.processed_width(), 36.f * scale, 1.f);
+        ASSERT_TRUE(side_bar.style.visual.border_radius.has_value());
+        EXPECT_FLOAT_EQ(*side_bar.style.visual.border_radius, 9.f);
+        for (int mode=0; mode<4; ++mode) {
+            auto* button = find<bgui::button>(side_bar, [mode](auto& item) {
+                return item.id == "workspace-mode-" + std::to_string(mode);
+            });
+            ASSERT_NE(button, nullptr);
+            auto* icon = find<bgui::icon>(*button, [](auto&) { return true; });
+            ASSERT_NE(icon, nullptr);
+            EXPECT_NEAR(button->processed_width(), 26.f * scale, 1.f);
+            EXPECT_NEAR(button->processed_height(), 26.f * scale, 1.f);
+            ASSERT_TRUE(button->style.visual.border_radius.has_value());
+            EXPECT_FLOAT_EQ(*button->style.visual.border_radius, 8.f);
+            EXPECT_FLOAT_EQ(button->computed_style.visual.border.a, 1.f);
+            EXPECT_FLOAT_EQ(button->computed_style.visual.border_size, 0.f);
+            const float center = side_bar.processed_x() + side_bar.processed_width() * .5f;
+            EXPECT_NEAR(button->processed_x() + button->processed_width() * .5f, center, 1.f);
+            EXPECT_NEAR(icon->processed_x() + icon->processed_width() * .5f, center, 1.f);
+            EXPECT_GE(icon->processed_y(), button->processed_y());
+            EXPECT_LE(icon->processed_y()+icon->processed_height(), button->processed_y()+button->processed_height());
+        }
+    }
+}
+
+TEST(EditorAppearanceNative, RendersCompactInspectorTabsAndCenteredModeGlyphs) {
+    if (!test_support::supports_opengl33())
+        GTEST_SKIP() << "OpenGL 3.3 unavailable";
+    commons::window window("Bubble Engine - Compact interface", 1600, 1000);
+    window.add<commons::ui_system>();
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    context->selected_entity = entity.id;
+    editor::ui::project_persistence_system persistence(registry, 0);
+    editor::ui::ui_persistence_system layout;
+    auto& root = bgui::get_layout().add<bgui::linear>(bgui::orientation::horizontal);
+    root.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    auto& side = root.add<bgui::linear>(bgui::orientation::vertical);
+    side.style.layout.require_mode(bgui::mode::pixel, bgui::mode::match_parent);
+    auto& center = root.add<bgui::linear>(bgui::orientation::vertical);
+    center.style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
+    auto& menu = center.add<bgui::menu_bar>(root);
+    auto& dock = center.add<bgui::dock>();
+    auto& models = center.add<bgui::dock>();
+    auto& scenes = center.add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
+    editor::ui::editor_ui editor(dock, models, scenes, menu, side, layout,
+        persistence, registry, "", {});
+    editor.set_editor_context(context);
+    editor.add_panel<editor::ui::components_view>(context);
+    dock.add_window("Viewport", bgui::dock_area::center, .6f);
+    auto& assets = dock.add_window("Assets", bgui::dock_area::bottom, .2f);
+    auto& console = dock.add_window("Console", bgui::dock_area::bottom, .2f);
+    dock.merge_window_as_tab(assets, console);
+    const auto frame = [&] {
+        bgui::glfw_update(bgui::get_context());
+        bgui::load_font_queue();
+        editor.update();
+        bgui::on_update();
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, 1600, 1000);
+        glDisable(GL_FRAMEBUFFER_SRGB);
+        bgui::gl3_clear();
+        bgui::gl3_render(bgui::get_draw_data());
+    };
+    for (const float scale : {1.f, 1.5f}) {
+        bgui::set_global_scale(scale);
+        for (int i = 0; i < 3; ++i) frame();
+        for (int mode = 0; mode < 4; ++mode) {
+            auto* button = find<bgui::button>(side, [mode](auto& item) {
+                return item.id == "workspace-mode-" + std::to_string(mode);
+            });
+            ASSERT_NE(button, nullptr);
+            auto* icon = find<bgui::icon>(*button, [](auto&) { return true; });
+            ASSERT_NE(icon, nullptr);
+            bgui::draw_data data;
+            data.m_clip_rect = {0, 0, 1600, 1000};
+            icon->get_requires(&data);
+            ASSERT_EQ(data.m_quad_requires.size(), 1u);
+            const auto rect = data.m_quad_requires.front().m_rect;
+            EXPECT_NEAR(rect.x + rect.z * .5f,
+                button->processed_x() + button->processed_width() * .5f, 1.f);
+            EXPECT_NEAR(rect.y + rect.w * .5f,
+                button->processed_y() + button->processed_height() * .5f, 1.f);
+        }
+        auto* tab = find<bgui::element>(dock, [](auto& item) { return item.has_class("dock-tab"); });
+        ASSERT_NE(tab, nullptr);
+        EXPECT_GT(tab->processed_height(), 0);
+        EXPECT_LE(tab->processed_height(), 20.f * scale);
+        auto* fov = find<bgui::field>(dock, [](auto& item) {
+            return item.get_label().get_buffer() == editor::ui::tr("Field of View");
+        });
+        ASSERT_NE(fov, nullptr);
+        EXPECT_EQ(fov->get_inputbox().processed_height(), static_cast<int>(22.f * scale));
+        auto& input = fov->get_inputbox();
+        const auto& padding = input.computed_style.layout.padding;
+        EXPECT_GT(input.get_label().get_content_size().y, 0);
+        EXPECT_LE(input.get_label().get_content_size().y,
+            input.processed_height() - padding.y - padding.w);
+        if (const auto* directory = std::getenv("BENGINE_APPEARANCE_SCREENSHOTS")) {
+            std::filesystem::create_directories(directory);
+            std::vector<unsigned char> pixels(1600 * 1000 * 3);
+            glReadPixels(0, 0, 1600, 1000, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+            std::ofstream output(std::filesystem::path(directory) /
+                (scale == 1.f ? "compact-100.ppm" : "compact-150.ppm"), std::ios::binary);
+            output << "P6\n1600 1000\n255\n";
+            for (int y = 999; y >= 0; --y)
+                output.write(reinterpret_cast<const char*>(pixels.data() + y * 1600 * 3), 1600 * 3);
+        }
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    }
+}
+
+TEST(ModelRigEditor, CreatesBindsSavesAndAutomaticallyRecordsBonePose) {
+    bgui::scoped_interface interface;
+    bgui::get_context().m_size = {1200,900};
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("bengine-rig-editor-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    struct cleanup { std::filesystem::path path; ~cleanup() { std::filesystem::remove_all(path); } } cleanup{directory};
+    commons::editable_model_data definition;
+    auto& mesh = definition.meshes.emplace_back();
+    for (auto point : {bgui::vec3{0,0,0}, {1,0,0}, {1,1,0}, {0,1,0}})
+        mesh.vertices.emplace_back(point, bgui::vec3{0,0,1}, bgui::vec2{});
+    mesh.faces = {{0,1,2,3}};
+    std::string error;
+    const auto file = directory / "model.bmodel";
+    ASSERT_TRUE(commons::save_editable_model(file, definition, error)) << error;
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, commons::model::prepare(file.string()).release());
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = directory; context->selected_entity = entity.id; context->workspace_mode = 1;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::model_editor_view model(context); model.build(dock); model.update();
+    const auto click = [&](const std::string& name) {
+        auto* button = find<bgui::button>(dock, [&](auto& value) {
+            return value.get_label().get_buffer() == editor::ui::tr(name) || value.get_tooltip() == editor::ui::tr(name);
+        });
+        if (!button) return false;
+        button->on_released(); bgui::on_update(); model.update(); return true;
+    };
+    ASSERT_TRUE(click("Criar rig"));
+    ASSERT_TRUE(click("Adicionar osso filho"));
+    ASSERT_TRUE(click("Vincular automaticamente"));
+    model.save(); model.update();
+    ASSERT_TRUE(commons::load_editable_model(file, definition, error)) << error;
+    ASSERT_EQ(definition.rig.joints.size(), 2u);
+    ASSERT_EQ(definition.meshes[0].skin.size(), 4u);
+    const auto joint = definition.rig.joints.back().id;
+    ASSERT_TRUE(click("Editar pose"));
+    {
+        auto renderer = registry->get<commons::renderer>(entity.id);
+        auto replacement = renderer->m_modelo->clone();
+        std::unique_ptr<commons::model> previous(renderer->m_modelo);
+        renderer->m_modelo = replacement.release();
+    }
+    model.update();
+    editor::ui::animation_editor edits(context);
+    ASSERT_TRUE(edits.create(entity.id, "BoneMotion", error)) << error;
+    editor::ui::animation_view animation(context); animation.build(dock); animation.update();
+    ASSERT_TRUE(click("● Gravar")); animation.update();
+    auto* time = find<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Tempo (s)"); });
+    ASSERT_NE(time, nullptr); time->get_inputbox().m_enter_func("1"); animation.update();
+    auto* rotation = find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == editor::ui::tr("Rotação"); });
+    ASSERT_NE(rotation, nullptr);
+    int index = 0;
+    auto* z = find<bgui::inputbox>(*rotation->get_parent(), [&](auto&) { return index++ == 2; });
+    ASSERT_NE(z, nullptr); z->m_enter_func("45"); animation.update();
+    const auto asset = edits.clip(entity.id);
+    ASSERT_NE(asset, nullptr);
+    ASSERT_EQ(asset->tracks.size(), 1u);
+    EXPECT_EQ(asset->tracks[0].target, commons::renderer::mask);
+    EXPECT_EQ(asset->tracks[0].property, "rig[" + joint + "].rotation.z");
+    EXPECT_DOUBLE_EQ(asset->tracks[0].keys.back().time, 1);
+    EXPECT_DOUBLE_EQ(asset->tracks[0].keys.back().value, 45);
+    EXPECT_EQ(registry->get<commons::transform>(entity.id)->position, (bgui::vec3{}));
+    ASSERT_TRUE(context->undo());
+    EXPECT_TRUE(asset->tracks.empty());
+    EXPECT_DOUBLE_EQ(*registry->get<commons::renderer>(entity.id)->read_animation_property("rig[" + joint + "].rotation.z"), 0);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(asset->tracks.size(), 1u);
+    ASSERT_TRUE(commons::load_editable_model(file, definition, error));
+    EXPECT_EQ(definition.meshes[0].vertices[2].position, (bgui::vec3{1,1,0}));
+    auto* scale = find<bgui::text>(dock, [](auto& text) { return text.get_buffer() == editor::ui::tr("Escala"); });
+    ASSERT_NE(scale, nullptr);
+    auto* x = find<bgui::inputbox>(*scale->get_parent(), [](auto&) { return true; });
+    ASSERT_NE(x, nullptr);
+    const auto history = context->undo_stack.size(); x->m_enter_func("0");
+    EXPECT_EQ(context->undo_stack.size(), history);
+    EXPECT_DOUBLE_EQ(*registry->get<commons::renderer>(entity.id)->read_animation_property("rig[" + joint + "].scale.x"), 1);
+    ASSERT_TRUE(click("Editar repouso e pesos"));
+    ASSERT_TRUE(click("Excluir osso"));
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->m_modelo->joint_pose(joint));
+    ASSERT_TRUE(click("Desfazer"));
+    EXPECT_DOUBLE_EQ(*registry->get<commons::renderer>(entity.id)->read_animation_property("rig[" + joint + "].rotation.z"), 45);
+    ASSERT_TRUE(click("Refazer"));
+    EXPECT_FALSE(registry->get<commons::renderer>(entity.id)->m_modelo->joint_pose(joint));
+    ASSERT_TRUE(click("Desfazer"));
+    EXPECT_DOUBLE_EQ(*registry->get<commons::renderer>(entity.id)->read_animation_property("rig[" + joint + "].rotation.z"), 45);
+    auto* name = find<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Nome do osso"); });
+    ASSERT_NE(name, nullptr); name->get_inputbox().m_enter_func("Renamed bone");
+    { std::ofstream external(file, std::ios::app); external << "\n"; }
+    model.save();
+    const auto contents = editor::ui::project_files::read(file);
+    EXPECT_FALSE(contents.empty()); EXPECT_EQ(contents.back(), '\n');
+    ASSERT_TRUE(commons::load_editable_model(file, definition, error));
+    EXPECT_NE(definition.rig.joints.back().name, "Renamed bone");
+}
+
+TEST(ModelRigAnimationNative, RendersRigTimelineAndDetailedTooltipAtTwoScales) {
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "OpenGL 3.3 unavailable";
+    commons::window window("Bubble Engine - Rig and animation", 1500, 1000);
+    window.add<commons::ui_system>();
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("bengine-rig-native-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    struct cleanup { std::filesystem::path path; ~cleanup() { std::filesystem::remove_all(path); } } cleanup{directory};
+    commons::editable_model_data definition;
+    definition.rig.joints = {{"root", "Base", "", {}}, {"tip", "Braço", "root", {{0,1,0},{0,0,0},{1,1,1}}}};
+    auto& mesh = definition.meshes.emplace_back();
+    for (auto point : {bgui::vec3{-.3f,0,-.3f}, {.3f,0,-.3f}, {.3f,0,.3f}, {-.3f,0,.3f},
+         {-.3f,2,-.3f}, {.3f,2,-.3f}, {.3f,2,.3f}, {-.3f,2,.3f}})
+        mesh.vertices.emplace_back(point, bgui::vec3{}, bgui::vec2{});
+    mesh.faces = {{0,3,2,1},{4,5,6,7},{0,1,5,4},{1,2,6,5},{2,3,7,6},{3,0,4,7}};
+    for (int i = 0; i < 8; ++i) mesh.skin.push_back({{i < 4 ? "root" : "tip", 1}});
+    mesh.recalculate_normals();
+    std::string error;
+    const auto file = directory / "rig.bmodel";
+    ASSERT_TRUE(commons::save_editable_model(file, definition, error)) << error;
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, commons::model::prepare(file.string()).release());
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = directory; context->selected_entity = entity.id; context->workspace_mode = 1;
+    context->entity_names[entity.id] = "Modelo com rig";
+    editor::ui::animation_editor edits(context);
+    commons::animation_clip clip;
+    clip.tracks.push_back({commons::renderer::mask, "rig[tip].rotation.z", false, {{0,0},{2,70},{4,0}}});
+    ASSERT_TRUE(edits.commit(entity.id, clip));
+    ASSERT_TRUE(edits.create(entity.id, "BoneMotion", error)) << error;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    editor::ui::model_editor_view model(context); model.build(dock); model.update();
+    editor::ui::animation_view animation(context); animation.build(dock); animation.show(); animation.update();
+    auto* chooser = find<bgui::combo_box>(dock, [](auto& value) { return value.has_class("model-rig-joints"); });
+    ASSERT_NE(chooser, nullptr); chooser->set_selected_index(1);
+    auto* skeleton = find<bgui::button>(dock, [](auto& value) { return value.get_label().get_buffer() == editor::ui::tr("Mostrar / ocultar esqueleto"); });
+    ASSERT_NE(skeleton, nullptr); skeleton->on_released();
+    const auto frame = [&](bool native_input = true) {
+        if (native_input) bgui::glfw_update(bgui::get_context());
+        bgui::load_font_queue(); model.update(); animation.update(); bgui::on_update();
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); glViewport(0,0,1500,1000); glDisable(GL_FRAMEBUFFER_SRGB);
+        bgui::gl3_clear(); bgui::gl3_render(bgui::get_draw_data());
+    };
+    frame(); frame();
+    auto* time = find<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Tempo (s)"); });
+    ASSERT_NE(time, nullptr); time->get_inputbox().m_enter_func("1");
+    for (float scale : {1.f, 1.5f}) {
+        bgui::set_global_scale(scale); for (int i = 0; i < 3; ++i) frame();
+        auto* timeline = find<bgui::element>(dock, [](auto& value) { return value.type == "animation-timeline"; });
+        ASSERT_NE(timeline, nullptr);
+        EXPECT_GT(timeline->processed_width(), 0); EXPECT_GT(timeline->processed_height(), 0);
+        EXPECT_EQ(find<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Tempo (s)"); }), time);
+        auto* hint = find<bgui::button>(dock, [](auto& button) { return button.get_tooltip() == editor::ui::tr("Extrudar face (E)"); });
+        ASSERT_NE(hint, nullptr); EXPECT_FALSE(hint->get_tooltip_description().empty());
+        hint->set_tooltip(hint->get_tooltip(), hint->get_tooltip_description(), std::chrono::milliseconds{0});
+        bgui::get_context().m_mouse_position = {hint->processed_x()+hint->processed_width()/2, hint->processed_y()+hint->processed_height()/2};
+        frame(false); frame(false);
+        if (const auto* output = std::getenv("BENGINE_RIG_SCREENSHOTS")) {
+            std::filesystem::create_directories(output);
+            std::vector<unsigned char> pixels(1500*1000*3);
+            glReadPixels(0,0,1500,1000,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+            std::ofstream image(std::filesystem::path(output) / (scale == 1.f ? "rig-100.ppm" : "rig-150.ppm"), std::ios::binary);
+            image << "P6\n1500 1000\n255\n";
+            for (int y = 999; y >= 0; --y) image.write(reinterpret_cast<const char*>(pixels.data()+y*1500*3),1500*3);
+        }
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    }
+    EXPECT_DOUBLE_EQ(*registry->get<commons::renderer>(entity.id)->read_animation_property("rig[tip].rotation.z"), 35);
+}
+
+TEST(ModelRigEditor, WeightPaintCommitsOneStrokeCancelsAndRoundTripsHistory) {
+    bgui::scoped_interface interface;
+    auto& io = bgui::get_context();
+    io.m_size = {1200,900}; io.m_input_map.clear();
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("bengine-weight-editor-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    struct cleanup { std::filesystem::path path; ~cleanup() { std::filesystem::remove_all(path); } } cleanup{directory};
+    commons::editable_model_data definition;
+    definition.rig.joints = {{"root", "Root", "", {}}, {"tip", "Tip", "root", {{0,1,0},{},{1,1,1}}}};
+    auto& mesh = definition.meshes.emplace_back();
+    for (auto point : {bgui::vec3{0,0,0}, {1,0,0}, {1,1,0}, {0,1,0}})
+        mesh.vertices.emplace_back(point, bgui::vec3{0,0,1}, bgui::vec2{});
+    mesh.faces = {{0,1,2,3}};
+    mesh.skin.resize(4, {{"tip",1.f}});
+    std::string error;
+    const auto file = directory / "paint.bmodel";
+    ASSERT_TRUE(commons::save_editable_model(file, definition, error)) << error;
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, commons::model::prepare(file.string()).release());
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = directory; context->selected_entity = entity.id; context->workspace_mode = 1;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    dock.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    editor::ui::model_editor_view panel(context); panel.build(dock);
+    const auto frame = [&] { panel.update(); bgui::on_update(); };
+    frame(); frame();
+    const auto click = [&](const std::string& label) {
+        auto* button = find<bgui::button>(dock, [&](auto& value) { return value.get_label().get_buffer() == editor::ui::tr(label); });
+        if (!button) return false;
+        button->on_released(); frame(); return true;
+    };
+    ASSERT_TRUE(click("Editar repouso e pesos"));
+    ASSERT_TRUE(click("Weight Paint"));
+    auto* image = find<bgui::image>(dock, [](auto& value) { return value.has_class("model-editor-preview"); });
+    ASSERT_NE(image, nullptr);
+    frame();
+    const auto matrix = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix;
+    const auto clip = matrix * glm::vec4{1,1,0,1};
+    io.m_mouse_position = {int(image->processed_x() + (clip.x / clip.w * .5f + .5f) * image->processed_width()),
+        int(image->processed_y() + (.5f - clip.y / clip.w * .5f) * image->processed_height())};
+    frame();
+    ASSERT_NE(bgui::get_mouse_target(), nullptr);
+    ASSERT_TRUE(bgui::get_mouse_target()->has_class("model-editor-viewport-input"));
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    frame(); frame(); frame();
+    io.m_input_map.clear(); frame();
+    panel.save(); frame();
+    commons::editable_model_data painted;
+    ASSERT_TRUE(commons::load_editable_model(file, painted, error)) << error;
+    const auto painted_root = editor::ui::rig_vertex_weight(painted.meshes[0].skin[2], "root");
+    EXPECT_GT(painted_root, .45f); EXPECT_LE(painted_root, .5f);
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    panel.save(); frame();
+    ASSERT_TRUE(commons::load_editable_model(file, painted, error)) << error;
+    EXPECT_FLOAT_EQ(editor::ui::rig_vertex_weight(painted.meshes[0].skin[2], "root"), 0);
+    ASSERT_TRUE(panel.handle_history_shortcut(true));
+    panel.save(); frame();
+    ASSERT_TRUE(commons::load_editable_model(file, painted, error)) << error;
+    EXPECT_FLOAT_EQ(editor::ui::rig_vertex_weight(painted.meshes[0].skin[2], "root"), painted_root);
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    frame();
+    io.m_input_map[bgui::input_key::escape] = bgui::input_action::press;
+    frame();
+    io.m_input_map.clear(); frame();
+    panel.save(); frame();
+    ASSERT_TRUE(commons::load_editable_model(file, painted, error)) << error;
+    EXPECT_FLOAT_EQ(editor::ui::rig_vertex_weight(painted.meshes[0].skin[2], "root"), painted_root);
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    panel.save(); frame();
+    ASSERT_TRUE(commons::load_editable_model(file, painted, error)) << error;
+    EXPECT_FLOAT_EQ(editor::ui::rig_vertex_weight(painted.meshes[0].skin[2], "root"), 0);
+}
+
+TEST(ModelEditorTools, DragsExtrusionCutsInEachModeAndExtractsMeshSelection) {
+    bgui::scoped_interface ui_scope;
+    auto& io = bgui::get_context();
+    io.m_size = {1000, 700};
+    auto registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = std::filesystem::temp_directory_path() /
+        ("model-tools-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(context->project_root);
+    struct cleanup {
+        std::filesystem::path path;
+        ~cleanup() { std::error_code error; std::filesystem::remove_all(path, error); }
+    } guard{context->project_root};
+    commons::editable_mesh_data mesh;
+    mesh.vertices = {{{-1,-1,0},{},{}}, {{1,-1,0},{},{}}, {{1,1,0},{},{}}, {{-1,1,0},{},{}}};
+    mesh.faces = {{0,1,2,3}};
+    mesh.recalculate_normals();
+    commons::editable_model_data data{{mesh, mesh, mesh}};
+    const auto native = context->project_root / "quads.bmodel";
+    std::string error;
+    ASSERT_TRUE(commons::save_editable_model(native, data, error)) << error;
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, new commons::model(native.string()));
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::model_editor_view panel(context);
+    panel.build(dock);
+    bgui::on_update(); bgui::on_update();
+    auto* image = find<bgui::image>(dock, [](auto& item) { return item.has_class("model-editor-preview"); });
+    ASSERT_NE(image, nullptr);
+    auto* extrude = find<bgui::button>(dock, [](auto& item) {
+        return item.get_tooltip() == editor::ui::tr("Extrudar face (E)");
+    });
+    auto* cut = find<bgui::button>(dock, [](auto& item) {
+        return item.get_tooltip() == editor::ui::tr("Loop Cut (Ctrl+R)");
+    });
+    ASSERT_NE(extrude, nullptr);
+    ASSERT_NE(cut, nullptr);
+    std::vector<bgui::button*> mesh_buttons;
+    std::function<void(bgui::element&)> collect = [&](bgui::element& item) {
+        if (auto* button = dynamic_cast<bgui::button*>(&item);
+            button && button->get_label().get_buffer() == editor::ui::tr("Selecionar malha"))
+            mesh_buttons.push_back(button);
+        if (auto* layout = item.as_layout())
+            for (auto& [layer, children] : layout->get_elements())
+                for (auto& child : children) collect(*child);
+    };
+    const auto select_mesh = [&](std::size_t index) {
+        mesh_buttons.clear();
+        collect(dock);
+        ASSERT_EQ(mesh_buttons.size(), 3u);
+        mesh_buttons[index]->on_released();
+    };
+    select_mesh(0);
+    extrude->on_released();
+    io.m_mouse_position = {image->processed_x()+image->processed_width()/2,
+        image->processed_y()+image->processed_height()/2};
+    bgui::on_update();
+    io.m_mouse_position.y -= 35;
+    bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear(); bgui::on_update();
+    panel.save();
+    commons::editable_model_data loaded;
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].faces.size(), 5u);
+    EXPECT_GT(loaded.meshes[0].vertices[4].position.z, .25f);
+    EXPECT_EQ(loaded.meshes[1].faces.size(), 1u);
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    panel.save();
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].faces.size(), 1u);
+
+    // Cancelling restores geometry and leaves the operation available again.
+    select_mesh(0);
+    extrude->on_released();
+    io.m_input_map[bgui::input_key::escape] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear(); bgui::on_update();
+    panel.save();
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].faces.size(), 1u);
+
+    select_mesh(0);
+    io.m_input_map[bgui::input_key::e] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear(); bgui::on_update();
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear(); bgui::on_update();
+    EXPECT_NE(find<bgui::text>(dock, [](auto& item) {
+        return item.get_buffer() == "Extrusão sem deslocamento cancelada.";
+    }), nullptr);
+
+    const auto screen = [&](bgui::vec3 position) {
+        const auto clip = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix *
+            glm::vec4(position.x, position.y, position.z, 1.f);
+        return bgui::vec2i{int(image->processed_x()+(clip.x/clip.w*.5f+.5f)*image->processed_width()),
+            int(image->processed_y()+(.5f-clip.y/clip.w*.5f)*image->processed_height())};
+    };
+    for (auto mode : {editor::ui::model_selection_mode::object,
+            editor::ui::model_selection_mode::faces, editor::ui::model_selection_mode::edges}) {
+        context->model_selection = static_cast<int>(mode);
+        bgui::on_update();
+        cut->on_released();
+        EXPECT_EQ(context->model_selection, static_cast<int>(mode));
+        io.m_mouse_position = screen({0,-1,0});
+        bgui::on_update();
+        io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+        bgui::on_update();
+        io.m_input_map.clear(); bgui::on_update();
+        io.m_mouse_position.x += 20;
+        bgui::on_update();
+        io.m_input_map[mode == editor::ui::model_selection_mode::faces
+            ? bgui::input_key::mouse_left : bgui::input_key::mouse_right] = bgui::input_action::press;
+        bgui::on_update();
+        io.m_input_map.clear(); bgui::on_update();
+        panel.save();
+        ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+        EXPECT_EQ(loaded.meshes[0].faces.size(), 2u);
+        EXPECT_EQ(loaded.meshes[0].vertices.size(), 6u);
+        if (mode == editor::ui::model_selection_mode::faces)
+            EXPECT_GT(std::abs(loaded.meshes[0].vertices[4].position.x), .001f);
+        else EXPECT_FLOAT_EQ(loaded.meshes[0].vertices[4].position.x, 0.f);
+        EXPECT_EQ(context->model_selection, static_cast<int>(mode));
+        ASSERT_TRUE(panel.handle_history_shortcut(false));
+        panel.save();
+        cut->on_released();
+        io.m_mouse_position = screen({0,-1,0});
+        bgui::on_update();
+        io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+        bgui::on_update();
+        io.m_input_map.clear(); bgui::on_update();
+        io.m_input_map[bgui::input_key::escape] = bgui::input_action::press;
+        bgui::on_update();
+        io.m_input_map.clear(); bgui::on_update();
+        panel.save();
+        ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+        EXPECT_EQ(loaded.meshes[0].faces.size(), 1u);
+        EXPECT_EQ(loaded.meshes[0].vertices.size(), 4u);
+    }
+
+    select_mesh(0);
+    io.m_input_map[bgui::input_key::left_shift] = bgui::input_action::press;
+    select_mesh(1);
+    io.m_input_map.clear();
+    panel.request_extract(); bgui::on_update();
+    auto* modal = find<bgui::modal>(bgui::get_layout(), [](auto&) { return true; });
+    ASSERT_NE(modal, nullptr);
+    auto* confirm = find<bgui::button>(*modal, [](auto& button) { return button.has_class("modal-confirm"); });
+    ASSERT_NE(confirm, nullptr);
+    confirm->on_released(); bgui::on_update();
+    ASSERT_TRUE(commons::load_editable_model(context->project_root /
+        "assets/models/quads_parts/quads-malha-1.bmodel", loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes.size(), 2u);
 }

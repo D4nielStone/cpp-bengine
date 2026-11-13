@@ -6,7 +6,7 @@
 
 namespace editor::ui {
 
-enum class lua_script_preset { empty, wasd, fpp_player, fpp_camera, fpp_controller };
+enum class lua_script_preset { fpp_controller };
 
 struct lua_script_template {
     std::string_view name;
@@ -14,88 +14,7 @@ struct lua_script_template {
 };
 
 inline constexpr std::array lua_script_templates{
-    lua_script_template{"Em branco", R"lua(-- Editable per entity in the Inspector; read with properties.speed.
---@property {"name":"speed","type":"number","default":5}
-
--- Called once when the scene starts.
-function setup()
-end
-
--- Called every frame.
-function update()
-end
-)lua"},
-    lua_script_template{"Movimentação WASD", R"lua(--@property {"name":"move_speed","type":"number","default":5}
-
-function update()
-    local direction = Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"))
-    if direction:length() > 1 then direction = direction:normalized() end
-    local movement = direction * properties.move_speed
-
-    local body = gameObject:GetComponent("Rigidbody")
-    if body then
-        movement.y = body.velocity.y
-        body.velocity = movement
-    else
-        local pose = gameObject.transform
-        if pose then pose.position = pose.position + movement * Time.deltaTime end
-    end
-end
-)lua"},
-    lua_script_template{"Jogador FPP (WASD e guinada)", R"lua(--@property {"name":"move_speed","type":"number","default":5}
---@property {"name":"mouse_sensitivity","type":"number","default":0.12}
-
-local yaw = -90.0
-
-function setup()
-    local pose = gameObject.transform
-    if not pose then return end
-    yaw = pose.localEulerAngles.y
-    Input.SetMouseCaptured(true)
-    Debug.Log("FPP player body ready.")
-end
-
-function update()
-    local pose = gameObject.transform
-    local body = gameObject:GetComponent("Rigidbody")
-    if not pose or not body then return end
-
-    local mouse_x = Input.GetMouseDelta()
-    yaw = yaw - mouse_x * properties.mouse_sensitivity
-    pose.localEulerAngles = Vector3(0, yaw, 0)
-
-    local direction = Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"))
-    if direction:length() > 1 then direction = direction:normalized() end
-    local right = direction.x * properties.move_speed
-    local forward = direction.z * properties.move_speed
-    local angle = math.rad(yaw)
-    local sine, cosine = math.sin(angle), math.cos(angle)
-    body.velocity = Vector3(
-        cosine * forward + sine * right,
-        body.velocity.y,
-        -sine * forward + cosine * right
-    )
-end
-)lua"},
-    lua_script_template{"Câmera FPP (filha do jogador)", R"lua(--@property {"name":"mouse_sensitivity","type":"number","default":0.12}
-
-local pitch = 0.0
-
-function setup()
-    local pose = gameObject.transform
-    if not pose then return end
-    pitch = pose.localEulerAngles.x
-    Input.SetMouseCaptured(true)
-end
-
-function update()
-    local pose = gameObject.transform
-    if not pose then return end
-    local _, mouse_y = Input.GetMouseDelta()
-    pitch = math.max(-89.0, math.min(89.0, pitch - mouse_y * properties.mouse_sensitivity))
-    pose.localEulerAngles = Vector3(pitch, 0, 0)
-end
-)lua"},
+    lua_script_template{"Arquivo em branco", ""},
     lua_script_template{"Controle FPP (jogador e câmera)", R"lua(--@property {"name":"player","type":"entity","default":null}
 --@property {"name":"camera","type":"entity","default":null}
 --@property {"name":"move_speed","type":"number","default":5}

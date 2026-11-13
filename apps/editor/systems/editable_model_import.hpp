@@ -131,6 +131,9 @@ inline std::filesystem::path import_native_model(const std::filesystem::path& so
     if (is_native_model(imported)) return imported;
 
     const auto options = settings ? *settings : commons::read_model_import_options(imported);
+    // Animated geometry must retain the source hierarchy, skins and clips.
+    const auto prepared = commons::model::prepare(imported.string(), &options);
+    if (prepared->has_skeleton() || !prepared->animation_clips().empty()) return imported;
     auto native = imported;
     const auto encoded = commons::serialize_model_import_options(options);
     if (encoded != commons::serialize_model_import_options({})) {
@@ -145,7 +148,7 @@ inline std::filesystem::path import_native_model(const std::filesystem::path& so
     std::string error;
     if (!import_editable_model(imported, data, error, &options))
         throw std::runtime_error(error);
-    const auto model = commons::model::prepare(imported.string(), &options);
+    const auto& model = prepared;
     if (model->meshes.size() != data.meshes.size())
         throw std::runtime_error("A topologia importada não corresponde às malhas do modelo.");
     const auto materials = native.parent_path() / (native.stem().string() + ".materials");

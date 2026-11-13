@@ -158,7 +158,7 @@ protected:
     void TearDown() override { std::filesystem::remove_all(folder); }
     void triangle() { std::ofstream(folder / "test.obj") << "o triangle\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
     bgui::button* button(const std::string& label) {
-        return find_import_element<bgui::button>(bgui::get_layout(), [&](auto& b) { return b.get_label().get_buffer() == label; });
+        return find_import_element<bgui::button>(bgui::get_layout(), [&](auto& b) { return b.get_label().get_buffer() == editor::ui::tr(label); });
     }
 };
 }
@@ -167,7 +167,7 @@ TEST_F(ImportDialogTest, ImportsSettingsAndCompletesOutsideClickDispatch) {
     bool complete = false;
     dialog.show(folder / "test.obj", project, {}, {}, [&](const auto& p) { complete = p.extension() == ".bmodel" && std::filesystem::is_regular_file(p); });
     ASSERT_TRUE(dialog.open());
-    auto* import = button("Importar como .bmodel"); ASSERT_NE(import, nullptr);
+    auto* import = button("Importar modelo e animações"); ASSERT_NE(import, nullptr);
     import->on_pressed(); import->on_released();
     bgui::on_update();
     EXPECT_TRUE(complete); EXPECT_FALSE(dialog.open());
@@ -180,7 +180,7 @@ TEST_F(ImportDialogTest, PersistsSelectedTextureFiltering) {
     auto* filter = button("Trilinear");
     ASSERT_NE(filter, nullptr);
     filter->on_pressed(); filter->on_released();
-    auto* import = button("Importar como .bmodel");
+    auto* import = button("Importar modelo e animações");
     ASSERT_NE(import, nullptr);
     import->on_pressed(); import->on_released();
     bgui::on_update();
@@ -191,17 +191,17 @@ TEST_F(ImportDialogTest, FailedImportShowsDiagnosticAndAllowsRetry) {
     std::ofstream(folder / "test.obj") << "invalid";
     editor::ui::model_import_dialog dialog;
     dialog.show(folder / "test.obj", project, {}, "Falha de importação");
-    EXPECT_TRUE(dialog.open()); EXPECT_EQ(button("Importar como .bmodel"), nullptr);
+    EXPECT_TRUE(dialog.open()); EXPECT_EQ(button("Importar modelo e animações"), nullptr);
     auto* retry = button("Tentar novamente"); ASSERT_NE(retry, nullptr);
     triangle(); retry->on_pressed(); retry->on_released(); bgui::on_update();
-    EXPECT_NE(button("Importar como .bmodel"), nullptr);
+    EXPECT_NE(button("Importar modelo e animações"), nullptr);
     EXPECT_FALSE(std::filesystem::exists(commons::model_import_settings_path(project / "assets/test.obj")));
 }
 TEST_F(ImportDialogTest, InvalidScaleKeepsDialogOpenAndPreservesSettings) {
     triangle(); editor::ui::model_import_dialog dialog; dialog.show(folder / "test.obj", project);
     auto* scale = find_import_element<bgui::inputbox>(bgui::get_layout(), [](auto&) { return true; });
     ASSERT_NE(scale, nullptr); scale->set_buffer("nan");
-    auto* import = button("Importar como .bmodel"); ASSERT_NE(import, nullptr);
+    auto* import = button("Importar modelo e animações"); ASSERT_NE(import, nullptr);
     import->on_pressed(); import->on_released(); bgui::on_update();
     EXPECT_TRUE(dialog.open());
     EXPECT_FALSE(std::filesystem::exists(commons::model_import_settings_path(project / "assets/test.obj")));
@@ -386,4 +386,62 @@ TEST(ModelImport, PreviewDrawsGeometryAndRespectsSelection) {
     EXPECT_NE(visible.m_buffer, orbited.m_buffer);
     EXPECT_NE(visible.m_buffer, zoomed.m_buffer);
     EXPECT_NE(visible.m_buffer, hidden.m_buffer);
+}
+
+TEST(ModelImport, SkeletonOverlayUsesAnimatedJointsScaleAndImportedMeshSelection) {
+    fixture f; f.animate();
+    auto* mesh = f.scene.mMeshes[0];
+    mesh->mNumBones = 1; mesh->mBones = new aiBone*[1]{new aiBone};
+    mesh->mBones[0]->mName = aiString("bone");
+    f.pose.options.scale = 3;
+    f.pose.collect(f.scene.mRootNode); f.pose.evaluate(.5);
+    const auto segments = f.pose.skeleton();
+    ASSERT_EQ(segments.size(), 1u);
+    EXPECT_EQ(segments[0].name, "bone");
+    EXPECT_FLOAT_EQ(segments[0].parent.x, 0);
+    EXPECT_FLOAT_EQ(segments[0].joint.x, 3);
+    f.pose.options.skeleton = false;
+    EXPECT_TRUE(f.pose.skeleton().empty());
+    f.pose.options.skeleton = true; f.pose.instances.clear();
+    EXPECT_TRUE(f.pose.skeleton().empty());
+}
+
+TEST(ModelImport, ImportsAnimatedGlbWithoutFlatteningClipsAndCanReloadIt) {
+    const auto folder = std::filesystem::temp_directory_path() / ("animated-import-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(folder / "project");
+    struct cleanup { std::filesystem::path path; ~cleanup() { std::filesystem::remove_all(path); } } cleanup{folder};
+    fixture f; f.animate();
+    auto* mesh = f.scene.mMeshes[0];
+    delete[] mesh->mVertices; delete[] mesh->mNormals;
+    mesh->mNumVertices = 3;
+    mesh->mVertices = new aiVector3D[3]{{0,0,0},{1,0,0},{0,1,0}};
+    mesh->mNormals = new aiVector3D[3]{{0,0,1},{0,0,1},{0,0,1}};
+    mesh->mNumFaces = 1; mesh->mFaces = new aiFace[1];
+    mesh->mFaces[0].mNumIndices = 3; mesh->mFaces[0].mIndices = new unsigned[3]{0,1,2};
+    mesh->mPrimitiveTypes = aiPrimitiveType_TRIANGLE;
+    f.scene.mNumMaterials = 1; f.scene.mMaterials = new aiMaterial*[1]{new aiMaterial};
+    const auto source = folder / "animated.glb";
+    Assimp::Exporter exporter;
+    ASSERT_EQ(exporter.Export(&f.scene, "glb2", source.string()), AI_SUCCESS) << exporter.GetErrorString();
+    const auto imported = editor::ui::import_native_model(source, folder / "project");
+    EXPECT_EQ(imported.extension(), ".glb");
+    auto model = commons::model::prepare(imported.string());
+    ASSERT_EQ(model->animation_clips().size(), 1u);
+    model->set_animation(model->animation_clips().front().index);
+    model->update_animation(.5);
+    EXPECT_NEAR(model->meshes.front().vertices().front().position.x, 1, .001);
+    auto clone = model->clone();
+    clone->update_animation(1);
+    EXPECT_NEAR(model->meshes.front().vertices().front().position.x, 1, .001);
+    EXPECT_NEAR(clone->meshes.front().vertices().front().position.x, 2, .001);
+    const auto id = model->rig_joints().front().id;
+    ASSERT_TRUE(model->set_joint_pose(id, {{3,0,0},{0,0,0},{1,1,1}}));
+    model->apply_pose();
+    EXPECT_TRUE(model->manual_pose());
+    model->set_animation(model->animation_index());
+    model->update_animation(.5);
+    EXPECT_FALSE(model->manual_pose());
+    EXPECT_EQ(model->joint_pose(id), commons::rig_transform{});
+    EXPECT_NEAR(model->meshes.front().vertices().front().position.x, 1, .001);
 }

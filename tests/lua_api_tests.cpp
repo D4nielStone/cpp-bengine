@@ -399,7 +399,10 @@ TEST(LuaApi, BuiltinFppTemplateScriptsMoveLookAndCollectUsingTheNewApi) {
     auto physical = registry->get<commons::physics>(player.id);
     physical->set_body_type(commons::physics::body_type::character);
     physical->setVelocidade({0.f, -3.f, 0.f});
-    auto body = load(player, "fpp_player.lua");
+    auto body = load(player, "fpp_controller.lua");
+    ASSERT_TRUE(body->set_property("player", player.id));
+    ASSERT_TRUE(body->set_property("camera", camera.id));
+    body->setup();
     auto setup = sol::protected_function(body->f_setup)();
     ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
     auto input = body->estado_lua["Input"].get<sol::table>();
@@ -409,10 +412,11 @@ TEST(LuaApi, BuiltinFppTemplateScriptsMoveLookAndCollectUsingTheNewApi) {
     auto moved = sol::protected_function(body->f_update)();
     ASSERT_TRUE(moved.valid()) << moved.get<sol::error>().what();
     auto player_transform = registry->get<commons::transform>(player.id);
-    EXPECT_NEAR(physical->getVelocidade().z, -std::sin(glm::radians(-91.2f)) * 5.f, 0.0001f);
-    EXPECT_NEAR(physical->getVelocidade().x, std::cos(glm::radians(-91.2f)) * 5.f, 0.0001f);
+    camera_component->getViewMatrix();
+    EXPECT_NEAR(physical->getVelocidade().z, camera_component->forward.z * 5.f, 0.0001f);
+    EXPECT_NEAR(physical->getVelocidade().x, camera_component->forward.x * 5.f, 0.0001f);
     EXPECT_FLOAT_EQ(physical->getVelocidade().y, -3.f);
-    EXPECT_NEAR(player_transform->get_rotation().y, -91.2f, 0.0001f);
+    EXPECT_NEAR(player_transform->get_rotation().y, -90.f, 0.0001f);
 
     input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 0.f}; });
     input.set_function("GetAxis", [](const std::string&) { return 1.f; });
@@ -424,14 +428,13 @@ TEST(LuaApi, BuiltinFppTemplateScriptsMoveLookAndCollectUsingTheNewApi) {
         EXPECT_FLOAT_EQ(velocity.y, -3.f);
     }
 
-    auto look = load(camera, "fpp_camera.lua");
-    setup = sol::protected_function(look->f_setup)();
-    ASSERT_TRUE(setup.valid()) << setup.get<sol::error>().what();
-    auto camera_input = look->estado_lua["Input"].get<sol::table>();
+    auto look = body;
+    auto camera_input = input;
     camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 10.f}; });
     auto looked = sol::protected_function(look->f_update)();
     ASSERT_TRUE(looked.valid()) << looked.get<sol::error>().what();
     EXPECT_FLOAT_EQ(registry->get<commons::transform>(camera.id)->get_rotation().x, -1.2f);
+    camera_input.set_function("GetMouseDelta", []() { return std::tuple<float, float>{0.f, 0.f}; });
     camera_component->getViewMatrix();
     const auto horizontal_length = std::hypot(
         camera_component->forward.x, camera_component->forward.z);
@@ -1153,4 +1156,32 @@ TEST(LuaApi, AnimationCommandsAreTypedAndRejectRemovedComponents) {
     registry->remove<commons::animation>(entity.id);
     result = lua.safe_script("assert(not anim:Play()); assert(not anim.isPlaying)", sol::script_pass_on_error);
     EXPECT_TRUE(result.valid());
+}
+
+TEST(LuaApi, NewCamerasExposeNeutralGrayWithoutOverridingSavedColors) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    sol::state lua;
+    lua.open_libraries(sol::lib::base, sol::lib::math);
+    commons::api::setClasses(lua);
+    commons::api::setNamespaces(lua);
+    commons::api::setUpApi(lua, registry, entity.id);
+    auto result = lua.safe_script(R"(
+        local camera = gameObject:GetComponent("Camera")
+        assert(math.abs(camera.backgroundColor.r - 0.16) < 0.0001)
+        assert(camera.backgroundColor.r == camera.backgroundColor.g)
+        assert(camera.backgroundColor.g == camera.backgroundColor.b)
+        camera.backgroundColor = Color(0.2, 0.3, 0.4, 1)
+    )", sol::script_pass_on_error);
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
+    auto camera = registry->get<commons::camera>(entity.id);
+    EXPECT_FLOAT_EQ(camera->config.sky_solid_color.b, .4f);
+    rapidjson::Document encoded(rapidjson::kObjectType);
+    ASSERT_TRUE(camera->serialize(encoded, encoded.GetAllocator()));
+    commons::camera restored;
+    ASSERT_TRUE(restored.analyze(encoded));
+    EXPECT_NEAR(restored.config.sky_solid_color.r, .2f, 1.f/255);
+    EXPECT_NEAR(restored.config.sky_solid_color.g, .3f, 1.f/255);
+    EXPECT_NEAR(restored.config.sky_solid_color.b, .4f, 1.f/255);
 }

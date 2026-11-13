@@ -26,7 +26,21 @@ namespace COMMONS_NS {
         shader& getShader();
         void setShader(const shader&);
         void draw();
+        struct animation_info { unsigned index; std::string name; double duration; };
+        std::vector<animation_info> animation_clips() const;
+        bool has_skeleton() const;
+        const std::vector<rig_joint>& rig_joints() const;
+        void reset_pose();
+        bool manual_pose() const { return m_manual_pose; }
+        std::optional<rig_transform> joint_pose(const std::string& id) const;
+        bool set_joint_pose(const std::string& id, const rig_transform& value);
+        bool set_rig(const editable_model_data& data, std::string& error);
+        void copy_joint_poses(const model& source);
+        void apply_pose();
+        std::size_t pose_revision() const { return m_pose_revision; }
+        std::vector<model_pose::bone_segment> skeleton() const { return m_pose ? m_pose->skeleton() : std::vector<model_pose::bone_segment>{}; }
         void set_animation(unsigned clip);
+        unsigned animation_index() const { return m_animation_clip; }
         void update_animation(double seconds);
         void load_model(const std::string& path);
         std::string getDiretorio() const;
@@ -56,6 +70,9 @@ namespace COMMONS_NS {
         std::shared_ptr<model_pose> m_pose;
         unsigned m_animation_clip = 0;
         std::chrono::steady_clock::time_point m_animation_start;
+        double m_animation_seconds{};
+        bool m_manual_pose{}, m_pose_dirty{};
+        std::size_t m_pose_revision{};
         std::string directory;
         std::string source_path;
         mutable bool m_source_missing{false};

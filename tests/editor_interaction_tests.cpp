@@ -1341,13 +1341,13 @@ TEST_F(EditorInteractionTest, EditorCameraInspectorExposesEnvironmentWithoutComp
     ASSERT_TRUE(context->redo());
     EXPECT_FLOAT_EQ(camera->config.corte_curto, 0.25f);
     auto* atmosphere = find_element<bgui::color_picker>(dock, [](auto& picker) {
-        return std::abs(picker.get_color().x - 0.08f) < 0.0001f;
+        return std::abs(picker.get_color().x - 0.16f) < 0.0001f;
     });
     ASSERT_NE(atmosphere, nullptr);
     atmosphere->set_color({0.4f, 0.25f, 0.55f, 1.f});
     EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.4f);
     ASSERT_TRUE(context->undo());
-    EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.08f);
+    EXPECT_FLOAT_EQ(camera->config.atmosphere_zenith.x, 0.16f);
     auto* image = find_element<bgui::inputbox>(dock, [](auto& field) {
         return field.get_buffer().empty();
     });
@@ -1482,7 +1482,7 @@ TEST_F(EditorInteractionTest, HierarchyGroupsSelectionAndUndoesInOneStep) {
     panel.build(dock);
     bgui::on_update();
     auto* button = find_element<bgui::button>(dock, [](auto& item) {
-        return item.get_label().get_buffer() == "Agrupar";
+        return item.get_label().get_buffer() == editor::ui::tr("Agrupar");
     });
     ASSERT_NE(button, nullptr);
     button->on_pressed(); button->on_released();

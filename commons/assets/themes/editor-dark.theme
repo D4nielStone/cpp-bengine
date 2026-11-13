@@ -1,45 +1,45 @@
 [base]
 visual.border.size = 1
-visual.background.normal = 0.065, 0.065, 0.065, 1.0
-visual.text.normal = 0.87, 0.87, 0.87, 1.0
+visual.background.normal = 0.08, 0.08, 0.08, 1.0
+visual.text.normal = 0.90, 0.90, 0.90, 1.0
 visual.border.normal = 0.20, 0.20, 0.20, 1.0
 
 [type.text]
-visual.text.normal = 0.87, 0.87, 0.87, 1.0
+visual.text.normal = 0.90, 0.90, 0.90, 1.0
 
 [type.window]
-visual.background.normal = 0.085, 0.085, 0.085, 1.0
+visual.background.normal = 0.11, 0.11, 0.11, 1.0
 visual.border.normal = 0.20, 0.20, 0.20, 1.0
 visual.border.radius = 4
 
 [type.button]
 visual.background.normal = 0.15, 0.15, 0.15, 1.0
 visual.background.hover = 0.21, 0.21, 0.21, 1.0
-visual.background.pressed = 0.20, 0.16, 0.26, 1.0
+visual.background.pressed = 0.22, 0.22, 0.22, 1.0
 visual.background.disabled = 0.11, 0.11, 0.11, 1.0
 visual.text.disabled = 0.45, 0.45, 0.45, 1.0
 visual.border.normal = 0.26, 0.26, 0.26, 1.0
 visual.border.hover = 0.36, 0.36, 0.36, 1.0
-visual.border.focused = 0.65, 0.43, 0.90, 1.0
+visual.border.focused = 0.48, 0.48, 0.48, 1.0
 visual.border.radius = 4
 layout.padding = 8, 4
 layout.align = center, center
 
 [type.inputarea]
 visual.background.normal = 0.055, 0.055, 0.055, 1.0
-visual.background.hover = 0.085, 0.085, 0.085, 1.0
+visual.background.hover = 0.11, 0.11, 0.11, 1.0
 visual.background.focused = 0.075, 0.075, 0.075, 1.0
 visual.border.normal = 0.23, 0.23, 0.23, 1.0
 visual.border.hover = 0.34, 0.34, 0.34, 1.0
-visual.border.focused = 0.65, 0.43, 0.90, 1.0
+visual.border.focused = 0.48, 0.48, 0.48, 1.0
 visual.border.radius = 4
 
 [type.combobox]
 visual.background.normal = 0.12, 0.12, 0.12, 1.0
 visual.background.hover = 0.19, 0.19, 0.19, 1.0
-visual.background.pressed = 0.20, 0.16, 0.26, 1.0
+visual.background.pressed = 0.22, 0.22, 0.22, 1.0
 visual.border.normal = 0.26, 0.26, 0.26, 1.0
-visual.border.focused = 0.65, 0.43, 0.90, 1.0
+visual.border.focused = 0.48, 0.48, 0.48, 1.0
 visual.border.radius = 4
 layout.padding = 8, 4
 
@@ -51,7 +51,7 @@ visual.border.size = 0
 [class.checkbox-box]
 visual.background.normal = 0.055, 0.055, 0.055, 1.0
 visual.background.hover = 0.22, 0.22, 0.22, 1.0
-visual.background.pressed = 0.52, 0.32, 0.73, 1.0
+visual.background.pressed = 0.40, 0.40, 0.40, 1.0
 visual.border.normal = 0.30, 0.30, 0.30, 1.0
 visual.border.radius = 3
 
@@ -59,18 +59,18 @@ visual.border.radius = 3
 visual.background.normal = 0.11, 0.11, 0.11, 1.0
 visual.background.hover = 0.17, 0.17, 0.17, 1.0
 visual.text.normal = 0.65, 0.65, 0.65, 1.0
-layout.padding = 10, 3
+layout.padding = 8, 1
 
 [class.dock-tab-active]
-visual.background.normal = 0.18, 0.14, 0.23, 1.0
-visual.text.normal = 0.94, 0.91, 0.98, 1.0
+visual.background.normal = 0.18, 0.18, 0.18, 1.0
+visual.text.normal = 0.94, 0.94, 0.94, 1.0
 
 [class.dock-tab-active-indicator]
-visual.background.normal = 0.65, 0.43, 0.90, 1.0
+visual.background.normal = 0.48, 0.48, 0.48, 1.0
 
 [class.tree-element-label]
 visual.background.hover = 0.15, 0.15, 0.15, 1.0
-visual.background.pressed = 0.23, 0.17, 0.30, 1.0
+visual.background.pressed = 0.22, 0.22, 0.22, 1.0
 layout.padding = 6, 3
 
 [class.tree-element-label-text]
@@ -87,16 +87,16 @@ visual.border.radius = 4
 layout.padding = 8, 4
 
 [class.primary]
-visual.background.normal = 0.35, 0.22, 0.49, 1.0
-visual.background.hover = 0.44, 0.28, 0.61, 1.0
-visual.background.pressed = 0.28, 0.17, 0.40, 1.0
-visual.border.normal = 0.55, 0.36, 0.74, 1.0
+visual.background.normal = 0.24, 0.24, 0.24, 1.0
+visual.background.hover = 0.30, 0.30, 0.30, 1.0
+visual.background.pressed = 0.20, 0.20, 0.20, 1.0
+visual.border.normal = 0.40, 0.40, 0.40, 1.0
 
 [class.danger]
-visual.background.normal = 0.48, 0.16, 0.20, 1.0
-visual.background.hover = 0.62, 0.22, 0.27, 1.0
-visual.background.pressed = 0.38, 0.12, 0.16, 1.0
-visual.border.normal = 0.68, 0.30, 0.35, 1.0
+visual.background.normal = 0.18, 0.18, 0.18, 1.0
+visual.background.hover = 0.26, 0.26, 0.26, 1.0
+visual.background.pressed = 0.22, 0.22, 0.22, 1.0
+visual.border.normal = 0.40, 0.40, 0.40, 1.0
 
 [class.animation-status]
 visual.text.normal = 0.70, 0.70, 0.70, 1.0
@@ -104,7 +104,7 @@ layout.margin = 0, 4
 layout.align = start, center
 
 [class.window-header]
-layout.padding = 0, 4
+layout.padding = 0, 2
 
 [class.window-controls]
 layout.align = start, center
@@ -129,7 +129,7 @@ visual.border.radius = 6
 
 [class.project-preview]
 visual.visible = true
-visual.background.normal = 0.065, 0.065, 0.065, 1.0
+visual.background.normal = 0.08, 0.08, 0.08, 1.0
 visual.border.normal = 0.0
 visual.border.size = 0
 visual.border.radius = 6
@@ -137,7 +137,7 @@ layout.align = center, center
 
 [class.editor-surface]
 visual.visible = true
-visual.background.normal = 0.065, 0.065, 0.065, 1.0
+visual.background.normal = 0.08, 0.08, 0.08, 1.0
 
 [class.debug-toolbar]
 visual.visible = true
@@ -170,7 +170,7 @@ visual.text.normal = 0.84, 0.84, 0.84, 1.0
 layout.padding = 0
 
 [class.editor-section]
-layout.margin = 0, 4
+layout.margin = 0, 2
 visual.visible = true
 visual.background.normal = 0.11, 0.11, 0.11, 1.0
 visual.border.normal = 0.18, 0.18, 0.18, 1.0
@@ -204,3 +204,52 @@ layout.margin = 0
 visual.visible = true
 visual.background.normal = 0.075, 0.075, 0.075, 1.0
 visual.border.size = 0
+
+[class.editor-muted]
+visual.text.normal = 0.68, 0.68, 0.68, 1.0
+
+[class.scene-file-row]
+visual.visible = true
+visual.background.normal = 0.11, 0.11, 0.11, 1.0
+visual.border.size = 0
+visual.border.radius = 4
+
+[class.scene-active-badge]
+visual.text.normal = 0.80, 0.80, 0.80, 1.0
+layout.padding = 8, 4
+
+[class.api-index]
+visual.visible = true
+visual.background.normal = 0.08, 0.08, 0.08, 1.0
+layout.padding = 8
+
+[class.api-article]
+visual.visible = true
+visual.background.normal = 0.11, 0.11, 0.11, 1.0
+layout.padding = 16, 10
+
+[class.api-category]
+visual.text.normal = 0.76, 0.76, 0.76, 1.0
+layout.margin = 0, 8, 0, 4
+layout.align = start, center
+
+[class.api-document]
+visual.border.size = 0
+visual.background.hover = 0.19, 0.19, 0.19, 1.0
+layout.padding = 8, 6
+layout.margin = 0, 2
+layout.align = start, center
+
+[class.api-code]
+visual.visible = true
+visual.background.normal = 0.065, 0.065, 0.065, 1.0
+visual.text.normal = 0.82, 0.82, 0.82, 1.0
+layout.padding = 8, 3
+
+[type.slider]
+visual.border.normal = 0.48, 0.48, 0.48, 1.0
+visual.border.hover = 0.60, 0.60, 0.60, 1.0
+visual.border.focused = 0.60, 0.60, 0.60, 1.0
+
+[type.progressbar]
+visual.border.normal = 0.48, 0.48, 0.48, 1.0

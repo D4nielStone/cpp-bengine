@@ -10,24 +10,17 @@ possível.
 
 ## Scripts prontos
 
-No painel **Arquivos**, abra **Novo script Lua…** e escolha um modelo. O editor
-cria uma cópia editável na pasta atual.
+No painel **Arquivos**, abra **Novo script Lua…**. O único modelo disponível é
+**Controle FPP (jogador e câmera)**, copiado para a pasta atual. Ele reúne WASD e
+rotação X/Y. Anexe-o uma vez e selecione `player` e `camera` no Inspector.
+WASD segue a projeção horizontal da câmera, preservando a velocidade vertical
+do Rigidbody; sem Rigidbody, usa Transform e `Time.deltaTime`. Câmeras fora da
+hierarquia mantêm o deslocamento inicial. Velocidade e sensibilidade ficam no
+Inspector. Novos projetos FPP usam `scripts/fpp_controller.lua` no jogador, com
+as duas referências preenchidas. Scripts de projetos existentes são preservados.
 
-- **Movimentação WASD** move no plano global XZ. Com um Rigidbody dinâmico,
-  ajusta a velocidade horizontal e preserva a velocidade vertical. Com
-  apenas Transform, desloca a entidade usando `Time.deltaTime`.
-- **Controle FPP (jogador e câmera)** reúne WASD e rotação X/Y no mesmo
-  script. Anexe o script uma vez e selecione `player` e `camera` no Inspector.
-  WASD segue a projeção horizontal da câmera. Se a câmera for filha do
-  jogador, segue pela hierarquia. Caso contrário, mantém a distância e o
-  deslocamento iniciais em relação ao jogador.
-- **Jogador FPP (WASD e guinada)** vai no jogador com Rigidbody do tipo
-  Personagem. O mouse horizontal gira o jogador e WASD segue essa direção.
-- **Câmera FPP (filha do jogador)** vai na entidade com Camera, filha do
-  jogador. O mouse vertical controla a inclinação e a câmera herda a guinada.
-
-Use o controle único ou a dupla de scripts FPP por jogador. A velocidade e a sensibilidade ficam no Inspector. Ao criar um projeto com o
-template FPP, os scripts de jogador e câmera já vêm associados às entidades.
+Projetos Empty e FPP começam com céu cinza (`Camera.backgroundColor` com RGB
+0.16 e alfa 1); personalizar o céu não exige mudar os scripts de navegação.
 
 ## Funções de ciclo de vida
 

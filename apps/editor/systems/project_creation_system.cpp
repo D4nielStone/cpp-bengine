@@ -36,16 +36,8 @@ bool write_template_file(
 }
 
 bool write_fpp_scripts(const std::filesystem::path& project_folder, std::string& error) {
-    return write_template_file(
-               project_folder / "scripts" / "fpp_player.lua",
-               script_template(lua_script_preset::fpp_player).source,
-               error
-           ) &&
-        write_template_file(
-            project_folder / "scripts" / "fpp_camera.lua",
-            script_template(lua_script_preset::fpp_camera).source,
-            error
-        );
+    return write_template_file(project_folder / "scripts" / "fpp_controller.lua",
+        script_template(lua_script_preset::fpp_controller).source, error);
 }
 
 void add_fpp_scene(const std::shared_ptr<commons::ecs>& registry) {
@@ -80,7 +72,6 @@ void add_fpp_scene(const std::shared_ptr<commons::ecs>& registry) {
     );
     body->set_body_type(commons::physics::body_type::character);
     body->setFriccao(0.f);
-    registry->add<commons::code>(player, "scripts/fpp_player.lua");
 
     auto player_camera = registry->create();
     registry->entity_names[player_camera.id] = "Player Camera";
@@ -89,7 +80,12 @@ void add_fpp_scene(const std::shared_ptr<commons::ecs>& registry) {
         {0.f, 0.8f, 0.f}
     );
     registry->get<commons::transform>(player_camera.id)->set_parent(player.id, false);
-    registry->add<commons::code>(player_camera, "scripts/fpp_camera.lua");
+    registry->add<commons::code>(player, "scripts/fpp_controller.lua");
+    const auto controller = registry->get<commons::code>(player.id);
+    controller->properties = {
+        {"player", "entity", player.id},
+        {"camera", "entity", player_camera.id}
+    };
 }
 
 }

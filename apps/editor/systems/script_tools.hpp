@@ -2,6 +2,7 @@
 
 #include "../core/editor_context.hpp"
 #include "components/code.hpp"
+#include "components/transform.hpp"
 #include "script_templates.hpp"
 #include <algorithm>
 #include <cctype>
@@ -20,7 +21,7 @@ inline bool is_lua_script(const std::filesystem::path& path) {
 
 inline bool create_lua_script(const std::filesystem::path& directory,
     std::string name, std::filesystem::path& created, std::string& error,
-    lua_script_preset preset = lua_script_preset::empty) {
+    lua_script_preset preset = lua_script_preset::fpp_controller) {
     error.clear();
     created.clear();
     if (name.empty() || name.find_first_of("/\\<>:\"|?*") != std::string::npos ||
@@ -115,4 +116,45 @@ inline bool attach_lua_script(const std::shared_ptr<editor_context>& context,
         return false;
     }
 }
+inline bool remove_lua_script(const std::shared_ptr<editor_context>& context,
+    editor_context::entity_id id, std::size_t index, std::string& error) {
+    error.clear();
+    if(!context || !context->registry || !context->registry->is_alive(id) || context->is_playing ||
+        context->locked_entities.contains(id) || context->editor_camera_entity==id) {
+        error="Escolha um objeto desbloqueado durante a edição."; return false;
+    }
+    const auto registry=context->registry;
+    const auto script=registry->get<commons::code>(id);
+    if(!script || index>script->scripts.size()) {error="O script não está mais associado ao objeto.";return false;}
+    if(index) {
+        const auto before=script->scripts;
+        auto after=before; after.erase(after.begin()+index-1);
+        auto apply=[registry,id,script](const auto& entries) {
+            if(registry->is_alive(id) && registry->get<commons::code>(id)==script) script->scripts=entries;
+        };
+        apply(after);
+        context->record_action([apply,before]{apply(before);},[apply,after]{apply(after);});
+    } else {
+        std::shared_ptr<commons::code> next;
+        if(!script->scripts.empty()) {
+            const auto& first=script->scripts.front();
+            next=std::make_shared<commons::code>(first->file);
+            next->arquivoCompleto=first->arquivoCompleto; next->properties=first->properties;
+            next->asset_root=first->asset_root; next->reg=registry; next->my_object=id;
+            next->scripts.assign(script->scripts.begin()+1,script->scripts.end());
+        }
+        const auto identity=registry->get<commons::transform>(id);
+        auto apply=[registry,id,identity](const auto& expected,const auto& value) {
+            if(!registry->is_alive(id) || registry->get<commons::transform>(id)!=identity || registry->get<commons::code>(id)!=expected) return;
+            if(value) {
+                registry->entities[id][commons::code::mask]=value;
+                registry->mascaras[id]|=commons::code::mask;
+            } else registry->remove<commons::code>(id);
+        };
+        apply(script,next);
+        context->record_action([apply,script,next]{apply(next,script);},[apply,script,next]{apply(script,next);});
+    }
+    return true;
+}
+
 }

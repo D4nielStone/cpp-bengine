@@ -8,6 +8,9 @@ std::unique_ptr<model> model::clone() const {
     if (m_shader.ID) result->m_shader = m_shader;
     result->m_animation_clip = m_animation_clip;
     result->m_animation_start = m_animation_start;
+    result->m_animation_seconds = m_animation_seconds;
+    result->m_manual_pose = m_manual_pose; result->m_pose_dirty = m_pose_dirty;
+    result->m_pose_revision = m_pose_revision;
     if (m_pose) result->m_pose = std::make_shared<model_pose>(*m_pose);
     result->meshes.reserve(meshes.size());
     for (const auto& source : meshes) {

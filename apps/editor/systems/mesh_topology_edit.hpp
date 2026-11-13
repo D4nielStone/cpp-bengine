@@ -38,7 +38,10 @@ inline mesh_element_clipboard copy_mesh_elements(
     std::map<unsigned int, unsigned int> face_map;
     const auto copy_vertex = [&](unsigned int index) {
         const auto [entry, added] = vertex_map.try_emplace(index, copy.geometry.vertices.size());
-        if (added) copy.geometry.vertices.push_back(mesh.vertices[index]);
+        if (added) {
+            copy.geometry.vertices.push_back(mesh.vertices[index]);
+            if (!mesh.skin.empty()) copy.geometry.skin.push_back(mesh.skin[index]);
+        }
         return entry->second;
     };
 
@@ -83,6 +86,11 @@ inline bool append_mesh_elements(commons::editable_mesh_data& mesh,
     const auto vertex_offset = static_cast<unsigned int>(result.vertices.size());
     const auto face_offset = static_cast<unsigned int>(result.faces.size());
     result.vertices.insert(result.vertices.end(), geometry.vertices.begin(), geometry.vertices.end());
+    if (!result.skin.empty() || !geometry.skin.empty()) {
+        result.skin.resize(vertex_offset);
+        if (geometry.skin.empty()) result.skin.resize(result.vertices.size());
+        else result.skin.insert(result.skin.end(), geometry.skin.begin(), geometry.skin.end());
+    }
     for (auto face : geometry.faces) {
         for (auto& index : face) index += vertex_offset;
         result.faces.push_back(std::move(face));
@@ -137,11 +145,13 @@ inline bool delete_mesh_elements(
     if (!changed) return false;
 
     result.vertices.clear();
+    result.skin.clear();
     std::vector<unsigned int> vertex_map(mesh.vertices.size());
     for (std::size_t index = 0; index < mesh.vertices.size(); ++index) {
         if (removed_vertices[index] && !used_vertices[index]) continue;
         vertex_map[index] = static_cast<unsigned int>(result.vertices.size());
         result.vertices.push_back(mesh.vertices[index]);
+        if (!mesh.skin.empty()) result.skin.push_back(mesh.skin[index]);
     }
     for (auto& face : result.faces)
         for (auto& vertex : face) vertex = vertex_map[vertex];
@@ -243,6 +253,7 @@ inline bool extrude_faces(
             static_cast<unsigned int>(result.vertices.size())
         );
         result.vertices.push_back(value);
+        if (!mesh.skin.empty()) result.skin.push_back(mesh.skin[source]);
     }
 
     std::vector<unsigned int> face_map(mesh.faces.size());
@@ -355,6 +366,18 @@ inline bool loop_cut(
             static_cast<unsigned int>(result.vertices.size())
         );
         result.vertices.push_back(midpoint);
+        if (!mesh.skin.empty()) {
+            std::map<std::string, float> combined;
+            for (const auto index : {edge.first, edge.second})
+                for (const auto& weight : mesh.skin[index]) combined[weight.joint] += weight.weight * .5f;
+            std::vector<commons::rig_weight> weights;
+            for (const auto& [id, value] : combined) weights.push_back({id, value});
+            std::sort(weights.begin(), weights.end(), [](const auto& a, const auto& b) { return a.weight > b.weight; });
+            if (weights.size() > 8) weights.resize(8);
+            float sum = 0; for (const auto& weight : weights) sum += weight.weight;
+            for (auto& weight : weights) weight.weight /= sum;
+            result.skin.push_back(std::move(weights));
+        }
     }
 
     std::vector<std::vector<unsigned int>> split_faces;

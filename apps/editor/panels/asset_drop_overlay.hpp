@@ -18,7 +18,7 @@ public:
         set_input_passthrough(true);
         set_flex(false);
         style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
-        style.visual.background.normal = bgui::color{.015f, .02f, .03f, .68f};
+        style.visual.background.normal = bgui::color{.02f, .02f, .02f, .68f};
         style.visual.visible = false;
         m_title = &add<bgui::text>(tr("Arraste aqui"), .55f);
         m_hint = &add<bgui::text>(tr("Arquivos serão copiados para o projeto"), .3f);

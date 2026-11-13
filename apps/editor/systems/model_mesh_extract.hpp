@@ -10,7 +10,9 @@ namespace editor::ui {
 inline std::filesystem::path extract(
     const std::filesystem::path& project_root, const std::filesystem::path& original,
     std::string name,
-    const commons::editable_mesh_data& mesh, const commons::material& material
+    const std::vector<commons::editable_mesh_data>& meshes,
+    const std::vector<commons::material>& selected_materials,
+    const commons::model_rig& rig = {}
 ) {
     if (is_native_model(name)) name = std::filesystem::path(name).stem().string();
     if (name.empty() || name.front() == '.' || name.back() == '.' || name.back() == ' ' ||
@@ -18,7 +20,10 @@ inline std::filesystem::path extract(
         std::ranges::any_of(name, [](unsigned char c) { return c < 32; })) {
         throw std::runtime_error("Escolha um nome válido para o arquivo .bmodel.");
     }
-    if (mesh.faces.empty()) throw std::runtime_error("A malha precisa ter faces para ser exportada.");
+    if (meshes.empty() || meshes.size() != selected_materials.size())
+        throw std::runtime_error("Selecione malhas e materiais válidos para extrair.");
+    for (const auto& mesh : meshes)
+        if (mesh.faces.empty()) throw std::runtime_error("A malha precisa ter faces para ser exportada.");
     if (project_root.empty()) throw std::runtime_error("Abra um projeto antes de exportar.");
 
     namespace fs = std::filesystem;
@@ -36,20 +41,22 @@ inline std::filesystem::path extract(
     if (fs::is_symlink(fs::symlink_status(materials)))
         throw std::runtime_error("A pasta de materiais é um link simbólico.");
 
-    commons::editable_model_data exported{{mesh}};
+    commons::editable_model_data exported{meshes, rig};
     std::string error;
     if (!exported.validate(error)) throw std::runtime_error(error);
     fs::create_directories(directory);
-    auto extracted_material = material;
-    for (auto& [slot, texture] : extracted_material.textures) {
-        if (texture.embedded || texture.path.empty()) continue;
-        fs::create_directories(materials);
-        texture.path = import_asset(texture.path, root, false, materials, true).string();
+    for (std::size_t i = 0; i < meshes.size(); ++i) {
+        auto extracted_material = selected_materials[i];
+        for (auto& [slot, texture] : extracted_material.textures) {
+            if (texture.embedded || texture.path.empty()) continue;
+            fs::create_directories(materials);
+            texture.path = import_asset(texture.path, root, false, materials, true).string();
+        }
+        fs::path material_file;
+        if (!commons::store_material_asset(materials, extracted_material, material_file, error))
+            throw std::runtime_error(error);
+        exported.meshes[i].material_path = material_file.lexically_relative(directory).generic_string();
     }
-    fs::path material_file;
-    if (!commons::store_material_asset(materials, extracted_material, material_file, error))
-        throw std::runtime_error(error);
-    exported.meshes.front().material_path = material_file.lexically_relative(directory).generic_string();
     static std::atomic_uint64_t next_extract{0};
     fs::path staging;
     while (staging.empty()) {
@@ -71,6 +78,15 @@ inline std::filesystem::path extract(
         throw std::runtime_error(error);
     fs::create_hard_link(temporary, destination);
     return destination;
+}
+
+inline std::filesystem::path extract(
+    const std::filesystem::path& project_root, const std::filesystem::path& original,
+    std::string name, const commons::editable_mesh_data& mesh, const commons::material& material,
+    const commons::model_rig& rig = {}
+) {
+    return extract(project_root, original, std::move(name),
+        std::vector<commons::editable_mesh_data>{mesh}, std::vector<commons::material>{material}, rig);
 }
 
 }

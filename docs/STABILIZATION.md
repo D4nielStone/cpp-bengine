@@ -606,3 +606,209 @@ abertura de scripts, edição/salvamento, reabertura de janelas e renderização
 OpenGL. `scripts/build.sh out --test` recompilou o editor e executou os 553 testes:
 539 passaram, 2 foram ignorados e as mesmas 12 falhas anteriores permaneceram;
 nenhuma falha nova foi identificada.
+
+## Interface compacta e paleta neutra — 2026-11-09
+
+- Abas do dock com padding vertical de 1 px e cabeçalhos de janela com 2 px.
+  Propriedades do inspetor usam campos de 22 px, texto em escala 0,27 e menor
+  espaçamento entre linhas; seletores, seções e controles auxiliares também
+  foram compactados. Os valores são escalados pelo mecanismo existente de DPI.
+- Tema e destaques locais do editor, modelos, cenas, animação, Lua visual e
+  referência de API substituem os acentos roxos por cinzas. As cores dos dados
+  inspecionados continuam sendo os valores dos próprios componentes.
+- BGUI: ícones passam a medir a área visível dos glifos, sem reservar o avanço
+  e a altura de linha da fonte como se fossem texto. O desenho respeita o
+  alinhamento vertical e não recebe o truncamento de rótulos de botões. O
+  teste headless com uma fonte sintética reproduziu deslocamentos horizontais
+  de 4,4 e 6,6 px nas escalas 1 e 1,5 antes da correção. A barra lateral define
+  explicitamente alinhamento central nos dois eixos.
+- BGUI: `visual.border.size` e `visual.border.radius` eram consumidos como
+  estados de cor pelo prefixo `visual.border.*`. A verificação de neutralidade
+  reproduziu um canal vermelho indevido no tema carregado. As dimensões agora
+  são lidas antes dos estados de cor, preservando a cor declarada da borda.
+  Há regressão específica para tamanho, raio e cor no mesmo bloco de tema.
+- Configuração limpa concluída em `/tmp/bengine-compact-ui-build`, com OpenGL,
+  GLFW, FreeType e testes habilitados. Os seis grupos CTest `IconTests`,
+  `StyleTests`, `DockTests`, `PanelFacadeTests`, `treeTests` e `InputAreaTests`,
+  além dos dois casos `EditorThemeTest`, passaram.
+  Log: `/tmp/bengine-compact-isolated-focused.log`.
+- Os 11 casos `EditorInteractionTest.Inspector*` passaram, incluindo altura
+  e espaçamento das linhas, edição e histórico. Os dois casos direcionados
+  da barra lateral e aparência nativa também passaram. O teste OpenGL mede
+  os quatro glifos com a fonte real, a altura das abas e o texto dos campos
+  em escalas globais 1 e 1,5, sem erro OpenGL. Capturas inspecionadas em
+  `/tmp/bengine-compact-ui-preview/compact-100.png` e `compact-150.png`.
+  Logs: `/tmp/bengine-compact-inspector-tests.log` e
+  `/tmp/bengine-compact-native-tests.log`. Essa conferência foi realizada em
+  Linux/OpenGL com escala simulada; outros sistemas e monitores físicos
+  com DPI diferente não foram verificados.
+- `scripts/build.sh /tmp/bengine-compact-ui-build --test` concluiu a compilação
+  do editor e runtime. CTest executou 578 entradas: 572 passaram, quatro
+  falharam e duas foram ignoradas por dependerem do modo smoke do runtime.
+  Log completo: `/tmp/bengine-compact-final-integrated.log`.
+  Permanecem falhas em `ModelEditorSelection.UiFramesFollowLiveGeometryAndClearRemovedComponents`
+  (navegação orbital), `EditorSceneManagement.CreatesOpensAndDeletesScenesThroughTheWorkspace`
+  (busca de ações por tooltip), `WindowFileDropTest.EngineTextureUploadsDecodedJpegPixels`
+  e `ModelImportGpuTest.LoadsEmbeddedGlbTextureAndAnimatesThroughExistingRenderer`
+  (largura esperada de 3 px, obtida de 2 px com a redução de textura a 70%).
+  Não foi estabelecida uma comparação anterior/posterior isolada dessas
+  quatro falhas; a suíte geral não está integralmente aprovada.
+- A compilação apresentou o aviso já documentado em `runtime_process.cpp:231`
+  sobre o retorno de `write`, além do aviso CMake CMP0135 do GoogleTest.
+  `git diff --check` passou na engine e no submódulo BGUI. A validação usou
+  pasta separada porque outras tarefas também estavam alterando e compilando
+  a mesma árvore de trabalho; suas alterações locais foram preservadas.
+
+### Modeling viewport icons and BGUI hover hints (2026-11-09)
+
+- Finding: modeling selection/shading buttons occupied fixed rows outside the
+  framebuffer, while geometry/navigation actions used text buttons in the mesh
+  sidebar. BGUI had no reusable delayed hover information API.
+- Change: modeling tools now use native icon buttons in two viewport overlays,
+  anchored to the preview geometry and wrapping at the available width. Extrusion
+  distance, mesh/material controls and help remain in the sidebar. Existing edit,
+  save, history and navigation callbacks and keyboard shortcuts are preserved.
+- BGUI: additive `element::set_tooltip` API with a configurable monotonic delay
+  (650 ms by default), a noninteractive native text balloon drawn after widgets,
+  UTF-8 wrapping, context bounds, and cancellation through the existing input and
+  subtree lifetime paths. See `external/cpp-bgui/docs/TOOLTIPS.md`.
+- Regression coverage: delayed/immediate display, leaving/pressing/disabling or
+  removing a target, context-edge placement and root replacement; modeling icon
+  hit testing, selection callback, overlay bounds, resizing and UI scaling; new
+  named icon glyphs. English and Portuguese hints include relevant shortcuts.
+- Validation: clean standalone headless BGUI configuration/build succeeded; all
+  20 CTest groups passed, including ElementTests and IconTests. Integrated
+  build/CTest remains in progress. Interactive GPU appearance has not been
+  manually checked.
+
+### FPP geral e leitura hierárquica de Lua
+
+- O catálogo agora contém somente o controlador geral FPP. Projetos FPP novos
+  associam `scripts/fpp_controller.lua` ao jogador e persistem referências ao
+  jogador e à câmera; arquivos de projetos existentes permanecem intactos.
+- O particionamento léxico reconhece guardas compactas e cabeçalhos condicionais
+  multilinha, preservando os bytes originais. Comentários e strings não abrem
+  blocos. A sintaxe ainda não representável continua como Lua preservado.
+- Blocos usam cores por categoria, cavidades para corpos, encaixes e fechamento
+  visual. A prévia de arraste mantém oscilação amortecida e indicação de suspensão.
+- Cobertura adicionada para estrutura completa do FPP, campos editáveis,
+  preservação de CRLF/comentários, remoção e movimentação de corpos compactos,
+  abertura do FPP pela UI e referências persistidas no projeto gerado.
+
+### Rig nativo, timeline contínua e dicas detalhadas (2026-11-09)
+
+- Constatação: o céu padrão usava horizonte/zenith azulados; o painel Animação
+  tinha controles maiores, não garantia uma superfície escura e reconstruía os
+  controles ao navegar. As dicas de modelagem tinham apenas título; o balão não
+  habilitava explicitamente o desenho do fundo.
+- Câmeras novas passam a usar horizonte e zenith cinza neutro (0,16). Valores
+  explícitos de cenas existentes são preservados. Referência Lua, conclusão,
+  comando visual, exemplos e templates Empty/FPP acompanham o novo padrão.
+- Animação: controles de 22 px, texto reduzido e fundo escuro explícito. Busca,
+  reprodução e gravação atualizam widgets retidos; apenas alterações estruturais
+  reconstruem as trilhas. A régua permite arrastar o cursor com uma única
+  operação de histórico, rolagem horizontal e zoom sem substituir o canvas.
+  A prévia não grava novas chaves automaticamente.
+- BGUI: extensão aditiva de `set_tooltip` com título e descrição, fontes 0,27/0,24,
+  fundo escuro opaco, borda e posicionamento limitado ao contexto. A API anterior
+  permanece compatível. Botões de modelagem explicam a ação abaixo do título;
+  a dica de câmera também aparece nas sugestões Lua. Teste headless verifica
+  os metadados e a geometria do fundo. A propriedade `visual.visible` ausente
+  foi a causa do fundo não desenhado.
+- Rig: definição e validação em `loaders/model_rig`, persistência nativa em
+  `editable_model`, deformação no avaliador CPU `model_pose` existente e canais
+  opcionais do Renderer. O painel Malhas cria ossos, ajusta pais/repouso, calcula
+  pesos e permite corrigir pesos da seleção. Poses por osso são gravadas pelo
+  fluxo automático existente em `.banim`; curvas não entram nos registros de
+  cena. A cena guarda somente a pose estática opcional `rig_pose`.
+- Identificadores nativos permanecem estáveis ao renomear ossos. Validação rejeita
+  ciclos, pais ausentes, pesos inválidos e matrizes de repouso não invertíveis.
+  Carregamento de pose inválida preserva o modelo anterior. Clones compartilham
+  dados importados imutáveis e mantêm poses independentes. Desfazer a exclusão de
+  um osso recupera sua pose; colar pesos de outro rig não deixa referências
+  inválidas no modelo. Salvar detecta alterações externas e mantém a edição local.
+- Compatibilidade: `.bmodel` sem rig continua versão 1; com rig usa versão 2,
+  rejeitada pelas engines antigas. Modelos Assimp expõem poses de nós existentes;
+  editar sua hierarquia/pesos é exclusivo do formato nativo. Converter geometria
+  importada não converte os clips/rigs originais. Identificadores importados
+  dependem da hierarquia; reimportações estruturais exigem revisar as trilhas.
+  Reiniciar um clip importado encerra a pose manual na cópia de prévia.
+
+### BGUI invalidation, preview geometry and dock lifetime (2026-11-09)
+
+- Scope: BGUI 1.0 embedded in Bubble Engine 0.1.4. Existing engine and
+  submodule working-tree changes were preserved. No public signatures changed.
+- Reproduction: the new generic tab removal test crashed with SIGSEGV before
+  the fix. `layout::remove` destroyed a window, while `dock::sync_windows`
+  dereferenced its retained tab-group pointer. Synchronization now prunes dead
+  members and their controls before reading window state, repairs anchor/active
+  selection, removes empty groups, and clears stale drop targets. Explicit
+  `remove_window` remains supported.
+- Preview invalidation: three new tests failed before the fixes. External
+  framebuffer assignment previously invalidated style and ancestor layout on
+  every call. Identical external frames now do nothing; texture replacement
+  invalidates drawing, with layout invalidated only when dimensions change.
+  Repeated size/mode setters are also idempotent. Flip changes still invalidate
+  cached UVs. Internal texture assignment continues to refresh drawing even
+  when the ID and dimensions match, preserving mutable pixel-buffer updates.
+- Style propagation: a parent's layout-only change no longer marks descendant
+  styles dirty. Visual inheritance and existing global theme/scale invalidation
+  remain intact. This avoids needless descendant style work during size changes.
+- Deterministic performance regression coverage: 1,000 visible widget rows,
+  ten unchanged draws with no additional row geometry construction, then a
+  single changed row with only that row rebuilt. These are operation counts,
+  not wall-clock/FPS guarantees or a benchmark of 1,000 ECS entities. Additional
+  tests cover repeated external frames, framebuffer replacement, UV flipping,
+  natural/explicit dimensions, and repeated dock resize at scales 1 and 1.5
+  with committed preview geometry matching draw commands in the same frame.
+- Changed implementation: BGUI `elem/image.hpp`, `elem/image.cpp`,
+  `elem/element.cpp`, `lay/dock.cpp`; regression coverage in `image_tests.cpp`,
+  `element_tests.cpp`, `dock_tests.cpp`. This section records only this task's
+  additions; other local modifications have separate stabilization entries.
+- Standalone validation: clean configuration in
+  `/tmp/bgui-stability-20261109`, headless null backend, C++20, FreeType enabled;
+  build succeeded and all 20 CTest groups passed (2.85 s). Logs:
+  `/tmp/bgui-stability-last-build.log`,
+  `/tmp/bgui-stability-final-ctest.log`. The initial FreeType-disabled run
+  passed 19/20 groups; the existing scaled tab separator test reported zero
+  text height. Repeating with FreeType enabled passed all 24 docking tests.
+  Before-fix evidence: `/tmp/bgui-stability-before.log` and
+  `/tmp/bgui-stability-dock-before.log`.
+- Integrated focused validation: all 15 CTest cases matching
+  `DeferredViewportResize|EditorViewport\.|Gizmo|CameraRelease` passed using
+  the Linux/OpenGL display available to the test process (1.36 s). This includes
+  deferred framebuffer resize, empty layout, camera release/recreation, gizmo
+  capture outside the viewport, world rotation, screen size and direction
+  overlays. Log: `/tmp/bgui-stability-viewport.log`. No manual visual inspection,
+  physical DPI/multi-monitor checks or other operating systems were exercised.
+- Deferred dock selection audit (2026-11-10): ordinary tests did not expose a
+  second lifetime defect, but Valgrind reported 38 invalid memory accesses in
+  36 contexts when a queued tab selection ran after generic window removal
+  or root replacement. Dock tabs now cancel their queued selection when the
+  tab dies; surviving callbacks synchronize window membership before selecting.
+  The lifetime token is allocated once per dock tab, with no per-frame token
+  allocation. Three removal/root replacement cases then passed under Valgrind
+  with zero errors and zero live heap blocks at exit. Logs:
+  `/tmp/bgui-stability-queued-valgrind-before.log`,
+  `/tmp/bgui-stability-lifetime-valgrind.log`,
+  `/tmp/bgui-stability-lifetime-valgrind-tests.log`.
+- Final standalone rebuild after the deferred-selection fix succeeded. All 20
+  CTest groups passed again, including 26 docking tests (4.36 s total).
+  Logs: `/tmp/bgui-stability-lifetime-build.log` and
+  `/tmp/bgui-stability-lifetime-ctest.log`.
+
+### Pre-publication validation (2026-11-13)
+
+- `bash scripts/build.sh out --test` configured and built the editor, runtime
+  and test targets successfully. CTest executed 604 entries: 545 passed,
+  13 failed and 46 were skipped. The full suite is not passing.
+- Failures cover FPP project/script creation and visual representation, script
+  attachment through the UI, modeling selection/extrusion, scene management,
+  the neutral-camera Lua test and the block-editor script context menu.
+  This check covers the existing working-tree changes; it does not
+  establish whether those failures were present before them.
+- Graphics-dependent tests were skipped because no display was available;
+  runtime smoke tests also require their optional execution mode. No manual
+  graphics or other-platform verification was performed in this session.
+- `git diff --check` passed in both cpp-bengine and cpp-bgui. Complete build
+  and CTest output: `/tmp/bengine-precommit-validation.log`.

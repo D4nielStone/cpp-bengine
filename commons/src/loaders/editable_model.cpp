@@ -12,6 +12,7 @@
 #include <iterator>
 #include <limits>
 #include <string_view>
+#include <set>
 
 namespace commons {
 namespace {
@@ -121,6 +122,24 @@ bool parse_mesh(
             mesh.face_groups.push_back(std::move(loaded));
         }
     }
+    if (value.HasMember("skin")) {
+        const auto& skin = value["skin"];
+        if (!skin.IsArray() || skin.Size() != mesh.vertices.size()) {
+            error = "Quantidade de pesos incompatível com os vértices."; return false;
+        }
+        mesh.skin.resize(skin.Size());
+        for (rapidjson::SizeType i = 0; i < skin.Size(); ++i) {
+            if (!skin[i].IsArray() || skin[i].Size() > 8) {
+                error = "Pesos de rig inválidos."; return false;
+            }
+            for (const auto& weight : skin[i].GetArray()) {
+                if (!weight.IsArray() || weight.Size() != 2 || !weight[0].IsString() || !weight[1].IsNumber()) {
+                    error = "Peso de osso inválido."; return false;
+                }
+                mesh.skin[i].push_back({std::string(weight[0].GetString(), weight[0].GetStringLength()), weight[1].GetFloat()});
+            }
+        }
+    }
     mesh.recalculate_normals();
     return mesh.validate(error);
 }
@@ -131,6 +150,22 @@ bool editable_mesh_data::validate(std::string& error) const {
     if (vertices.size() > max_vertices || faces.size() > max_faces) {
         error = "Editable mesh exceeds supported limits.";
         return false;
+    }
+    if (!skin.empty() && skin.size() != vertices.size()) {
+        error = "Quantidade de pesos incompatível com os vértices."; return false;
+    }
+    for (const auto& weights : skin) {
+        if (weights.size() > 8) { error = "Um vértice excede oito influências de ossos."; return false; }
+        float sum = 0;
+        std::set<std::string> unique;
+        for (const auto& value : weights) {
+            if (!std::isfinite(value.weight) || value.weight <= 0 || value.weight > 1 ||
+                !unique.insert(value.joint).second) { error = "Pesos de osso inválidos."; return false; }
+            sum += value.weight;
+        }
+        if (!weights.empty() && std::abs(sum - 1.f) > .001f) {
+            error = "A soma dos pesos de cada vértice deve ser um."; return false;
+        }
     }
     for (const auto& value : vertices) {
         if (!finite(value.position) || !std::isfinite(value.uvcoords.x) ||
@@ -209,9 +244,14 @@ bool editable_model_data::validate(std::string& error) const {
         error = "Editable model must contain at least one mesh.";
         return false;
     }
-    for (const auto& mesh : meshes)
-        if (!mesh.validate(error))
-            return false;
+    if (!rig.validate(error)) return false;
+    std::set<std::string> joints;
+    for (const auto& joint : rig.joints) joints.insert(joint.id);
+    for (const auto& mesh : meshes) {
+        if (!mesh.validate(error)) return false;
+        for (const auto& weights : mesh.skin) for (const auto& weight : weights)
+            if (!joints.contains(weight.joint)) { error = "Um peso referencia um osso inexistente."; return false; }
+    }
     return true;
 }
 
@@ -238,7 +278,7 @@ bool load_editable_model(
         !document.HasMember("format") || !document["format"].IsString() ||
         std::string_view(document["format"].GetString()) != "bengine-model" ||
         !document.HasMember("version") || !document["version"].IsInt() ||
-        document["version"].GetInt() != 1 ||
+        (document["version"].GetInt() != 1 && document["version"].GetInt() != 2) ||
         !document.HasMember("meshes") || !document["meshes"].IsArray() ||
         document["meshes"].Empty() ||
         document["meshes"].Size() > max_meshes) {
@@ -247,6 +287,27 @@ bool load_editable_model(
     }
 
     editable_model_data loaded;
+    if (document.HasMember("rig")) {
+        const auto& rig = document["rig"];
+        if (!rig.IsObject() || !rig.HasMember("joints") || !rig["joints"].IsArray() || rig["joints"].Size() > 512) {
+            error = "Rig inválido."; return false;
+        }
+        for (const auto& source : rig["joints"].GetArray()) {
+            rig_joint joint;
+            if (!source.IsObject()) { error = "Osso inválido."; return false; }
+            for (auto [key, destination] : {std::pair{"id", &joint.id}, {"name", &joint.name}, {"parent", &joint.parent}}) {
+                if (!source.HasMember(key) || !source[key].IsString()) { error = "Identificação de osso inválida."; return false; }
+                destination->assign(source[key].GetString(), source[key].GetStringLength());
+            }
+            for (auto [key, destination] : {std::pair{"position", &joint.rest.position},
+                {"rotation", &joint.rest.rotation}, {"scale", &joint.rest.scale}}) {
+                if (!source.HasMember(key) || !read_float_array(source[key], 3, destination->v.data())) {
+                    error = "Transformação de repouso inválida."; return false;
+                }
+            }
+            loaded.rig.joints.push_back(std::move(joint));
+        }
+    } else if (document["version"].GetInt() == 2) { error = "Modelo versão 2 sem rig."; return false; }
     loaded.meshes.reserve(document["meshes"].Size());
     for (const auto& source : document["meshes"].GetArray()) {
         editable_mesh_data mesh;
@@ -279,7 +340,22 @@ bool save_editable_model(
     writer.Key("format");
     writer.String("bengine-model");
     writer.Key("version");
-    writer.Int(1);
+    writer.Int(model.rig.joints.empty() ? 1 : 2);
+    if (!model.rig.joints.empty()) {
+        writer.Key("rig"); writer.StartObject(); writer.Key("joints"); writer.StartArray();
+        for (const auto& joint : model.rig.joints) {
+            writer.StartObject();
+            writer.Key("id"); writer.String(joint.id.c_str());
+            writer.Key("name"); writer.String(joint.name.c_str());
+            writer.Key("parent"); writer.String(joint.parent.c_str());
+            for (auto [key, value] : {std::pair{"position", joint.rest.position},
+                {"rotation", joint.rest.rotation}, {"scale", joint.rest.scale}}) {
+                writer.Key(key); writer.StartArray(); for (int axis = 0; axis < 3; ++axis) writer.Double(value[axis]); writer.EndArray();
+            }
+            writer.EndObject();
+        }
+        writer.EndArray(); writer.EndObject();
+    }
     writer.Key("meshes");
     writer.StartArray();
     for (const auto& mesh : model.meshes) {
@@ -306,6 +382,17 @@ bool save_editable_model(
             writer.EndArray();
         }
         writer.EndArray();
+        if (!mesh.skin.empty()) {
+            writer.Key("skin"); writer.StartArray();
+            for (const auto& weights : mesh.skin) {
+                writer.StartArray();
+                for (const auto& weight : weights) {
+                    writer.StartArray(); writer.String(weight.joint.c_str()); writer.Double(weight.weight); writer.EndArray();
+                }
+                writer.EndArray();
+            }
+            writer.EndArray();
+        }
         writer.Key("face_groups");
         writer.StartArray();
         for (const auto& group : mesh.face_groups) {

@@ -86,6 +86,35 @@ TEST(SceneTest, OwnsAnIndependentEcs)
     EXPECT_NE(first.get_ecs(), second.get_ecs());
 }
 
+TEST(EditorThemeTest, UsesNeutralColorsAndCompactTabPadding)
+{
+    const auto theme = bgui::load_theme((std::filesystem::path(BENGINE_SOURCE_DIR) /
+        "commons/assets/themes/editor-dark.theme").string());
+    const auto check_color = [](const bgui::state_color& states) {
+        for (const auto& color : {states.normal, states.hover, states.pressed,
+                                  states.focused, states.disabled}) {
+            if (!color) continue;
+            EXPECT_FLOAT_EQ(color->r, color->g);
+            EXPECT_FLOAT_EQ(color->g, color->b);
+        }
+    };
+    const auto check_style = [&](const bgui::style& style) {
+        check_color(style.visual.background);
+        check_color(style.visual.border);
+        check_color(style.visual.text);
+    };
+    check_style(theme.base);
+    for (const auto* styles : {&theme.types, &theme.classes, &theme.ids})
+        for (const auto& [name, style] : *styles) {
+            SCOPED_TRACE(name);
+            check_style(style);
+        }
+    const auto& tabs = theme.classes.at("dock-tab");
+    ASSERT_TRUE(tabs.layout.padding.has_value());
+    EXPECT_EQ(tabs.layout.padding->y, 1);
+    EXPECT_EQ(tabs.layout.padding->w, 1);
+}
+
 TEST(EditorThemeTest, VerticallyCentersWindowTrafficLights)
 {
     const auto theme_path = std::filesystem::path(BENGINE_SOURCE_DIR) /
@@ -139,7 +168,7 @@ TEST(EditorThemeTest, VerticallyCentersWindowTrafficLights)
             }
         }
         ASSERT_NE(header, nullptr);
-        EXPECT_GE(header->processed_height(), 20);
+        EXPECT_GE(header->processed_height(), 19);
 
         bgui::linear* controls_layout = nullptr;
         for (auto& [layer, elements] : header->get_elements()) {

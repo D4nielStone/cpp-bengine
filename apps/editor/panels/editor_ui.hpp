@@ -134,6 +134,7 @@ private:
     bgui::button* m_pause_button{nullptr};
     bgui::icon* m_pause_icon{nullptr};
     std::array<bgui::icon*, 4> m_workspace_icons{};
+    std::array<bgui::button*, 4> m_workspace_buttons{};
     bgui::text* m_build_status{nullptr};
     bgui::progress_bar* m_build_progress{nullptr};
     bgui::modal* m_build_modal{nullptr};

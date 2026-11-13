@@ -234,3 +234,60 @@ Ao terminar, só o clipe de destino continua sendo avaliado. O tempo de transiç
 
 A referência **API Reference** da barra de menu indexa os arquivos Markdown em
 `docs/`, agrupa-os por pasta e pesquisa seus nomes e conteúdos.
+
+## Animação de ossos e rigs próprios
+
+Em **Edição do modelo → Malhas → Rig e pose**, um `.bmodel` pode receber um rig
+próprio. Use **Criar rig**, **Adicionar osso filho** e o seletor de pai para
+formar a hierarquia. Em **Editar repouso e pesos**, ajuste posição, rotação e
+escala de repouso. Renomear um osso não muda seu identificador, usado pelas
+trilhas de animação. Ciclos e pais inexistentes são rejeitados.
+
+**Vincular automaticamente** calcula pesos normalizados para até quatro ossos
+por vértice. Para corrigir uma região, selecione pontos no modo **Vértices**,
+escolha um osso, informe **Peso da seleção** entre zero e um e use **Aplicar
+peso aos vértices selecionados**. Os demais pesos são normalizados; um vértice
+sem outras influências recebe peso total no osso escolhido. Excluir um osso
+requer remover ou reatribuir seus filhos primeiro; as trilhas existentes no
+`.banim` são mantidas, mesmo quando seu osso deixa de existir.
+
+Em **Editar repouso e pesos**, ative **Weight Paint** para pintar no viewport.
+Escolha o osso, o **Peso da seleção** (peso-alvo), o **Raio do pincel (px)**
+e a **Força do pincel**. Arraste sobre a malha ativa: os pontos mostram pesos
+entre azul (zero), verde (intermediário) e vermelho (um). O pincel tem queda
+suave e cobre o segmento do arraste, inclusive movimentos rápidos. A pintura
+atravessa a malha ativa, incluindo vértices atrás da superfície; não atinge as
+outras malhas. A força é aplicada uma vez por vértice por pincelada, usando a
+maior influência atingida, sem depender da taxa de quadros. Solte para confirmar,
+use Esc ou botão direito para cancelar e Ctrl+Z/Ctrl+Shift+Z para desfazer/refazer
+a pincelada. Salve o `.bmodel` para persistir os pesos. Ao atingir oito influências,
+a menor influência anterior é removida para abrir espaço ao osso pintado.
+Vértices sem outras influências recebem peso total quando o peso-alvo é positivo.
+A visualização é por vértice; pintura apenas de superfícies visíveis, mapa de
+calor interpolado na superfície, IK, constraints e edição de ossos com gizmos
+no viewport ainda não estão disponíveis como no Blender.
+
+Salve o `.bmodel` antes de mudar para **Editar pose**. Ative **Gravar** no
+painel Animação, posicione o cursor e altere posição/rotação/escala do osso.
+A gravação automática usa o componente Renderer e caminhos como
+`rig[bone-id].rotation.z`; não altera o Transform da entidade. A geometria de
+repouso, a hierarquia e os pesos ficam no asset do modelo; as curvas ficam no
+`.banim`. A pose estática pode ser salva na cena em `rig_pose`, sem curvas.
+
+Modelos importados pelo Assimp também expõem poses dos nós/ossos existentes.
+Seus identificadores são derivados dos caminhos dos nós; alterações estruturais
+no arquivo de origem podem exigir revisar as trilhas. Criar ossos e editar o
+repouso/pesos é um fluxo do formato nativo `.bmodel`; os arquivos importados
+continuam preservados. Rigs com pesos e arquivos nativos novos usam `.bmodel`
+versão 2. Modelos sem rig continuam na versão 1. Engines antigas rejeitam a
+versão 2, em vez de abrir o arquivo e descartar o rig ao salvar.
+
+## Navegação contínua da timeline
+
+Clique e arraste a régua para buscar tempos. O cursor e o campo de tempo mudam
+sem reconstruir os controles e sem gravar a prévia como novas chaves. Uma
+busca contínua entra em uma única operação de histórico. A grade acompanha o
+zoom; os botões **+** e **−** ampliam/reduzem a área de tempo sem recriar a
+árvore de widgets. A área das trilhas tem suas próprias barras horizontal e
+vertical; gesto horizontal e **Shift + roda** percorrem o tempo. Alterações
+estruturais, como criar ou remover trilhas/chaves, ainda atualizam os editores.

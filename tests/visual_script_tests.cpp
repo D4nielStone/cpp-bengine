@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <gtest/gtest.h>
 #include "apps/editor/services/visual_lua.hpp"
 #include "apps/editor/services/scene_graph.hpp"
@@ -198,4 +199,83 @@ TEST(VisualLua, ControlPaletteInsertsAtDropPositionAndRejectsDuplicateElse) {
     const auto source=doc.source();EXPECT_FALSE(doc.insert(condition,vl::kind::branch));EXPECT_EQ(doc.source(),source);
     EXPECT_FALSE(doc.insert(0,vl::kind::loop,999));EXPECT_EQ(doc.source(),source);
     std::string error;EXPECT_TRUE(vl::validate(doc.source(),error))<<error;
+}
+
+TEST(VisualLua, CameraColorCommandStartsWithNeutralGrayAndKeepsEditableFields) {
+    const auto& catalog = vl::commands();
+    const auto command = std::find_if(catalog.begin(), catalog.end(), [](const auto& value) {
+        return value.title == "Definir Camera.backgroundColor";
+    });
+    ASSERT_NE(command, catalog.end());
+    EXPECT_NE(command->source.find("Color(0.16, 0.16, 0.16, 1)"), std::string::npos);
+    vl::document document;
+    document.load("function setup()\nend\n");
+    ASSERT_TRUE(document.insert_command(document.blocks()[0].id, std::size_t(command - catalog.begin())));
+    const auto& block = document.blocks()[0].children.front();
+    const auto fields = vl::slots(block);
+    EXPECT_FALSE(fields.empty());
+    std::string error;
+    EXPECT_TRUE(vl::validate(document.source(), error)) << error;
+}
+
+TEST(VisualLua, GeneralFppHasStructuredEventsConditionsAndEditableMovement) {
+    const std::string source(editor::ui::script_template(editor::ui::lua_script_preset::fpp_controller).source);
+    vl::document doc; doc.load(source);
+    EXPECT_EQ(doc.source(),source);
+    int functions=0, conditions=0, assignments=0;
+    std::uint64_t movement{};
+    auto visit=[&](auto&& self,const std::vector<vl::block>& blocks)->void {
+        for(const auto& b:blocks) {
+            functions+=b.type==vl::kind::function;
+            conditions+=b.type==vl::kind::condition;
+            assignments+=b.type==vl::kind::assignment;
+            if(b.type==vl::kind::assignment && b.head.find("local movement =")!=std::string::npos) movement=b.id;
+            if(b.type==vl::kind::raw) {
+                auto tokens=vl::lex(b.head);
+                EXPECT_TRUE(std::all_of(tokens.begin(),tokens.end(),[](const auto& t){return t.comment;})) << b.head;
+            }
+            self(self,b.children);
+        }
+    };
+    visit(visit,doc.blocks());
+    EXPECT_EQ(functions,3); EXPECT_GE(conditions,9); EXPECT_GT(assignments,15);
+    ASSERT_NE(movement,0u);
+    const auto fields=vl::slots(*doc.find(movement));
+    auto value=std::find_if(fields.begin(),fields.end(),[](const auto& f){return f.label=="Valor";});
+    ASSERT_NE(value,fields.end());
+    ASSERT_TRUE(doc.edit(movement,std::distance(fields.begin(),value),"direction * 8"));
+    std::string error; EXPECT_TRUE(vl::validate(doc.source(),error)) << error;
+    EXPECT_TRUE(doc.undo()); EXPECT_EQ(doc.source(),source);
+}
+
+TEST(VisualLua, CompactAndMultilineConditionsPreserveBytesAndNesting) {
+    for(const std::string source:{
+        "function update()\n if not a or\n not b then return end\nend\n",
+        "if a then if b then x=1 else x=2 end elseif c then x=3 else x=4 end\n",
+        "if a then -- then end\r\n print('else end then')\r\nend\r\n"}) {
+        vl::document doc; doc.load(source);
+        EXPECT_EQ(doc.source(),source);
+        ASSERT_FALSE(doc.blocks().empty());
+        EXPECT_NE(doc.blocks()[0].type,vl::kind::raw);
+        EXPECT_FALSE(doc.blocks()[0].children.empty());
+        std::string error; EXPECT_TRUE(vl::validate(doc.source(),error)) << error;
+    }
+}
+
+TEST(VisualLua, CompactGuardsRemainValidAfterRemovingAndMovingTheirBody) {
+    const std::string source="function update()\n if ready then value=1 end\n Debug.Log(value)\nend\n";
+    vl::document doc; doc.load(source);
+    ASSERT_EQ(doc.blocks().size(),1u);
+    const auto& function=doc.blocks()[0];
+    ASSERT_GE(function.children.size(),2u);
+    const auto& guard=function.children[0];
+    ASSERT_EQ(guard.type,vl::kind::condition);
+    ASSERT_EQ(guard.children.size(),1u);
+    const auto action=guard.children[0].id, parent=function.id;
+    ASSERT_TRUE(doc.erase(action));
+    std::string error; EXPECT_TRUE(vl::validate(doc.source(),error)) << error;
+    ASSERT_TRUE(doc.undo()); EXPECT_EQ(doc.source(),source);
+    ASSERT_TRUE(doc.move(action,parent));
+    EXPECT_TRUE(vl::validate(doc.source(),error)) << error;
+    ASSERT_TRUE(doc.undo()); EXPECT_EQ(doc.source(),source);
 }

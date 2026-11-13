@@ -75,6 +75,7 @@ void model::draw() {
 }
 
 void model::advance_animation() {
+    if (m_manual_pose) { apply_pose(); return; }
     if (m_pose && m_pose->options.animations && m_pose->scene->HasAnimations())
         update_animation(std::chrono::duration<double>(std::chrono::steady_clock::now() - m_animation_start).count());
 }
@@ -111,6 +112,9 @@ void model::load_model(const std::string& path) {
     std::swap(m_source_missing, replacement.m_source_missing);
     m_animation_clip = replacement.m_animation_clip;
     m_animation_start = replacement.m_animation_start;
+    m_animation_seconds = replacement.m_animation_seconds;
+    m_manual_pose = replacement.m_manual_pose; m_pose_dirty = replacement.m_pose_dirty;
+    ++m_pose_revision;
 }
 
 bool model::source_available() const {
@@ -178,6 +182,9 @@ void model::load_model_data(const std::string& path, bool upload, const model_im
                 model_material
             );
         }
+        m_pose = model_pose::from_editable(editable);
+        m_manual_pose = false; m_pose_dirty = false;
+        if (m_pose) update_animation(0);
         return;
     }
 
@@ -206,17 +213,42 @@ void model::load_model_data(const std::string& path, bool upload, const model_im
     m_animation_start = std::chrono::steady_clock::now();
 }
 
+bool model::has_skeleton() const {
+    if (!m_pose || !m_pose->options.skeleton) return false;
+    if (m_pose->authored_scene && !m_pose->joints.empty()) return true;
+    for (const auto& item : m_pose->instances)
+        if (m_pose->scene->mMeshes[item.mesh]->HasBones()) return true;
+    return false;
+}
+std::vector<model::animation_info> model::animation_clips() const {
+    std::vector<animation_info> result;
+    if (!m_pose || !m_pose->options.animations) return result;
+    for (unsigned i = 0; i < m_pose->scene->mNumAnimations; ++i) {
+        if (m_pose->options.excluded_animations.contains(i)) continue;
+        const auto* clip = m_pose->scene->mAnimations[i];
+        result.push_back({i, clip->mName.C_Str(), clip->mDuration /
+            (clip->mTicksPerSecond > 0 ? clip->mTicksPerSecond : 25.)});
+    }
+    return result;
+}
+
 void model::set_animation(unsigned clip) {
     if (!m_pose || clip >= m_pose->scene->mNumAnimations || m_pose->options.excluded_animations.contains(clip))
         throw std::out_of_range("Animation is not imported");
     m_animation_clip = clip;
+    m_manual_pose = false;
+    m_pose->overrides.clear();
+    ++m_pose_revision;
     m_animation_start = std::chrono::steady_clock::now();
     update_animation(0);
 }
 
 void model::update_animation(double seconds) {
+    if (!std::isfinite(seconds)) return;
+    m_pose_dirty = false;
     if (!m_pose) return;
-    m_pose->evaluate(seconds, m_animation_clip);
+    m_animation_seconds = std::max(0., seconds);
+    m_pose->evaluate(m_animation_seconds, m_manual_pose ? std::numeric_limits<unsigned>::max() : m_animation_clip);
     for (size_t i = 0; i < std::min(meshes.size(), m_pose->instances.size()); ++i) {
         auto vertices = meshes[i].getVertices();
         const auto geometry = m_pose->vertices(m_pose->instances[i]);

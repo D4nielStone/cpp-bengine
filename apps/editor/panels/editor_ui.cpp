@@ -67,9 +67,9 @@ constexpr const char* icon_pause = "\xef\x81\x8c";
 const bgui::color play_normal   {0.220f, 0.220f, 0.220f, 1.f}; // #383838
 const bgui::color play_hover    {0.310f, 0.310f, 0.310f, 1.f}; // #4F4F4F
 const bgui::color play_pressed  {0.160f, 0.160f, 0.160f, 1.f};
-const bgui::color playing_normal{0.170f, 0.360f, 0.580f, 1.f}; // azul "em execução"
-const bgui::color playing_hover {0.230f, 0.440f, 0.680f, 1.f};
-const bgui::color playing_press {0.120f, 0.280f, 0.470f, 1.f};
+const bgui::color playing_normal{0.300f, 0.300f, 0.300f, 1.f};
+const bgui::color playing_hover {0.360f, 0.360f, 0.360f, 1.f};
+const bgui::color playing_press {0.240f, 0.240f, 0.240f, 1.f};
 const bgui::color icon_color    {0.85f,  0.85f,  0.85f, 1.f};
 const bgui::color icon_color_on {1.f,    1.f,    1.f,   1.f};
 
@@ -385,6 +385,7 @@ editor_ui::editor_ui(
             bgui::mode::wrap_content,
             bgui::mode::wrap_content
         );
+        icon.style.layout.margin = bgui::vec4i{0};
         icon.style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::center,
             bgui::alignment::center
@@ -480,8 +481,12 @@ editor_ui::editor_ui(
     side_bar.style.visual.background.normal =
         bgui::color{0.055f, 0.055f, 0.055f, 1.f};
     side_bar.style.visual.visible = true;
-    side_bar.style.visual.border_radius = 5.f;
+    side_bar.style.visual.border_radius = 9.f;
     side_bar.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
+    side_bar.style.layout.require_width(bgui::mode::pixel, 36.f);
+    side_bar.style.layout.align = bgui::vec<2, bgui::alignment>{
+        bgui::alignment::start, bgui::alignment::center
+    };
 
     auto add_vertical_spacer = [&side_bar]() {
         auto& spacer = side_bar.add<bgui::linear>();
@@ -506,7 +511,8 @@ editor_ui::editor_ui(
             bgui::mode::pixel,
             bgui::mode::pixel
         );
-        button.style.layout.require_size(35.f, 35.f);
+        button.style.layout.require_size(26.f, 26.f);
+        button.style.layout.padding = bgui::vec4i{0};
         button.style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::center,
             bgui::alignment::center
@@ -518,22 +524,25 @@ editor_ui::editor_ui(
             bgui::color{0.f, 0.f, 0.f, 0.f};
         button.style.visual.background.pressed =
             bgui::color{0.f, 0.f, 0.f, 0.f};
+        // BGUI needs an opaque border color to clip rounded corners, even at zero width.
         button.style.visual.border.normal =
-            bgui::color{0.f, 0.f, 0.f, 0.f};
+            bgui::color{0.f, 0.f, 0.f, 1.f};
         button.style.visual.border_size = 0.f;
         button.id="workspace-mode-"+std::to_string(index);
         button.get_label().set_enable(false);
-        auto& icon = button.add<bgui::icon>(icon_name, 0.4f);
+        auto& icon = button.add<bgui::icon>(icon_name, 0.3f);
         icon.receives_input(false);
         icon.style.layout.require_mode(
             bgui::mode::wrap_content,
             bgui::mode::wrap_content
         );
+        icon.style.layout.margin = bgui::vec4i{0};
         icon.style.layout.align = bgui::vec<2, bgui::alignment>{
             bgui::alignment::center,
             bgui::alignment::center
         };
         m_workspace_icons[index] = &icon;
+        m_workspace_buttons[index] = &button;
     };
     add_workspace_button("home", editor_workspace_mode::editor, 0);
     add_workspace_button(
@@ -588,6 +597,11 @@ void editor_ui::set_workspace_mode(const editor_workspace_mode mode) {
         m_workspace_icons[index]->style.visual.text.normal =
             selected ? selected_icon_color : icon_color;
         m_workspace_icons[index]->mark_style_dirty();
+        m_workspace_buttons[index]->style.visual.background.normal = selected
+            ? bgui::color{.22f, .22f, .22f, 1.f} : bgui::color{0.f, 0.f, 0.f, 0.f};
+        m_workspace_buttons[index]->style.visual.background.hover = bgui::color{.26f, .26f, .26f, 1.f};
+        m_workspace_buttons[index]->style.visual.border_radius = 8.f;
+        m_workspace_buttons[index]->mark_style_dirty();
     }
 }
 
@@ -1581,13 +1595,14 @@ void editor_ui::apply_layout(bool wide) {
     configuration.splits.clear();
     configuration.tab_groups.clear();
     configuration.top_ratio = .24f;
-    configuration.left_ratio = wide ? .16f : .24f;
-    configuration.right_ratio = wide ? .18f : .24f;
-    configuration.bottom_ratio = wide ? .18f : .24f;
+    configuration.left_ratio = wide ? .16f : .18f;
+    configuration.right_ratio = .28f;
+    configuration.bottom_ratio = wide ? .26f : .30f;
+    std::vector<std::string> documents;
     for (auto& window : configuration.windows) {
         window.floating = false;
         window.weight = 1.f;
-        if (window.title == tr("Scene"))
+        if (window.title == tr("Scene") || window.title == tr("Game"))
             window.area = bgui::dock_area::center;
         else if (window.title == tr("Hierarchy"))
             window.area = bgui::dock_area::left;
@@ -1595,10 +1610,16 @@ void editor_ui::apply_layout(bool wide) {
             window.area = bgui::dock_area::bottom;
         else if (window.title == tr("Inspector") || window.title == tr("Editor Diagnostics"))
             window.area = bgui::dock_area::right;
-        else
+        else {
             window.area = bgui::dock_area::center;
+            documents.push_back(window.title);
+        }
     }
     configuration.tab_groups.push_back({tr("Arquivos"), tr("Arquivos"), {tr("Arquivos"), tr("Debug"), tr("Animação")}});
+    configuration.tab_groups.push_back({tr("Scene"), tr("Scene"), {tr("Scene"), tr("Game")}});
+    configuration.tab_groups.push_back({tr("Inspector"), tr("Inspector"), {tr("Inspector"), tr("Editor Diagnostics")}});
+    if (documents.size() > 1)
+        configuration.tab_groups.push_back({documents.front(), documents.front(), documents});
     m_dock.apply_configuration(configuration);
 }
 
@@ -1752,7 +1773,7 @@ void editor_ui::setup_scene_management(files_view& files, std::function<void()> 
         [this]{return m_project_path.empty()?std::filesystem::path{}:project_root();},
         [this](const auto& path){open_managed_scene(path);},
         [this]{return !m_is_playing && !m_project_load_pending;},
-        [this]{set_workspace_mode(editor_workspace_mode::visual_scripting);});
+        [this]{set_workspace_mode(editor_workspace_mode::visual_scripting);}, m_context);
     m_show_scene_workflow=std::move(workflow.scenes);m_show_scripting=std::move(workflow.scripting);
     m_scenes->set_visual_action(m_show_scene_workflow);
 }

@@ -23,6 +23,7 @@ inline std::vector<bgui::element*> render_markdown(bgui::linear& parent, const s
             continue;
         }
         if (in_code_block) {
+            heading = 0;
             display = "    " + line;
         } else if (heading && heading < static_cast<int>(line.size()) && line[heading] == ' ') {
             display = line.substr(static_cast<size_t>(heading + 1));
@@ -41,10 +42,13 @@ inline std::vector<bgui::element*> render_markdown(bgui::linear& parent, const s
             display = std::regex_replace(display, std::regex(R"(`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_)"), "$1$2$3$4$5");
             display = std::regex_replace(display, std::regex(R"(~~([^~]+)~~)"), "$1");
         }
-        auto& paragraph = parent.add<bgui::text>(display, heading ? 0.28f + (6 - heading) * 0.035f : 0.28f);
+        auto& paragraph = parent.add<bgui::text>(display, heading ? 0.34f + (6 - heading) * 0.035f : 0.34f);
         paragraph.set_wrap(true);
         paragraph.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        if (heading) paragraph.style.visual.text.normal = bgui::color{0.78f, 0.84f, 0.96f, 1.f};
+        paragraph.style.layout.margin = bgui::vec4i{0, heading ? 10 : 2, 0, heading ? 6 : 2};
+        paragraph.style.layout.align = bgui::vec<2, bgui::alignment>{bgui::alignment::start, bgui::alignment::start};
+        if (in_code_block) paragraph.add_class("api-code");
+        if (heading) paragraph.style.visual.text.normal = bgui::color{0.84f, 0.84f, 0.84f, 1.f};
         paragraphs.push_back(&paragraph);
     }
     return paragraphs;

@@ -43,7 +43,7 @@ public:
     static bgui::color_picker& add_color(Parent& parent, const bgui::color& value) {
         auto& picker = parent.template add<bgui::color_picker>(value);
         picker.add_class("editor-input");
-        picker.style.layout.require_size(128.f, 92.f);
+        picker.style.layout.require_size(112.f, 80.f);
         return picker;
     }
 
@@ -90,14 +90,15 @@ public:
     static void configure_property_label(bgui::text& label) {
         label.add_class("editor-property-label");
         label.style.layout.require_mode(bgui::mode::pixel, bgui::mode::wrap_content);
-        label.style.layout.require_width(bgui::mode::pixel, 112.f);
+        label.style.layout.require_width(bgui::mode::pixel, 88.f);
         label.style.layout.margin = bgui::vec4i{0, 0, 4, 0};
+        label.style.layout.align = bgui::vec<2, bgui::alignment>{bgui::alignment::start, bgui::alignment::center};
     }
 
     static void configure_property_row(bgui::linear& row) {
         configure_row(row);
         row.style.layout.padding = bgui::vec4i{0, 0, 0, 0};
-        row.style.layout.margin = bgui::vec4i{0, 2, 0, 2};
+        row.style.layout.margin = bgui::vec4i{0, 1, 0, 1};
     }
 
     static void configure_property_input(bgui::inputbox& input) {
@@ -170,9 +171,12 @@ public:
                         on_change(axis, next);
                     };
                     apply_value(parsed);
+                    const float applied = get_value()[axis];
+                    if (applied == previous)
+                        return;
                     record_edit(
                         [apply_value, previous]() { apply_value(previous); },
-                        [apply_value, parsed]() { apply_value(parsed); }
+                        [apply_value, applied]() { apply_value(applied); }
                     );
                 },
                 bgui::input_mode::inputbox

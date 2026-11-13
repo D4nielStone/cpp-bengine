@@ -92,7 +92,7 @@ add_executable(editor_render_tests
     ${CMAKE_SOURCE_DIR}/apps/editor/panels/game_view.cpp
     ${CMAKE_SOURCE_DIR}/apps/editor/systems/project_creation_system.cpp
 )
-target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main project_persistence)
+target_link_libraries(editor_render_tests PRIVATE GTest::gtest_main project_persistence editor_services)
 target_include_directories(editor_render_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/core
     ${CMAKE_SOURCE_DIR}/apps/editor/panels
@@ -118,7 +118,7 @@ target_include_directories(ui_scale_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/edito
 target_link_libraries(ui_scale_tests PRIVATE GTest::gtest_main bgui)
 gtest_discover_tests(ui_scale_tests)
 
-add_executable(editable_model_tests editable_model_tests.cpp)
+add_executable(editable_model_tests editable_model_tests.cpp model_rig_tests.cpp)
 target_include_directories(editable_model_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )

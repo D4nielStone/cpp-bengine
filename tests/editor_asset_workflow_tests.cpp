@@ -71,7 +71,7 @@ TEST_F(EditorAssetWorkflowTest, CreatesScriptAndUpdatesDirtyAndSaveThroughTheUiL
         return value.has_class("new-script-template");
     });
     ASSERT_NE(preset, nullptr);
-    preset->set_selected_index(static_cast<std::size_t>(editor::ui::lua_script_preset::wasd));
+    preset->set_selected_index(static_cast<std::size_t>(editor::ui::lua_script_preset::fpp_controller));
     auto* confirm = find<bgui::button>(bgui::get_layout(), [](auto& value) {
         return value.has_class("modal-confirm");
     });
@@ -430,7 +430,7 @@ TEST_F(EditorAssetWorkflowTest, DropHintIsTranslucentDoesNotCaptureInputAndClear
     EXPECT_EQ(overlay.processed_rect(), (bgui::vec4i{0, 0, 1000, 700}));
     const auto alpha = overlay.style.visual.background.normal->a;
     EXPECT_GT(alpha, 0.f); EXPECT_LT(alpha, 1.f);
-    EXPECT_NE(find<bgui::text>(overlay, [](auto& text) { return text.get_buffer() == "Arraste aqui"; }), nullptr);
+    EXPECT_NE(find<bgui::text>(overlay, [](auto& text) { return text.get_buffer() == editor::ui::tr("Arraste aqui"); }), nullptr);
     native_hover = false;
     overlay.on_update();
     EXPECT_FALSE(*overlay.style.visual.visible);
@@ -780,7 +780,7 @@ TEST_F(EditorAssetWorkflowTest, RightClickFileOffersEditingAndConfirmedDeletion)
     EXPECT_TRUE(std::filesystem::exists(folder / "Context.lua"));
     auto* modal = find<bgui::modal>(bgui::get_layout(), [](auto& value) { return value.is_enabled(); });
     ASSERT_NE(modal, nullptr);
-    auto* confirm = find<bgui::button>(*modal, [](auto& value) { return value.get_label().get_buffer() == "Excluir definitivamente"; });
+    auto* confirm = find<bgui::button>(*modal, [](auto& value) { return value.get_label().get_buffer() == editor::ui::tr("Excluir definitivamente"); });
     ASSERT_NE(confirm, nullptr);
     confirm->on_released(); bgui::on_update();
     EXPECT_FALSE(std::filesystem::exists(folder / "Context.lua"));

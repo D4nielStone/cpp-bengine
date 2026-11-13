@@ -193,6 +193,14 @@ TEST(LuaCompletion, GlobalSymbolsAndNewComponentMembers) {
     }
 }
 
+TEST(LuaCompletion, CameraColorHintExplainsNeutralDefault) {
+    const std::string source = "local camera = gameObject:GetComponent('Camera')\ncamera.back";
+    const auto completion = complete_lua(source, source.size());
+    ASSERT_TRUE(completion);
+    EXPECT_EQ(completion->members, (std::vector<std::string>{"backgroundColor"}));
+    EXPECT_NE(completion->description("backgroundColor").find("0.16"), std::string::npos);
+}
+
 TEST(LuaCompletion, HandlesLongDelimitersAndIgnoresFakeAssignments) {
     for (const std::string source : {"--[=[\nInput.", "[==[\nInput.", "'escaped\\' Input.",
             "local thing = unknown:Add()\nthing:"})

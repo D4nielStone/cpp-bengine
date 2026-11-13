@@ -68,7 +68,7 @@ TEST_F(SceneWorkflowTest, BuildsThreePanelsEditsBlocksSavesLuaAndReopensClosedWi
     field->get_inputbox().set_buffer("42");
     bgui::on_update();
     EXPECT_NE(files.script_source(root/"enemy.lua").find("Debug.Log(42)"),std::string::npos);
-    auto* save=find<bgui::button>(dock,[](auto& b){return b.get_label().get_buffer()=="Salvar Lua";});ASSERT_TRUE(save);
+    auto* save=find<bgui::button>(dock,[](auto& b){return b.get_label().get_buffer()==editor::ui::tr("Salvar Lua");});ASSERT_TRUE(save);
     save->on_pressed();save->on_released();bgui::on_update();
     EXPECT_NE(editor::ui::project_files::read(root/"enemy.lua").find("Debug.Log(42)"),std::string::npos);
     auto* window=find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Script em blocos";});ASSERT_TRUE(window);
@@ -239,3 +239,158 @@ TEST_F(SceneWorkflowTest, NativeGraphAndBlockLayoutRendersInsideDock) {
 
 }
 
+
+TEST_F(SceneWorkflowTest, SceneOutlinesKeepSeparateRecoverableDraftsAndDetectDiskConflicts) {
+    std::ofstream(root/"b.scene") << R"({"entities":[]})";
+    auto& text_dock=bgui::get_layout().add<bgui::dock>();
+    text_dock.set_enable(false);
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(root); files.build(text_dock);
+    editor::ui::panel_manager manager(dock);
+    auto show=editor::ui::install_scene_workflow(manager,files,[&]{return root;},[](const auto&){},[]{return true;});
+    bgui::on_update();
+    auto* outline=find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Roteiro da cena";});
+    ASSERT_TRUE(outline);
+    const auto choose=[&](std::size_t i) {
+        auto* choices=find<bgui::combo_box>(*outline,[](auto&){return true;});
+        ASSERT_TRUE(choices);
+        choices->set_selected_index(i);
+        bgui::on_update();
+    };
+    const auto click=[&](const std::string& title) {
+        auto* b=find<bgui::button>(*outline,[&](auto& v){return v.get_label().get_buffer()==title;});
+        ASSERT_TRUE(b); b->on_pressed(); b->on_released(); bgui::on_update();
+    };
+    choose(1); click("Criar roteiro");
+    auto* input=find<bgui::inputbox>(*outline,[](auto& e){return e.type=="scene-development-outline";});
+    ASSERT_TRUE(input);
+    input->set_buffer("Objetivo: abrir a porta.\n");
+    bgui::on_update();
+    EXPECT_TRUE(files.has_document_edits(root/"a.scene.roteiro.txt"));
+    EXPECT_EQ(editor::ui::project_files::read(root/"a.scene.roteiro.txt"),"");
+    choose(2); click("Criar roteiro");
+    input->set_buffer("Cena B: encontrar a chave.");
+    bgui::on_update(); click("Salvar roteiro");
+    EXPECT_EQ(editor::ui::project_files::read(root/"b.scene.roteiro.txt"),"Cena B: encontrar a chave.");
+    choose(1);
+    EXPECT_EQ(input->get_buffer(),"Objetivo: abrir a porta.\n");
+    ASSERT_TRUE(files.save_session(root/"outline-session"));
+    EXPECT_NE(editor::ui::project_files::read(root/"outline-session").find("abrir a porta"),std::string::npos);
+    std::ofstream(root/"a.scene.roteiro.txt") << "Edição externa";
+    click("Salvar roteiro");
+    EXPECT_EQ(editor::ui::project_files::read(root/"a.scene.roteiro.txt"),"Edição externa");
+    EXPECT_EQ(input->get_buffer(),"Objetivo: abrir a porta.\n");
+    dock.remove_window(outline); show(); bgui::on_update();
+    outline=find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Roteiro da cena";});
+    ASSERT_TRUE(outline); choose(1);
+    input=find<bgui::inputbox>(*outline,[](auto& e){return e.type=="scene-development-outline";});
+    ASSERT_TRUE(input);
+    EXPECT_EQ(input->get_buffer(),"Objetivo: abrir a porta.\n");
+    editor::ui::files_view recovered(root); recovered.build(text_dock);
+    recovered.restore_session(root/"outline-session");
+    EXPECT_NE(recovered.text_source(root/"a.scene.roteiro.txt").find("abrir a porta"),std::string::npos);
+    EXPECT_THROW(recovered.script_source(root/"a.scene.roteiro.txt"),std::runtime_error);
+}
+
+TEST_F(SceneWorkflowTest, SceneOutlineRespectsPlayGuardAndSourceControlHasNoGitSideEffects) {
+    auto& text_dock=bgui::get_layout().add<bgui::dock>(); text_dock.set_enable(false);
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(root); files.build(text_dock);
+    editor::ui::panel_manager manager(dock);
+    bool editable=false;
+    auto show=editor::ui::install_scene_workflow(manager,files,[&]{return root;},[](const auto&){},[&]{return editable;});
+    bgui::on_update();
+    for(const auto* title:{"Source Control","Diff","Roteiro da cena"})
+        ASSERT_TRUE(find<bgui::window>(dock,[&](auto& w){return w.get_title().get_buffer()==title;}));
+    auto* choices=find<bgui::combo_box>(dock,[](auto&){return true;}); ASSERT_TRUE(choices);
+    choices->set_selected_index(1); bgui::on_update();
+    auto* create=find<bgui::button>(dock,[](auto& b){return b.get_label().get_buffer()=="Criar roteiro";});
+    ASSERT_TRUE(create); create->on_pressed(); create->on_released(); bgui::on_update();
+    EXPECT_FALSE(std::filesystem::exists(root/"a.scene.roteiro.txt"));
+    EXPECT_FALSE(std::filesystem::exists(root/".git"));
+    editable=true;
+    create->on_pressed(); create->on_released(); bgui::on_update();
+    EXPECT_TRUE(std::filesystem::exists(root/"a.scene.roteiro.txt"));
+    auto* source=find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Source Control";});
+    dock.remove_window(source);
+    auto* diff=find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Diff";});
+    dock.remove_window(diff); show(); bgui::on_update();
+    EXPECT_TRUE(find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Source Control";}));
+    EXPECT_TRUE(find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Diff";}));
+}
+
+TEST_F(SceneWorkflowTest, GeneralFppOpensAsNestedBlocksWithoutOpaqueScript) {
+    const std::string source(editor::ui::script_template(editor::ui::lua_script_preset::fpp_controller).source);
+    std::ofstream(root/"enemy.lua") << source;
+    auto& text_dock=bgui::get_layout().add<bgui::dock>(); text_dock.set_enable(false);
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(root); files.build(text_dock);
+    editor::ui::panel_manager manager(dock);
+    auto show=editor::ui::install_scene_workflow(manager,files,[&]{return root;},[](const auto&){},[]{return true;});
+    bgui::on_update();
+    auto* script=find<bgui::button>(dock,[](auto& b){return b.get_label().get_buffer()=="enemy.lua";});
+    ASSERT_TRUE(script); script->on_pressed(); script->on_released();
+    bgui::on_update(); bgui::on_update();
+    auto* tree=find<bgui::linear>(dock,[](auto& e){return e.type=="visual-script-tree";});
+    ASSERT_TRUE(tree);
+    EXPECT_TRUE(find<bgui::element>(*tree,[](auto& e){return e.type=="visual-block-body";}));
+    EXPECT_TRUE(find<bgui::button>(*tree,[](auto& b){return b.get_label().get_buffer()==":: A cada quadro";}));
+    EXPECT_FALSE(find<bgui::button>(*tree,[](auto& b){return b.get_label().get_buffer()==":: Lua preservado";}));
+    EXPECT_TRUE(find<bgui::field>(*tree,[](auto& f){return f.get_label().get_buffer()=="Condição";}));
+    EXPECT_EQ(files.script_source(root/"enemy.lua"),source);
+    EXPECT_FALSE(files.has_document_edits(root/"enemy.lua"));
+}
+
+TEST_F(SceneWorkflowTest, RightClickInBlocksCreatesAppliesAndRemovesScripts) {
+    auto context=std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
+    context->project_root=root;
+    const auto object=context->registry->create(); context->registry->entity_names[object.id]="Player";
+    context->selected_entity=object.id;
+    auto& text_dock=bgui::get_layout().add<bgui::dock>();text_dock.set_enable(false);
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::files_view files(root);files.build(text_dock);
+    editor::ui::panel_manager manager(dock);
+    auto actions=editor::ui::install_scene_workflow(manager,manager,files,[&]{return root;},[](const auto&){},[]{return true;},[]{},context);
+    bgui::on_update();
+    auto* script=find<bgui::button>(dock,[](auto& b){return b.get_label().get_buffer()=="enemy.lua";});
+    ASSERT_TRUE(script);script->on_pressed();script->on_released();bgui::on_update();bgui::on_update();
+    const auto menu=[&] {
+        auto* field=find<bgui::field>(dock,[](auto& f){return f.get_label().get_buffer()=="Mensagem";});
+        ASSERT_TRUE(field);
+        auto& input=field->get_inputbox();
+        auto& io=bgui::get_context();
+        io.m_mouse_position={input.processed_x()+5,input.processed_y()+5};
+        io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;bgui::on_update();
+        io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;bgui::on_update();bgui::on_update();
+        io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;bgui::on_update();
+        std::cerr << "input " << input.processed_x() << "," << input.processed_y() << " " << input.processed_width() << "x" << input.processed_height() << " target ";
+        for(auto* e=bgui::get_mouse_target();e;e=e->get_parent()) std::cerr << e->type << ":" << e->processed_x() << "," << e->processed_y() << " ";
+        std::cerr << "\n";
+    };
+    const auto click=[&](const std::string& label) {
+        auto* button=find<bgui::button>(bgui::get_layout(),[&](auto& b){return b.get_label().get_buffer()==label;});
+        ASSERT_TRUE(button) << label;button->on_released();bgui::on_update();bgui::on_update();
+    };
+    menu(); click("Aplicar a objeto...");
+    ASSERT_TRUE(find<bgui::combo_box>(bgui::get_layout(),[](auto& b){return b.has_class("script-object-choice");}));
+    click("Aplicar script");
+    auto attached=context->registry->get<commons::code>(object.id);ASSERT_TRUE(attached);
+    EXPECT_EQ(attached->file,"enemy.lua");EXPECT_TRUE(attached->scripts.empty());
+    EXPECT_TRUE(context->undo());EXPECT_FALSE(context->registry->has<commons::code>(object.id));
+    EXPECT_TRUE(context->redo());
+    menu();click("Remover de objeto...");click("Remover associação");
+    EXPECT_FALSE(context->registry->has<commons::code>(object.id));EXPECT_TRUE(std::filesystem::exists(root/"enemy.lua"));
+    EXPECT_TRUE(context->undo());
+    menu();click("Novo script Lua...");
+    auto* name=find<bgui::inputbox>(bgui::get_layout(),[](auto& b){return b.has_class("new-script-name");});
+    ASSERT_TRUE(name);name->set_buffer("GeneralFpp");click(editor::ui::tr("Criar"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(root/"GeneralFpp.lua"));
+    EXPECT_NE(files.script_source(root/"GeneralFpp.lua").find("properties.player"),std::string::npos);
+    auto* row=find<editor::ui::context_action_button>(dock,[](auto& b){return b.get_label().get_buffer()=="GeneralFpp.lua";});
+    ASSERT_TRUE(row);row->open_context();bgui::on_update();bgui::on_update();
+    click("Excluir arquivo de script...");
+    EXPECT_TRUE(std::filesystem::exists(root/"GeneralFpp.lua"));
+    click(editor::ui::tr("Excluir definitivamente"));
+    EXPECT_FALSE(std::filesystem::exists(root/"GeneralFpp.lua"));
+    EXPECT_TRUE(find<bgui::text>(dock,[](auto& t){return t.get_buffer()=="Selecione um script no painel de scripts";}));
+}

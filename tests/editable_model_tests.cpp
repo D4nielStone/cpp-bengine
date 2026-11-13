@@ -401,3 +401,33 @@ TEST_F(EditableModelTest, ExtractsOneNamedMeshWithEditableTopologyAndLiveMateria
     std::ifstream copied_texture(texture_path, std::ios::binary);
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(copied_texture), {}), "texture payload");
 }
+
+TEST_F(EditableModelTest, ExtractsSelectedMeshesTogetherWithDistinctMaterials) {
+    auto first = quad_mesh();
+    auto second = quad_mesh();
+    second.face_groups = {{"Second", {0}}};
+    for (auto& vertex : second.vertices) vertex.position.z += 2.f;
+    commons::material first_material, second_material;
+    first_material.set_uniform("material.roughness", .2f);
+    second_material.set_uniform("material.roughness", .8f);
+    const auto output = editor::ui::extract(folder, "source.bmodel", "Selection",
+        std::vector<commons::editable_mesh_data>{first, second},
+        std::vector<commons::material>{first_material, second_material});
+    commons::editable_model_data loaded;
+    std::string error;
+    ASSERT_TRUE(commons::load_editable_model(output, loaded, error)) << error;
+    ASSERT_EQ(loaded.meshes.size(), 2u);
+    EXPECT_EQ(loaded.meshes[0].faces, first.faces);
+    EXPECT_EQ(loaded.meshes[1].face_groups[0].name, "Second");
+    EXPECT_EQ(loaded.meshes[1].vertices[0].position, second.vertices[0].position);
+    const commons::model model(output.string());
+    ASSERT_EQ(model.meshes.size(), 2u);
+    EXPECT_FLOAT_EQ(model.meshes[0].getMaterial().getUniforme("material.roughness").valor.f, .2f);
+    EXPECT_FLOAT_EQ(model.meshes[1].getMaterial().getUniforme("material.roughness").valor.f, .8f);
+    EXPECT_THROW(editor::ui::extract(folder, "source.bmodel", "Empty",
+        std::vector<commons::editable_mesh_data>{}, std::vector<commons::material>{}), std::runtime_error);
+    EXPECT_THROW(editor::ui::extract(folder, "source.bmodel", "Mismatch",
+        std::vector<commons::editable_mesh_data>{first, second},
+        std::vector<commons::material>{first_material}), std::runtime_error);
+    EXPECT_FALSE(std::filesystem::exists(output.parent_path() / "Mismatch.bmodel"));
+}

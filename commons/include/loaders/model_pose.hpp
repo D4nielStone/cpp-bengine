@@ -1,5 +1,6 @@
 #pragma once
 #include "model_import.hpp"
+#include "model_rig.hpp"
 #include <assimp/quaternion.h>
 #include <cmath>
 #include <map>
@@ -7,11 +8,19 @@
 #include <vector>
 
 namespace commons {
+struct editable_model_data;
 // CPU pose evaluation keeps the existing renderer and vertex layout unchanged.
 class model_pose {
 public:
     std::shared_ptr<Assimp::Importer> importer = std::make_shared<Assimp::Importer>();
     const aiScene* scene = nullptr;
+    std::shared_ptr<aiScene> authored_scene;
+    std::vector<rig_joint> joints;
+    std::map<std::string, const aiNode*> identified_nodes;
+    std::map<const aiNode*, rig_transform> overrides;
+    static std::shared_ptr<model_pose> from_editable(const editable_model_data&);
+    static aiMatrix4x4 matrix(const rig_transform&, float units = 1.f);
+    void collect_joint(const aiNode*, const std::string&);
     model_import_options options;
     struct instance { unsigned mesh; const aiNode* node; };
     std::vector<instance> instances;
@@ -20,6 +29,7 @@ public:
 
     void collect(const aiNode* node, const std::string& path = "0", bool enabled = true) {
         named_nodes.emplace(node->mName.C_Str(), node);
+        collect_joint(node, path);
         enabled = enabled && !options.excluded_nodes.contains(path);
         for (unsigned i = 0; enabled && i < node->mNumMeshes; ++i)
             if (!options.excluded_meshes.contains(node->mMeshes[i])) instances.push_back({node->mMeshes[i], node});
@@ -66,11 +76,37 @@ public:
                     });
                 local = aiMatrix4x4(scale, rotation, position);
             }
+            if (const auto pose = overrides.find(node); pose != overrides.end())
+                local = local * matrix(pose->second, float(options.scale));
             const auto global = parent * local;
             globals[node] = global;
             for (unsigned i = 0; i < node->mNumChildren; ++i) self(self, node->mChildren[i], global);
         };
         visit(visit, scene->mRootNode, aiMatrix4x4{});
+    }
+    struct bone_segment { std::string name; aiVector3D parent, joint; };
+    std::vector<bone_segment> skeleton() const {
+        std::set<const aiNode*> nodes;
+        if (!scene || !options.skeleton) return {};
+        if (authored_scene) for (const auto& [id, node] : identified_nodes) nodes.insert(node);
+        for (const auto& item : instances) {
+            const auto* mesh = scene->mMeshes[item.mesh];
+            for (unsigned i = 0; i < mesh->mNumBones; ++i) {
+                const auto found = named_nodes.find(mesh->mBones[i]->mName.C_Str());
+                if (found == named_nodes.end()) continue;
+                for (auto* node = found->second; node; node = node->mParent) nodes.insert(node);
+            }
+        }
+        std::vector<bone_segment> result;
+        for (const auto* node : nodes) {
+            const auto joint = globals.find(node);
+            const auto parent = globals.find(node->mParent);
+            if (joint == globals.end() || parent == globals.end()) continue;
+            const aiVector3D origin{};
+            result.push_back({node->mName.C_Str(), (parent->second * origin) * float(options.scale),
+                (joint->second * origin) * float(options.scale)});
+        }
+        return result;
     }
     struct geometry { std::vector<aiVector3D> positions, normals; };
     geometry vertices(const instance& item) const {

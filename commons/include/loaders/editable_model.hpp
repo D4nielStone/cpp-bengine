@@ -1,6 +1,7 @@
 #pragma once
 
 #include "util/vertex.hpp"
+#include "model_rig.hpp"
 
 #include <filesystem>
 #include <string>
@@ -18,6 +19,7 @@ struct editable_mesh_data {
     std::vector<std::vector<unsigned int>> faces;
     std::string material_path;
     std::vector<editable_face_group> face_groups;
+    std::vector<std::vector<rig_weight>> skin;
 
     bool validate(std::string& error) const;
     std::vector<unsigned int> triangulated_indices() const;
@@ -26,6 +28,7 @@ struct editable_mesh_data {
 
 struct editable_model_data {
     std::vector<editable_mesh_data> meshes;
+    model_rig rig;
 
     bool validate(std::string& error) const;
 };

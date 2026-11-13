@@ -983,6 +983,8 @@ TEST(CameraBackground, DefaultsToAtmosphereAndRoundTripsCubemapWithoutGpu) {
     EXPECT_FALSE(legacy_loaded.config.use_skybox);
     EXPECT_TRUE(legacy_loaded.config.skybox_image.empty());
     EXPECT_FALSE(legacy_loaded.config.fog_enabled);
+    EXPECT_FLOAT_EQ(legacy_loaded.config.fog_min_distance, 0.f);
+    EXPECT_FLOAT_EQ(legacy_loaded.config.fog_max_distance, 300.f);
     rapidjson::Document invalid(rapidjson::kObjectType);
     invalid.AddMember("znear", 300.f, invalid.GetAllocator());
     EXPECT_FALSE(legacy_loaded.analyze(invalid));
@@ -1170,8 +1172,10 @@ TEST_F(EditorRenderTest, BuiltinFppTemplateMovementFollowsCameraAndPickupIsSepar
     registry->get<commons::physics>(floor.id)->configure_collision(
         commons::physics::shapes::box_shape, {40, 1, 40}, {0, 0, 0}, true, false);
     const auto scripts_path = project_directory / "scripts";
-    registry->add<commons::code>(player_object, (scripts_path / "fpp_player.lua").string());
-    registry->add<commons::code>(camera_object, (scripts_path / "fpp_camera.lua").string());
+    registry->add<commons::code>(player_object, (scripts_path / "fpp_controller.lua").string());
+    registry->get<commons::code>(player_object.id)->properties = {
+        {"player", "entity", player_object.id}, {"camera", "entity", camera_object.id}
+    };
     registry->add<commons::code>(pickup_object, (scripts_path / "pickup.lua").string());
     const auto player = registry->find_by_name("PlayerCapsule");
     const auto camera_entity = registry->find_by_name("PlayerCamera");

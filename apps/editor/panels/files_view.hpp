@@ -131,17 +131,23 @@ public:
         if(const auto found=m_documents.find(path);found!=m_documents.end()) return found->second.buffer;
         return project_files::read(path);
     }
+    const std::string& text_source(const std::filesystem::path& requested) {
+        const auto path=asset_files::editable_file(requested,m_project_root);
+        if(is_image_file(path) || is_markdown_file(path) || is_model_file(path) || is_material_file(path))
+            throw std::runtime_error("Escolha um documento de texto editável.");
+        update_document_editor();
+        if(!m_documents.contains(path)) open_document(path);
+        const auto found=m_documents.find(path);
+        if(found==m_documents.end()) throw std::runtime_error("Não foi possível abrir o documento.");
+        found->second.visual=true;
+        return found->second.buffer;
+    }
     // Shared source for the textual and visual Lua editors. Drafts use the
     // existing document session and never bypass its recovery mechanism.
     std::string script_source(const std::filesystem::path& requested) {
         const auto path=asset_files::editable_file(requested,m_project_root);
         if (!is_lua_script(path)) throw std::runtime_error("Escolha um script Lua.");
-        update_document_editor();
-        if (!m_documents.contains(path)) open_document(path);
-        const auto found=m_documents.find(path);
-        if(found==m_documents.end()) throw std::runtime_error("Não foi possível abrir o script.");
-        found->second.visual=true;
-        return found->second.buffer;
+        return text_source(path);
     }
     void discard_script_draft_and_reload(const std::filesystem::path& requested) {
         const auto path=asset_files::editable_file(requested,m_project_root);
@@ -154,19 +160,27 @@ public:
         if(doc.window) doc.window->set_title(path.filename().string());
     }
     void edit_script_source(const std::filesystem::path& requested, const std::string& expected, const std::string& source) {
+        (void)script_source(requested);
+        edit_text_source(requested,expected,source);
+    }
+    void edit_text_source(const std::filesystem::path& requested, const std::string& expected, const std::string& source) {
         const auto path=asset_files::editable_file(requested,m_project_root);
-        if(m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução para editar scripts.");
-        if(script_source(path)!=expected) throw std::runtime_error("O documento mudou. Reabra a visualização antes de editar.");
+        if(m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução para editar documentos.");
+        if(text_source(path)!=expected) throw std::runtime_error("O documento mudou. Reabra a visualização antes de editar.");
         auto& doc=m_documents.at(path); doc.buffer=source;
         if(doc.editor) doc.editor->set_buffer(source);
         if(doc.window) doc.window->set_title(path.filename().string()+(source!=doc.original?"*":""));
     }
     void save_script_source(const std::filesystem::path& requested, const std::string& expected) {
+        (void)script_source(requested);
+        save_text_source(requested,expected);
+    }
+    void save_text_source(const std::filesystem::path& requested, const std::string& expected) {
         const auto path=asset_files::editable_file(requested,m_project_root);
-        if(m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução para salvar scripts.");
-        if(script_source(path)!=expected) throw std::runtime_error("O documento mudou. Atualize a visualização antes de salvar.");
+        if(m_can_modify_files && !m_can_modify_files()) throw std::runtime_error("Pare a execução para salvar documentos.");
+        if(text_source(path)!=expected) throw std::runtime_error("O documento mudou. Atualize a visualização antes de salvar.");
         auto& doc=m_documents.at(path);
-        if(project_files::read(path)!=doc.original) throw std::runtime_error("O script mudou no disco. A versão visual foi mantida; resolva o conflito antes de salvar.");
+        if(project_files::read(path)!=doc.original) throw std::runtime_error("O documento mudou no disco. O rascunho foi mantido; resolva o conflito antes de salvar.");
         auto* previous=m_active_document;
         auto* previous_window=m_document_window;
         auto* previous_body=m_document_body;
@@ -182,6 +196,22 @@ public:
         update_document_editor();
         const auto found = m_documents.find(path);
         return found != m_documents.end() && found->second.buffer != found->second.original;
+    }
+
+    void request_new_script(const std::filesystem::path& directory,
+        std::function<void(const std::filesystem::path&)> created = {}) {
+        if (m_can_modify_files && !m_can_modify_files())
+            throw std::runtime_error("Pare a execução para criar scripts.");
+        const auto folder=std::filesystem::canonical(directory);
+        if(!std::filesystem::is_directory(folder) || !path_inside(folder,std::filesystem::canonical(m_project_root)))
+            throw std::runtime_error("Escolha uma pasta dentro do projeto.");
+        show_new_script_dialog(folder,std::move(created));
+    }
+    void request_delete_script(const std::filesystem::path& requested,
+        std::function<void()> removed = {}) {
+        const auto path=asset_files::editable_file(requested,m_project_root);
+        if(!is_lua_script(path)) throw std::runtime_error("Escolha um script Lua.");
+        confirm_file_delete(path,std::move(removed));
     }
 
     void refresh_files() { m_refresh_requested = true; }
@@ -713,7 +743,8 @@ private:
             render_markdown(doc);
         } else {
             if (lower_extension(doc.path) == ".lua")
-                doc.editor = &m_document_body->add<lua_inputbox>(doc.buffer);
+                doc.editor = &m_document_body->add<lua_inputbox>(doc.buffer,
+                    [](const std::string& text) { return tr(text); });
             else
                 doc.editor = &panel::add_input(*m_document_body,
                     doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
@@ -1340,8 +1371,11 @@ private:
         });
     }
 
-    void show_new_script_dialog() {
+    void show_new_script_dialog(std::filesystem::path directory = {},
+        std::function<void(const std::filesystem::path&)> created_callback = {}) {
         if (m_new_asset_modal) return;
+        if(directory.empty()) directory=m_current_directory;
+        const auto project=m_project_root;
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_new_asset_modal = &modal;
         modal.add<bgui::text>(tr("Nome do novo script Lua"), .3f);
@@ -1354,16 +1388,20 @@ private:
         preset.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         preset.style.layout.require_height(bgui::mode::pixel, 30.f);
         modal.set_confirmation_text(tr("Criar"));
-        modal.set_on_confirm([this, input = &filename, choice = &preset]() {
+        modal.set_on_confirm([this, input = &filename, choice = &preset, directory, project, created_callback]() {
             m_new_asset_modal = nullptr;
             m_new_script_name = input->get_buffer();
             std::filesystem::path created;
             std::string error;
             const auto selected = static_cast<lua_script_preset>(choice->get_selected_index());
-            if (create_lua_script(m_current_directory, m_new_script_name, created, error, selected)) {
+            if(project!=m_project_root || (m_can_modify_files && !m_can_modify_files())) {
+                m_asset_status="O projeto mudou ou está em execução. Criação cancelada."; return;
+            }
+            if (create_lua_script(directory, m_new_script_name, created, error, selected)) {
                 m_selected_file = created;
                 m_asset_status = "Script criado. Arraste-o para uma entidade na Scene.";
                 open_document(created);
+                if(created_callback) created_callback(created);
             } else {
                 m_asset_status = error;
             }
@@ -1375,7 +1413,7 @@ private:
         }).add_class("cancel-new-script");
     }
 
-    void confirm_file_delete(const std::filesystem::path& file) {
+    void confirm_file_delete(const std::filesystem::path& file, std::function<void()> removed = {}) {
         if (m_delete_modal) return;
         if (m_can_modify_files && !m_can_modify_files()) {
             set_asset_status("Pare a execução antes de excluir arquivos.");
@@ -1386,10 +1424,12 @@ private:
         modal.add<bgui::text>("Excluir definitivamente “" + file.lexically_relative(m_project_root).generic_string() + "”?", .32f);
         modal.add<bgui::text>(tr("Esta ação não pode ser desfeita. Alterações não salvas serão descartadas. Referências ao arquivo poderão ficar ausentes."), .27f);
         modal.set_confirmation_text(tr("Excluir definitivamente"));
-        modal.set_on_confirm([this, file]() {
+        modal.set_on_confirm([this, file, project=m_project_root, removed]() {
             m_delete_modal = nullptr;
             try {
+                if(project!=m_project_root) throw std::runtime_error("O projeto mudou. Exclusão cancelada.");
                 delete_file(file);
+                if(removed) removed();
                 set_asset_status("Arquivo excluído definitivamente.");
             } catch (const std::exception& error) { set_asset_status(error.what()); }
         });

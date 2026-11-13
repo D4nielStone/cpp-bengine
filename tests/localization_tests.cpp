@@ -181,7 +181,7 @@ TEST(Localization, ApiReferenceClosesAfterUsingBothFilters) {
     ASSERT_NE(filters, nullptr);
     for (const auto& element : filters->get_elements().at(bgui::layer::base)) {
         auto* filter = dynamic_cast<bgui::combo_box*>(element.get());
-        ASSERT_NE(filter, nullptr);
+        if (!filter) continue;
         filter->on_clicked();
         filter->set_selected_index(1);
     }
@@ -194,4 +194,47 @@ TEST(Localization, ApiReferenceClosesAfterUsingBothFilters) {
     bgui::on_update();
     ASSERT_EQ(root.get_elements().at(bgui::layer::overlay).size(), 1u);
     EXPECT_EQ(root.get_elements().at(bgui::layer::overlay).front().get(), &sibling);
+}
+
+TEST(Localization, ApiReferencePreservesSelectionAndResizesBothPanes) {
+    bgui::scoped_interface interface;
+    bgui::get_context().m_size = {1366, 702};
+    open_api_reference();
+    bgui::inputbox* search = nullptr;
+    bgui::text* identity = nullptr;
+    api_reference_body* body = nullptr;
+    api_reference_article* article = nullptr;
+    bgui::linear* index = nullptr;
+    bgui::button* guide = nullptr;
+    const auto visit = [&](auto&& self, bgui::layout& layout) -> void {
+        for (auto& [layer, children] : layout.get_elements()) for (auto& child : children) {
+            if (auto* input = dynamic_cast<bgui::inputbox*>(child.get())) search = input;
+            if (child->id == "api-document-path") identity = dynamic_cast<bgui::text*>(child.get());
+            if (auto* viewport = dynamic_cast<api_reference_body*>(child.get())) body = viewport;
+            if (auto* pane = dynamic_cast<api_reference_article*>(child.get())) article = pane;
+            if (child->has_class("api-index")) index = dynamic_cast<bgui::linear*>(child.get());
+            if (auto* button = dynamic_cast<bgui::button*>(child.get()); button && button->has_class("api-document"))
+                if (button->get_label().get_buffer() == "Painéis do editor") guide = button;
+            if (auto* nested = child->as_layout()) self(self, *nested);
+        }
+    };
+    visit(visit, bgui::get_layout());
+    ASSERT_TRUE(search); ASSERT_TRUE(identity); ASSERT_TRUE(body); ASSERT_TRUE(article); ASSERT_TRUE(index); ASSERT_TRUE(guide);
+    EXPECT_EQ(identity->get_buffer(), "lua-api/README.md");
+    guide->on_released();
+    bgui::on_update();
+    EXPECT_EQ(identity->get_buffer(), "EDITOR_PANELS.md");
+    search->m_enter_func("Modelagem");
+    EXPECT_EQ(identity->get_buffer(), "EDITOR_PANELS.md");
+    search->m_enter_func("no-matching-document-12345");
+    search->m_enter_func("");
+    EXPECT_EQ(identity->get_buffer(), "EDITOR_PANELS.md");
+    for (const auto size : {bgui::vec2i{1366,702}, bgui::vec2i{800,600}}) {
+        bgui::get_context().m_size = size;
+        for (int frame=0; frame<3; ++frame) bgui::on_update();
+        EXPECT_LE(body->processed_width(), size.x);
+        EXPECT_GT(article->processed_width(), index->processed_width());
+        EXPECT_GE(article->processed_x(), index->processed_x()+index->processed_width());
+        EXPECT_GT(article->processed_height(), 100);
+    }
 }

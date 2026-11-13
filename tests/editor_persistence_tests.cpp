@@ -315,9 +315,9 @@ TEST(ProjectCreationTest, CreatesAnFppProjectTemplateWithAPlayableScene) {
         editor::ui::project_template::fpp
     )) << error;
     EXPECT_TRUE(std::filesystem::is_regular_file(
-        project_folder / "scripts" / "fpp_player.lua"
+        project_folder / "scripts" / "fpp_controller.lua"
     ));
-    EXPECT_TRUE(std::filesystem::is_regular_file(
+    EXPECT_FALSE(std::filesystem::exists(
         project_folder / "scripts" / "fpp_camera.lua"
     ));
 
@@ -352,12 +352,18 @@ TEST(ProjectCreationTest, CreatesAnFppProjectTemplateWithAPlayableScene) {
         commons::physics::body_type::static_body);
     EXPECT_EQ(
         loaded_registry->get<commons::code>(*player)->file,
-        "scripts/fpp_player.lua"
+        "scripts/fpp_controller.lua"
     );
-    EXPECT_EQ(
-        loaded_registry->get<commons::code>(*player_camera)->file,
-        "scripts/fpp_camera.lua"
-    );
+    EXPECT_FALSE(loaded_registry->has<commons::code>(*player_camera));
+    const auto controller=loaded_registry->get<commons::code>(*player);
+    const auto reference=[&](const std::string& name) {
+        for(const auto& property:controller->properties)
+            if(property.name==name && std::holds_alternative<std::uint32_t>(property.value))
+                return std::get<std::uint32_t>(property.value);
+        return std::uint32_t{};
+    };
+    EXPECT_EQ(reference("player"), *player);
+    EXPECT_EQ(reference("camera"), *player_camera);
 }
 
 TEST(ProjectPersistenceTest, KeepsLoadedEntityIdsInTheLiveRegistry) {
@@ -1226,4 +1232,28 @@ TEST(ProjectPersistenceTest, ManagesSceneFilesAndSwitchesWithoutLosingProjectSet
     EXPECT_EQ(scene_file_for_project(project), next);
     ASSERT_TRUE(persistence.load(project.string(), error)) << error;
     EXPECT_TRUE(registry->is_alive(72));
+}
+
+TEST(ProjectCreationTest, EmptyAndFppTemplatesStartWithNeutralGrayCameras) {
+    for (auto type : {editor::ui::project_template::empty, editor::ui::project_template::fpp}) {
+        const auto unique = temporary_project_path();
+        const auto folder = unique.parent_path() / unique.stem();
+        struct cleanup { std::filesystem::path path; ~cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); } } cleanup{folder};
+        std::string error;
+        ASSERT_TRUE(editor::ui::create_project_files(folder, error, type)) << error;
+        auto registry = std::make_shared<commons::ecs>();
+        auto entity = registry->create(); registry->add<commons::camera>(entity);
+        editor::ui::project_persistence_system persistence(registry, entity.id);
+        ASSERT_TRUE(persistence.load(editor::ui::project_file_path(folder).string(), error)) << error;
+        int cameras = 0;
+        registry->cada<commons::camera>([&](std::uint32_t id) {
+            const auto camera = registry->get<commons::camera>(id);
+            ++cameras;
+            EXPECT_FLOAT_EQ(camera->config.sky_solid_color.r, camera->config.sky_solid_color.g);
+            EXPECT_FLOAT_EQ(camera->config.sky_solid_color.g, camera->config.sky_solid_color.b);
+            EXPECT_NEAR(camera->config.sky_solid_color.r, .16f, 1.f/255);
+            EXPECT_EQ(camera->config.atmosphere_zenith, (bgui::vec3{.16f,.16f,.16f}));
+        });
+        EXPECT_GT(cameras, 0);
+    }
 }

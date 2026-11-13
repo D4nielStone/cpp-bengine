@@ -45,12 +45,16 @@ pelo formato de cena.
 | `farClipPlane` | leitura/escrita | Plano distante. |
 | `orthographic` | leitura/escrita | Ativa projeção ortográfica. |
 | `orthographicSize` | leitura/escrita | Escala ortográfica. |
-| `backgroundColor` | leitura/escrita | Cor sólida de fundo (`Color`). |
+| `backgroundColor` | leitura/escrita | Cor sólida de fundo (`Color`); padrão de câmeras novas: `Color(0.16, 0.16, 0.16, 1)`. |
 | `useSkybox` | leitura/escrita | Ativa o skybox da câmera. |
 | `skyboxImage` | leitura/escrita | Caminho da imagem de skybox. |
 | `fogEnabled` | leitura/escrita | Ativa neblina. |
 | `fogColor` | leitura/escrita | Cor da neblina (`Color`). |
 | `fogDensity` | leitura/escrita | Densidade da neblina. |
+
+O céu e o zênite de câmeras novas são cinza neutro. Os projetos Empty/FPP
+herdam esse padrão; cores já salvas continuam valendo. Veja
+[o exemplo de câmera cinza](examples/neutral_camera.lua).
 
 O binding escreve diretamente nas configurações da câmera; não faz validação
 adicional para cada atribuição Lua. A validade final depende do uso pelo

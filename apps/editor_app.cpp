@@ -629,9 +629,37 @@ public:
             [this]() { return m_window.file_drag_hovered(); }, m_context
         );
         m_editor->add_panel<editor::ui::debug_view>();
-        m_animation = &m_editor->add_panel<editor::ui::animation_view>(m_context);
-        m_editor->set_animation_callback([this] { m_animation->show(); });
-        m_components->set_animation_editor_callback([this] { m_animation->show(); });
+        m_animation = &m_editor->add_model_panel<editor::ui::animation_view>(m_context);
+        m_animation->set_import_browser([this](std::string& error) {
+            return editor::browse_native(m_context->project_root, false, error);
+        });
+        const auto show_animation = [this] {
+            m_editor->set_workspace_mode(editor::ui::editor_workspace_mode::model_editing);
+            m_animation->show();
+        };
+        m_editor->set_animation_callback(show_animation);
+        m_components->set_animation_editor_callback(show_animation);
+        m_model_editor->set_animation_callback(show_animation);
+        m_editor->add_model_panel<editor::ui::entities_view>(m_context,
+            [](std::uint32_t id) { return "Entity " + std::to_string(id); });
+        auto& model_inspector = m_editor->add_model_panel<editor::ui::components_view>(m_context);
+        model_inspector.set_animation_editor_callback(show_animation);
+        m_model_editor->set_import_callback([this] {
+            bgui::add_function([this] {
+                std::string error;
+                const auto source = editor::browse_native(m_context->project_root, false, error);
+                if (!source.empty()) m_files->show_model_importer(source, {}, {}, [this](const auto& imported) {
+                    auto model = std::make_unique<commons::model>(imported.string());
+                    if (model->meshes.empty()) return;
+                    auto entity = m_context->registry->create();
+                    m_context->registry->add<commons::renderer>(entity, model.release());
+                    m_context->entity_names[entity.id] = imported.stem().string();
+                    m_context->record_entity_creation(entity.id);
+                    m_context->select_entity(entity.id);
+                    m_entities->refresh(); m_components->refresh();
+                });
+            });
+        });
 
         m_render_system = m_window.add<commons::render_system>();
         m_render_system->set_camera_filter([this](std::uint32_t entity) {
@@ -691,6 +719,7 @@ public:
             m_editor->set_workspace_mode(static_cast<editor::ui::editor_workspace_mode>(m_context->workspace_mode));
             m_components->restore_session();
         });
+        m_editor->reset_ui();
         const bool loaded = m_workspace->load_workspace(*m_files, error);
         m_editor->set_workspace_mode(static_cast<editor::ui::editor_workspace_mode>(m_context->workspace_mode));
         m_components->restore_session();

@@ -480,7 +480,7 @@ TEST_F(AnimationTest, ClipPathAndActionsRemainSeparatedAtEditorPanelWidths) {
         EXPECT_GT(path->get_inputbox().processed_width(), 400);
         for (auto* action : actions) {
             EXPECT_GE(action->processed_y(), path->processed_y() + path->processed_height());
-            EXPECT_EQ(action->processed_height(), 28);
+            EXPECT_EQ(action->processed_height(), 22);
             EXPECT_GT(action->processed_width(), action->get_label().processed_width());
             EXPECT_LE(action->processed_x() + action->processed_width(), width);
         }
@@ -578,8 +578,9 @@ TEST_F(AnimationTest, PanelPreviewPlaysPausesLoopsStopsAndDoesNotRecordKeys) {
     EXPECT_DOUBLE_EQ(panel.time(), frozen);
     ASSERT_TRUE(click(editor::ui::tr("Reproduzir prévia")));
     context->selected_entity = registry->create().id; panel.update(); tick(500);
-    EXPECT_DOUBLE_EQ(panel.time(), frozen);
+    EXPECT_DOUBLE_EQ(panel.time(), 0);
     context->selected_entity = target.id; panel.update();
+    EXPECT_DOUBLE_EQ(panel.time(), frozen);
     ASSERT_TRUE(click(editor::ui::tr("Reproduzir prévia")));
     registry->remove<commons::animation>(target.id);
     EXPECT_NO_THROW(panel.update());
@@ -751,4 +752,119 @@ TEST_F(AnimationTest, CrossFadeHandlesDiscreteMissingAndReplacedTargetsAndInterr
     // Replaced components become normal live destinations after blending ends.
     system.update(registry);
     EXPECT_TRUE(registry->get<commons::sound_player>(target.id)->looping);
+}
+
+TEST_F(AnimationTest, SelectionRoundTripRestoresCursorAndRecordingWithoutCapturingOtherEntity) {
+    ASSERT_TRUE(editor.commit(target.id, clip()));
+    const auto other = registry->create();
+    bgui::scoped_interface interface;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::animation_view::clock::time_point now{};
+    editor::ui::animation_view panel(context, [&] { return now; });
+    panel.build(dock); panel.update();
+    const auto click = [&](const std::string& label) {
+        bgui::button* found = nullptr;
+        std::function<void(bgui::layout&)> visit = [&](bgui::layout& layout) {
+            for (auto& [layer, children] : layout.get_elements()) for (auto& child : children) {
+                if (auto* button = dynamic_cast<bgui::button*>(child.get()); button && button->get_label().get_buffer() == editor::ui::tr(label)) found = button;
+                if (auto* nested = child->as_layout()) visit(*nested);
+            }
+        };
+        visit(dock);
+        if (!found) return false;
+        found->on_released(); bgui::on_update(); panel.update(); return true;
+    };
+    ASSERT_TRUE(click("Reproduzir prévia"));
+    now += std::chrono::milliseconds(500); panel.update();
+    ASSERT_TRUE(click("Pausar prévia"));
+    const double cursor = panel.time();
+    ASSERT_GT(cursor, 0);
+    ASSERT_TRUE(click("● Gravar"));
+    context->select_entity(other.id); panel.update();
+    EXPECT_DOUBLE_EQ(panel.time(), 0);
+    registry->get<commons::transform>(other.id)->position.x = 42;
+    panel.update();
+    context->select_entity(target.id); panel.update();
+    EXPECT_DOUBLE_EQ(panel.time(), cursor);
+    registry->get<commons::transform>(target.id)->position.x = 7;
+    panel.update();
+    const auto data = editor.clip(target.id);
+    const auto& keys = data->tracks.front().keys;
+    EXPECT_TRUE(std::any_of(keys.begin(), keys.end(), [&](const auto& key) { return key.time == cursor && key.value == 7; }));
+}
+
+TEST_F(AnimationTest, ImportsExternalClipWithoutOverwritingAndRejectsMalformedInput) {
+    context->project_root = root;
+    const auto source = root / "Walk.banim";
+    std::ofstream(source) << clip().encode();
+    std::string error;
+    ASSERT_TRUE(editor.import_clip(target.id, source, error)) << error;
+    const auto first = editor.player(target.id)->clip;
+    EXPECT_EQ(first, "assets/animations/Walk.banim");
+    EXPECT_EQ(editor.clip(target.id)->tracks, clip().tracks);
+    ASSERT_TRUE(editor.import_clip(target.id, source, error)) << error;
+    EXPECT_NE(editor.player(target.id)->clip, first);
+    const auto assigned = editor.player(target.id)->clip;
+    std::ofstream(source) << "invalid";
+    EXPECT_FALSE(editor.import_clip(target.id, source, error));
+    EXPECT_EQ(editor.player(target.id)->clip, assigned);
+    EXPECT_EQ(commons::load_animation_clip(root / first)->tracks, clip().tracks);
+}
+
+namespace {
+template<class T, class Predicate>
+T* find_animation_widget(bgui::element& root, Predicate predicate) {
+    if (auto* value = dynamic_cast<T*>(&root); value && predicate(*value)) return value;
+    if (auto* layout = root.as_layout())
+        for (auto& [layer, children] : layout->get_elements()) for (auto& child : children)
+            if (auto* found = find_animation_widget<T>(*child, predicate)) return found;
+    return nullptr;
+}
+}
+TEST_F(AnimationTest, TimelineScrubbingKeepsWidgetsAndGroupsHistoryWithoutRecordingPreview) {
+    ASSERT_TRUE(editor.commit(target.id, clip()));
+    bgui::scoped_interface interface;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::animation_view panel(context); panel.build(dock); panel.update();
+    auto* plot = find_animation_widget<bgui::element>(dock, [](auto& value) { return value.type == "animation-timeline"; });
+    auto* time = find_animation_widget<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Tempo (s)"); });
+    auto* record = find_animation_widget<bgui::button>(dock, [](auto& button) { return button.get_label().get_buffer() == editor::ui::tr("● Gravar"); });
+    ASSERT_NE(plot, nullptr); ASSERT_NE(time, nullptr); ASSERT_NE(record, nullptr);
+    record->on_released(); bgui::on_update(); panel.update();
+    ASSERT_EQ(find_animation_widget<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Tempo (s)"); }), time);
+    plot->set_final_rect(0, 0, 1000, 40);
+    const auto history = context->undo_stack.size();
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {200,30}; plot->on_clicked(); panel.update();
+    EXPECT_DOUBLE_EQ(panel.time(), 1);
+    io.m_mouse_position = {300,30}; plot->set_drag({100,0}); panel.update();
+    EXPECT_DOUBLE_EQ(panel.time(), 1.5);
+    plot->on_released(); panel.update();
+    EXPECT_EQ(context->undo_stack.size(), history + 1);
+    EXPECT_EQ(editor.clip(target.id)->tracks, clip().tracks);
+    EXPECT_EQ(find_animation_widget<bgui::element>(dock, [](auto& value) { return value.type == "animation-timeline"; }), plot);
+    EXPECT_EQ(find_animation_widget<bgui::field>(dock, [](auto& field) { return field.get_label().get_buffer() == editor::ui::tr("Tempo (s)"); }), time);
+    EXPECT_FLOAT_EQ(registry->get<commons::transform>(target.id)->position.x, 3);
+}
+
+TEST_F(AnimationTest, TimelineScrollsHorizontallyAndZoomPreservesTheCanvas) {
+    ASSERT_TRUE(editor.commit(target.id, clip()));
+    bgui::scoped_interface interface;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::animation_view panel(context); panel.build(dock); panel.update();
+    auto* scroll = find_animation_widget<bgui::linear>(dock, [](auto& value) { return value.has_class("animation-timeline-scroll"); });
+    auto* canvas = find_animation_widget<bgui::linear>(dock, [](auto& value) { return value.has_class("animation-timeline-content"); });
+    ASSERT_NE(scroll, nullptr); ASSERT_NE(canvas, nullptr);
+    scroll->compute_style(); scroll->cascade_style();
+    scroll->process_required_size({420,260}); scroll->set_final_rect(0,0,420,260);
+    bgui::element::begin_arranging(); scroll->arrange(); bgui::element::end_arranging();
+    auto& io = bgui::get_context(); io.m_mouse_position = {200,100}; io.m_scroll_delta_x = -3;
+    scroll->on_update();
+    EXPECT_GT(scroll->get_horizontal_scroll_offset(), 0);
+    EXPECT_FLOAT_EQ(io.m_scroll_delta_x, 0);
+    const auto width = canvas->style.layout.size->x;
+    auto* zoom = find_animation_widget<bgui::button>(dock, [](auto& button) { return button.get_label().get_buffer() == "+"; });
+    ASSERT_NE(zoom, nullptr); zoom->on_released(); bgui::on_update(); panel.update();
+    EXPECT_EQ(find_animation_widget<bgui::linear>(dock, [](auto& value) { return value.has_class("animation-timeline-content"); }), canvas);
+    EXPECT_GT(canvas->style.layout.size->x, width);
 }

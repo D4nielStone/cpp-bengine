@@ -294,7 +294,7 @@ void editor::grid_gizmo::draw_camera_frustum(
             return;
     }
 
-    constexpr float color[4]{1.f, 0.72f, 0.16f, 1.f};
+    constexpr float color[4]{1.f, 0.72f, 0.16f, .75f};
     constexpr std::size_t edges[][2]{
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -497,7 +497,7 @@ void editor::grid_gizmo::draw_colliders(const COMMONS_NS::camera& camera,
     std::vector<grid_vertex> vertices;
     for (const auto& line : collision_lines(registry)) {
         for (const auto& point : {line.from, line.to})
-            vertices.push_back({point.x,point.y,point.z,line.color.x,line.color.y,line.color.z,1.f});
+            vertices.push_back({point.x,point.y,point.z,line.color.x,line.color.y,line.color.z,.70f});
     }
     if (vertices.empty()) return;
     ensure_resources(m_program, m_vao, m_vbo);

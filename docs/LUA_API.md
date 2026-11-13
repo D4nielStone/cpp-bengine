@@ -4,6 +4,13 @@ Esta página é o ponto de entrada legado e compatível para a referência Lua.
 Consulte o [índice da documentação Lua](./lua-api/README.md) para a API
 completa, organizada por tópico.
 
+## Céu padrão
+
+Novas câmeras usam `Color(0.16, 0.16, 0.16, 1)` em `Camera.backgroundColor`,
+com zênite também cinza. Cores explícitas de cenas existentes são preservadas.
+Os templates Empty/FPP herdam esse padrão; o comando visual de cor da câmera
+e a dica da conclusão de código usam o mesmo valor.
+
 ## Início rápido
 
 ```lua

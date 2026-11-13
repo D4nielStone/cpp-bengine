@@ -13,6 +13,11 @@ struct lua_completion {
     std::size_t begin{};
     std::size_t end{};
     std::vector<std::string> members;
+    std::string receiver_type;
+    std::string description(const std::string& member) const {
+        return receiver_type == "camera" && member == "backgroundColor"
+            ? "Cor do céu. Câmeras novas usam cinza neutro: Color(0.16, 0.16, 0.16, 1). Cenas existentes preservam suas cores." : "";
+    }
 };
 
 // A deliberately small catalog of the engine API, not a Lua language server.
@@ -172,6 +177,6 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
     std::sort(names.begin(), names.end());
     auto end = cursor;
     while (end < source.size() && identifier(source[end])) ++end;
-    return lua_completion{start, end, std::move(names)};
+    return lua_completion{start, end, std::move(names), std::move(type)};
 }
 }

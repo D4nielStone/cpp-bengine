@@ -23,11 +23,13 @@ struct workflow_state {
     std::function<bool()> editable;
     std::function<void(const fs::path&)> open_script;
     std::function<bool()> before_open;
+    std::function<void(const fs::path&)> open_outline;
     fs::path current_root, script;
     vl::document document;
     std::string buffer, status;
     std::uint64_t selected{};
-    std::size_t revision{}, graph_revision{};
+    std::size_t revision{}, graph_revision{}, scripts_revision{};
+    std::shared_ptr<editor_context> context;
     void open(const fs::path& path,bool flush=true) {
         try {
             if(flush && before_open && !before_open()) return;
@@ -47,6 +49,106 @@ struct workflow_state {
         } catch(const std::exception& error) { document=std::move(previous); status=error.what(); ++revision; }
     }
 };
+
+std::optional<std::size_t> assigned_script(const std::shared_ptr<editor_context>& context,
+    editor_context::entity_id id,const fs::path& path) {
+    const auto code=context->registry->get<commons::code>(id);
+    if(!code) return {};
+    auto matches=[&](const auto& script) {
+        const fs::path file=script->file;
+        return fs::weakly_canonical(file.is_absolute()?file:context->project_root/file)==fs::weakly_canonical(path);
+    };
+    if(matches(code)) return 0;
+    for(std::size_t i=0;i<code->scripts.size();++i) if(matches(code->scripts[i])) return i+1;
+    return {};
+}
+void choose_script_object(const std::shared_ptr<workflow_state>& state,const fs::path& path,bool remove) {
+    const auto context=state->context;
+    if(!context || !context->registry || !state->editable() || context->project_root!=state->root()) return;
+    std::vector<editor_context::entity_id> ids;
+    std::vector<std::string> labels;
+    std::vector<std::shared_ptr<commons::transform>> identities;
+    for(const auto& [id,components]:context->registry->entities) {
+        if(!context->registry->is_alive(id) || context->locked_entities.contains(id) || context->editor_camera_entity==id) continue;
+        if(remove && !assigned_script(context,id,path)) continue;
+        ids.push_back(id);
+    }
+    std::sort(ids.begin(),ids.end());
+    for(const auto id:ids) {
+        identities.push_back(context->registry->get<commons::transform>(id));
+        const auto name=context->registry->entity_names.find(id);
+        labels.push_back((name==context->registry->entity_names.end()?"Objeto":name->second)+" (#"+std::to_string(id)+")");
+    }
+    if(ids.empty()) {state->status=remove?"Nenhum objeto usa este script.":"Nenhum objeto desbloqueado disponível.";++state->revision;return;}
+    auto& modal=bgui::get_layout().add<bgui::modal,bgui::layer::overlay>();
+    modal.add<bgui::text>(remove?"Remover script do objeto":"Aplicar script ao objeto",.34f);
+    modal.add<bgui::text>(path.filename().string(),.28f);
+    std::size_t selected=0;
+    for(std::size_t i=0;i<ids.size();++i) if(context->selected_entity==ids[i]) selected=i;
+    auto& objects=modal.content().add<bgui::combo_box>(labels,.30f,selected);
+    objects.add_class("script-object-choice");
+    objects.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+    modal.set_confirmation_text(remove?"Remover associação":"Aplicar script");
+    modal.set_on_confirm([weak=std::weak_ptr<workflow_state>(state),root=state->root(),path,remove,ids,identities,choice=&objects] {
+        const auto state=weak.lock();
+        if(!state || state->root()!=root || !state->editable() || !state->context || state->context->project_root!=root) return;
+        try {
+            const auto index=choice->get_selected_index(); if(index>=ids.size()) return;
+            const auto id=ids[index];
+            const auto context=state->context;
+            if(!context->registry->is_alive(id) || context->registry->get<commons::transform>(id)!=identities[index])
+                throw std::runtime_error("O objeto foi removido ou substituído.");
+            std::string error;
+            if(remove) {
+                const auto slot=assigned_script(context,id,path);
+                if(!slot || !remove_lua_script(context,id,*slot,error))
+                    throw std::runtime_error(error.empty()?"O objeto não usa mais este script.":error);
+            } else {
+                (void)asset_files::editable_file(path,root);
+                if(state->files.has_document_edits(path)) throw std::runtime_error("Salve o Lua antes de aplicar o script ao objeto.");
+                if(assigned_script(context,id,path)) throw std::runtime_error("Este script já está associado ao objeto.");
+                if(!attach_lua_script(context,id,path,error)) throw std::runtime_error(error);
+            }
+            state->status=remove?"Associação removida. A ação pode ser desfeita.":"Script aplicado ao objeto. A ação pode ser desfeita.";
+            ++state->graph_revision;
+        } catch(const std::exception& error) {state->status=error.what();}
+        ++state->revision;
+    });
+    modal.add<bgui::button>("Cancelar",.30f,[surface=&modal]{bgui::add_function([surface]{bgui::get_layout().remove(surface);});});
+}
+context_actions script_actions(const std::shared_ptr<workflow_state>& state,const fs::path& path) {
+    if(!state->editable() || state->root().empty()) return {};
+    const auto weak=std::weak_ptr<workflow_state>(state);
+    const auto root=state->root();
+    context_actions actions{{"Novo script Lua...",[weak,root] {
+        const auto s=weak.lock(); if(!s || s->root()!=root || !s->editable()) return;
+        if(s->before_open && !s->before_open()) return;
+        try {
+            const auto folder=fs::is_directory(root/"scripts")?root/"scripts":root;
+            s->files.request_new_script(folder,[weak,root](const auto& created) {
+                if(auto s=weak.lock();s && s->root()==root) {++s->graph_revision;++s->scripts_revision;if(s->open_script) s->open_script(created);}
+            });
+        } catch(const std::exception& error) {s->status=error.what();++s->revision;}
+    }}};
+    if(path.empty()) return actions;
+    if(state->context) for(const bool remove:{false,true}) actions.emplace_back(remove?"Remover de objeto...":"Aplicar a objeto...",[weak,root,path,remove] {
+        if(auto s=weak.lock();s && s->root()==root && s->editable()) {
+            if(s->before_open && !s->before_open()) return;
+            try {choose_script_object(s,path,remove);} catch(const std::exception& e) {s->status=e.what();++s->revision;}
+        }
+    });
+    actions.emplace_back("Excluir arquivo de script...",[weak,root,path] {
+        const auto s=weak.lock();if(!s || s->root()!=root || !s->editable()) return;
+        if(s->before_open && !s->before_open()) return;
+        try {s->files.request_delete_script(path,[weak,root,path] {
+            if(auto s=weak.lock();s && s->root()==root) {
+                if(s->script==path) {s->script.clear();s->buffer.clear();s->document.load("");s->selected=0;}
+                s->status="Arquivo de script excluído.";++s->revision;++s->graph_revision;++s->scripts_revision;
+            }
+        });} catch(const std::exception& e) {s->status=e.what();++s->revision;}
+    });
+    return actions;
+}
 class workflow_panel : public panel {
     class refresh_driver final : public bgui::element {
         workflow_panel& owner;
@@ -55,11 +157,28 @@ class workflow_panel : public panel {
             set_flex(false);
             receives_input(false);
         }
-        void on_update() override { owner.update(); }
+        void on_update() override { owner.context_input(); owner.update(); }
         void get_requires(bgui::draw_data*) override {}
     };
 protected:
     std::shared_ptr<workflow_state> state;
+    std::shared_ptr<bool> context_lifetime=std::make_shared<bool>(true);
+    bool right_down{};
+    virtual context_actions context_options() {return {};}
+    void context_input() {
+        const bool right=bgui::get_pressed(bgui::input_key::mouse_right);
+        const bool pressed=right && !right_down; right_down=right;
+        if(!pressed || !attached() || !dock->is_enabled() || !window->is_enabled() || viewport_input_blocked_by_modal()) return;
+        bool inside=false;
+        for(auto* target=bgui::get_mouse_target();target;target=target->get_parent()) {
+            if(auto* button=dynamic_cast<context_action_button*>(target);button && button->context_options) return;
+            if(target==window) inside=true;
+        }
+        if(inside) {
+            auto actions=context_options();
+            if(!actions.empty()) show_action_popup(std::move(actions),context_lifetime);
+        }
+    }
     bgui::dock* dock{};
     bgui::window* window{};
     bool attached() const {
@@ -68,6 +187,7 @@ protected:
         return false;
     }
     void init(bgui::dock& d,bgui::panel_facade& facade) {
+        context_lifetime=std::make_shared<bool>(true);
         dock=&d; window=&facade.native(); window->add_class("editor-panel");
         facade.content().add<refresh_driver,bgui::layer::overlay>(*this);
     }
@@ -83,6 +203,8 @@ class scripts_panel final : public workflow_panel {
     fs::path root;
     std::string search;
     bool refresh{true};
+    std::size_t seen_scripts=~std::size_t{};
+    context_actions context_options() override {return script_actions(state,{});}
 public:
     using workflow_panel::workflow_panel;
     void show() { workflow_panel::show(); refresh=true; }
@@ -103,6 +225,7 @@ public:
         const auto next=state->root();
         if(root!=next) { root=next; refresh=true; }
         if(search!=filter->get_buffer()) { search=filter->get_buffer(); refresh=true; }
+        if(seen_scripts!=state->scripts_revision) {seen_scripts=state->scripts_revision;refresh=true;}
         if(!refresh) return; refresh=false;
         for(auto& [layer,children]:list->get_elements()) while(!children.empty()) list->remove(children.back().get());
         if(root.empty()) return;
@@ -112,8 +235,16 @@ public:
             for(const auto& path:scripts) {
                 const auto relative=path.lexically_relative(root).generic_string();
                 if(!search.empty() && relative.find(search)==std::string::npos) continue;
-                auto& button=list->add<bgui::button>(relative,.28f,[s=state,path]{s->open_script(path);});
+                auto& button=list->add<context_action_button>(path.filename().string(),.33f,[s=state,path]{s->open_script(path);});
+                button.context_options=[s=state,path]{return script_actions(s,path);};
                 button.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+                button.get_label().style.layout.align={bgui::alignment::start,bgui::alignment::center};
+                button.get_label().set_wrap(true);
+                button.get_label().style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+                if (path.parent_path()!=root) {
+                    button.get_label().set_buffer(path.filename().string() + "\n" +
+                        path.parent_path().lexically_relative(root).generic_string());
+                }
             }
         } catch(const std::exception& error) { status->set_buffer(error.what()); }
     }
@@ -126,7 +257,7 @@ class graph_canvas final : public bgui::layout {
         bgui::vec2 original;
         bool moved{};
     public:
-        node_button(graph_canvas& c,std::size_t i,const std::string& title):bgui::button(title,.28f,[]{}),canvas(c),index(i){}
+        node_button(graph_canvas& c,std::size_t i,const std::string& title):bgui::button(title,.34f,[]{}),canvas(c),index(i){}
         void on_pressed() override {
             bgui::button::on_pressed(); start=bgui::get_mouse_position(); moved=false;
             original={canvas.graph.nodes[index].x,canvas.graph.nodes[index].y};
@@ -169,8 +300,8 @@ public:
         buttons.clear(); graph=std::move(next);
         for(std::size_t i=0;i<graph.nodes.size();++i) {
             auto& node=add<node_button>(*this,i,graph.nodes[i].path.filename().string());
-            node.style.visual.background.normal=bgui::color{.16f,.27f,.43f,1};
-            node.style.visual.text.normal=bgui::color{.95f,.96f,1,1};
+            node.style.visual.background.normal=bgui::color{.16f,.16f,.16f,1};
+            node.style.visual.text.normal=bgui::color{.95f,.95f,.95f,1};
             node.set_flex(false); buttons.push_back(&node);
         }
         mark_layout_dirty();
@@ -195,21 +326,21 @@ public:
         const auto saved=draw.get_color();
         const auto draw_clip=draw.get_clip_rect(); const bool had_clip=draw.has_clip_rect();
         draw.set_clip_rect(clip.z>0 && clip.w>0?bgui::intersect_rect(clip,processed_rect()):processed_rect());
-        draw.set_color({.045f,.055f,.075f,1});
+        draw.set_color({.05f,.05f,.05f,1});
         draw.add_rect_filled({float(processed_x()),float(processed_y())},{float(processed_x()+processed_width()),float(processed_y()+processed_height())});
         const float grid=50*zoom;
         const auto zero=screen(0,0);
-        draw.set_color({.12f,.15f,.20f,1});
+        draw.set_color({.09f,.09f,.09f,1});
         for(float x=processed_x()+std::fmod(zero.x-processed_x(),grid);x<processed_x()+processed_width();x+=grid) draw.add_line({x,float(processed_y())},{x,float(processed_y()+processed_height())});
         for(float y=processed_y()+std::fmod(zero.y-processed_y(),grid);y<processed_y()+processed_height();y+=grid) draw.add_line({float(processed_x()),y},{float(processed_x()+processed_width()),y});
-        draw.set_color({.35f,.47f,.59f,1});
+        draw.set_color({.18f,.18f,.18f,1});
         draw.add_line({zero.x,float(processed_y())},{zero.x,float(processed_y()+processed_height())},2);
         draw.add_line({float(processed_x()),zero.y},{float(processed_x()+processed_width()),zero.y},2);
         for(const auto& edge:graph.edges) {
             if(edge.unresolved) continue;
             const auto& from=graph.nodes[edge.from]; const auto& to=graph.nodes[edge.to];
             auto a=screen(from.x+190,from.y-27), b=screen(to.x,to.y-27);
-            draw.set_color({.35f,.8f,.85f,1});
+            draw.set_color({.50f,.50f,.50f,1});
             if(edge.from==edge.to) {
                 draw.add_polyline({a,{a.x+28,a.y},{a.x+28,a.y-65},{b.x-25,b.y-65},{b.x-25,b.y},b},2);
             } else draw.add_line(a,b,2);
@@ -223,6 +354,184 @@ public:
         if(had_clip) draw.set_clip_rect(draw_clip); else draw.clear_clip_rect();
     }
 };
+class scene_outline_panel final : public workflow_panel {
+    bgui::linear* selector{};
+    bgui::inputbox* editor{};
+    bgui::text* identity{};
+    bgui::text* status{};
+    bgui::button* create{};
+    fs::path root, scene, document;
+    std::string buffer;
+    std::size_t seen=~std::size_t{};
+    bool loaded{};
+
+    bool sync() {
+        if(!loaded || root!=state->root()) return true;
+        const auto& next=editor->get_buffer();
+        if(next==buffer) return true;
+        try {
+            if(!state->editable()) {
+                editor->set_buffer(buffer);
+                return false;
+            }
+            state->files.edit_text_source(document,buffer,next);
+            buffer=next;
+            status->set_buffer("Rascunho recuperável. Use Salvar roteiro para gravar.");
+            return true;
+        } catch(const std::exception& error) {
+            status->set_buffer(error.what());
+            return false;
+        }
+    }
+    void select(const fs::path& path) {
+        if(!sync()) return;
+        scene=path; document=fs::path(path.string()+".roteiro.txt");
+        loaded=false; buffer.clear(); editor->set_buffer("");
+        identity->set_buffer(scene.lexically_relative(root).generic_string());
+        try {
+            (void)scene_files::checked_scene(root,scene);
+            if(fs::exists(fs::symlink_status(document))) {
+                buffer=state->files.text_source(document);
+                loaded=true; editor->set_buffer(buffer);
+                status->set_buffer("Objetivos, sequência de eventos e tarefas de desenvolvimento.");
+            } else status->set_buffer("Esta cena ainda não tem roteiro. Use Criar roteiro.");
+        } catch(const std::exception& error) {status->set_buffer(error.what());}
+        create->set_enable(!loaded);
+        editor->receives_input(loaded && state->editable());
+    }
+public:
+    using workflow_panel::workflow_panel;
+    void build(bgui::dock& d) override {
+        bgui::panel_facade facade(d,"Roteiro da cena",bgui::dock_area::right,.30f);
+        init(d,facade);
+        auto body=facade.content(); body.native().set_scrollable(false);
+        body.label("Roteiro de desenvolvimento",.36f);
+        selector=&body.add<bgui::linear>(bgui::orientation::vertical);
+        selector->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+        identity=&body.label("Selecione uma cena no grafo ou na lista acima.",.28f);
+        auto actions=body.row();
+        create=&actions.action("Criar roteiro",[this]{
+            if(scene.empty() || root!=state->root() || !state->editable()) return;
+            try {
+                (void)scene_files::checked_scene(root,scene);
+                if(fs::exists(fs::symlink_status(document)))
+                    throw std::runtime_error("O roteiro já existe. Selecione novamente a cena para abri-lo.");
+                if(!scene_files::inside(fs::weakly_canonical(document),fs::canonical(root)))
+                    throw std::runtime_error("Roteiro fora do projeto.");
+                std::string error;
+                if(!project_files::save(document,{{document,""}},error)) throw std::runtime_error(error);
+                state->files.refresh_files();
+                select(scene);
+            } catch(const std::exception& error) {status->set_buffer(error.what());}
+        });
+        actions.action("Salvar roteiro",[this]{
+            if(!loaded || root!=state->root() || !state->editable() || !sync()) return;
+            try {
+                (void)scene_files::checked_scene(root,scene);
+                state->files.save_text_source(document,buffer);
+                status->set_buffer("Roteiro salvo.");
+            } catch(const std::exception& error) {status->set_buffer(error.what());}
+        });
+        status=&body.label("",.27f);
+        editor=&body.add<bgui::inputbox>("","Objetivos da cena\nEventos e diálogos\nTarefas de desenvolvimento",.32f,
+            [this](const std::string&){sync();},bgui::input_mode::multiline);
+        editor->type="scene-development-outline";
+        editor->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);
+        editor->set_scrollable(true); editor->set_wrap(true);
+        editor->receives_input(false);
+        seen=~std::size_t{}; root.clear(); loaded=false;
+        state->open_outline=[this](const fs::path& path){show();update();select(path);};
+    }
+    ~scene_outline_panel() override {state->open_outline={};}
+    void update() override {
+        if(!attached()) return;
+        const auto next=state->root();
+        if(root!=next || seen!=state->graph_revision) {
+            if(root==next && !sync()) return;
+            const bool same=root==next;
+            root=next; seen=state->graph_revision;
+            if(!same) {
+                loaded=false; scene.clear(); document.clear(); buffer.clear(); editor->set_buffer("");
+                identity->set_buffer("Selecione uma cena.");
+                status->set_buffer(""); create->set_enable(false);
+            }
+            for(auto& [layer,children]:selector->get_elements())
+                while(!children.empty()) selector->remove(children.back().get());
+            if(!root.empty()) try {
+                const auto scenes=scene_files::list(root,true);
+                std::vector<std::string> labels{"Selecionar cena..."};
+                std::size_t index=0;
+                for(const auto& p:scenes) {
+                    labels.push_back(p.lexically_relative(root).generic_string());
+                    if(p==scene) index=labels.size()-1;
+                }
+                auto& choices=selector->add<bgui::combo_box>(labels,.30f,index);
+                choices.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+                choices.set_on_change([this,scenes](std::size_t i,const std::string&){
+                    if(i>0 && i<=scenes.size()) select(scenes[i-1]);
+                });
+            } catch(const std::exception& error) {status->set_buffer(error.what());}
+        }
+        if(!sync()) return;
+        if(loaded) try {
+            const auto& current=state->files.text_source(document);
+            if(current!=buffer) {buffer=current;editor->set_buffer(buffer);}
+        } catch(const std::exception& error) {status->set_buffer(error.what());}
+        editor->receives_input(loaded && state->editable());
+        if(!state->editable()) editor->set_focused(false);
+    }
+};
+class source_control_panel final : public workflow_panel {
+    bgui::text* project{};
+    fs::path root;
+public:
+    using workflow_panel::workflow_panel;
+    void build(bgui::dock& d) override {
+        bgui::panel_facade facade(d,"Source Control",bgui::dock_area::left,.30f); init(d,facade);
+        auto body=facade.content();
+        body.label("Source Control · Git",.36f);
+        project=&body.label("Nenhum projeto aberto",.27f);
+        body.label("Integração Git ainda não disponível.",.30f);
+        body.label("Branch · indisponível",.28f);
+        body.label("Alterações preparadas",.32f);
+        body.label("Nenhum status consultado.",.28f);
+        body.label("Alterações no projeto",.32f);
+        body.label("A lista de arquivos será exibida após a integração Git.",.28f);
+        body.label("Commit",.32f);
+        auto& message=body.add<bgui::inputbox>("","Mensagem do commit",.30f);
+        message.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+        message.receives_input(false);
+        body.label("Preparar, descartar e criar commits estarão disponíveis em uma próxima etapa.",.27f);
+        root.clear();
+    }
+    void update() override {
+        if(!attached()) return;
+        const auto next=state->root();
+        if(next!=root) {root=next;project->set_buffer(root.empty()?"Nenhum projeto aberto":root.filename().string());}
+    }
+};
+class diff_panel final : public workflow_panel {
+public:
+    using workflow_panel::workflow_panel;
+    void build(bgui::dock& d) override {
+        bgui::panel_facade facade(d,"Diff",bgui::dock_area::bottom,.30f); init(d,facade);
+        auto body=facade.content(); body.native().set_scrollable(false);
+        body.label("Comparação de alterações",.36f);
+        body.label("Aguardando integração Git e seleção de um arquivo no Source Control.",.28f);
+        auto columns=body.row();
+        columns.native().style.layout.require_height(bgui::mode::stretch);
+        for(const auto* title:{"Original · HEAD","Versão de trabalho"}) {
+            auto column=columns.column();
+            column.native().style.layout.require_mode(bgui::mode::stretch,bgui::mode::match_parent);
+            column.label(title,.30f);
+            auto& content=column.add<bgui::inputbox>("","Nenhum arquivo selecionado",.30f,nullptr,bgui::input_mode::multiline);
+            content.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);
+            content.set_scrollable(true); content.receives_input(false);
+        }
+    }
+    void update() override {}
+};
+
 class graph_panel final : public workflow_panel {
     graph_canvas* canvas{};
     bgui::text* status{};
@@ -247,8 +556,14 @@ class graph_panel final : public workflow_panel {
     void inspect(std::size_t i) {
         if(i>=canvas->graph.nodes.size()) return;
         selected=i;
+        for (auto& [layer, children] : canvas->get_elements()) for (std::size_t n=0; n<children.size(); ++n) {
+            children[n]->style.visual.border.normal = n == i
+                ? bgui::color{.50f,.50f,.50f,1.f} : bgui::color{.28f,.28f,.28f,1.f};
+            children[n]->mark_style_dirty();
+        }
         for(auto& [layer,children]:details->get_elements()) while(!children.empty()) details->remove(children.back().get());
         const auto& node=canvas->graph.nodes[i];
+        details->add<bgui::button>("Editar roteiro",.27f,[s=state,path=node.path]{if(s->open_outline) s->open_outline(path);});
         details->add<bgui::text>(node.path.lexically_relative(root).generic_string()+" | X "+std::to_string(int(node.x))+" / Y "+std::to_string(int(node.y)),.28f);
         details->add<bgui::button>("Abrir cena",.27f,[s=state,path=node.path]{s->open_scene(path);});
         for(const auto& edge:canvas->graph.edges) if(edge.from==i) {
@@ -324,8 +639,8 @@ class block_drag_preview final : public bgui::linear {
 public:
     explicit block_drag_preview(std::function<bool()> visible):bgui::linear(bgui::orientation::vertical),active(std::move(visible)) {
         type="visual-block-drag-preview";
-        style.visual.background.normal=bgui::color{.12f,.23f,.34f,.98f};
-        style.visual.border.normal=bgui::color{.4f,.8f,1,1};style.visual.border_size=1.f;style.visual.border_radius=7.f;
+        style.visual.background.normal=bgui::color{.18f,.18f,.18f,.98f};
+        style.visual.border.normal=bgui::color{.50f,.50f,.50f,1};style.visual.border_size=1.f;style.visual.border_radius=7.f;
         style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);style.layout.require_size(420,80);
         set_flex(false); receives_input(false); set_input_passthrough(true);
         style.visual.visible=false;set_enable(false);
@@ -335,6 +650,8 @@ public:
     }
     void begin(const vl::block& b) {
         caption->set_buffer(vl::title(b));
+        style.visual.background.normal=b.type==vl::kind::function
+            ? bgui::color{.46f,.29f,.10f,.98f} : bgui::color{.17f,.31f,.48f,.98f};
         std::string text;
         for(const auto& f:vl::slots(b)) {
             if(!text.empty()) text+="  |  ";
@@ -362,7 +679,7 @@ public:
         const float scale=bgui::get_global_scale();
         const int width=std::min(int(420*scale),std::max(1,size.x-16));
         const int height=std::min(int(80*scale),std::max(1,size.y-16));
-        const int x=std::clamp(mouse.x-40+int(std::sin(angle)*45),8,std::max(8,size.x-width-8));
+        const int x=std::clamp(mouse.x+int((-40+std::sin(angle)*45)*scale),8,std::max(8,size.x-width-8));
         const int y=std::clamp(mouse.y+int((20+(1-std::cos(angle))*45)*scale),8,std::max(8,size.y-height-8));
         style.layout.require_size(width/scale,height/scale);compute_style();
         set_final_rect(x,y,width,height);
@@ -375,24 +692,27 @@ public:
         if(!style.visual.visible.value_or(false)) return;
         auto& draw=data->m_draw_list; const auto color=draw.get_color();
         const float x=processed_x(),y=processed_y(),w=processed_width(),h=processed_height();
+        const auto mouse=bgui::get_mouse_position();
+        draw.set_color({.80f,.85f,.92f,.65f});
+        draw.add_line({float(mouse.x),float(mouse.y)},{x+40*bgui::get_global_scale(),y},2.f);
         draw.set_color({0,0,0,.28f});draw.add_rect_filled({x+4,y+5},{x+w+4,y+h+5});
         draw.set_color(color);
         bgui::linear::get_requires(data);
     }
 };
 bgui::color category_color(const std::string& category) {
-    if(category=="Eventos" || category=="Controle") return {.53f,.36f,.16f,1};
-    if(category=="Propriedades") return {.20f,.43f,.32f,1};
-    if(category=="Debug") return {.40f,.32f,.48f,1};
-    if(category=="Scenes") return {.32f,.36f,.53f,1};
-    if(category=="Time" || category=="Matemática") return {.23f,.43f,.42f,1};
-    if(category=="Interface" || category=="Animação") return {.43f,.28f,.44f,1};
-    return {.22f,.38f,.52f,1};
+    if(category=="Eventos") return {.46f,.29f,.10f,1};
+    if(category=="Controle") return {.43f,.26f,.12f,1};
+    if(category=="Propriedades") return {.34f,.23f,.48f,1};
+    if(category=="Física") return {.17f,.36f,.47f,1};
+    if(category=="Câmera") return {.19f,.38f,.32f,1};
+    if(category=="Animação") return {.42f,.22f,.35f,1};
+    return {.17f,.31f,.48f,1};
 }
 class category_button final : public bgui::button {
     bgui::color accent;
 public:
-    category_button(const std::string& name,std::function<void()> action):bgui::button(name,.25f,std::move(action)),accent(category_color(name)) {
+    category_button(const std::string& name,std::function<void()> action):bgui::button(name,.30f,std::move(action)),accent(category_color(name)) {
         style.layout.padding={25,7,5,7};
         get_label().style.layout.align={bgui::alignment::start,bgui::alignment::center};
     }
@@ -426,8 +746,8 @@ public:
     void get_requires(bgui::draw_data* data) override {
         auto& draw=data->m_draw_list;const auto color=draw.get_color();const auto clip=draw.get_clip_rect();const bool clipped=draw.has_clip_rect();
         draw.set_clip_rect(data->m_clip_rect.z>0?bgui::intersect_rect(data->m_clip_rect,processed_rect()):processed_rect());
-        draw.set_color({.045f,.05f,.06f,1});draw.add_rect_filled({float(processed_x()),float(processed_y())},{float(processed_x()+processed_width()),float(processed_y()+processed_height())});
-        const float step=24*bgui::get_global_scale();draw.set_color({.13f,.14f,.17f,1});
+        draw.set_color({.05f,.05f,.05f,1});draw.add_rect_filled({float(processed_x()),float(processed_y())},{float(processed_x()+processed_width()),float(processed_y()+processed_height())});
+        const float step=24*bgui::get_global_scale();draw.set_color({.13f,.13f,.13f,1});
         for(float x=processed_x()+12;x<processed_x()+processed_width();x+=step)
             for(float y=processed_y()+12-std::fmod(float(get_scroll_offset()),step);y<processed_y()+processed_height();y+=step)
                 draw.add_rect_filled({x,y},{x+1,y+1});
@@ -438,19 +758,31 @@ public:
 class block_group final : public bgui::linear {
     bool selected{};
 public:
-    block_group():bgui::linear(bgui::orientation::vertical) {}
+    block_group():bgui::linear(bgui::orientation::vertical) {type="visual-block-group";}
+
     void select(bool value) {if(selected!=value){selected=value;mark_render_dirty();}}
     void get_requires(bgui::draw_data* data) override {
         bgui::linear::get_requires(data);
-        if(!selected) return;
         auto& draw=data->m_draw_list;const auto color=draw.get_color();
-        draw.set_color({.40f,.80f,1.f,1.f});
+        const float scale=bgui::get_global_scale();
+        const float x=processed_x(),y=processed_y(),w=processed_width(),h=processed_height();
+        // Matching socket and tongue follow layout geometry at every nesting level.
+        draw.set_color({.07f,.09f,.12f,1});
+        draw.add_convexpolyfilled({{x+28*scale,y},{x+34*scale,y+5*scale},
+            {x+54*scale,y+5*scale},{x+60*scale,y}});
+        draw.add_convexpolyfilled({{x,y+h-5*scale},{x+28*scale,y+h-5*scale},
+            {x+34*scale,y+h},{x,y+h}});
+        draw.add_convexpolyfilled({{x+60*scale,y+h-5*scale},{x+w,y+h-5*scale},
+            {x+w,y+h},{x+54*scale,y+h}});
+        if(!selected) {draw.set_color(color);return;}
+        draw.set_color({.95f,.79f,.38f,1.f});
         draw.add_rect({float(processed_x()+1),float(processed_y()+1)},
             {float(processed_x()+processed_width()-1),float(processed_y()+processed_height()-1)},2.f);
         draw.set_color(color);
     }
 };
 class blocks_panel final : public workflow_panel {
+    context_actions context_options() override {return script_actions(state,state->script);}
     class handle final : public bgui::button {
         blocks_panel& owner;
         std::uint64_t id;
@@ -459,19 +791,19 @@ class blocks_panel final : public workflow_panel {
         bgui::vec2i start;
         bool dragged{};
     public:
-        handle(blocks_panel& p,std::uint64_t block,const std::string& title):bgui::button(title,.28f,[]{}),owner(p),id(block){}
-        handle(blocks_panel& p,std::size_t index,const vl::command& c):bgui::button(c.title,.28f,[]{}),owner(p),id(0),command_index(index) {
+        handle(blocks_panel& p,std::uint64_t block,const std::string& title):bgui::button(title,.34f,[]{}),owner(p),id(block){}
+        handle(blocks_panel& p,std::size_t index,const vl::command& c):bgui::button(c.title,.34f,[]{}),owner(p),id(0),command_index(index) {
             m_orientation=bgui::orientation::vertical;
             style.visual.background.normal=category_color(c.category);style.visual.border_radius=6.f;
             style.layout.padding={10,9,10,9};style.layout.margin={0,2,0,6};
             const auto model=vl::parse(c.source);std::string hint;
             if(!model.empty()) for(const auto& f:vl::slots(model.front())) {if(!hint.empty()) hint+="  ";hint+=f.label;}
             if(hint.empty()) hint="Sem argumentos";
-            auto& info=add<bgui::text>(hint,.21f);info.receives_input(false);info.set_wrap(false);
+            auto& info=add<bgui::text>(hint,.28f);info.receives_input(false);info.set_wrap(false);
             get_label().style.layout.align={bgui::alignment::start,bgui::alignment::start};
             info.style.layout.align={bgui::alignment::start,bgui::alignment::start};
         }
-        handle(blocks_panel& p,vl::kind structure):bgui::button(vl::label(structure),.27f,[]{}),owner(p),id(0),structure_kind(structure) {
+        handle(blocks_panel& p,vl::kind structure):bgui::button(vl::label(structure),.33f,[]{}),owner(p),id(0),structure_kind(structure) {
             style.visual.background.normal=category_color("Controle");style.visual.border_radius=6.f;
             style.layout.padding={10,10,10,10};style.layout.margin={0,2,0,6};
         }
@@ -490,7 +822,7 @@ class blocks_panel final : public workflow_panel {
             bgui::button::get_requires(data);
             auto& draw=data->m_draw_list; const auto color=draw.get_color();
             const float x=processed_x()+16.f, y=processed_y()+processed_height()-1.f;
-            draw.set_color({.65f,.72f,.84f,1});
+            draw.set_color({.70f,.70f,.70f,1});
             draw.add_polyline({{x,y},{x+4,y+4},{x+14,y+4},{x+18,y}},1.5f);
             draw.set_color(color);
         }
@@ -553,7 +885,7 @@ class blocks_panel final : public workflow_panel {
     void select_category(const std::string& name) {
         category=name;palette_dirty=true;
         for(auto& [title,button]:category_buttons) {
-            button->style.visual.background.normal=bgui::color{title==name?.16f:.075f,title==name?.17f:.08f,title==name?.20f:.095f,1};
+            button->style.visual.background.normal=title==name ? bgui::color{.22f,.22f,.22f,1} : bgui::color{.08f,.08f,.08f,1};
             button->style.visual.border_size=title==name?1.f:0.f;button->mark_style_dirty();
         }
     }
@@ -695,25 +1027,28 @@ class blocks_panel final : public workflow_panel {
     }
     void render(bgui::linear& parent,const std::vector<vl::block>& values,std::uint64_t parent_id) {
         for(const auto& b:values) {
+            if(b.type==vl::kind::raw && std::all_of(b.head.begin(),b.head.end(),
+                [](unsigned char c){return std::isspace(c);})) continue;
             auto& group=parent.add<block_group>();
             group.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-            group.style.layout.padding={8,3,5,4}; group.style.layout.margin={0,1,0,2};
-            bgui::color color{.16f,.35f,.53f,1};
-            if(b.type==vl::kind::function) color={.42f,.26f,.58f,1};
-            else if(b.type==vl::kind::condition || b.type==vl::kind::branch || b.type==vl::kind::loop || b.type==vl::kind::while_loop || b.type==vl::kind::repeat || b.type==vl::kind::scope) color={.48f,.30f,.10f,1};
-            else if(b.type==vl::kind::assignment) color={.13f,.40f,.29f,1};
-            else if(b.type==vl::kind::raw) color={.23f,.25f,.29f,1};
-            group.style.visual.background.normal=color; group.style.visual.border_radius=7;
+            group.style.layout.padding={8,7,5,9}; group.style.layout.margin={0,0,0,1};
+            bgui::color color=category_color("Objeto");
+            if(const auto* command=vl::describe(b)) color=category_color(command->category);
+            else if(b.type==vl::kind::function) color=category_color("Eventos");
+            else if(!b.tail.empty() || b.type==vl::kind::branch) color=category_color("Controle");
+            else if(b.type==vl::kind::assignment) color=category_color("Propriedades");
+            else if(b.type==vl::kind::raw) color={.22f,.25f,.29f,1};
+            group.style.visual.background.normal=color; group.style.visual.border_radius=5;
             group.select(state->selected==b.id);
             auto& heading=group.add<bgui::linear>(bgui::orientation::horizontal);
             heading.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
             auto& toggle=heading.add<bgui::button>(collapsed.contains(b.id)?"+":"-",.28f,[this,id=b.id]{fold(id,!collapsed.contains(id));});
             toggle.style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);
-            toggle.style.layout.require_size(26,26);
+            toggle.style.layout.require_size(28,32);
             auto& title=heading.add<handle>(*this,b.id,":: "+vl::title(b));
             title.style.visual.background.normal=color;
             toggle.style.visual.background.normal=color;
-            title.style.layout.require_mode(bgui::mode::stretch,bgui::mode::pixel); title.style.layout.require_height(bgui::mode::pixel,26);
+            title.style.layout.require_mode(bgui::mode::stretch,bgui::mode::pixel); title.style.layout.require_height(bgui::mode::pixel,32);
             targets.push_back({&title,parent_id,b.id});
             auto& content=group.add<bgui::linear>(bgui::orientation::vertical);
             content.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
@@ -728,13 +1063,17 @@ class blocks_panel final : public workflow_panel {
                     components=&content.add<bgui::linear>(bgui::orientation::horizontal);
                     components->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
                 } else if(slot.label!="Y" && slot.label!="Z" && slot.label!="G" && slot.label!="B" && slot.label!="A") components=nullptr;
-                auto& field=(components?*components:content).add<tracked_field>(slot.label,source.substr(slot.begin,slot.end-slot.begin),.27f,
+                auto& field=(components?*components:content).add<tracked_field>(slot.label,source.substr(slot.begin,slot.end-slot.begin),.33f,
                     [this](const std::string&){sync_fields();},"",
                     multiline?bgui::input_mode::multiline:bgui::input_mode::inputbox);
                 field.changed=[this]{if(seen==state->revision) sync_fields();};
                 field.style.layout.require_mode(components?bgui::mode::stretch:bgui::mode::match_parent,bgui::mode::wrap_content);
+                field.get_label().style.layout.require_mode(bgui::mode::pixel,bgui::mode::wrap_content);
+                field.get_label().style.layout.require_width(bgui::mode::pixel, components ? 18.f : 144.f);
+                field.get_label().style.layout.align={bgui::alignment::start,bgui::alignment::center};
+                field.style.layout.margin={4,3,4,3};
                 field.get_inputbox().style.layout.require_mode(bgui::mode::stretch,bgui::mode::pixel);
-                field.get_inputbox().style.layout.require_height(bgui::mode::pixel,multiline?90:26);
+                field.get_inputbox().style.layout.require_height(bgui::mode::pixel,multiline?100:30);
                 field.get_inputbox().set_scrollable(true);
                 field.get_inputbox().set_wrap(false);
                 fields.push_back({&field.get_inputbox(),b.id,slot,source.substr(slot.begin,slot.end-slot.begin),b.head,b.tail,source.substr(slot.begin,slot.end-slot.begin)});
@@ -742,11 +1081,19 @@ class blocks_panel final : public workflow_panel {
             if(!b.tail.empty() || b.type==vl::kind::branch) {
                 auto& body=content.add<bgui::linear>(bgui::orientation::vertical);
                 body.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-                body.style.layout.margin={16,2,0,3};
+                body.type="visual-block-body";
+                body.style.layout.margin={18,4,0,3};
+                body.style.layout.padding={6,5,4,5};
+                body.style.visual.background.normal=bgui::color{.07f,.09f,.12f,1};
+                body.style.visual.border_radius=3;
                 render(body,b.children,b.id);
                 auto& slot=body.add<bgui::button>("+ Encaixar aqui",.24f,[this,id=b.id]{select(id);});
                 slot.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel); slot.style.layout.require_height(bgui::mode::pixel,24);
+                slot.style.visual.background.normal=bgui::color{.12f,.16f,.20f,1};
+                slot.style.visual.border.normal=color; slot.style.visual.border_size=1;
                 targets.push_back({&slot,b.id,0});
+                auto& closing=content.add<bgui::text>(b.type==vl::kind::function?"Fim da função":b.type==vl::kind::branch?"Fim do ramo":"Fim do bloco",.24f);
+                closing.receives_input(false);
             }
         }
     }
@@ -788,10 +1135,12 @@ public:
         state->before_open=[this]{return !attached() || sync_fields();};
         bgui::panel_facade facade(d,"Script em blocos",bgui::dock_area::center,.30f); init(d,facade);
         auto body=facade.content(); body.native().set_scrollable(false);
-        identity=&body.label("",.30f);
-        auto& action_grid=body.add<bgui::grid>(bgui::vec2i{112,28},bgui::vec2i{4,4});
+        identity=&body.label("",.36f);
+        auto& action_grid=body.add<bgui::grid>(bgui::vec2i{132,32},bgui::vec2i{4,4});
         action_grid.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-        const auto action=[&](const std::string& label,std::function<void()> f){action_grid.add<bgui::button>(label,.26f,std::move(f));};
+        const auto action=[&](const std::string& label,std::function<void()> f){auto& button=action_grid.add<bgui::button>(tr(label),.32f,std::move(f));
+            if(label=="Salvar Lua") button.add_class("primary");
+            if(label=="Excluir bloco") button.add_class("danger");};
         action("Salvar Lua",[this]{save();bgui::focus_keyboard(*tree);});
         action("Reler do disco",[this,s=state]{
             if(reload_modal || s->script.empty() || !s->editable()) return;
@@ -809,12 +1158,12 @@ public:
         action("Desfazer",[this]{history(false);});
         action("Refazer",[this]{history(true);});
         action("Excluir bloco",[this]{erase_selected();});
-        status=&body.label("",.24f);
+        status=&body.label("",.30f);
         auto& workbench=body.add<bgui::linear>(bgui::orientation::horizontal);
         workbench.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);
         auto& categories=workbench.add<bgui::linear>(bgui::orientation::vertical);
         categories.type="visual-script-categories";categories.set_scrollable(true);
-        categories.style.layout.require_mode(bgui::mode::pixel,bgui::mode::match_parent);categories.style.layout.require_width(bgui::mode::pixel,132);
+        categories.style.layout.require_mode(bgui::mode::pixel,bgui::mode::match_parent);categories.style.layout.require_width(bgui::mode::pixel,144);
         categories.style.layout.padding={3,6,3,6};
         for(const std::string name:{"Objeto","Propriedades","Eventos","Controle","Debug","Scenes","Time","Entrada","Física","Câmera","Luzes","Animação","Interface","Matemática","Navegação","Compatibilidade"}) {
             auto& button=categories.add<category_button>(name,[this,name]{select_category(name);});
@@ -823,18 +1172,18 @@ public:
         }
         auto& palette=workbench.add<bgui::linear>(bgui::orientation::vertical);
         palette.type="visual-script-palette";
-        palette.style.layout.require_mode(bgui::mode::pixel,bgui::mode::match_parent);palette.style.layout.require_width(bgui::mode::pixel,250);
+        palette.style.layout.require_mode(bgui::mode::pixel,bgui::mode::match_parent);palette.style.layout.require_width(bgui::mode::pixel,230);
         palette.style.layout.padding={10,8,10,8};
-        category_title=&palette.add<bgui::text>("Objeto",.32f);
+        category_title=&palette.add<bgui::text>("Objeto",.36f);
         command_query.clear();
-        command_filter=&palette.add<bgui::inputbox>("","Buscar comando",.25f,[](const std::string&){});
+        command_filter=&palette.add<bgui::inputbox>("","Buscar comando",.32f,[](const std::string&){});
         command_filter->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
         command_palette=&palette.add<bgui::linear>(bgui::orientation::vertical);
         command_palette->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);command_palette->set_scrollable(true);
         auto& assembly=workbench.add<bgui::linear>(bgui::orientation::vertical);
         assembly.type="visual-script-assembly";
         assembly.style.layout.require_mode(bgui::mode::stretch,bgui::mode::match_parent);
-        auto& hint=assembly.add<bgui::text>("Arraste os blocos e encaixe na sequência. Selecione para editar.",.24f);
+        auto& hint=assembly.add<bgui::text>("Arraste os blocos e encaixe na sequência. Selecione para editar.",.30f);
         hint.style.layout.margin={12,6,6,6};
         tree=&assembly.add<block_tree>();
         tree->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);tree->set_scrollable(true);
@@ -868,16 +1217,20 @@ public:
 }
 scene_workflow_actions install_scene_workflow(panel_manager& scene_manager,panel_manager& script_manager,files_view& files,
     std::function<fs::path()> root,std::function<void(const fs::path&)> open_scene,std::function<bool()> editable,
-    std::function<void()> activate_scripting) {
+    std::function<void()> activate_scripting,std::shared_ptr<editor_context> context) {
     auto state=std::make_shared<workflow_state>(workflow_state{files,std::move(root),std::move(open_scene),std::move(editable)});
+    state->context=std::move(context);
     auto& graph=scene_manager.add<graph_panel>(state);
+    auto& outline=scene_manager.add<scene_outline_panel>(state);
+    auto& source_control=scene_manager.add<source_control_panel>(state);
+    auto& diff=scene_manager.add<diff_panel>(state);
     auto& scripts=script_manager.add<scripts_panel>(state);
     auto& blocks=script_manager.add<blocks_panel>(state);
     state->open_script=[&blocks,s=std::weak_ptr<workflow_state>(state),activate=std::move(activate_scripting)](const fs::path& path){
         if(auto state=s.lock()) {if(activate) activate();state->open(path);blocks.show();}
     };
     return {
-        [&graph,s=std::weak_ptr<workflow_state>(state)]{graph.show();if(auto state=s.lock()) ++state->graph_revision;},
+        [&graph,&outline,&source_control,&diff,s=std::weak_ptr<workflow_state>(state)]{graph.show();outline.show();source_control.show();diff.show();if(auto state=s.lock()) ++state->graph_revision;},
         [&scripts,&blocks]{scripts.show();blocks.show();}
     };
 }

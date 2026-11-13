@@ -1,4 +1,5 @@
 #pragma once
+#include "components/renderer.hpp"
 #include "editor_context.hpp"
 #include "systems/animation_system.hpp"
 #include "animation_assets.hpp"
@@ -40,6 +41,24 @@ public:
             if(std::find(m_context->animation_assets.begin(),m_context->animation_assets.end(),next.data)==m_context->animation_assets.end())
                 m_context->animation_assets.push_back(next.data);
             return set_player(id, std::move(next));
+        } catch (const std::exception& failure) { error = failure.what(); return false; }
+    }
+    bool import_clip(uint32_t id, const std::filesystem::path& source, std::string& error) {
+        try {
+            if (!editable(id) || m_context->project_root.empty()) throw std::runtime_error("Select an editable entity in an open project.");
+            auto imported = commons::load_animation_clip(source);
+            auto directory = m_context->project_root / "assets/animations";
+            std::filesystem::create_directories(directory);
+            auto destination = directory / source.filename();
+            if (std::filesystem::weakly_canonical(source) == std::filesystem::weakly_canonical(destination))
+                return assign(id, destination.string(), error);
+            for (unsigned suffix = 1; std::filesystem::exists(destination); ++suffix)
+                destination = directory / (source.stem().string() + "-" + std::to_string(suffix) + ".banim");
+            imported->source_path = destination;
+            imported->source_contents.clear(); imported->saved_definition.clear();
+            if (!save_animation_asset(*imported, error)) return false;
+            m_context->events.publish(editor_event::assets);
+            return assign(id, destination.string(), error);
         } catch (const std::exception& failure) { error = failure.what(); return false; }
     }
     bool create(uint32_t id, std::string name, std::string& error) {
@@ -185,11 +204,14 @@ public:
             }
         }
         if (!sampled) return false;
+        if (auto renderer = registry->get<commons::renderer>(id); renderer && renderer->m_modelo)
+            renderer->m_modelo->apply_pose();
         auto apply = [registry, edits, id](bool redo) {
             for (const auto& edit : *edits) {
                 auto target = commons::animation_target(*registry, id, edit.mask);
                 if (target && target == edit.target.lock()) commons::write_animation_property(*target, edit.path, redo ? edit.after : edit.before);
             }
+            if (auto renderer = registry->get<commons::renderer>(id); renderer && renderer->m_modelo) renderer->m_modelo->apply_pose();
         };
         if (!extend) m_context->record_action([apply] { apply(false); }, [apply] { apply(true); }, editor_event::properties);
         else m_context->events.publish(editor_event::properties);

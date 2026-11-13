@@ -131,6 +131,8 @@ void sample_animation(ecs& registry, uint32_t entity, const animation_clip& clip
         auto target = animation_target(registry, entity, track.target);
         if (value && target) write_animation_property(*target, track.property, *value);
     }
+    if (const auto target = registry.get<renderer>(entity); target && target->m_modelo)
+        target->m_modelo->apply_pose();
 }
 void animation_system::update(const std::shared_ptr<ecs>& registry) {
     const auto dt = m_delta();
@@ -226,6 +228,8 @@ void animation_system::update(const std::shared_ptr<ecs>& registry) {
                     write_animation_property(*target, channel.path, channel.stepped ? (weight < .5 ? a : b) : std::lerp(a, b, weight));
                 }
                 if (weight >= 1) { state.channels.clear(); state.source.reset(); }
+                if (const auto target = registry->get<renderer>(id); target && target->m_modelo)
+                    target->m_modelo->apply_pose();
             }
             state.sample_requested = false;
             player->m_time = state.time;

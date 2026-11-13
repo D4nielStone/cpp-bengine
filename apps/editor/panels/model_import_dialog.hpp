@@ -154,7 +154,7 @@ public:
         settings.add<bgui::text>("Materiais: " + std::to_string(scene->mNumMaterials) +
             "; texturas embutidas: " + std::to_string(scene->mNumTextures) +
             ". Câmeras, luzes e morph targets não são convertidos em entidades.", .27f);
-        modal.add<bgui::button>(tr("Importar como .bmodel"), .30f,
+        modal.add<bgui::button>(tr("Importar modelo e animações"), .30f,
             [this, source, project, destination, complete, scale = &scale, status = &status]() {
             try {
                 if (!std::filesystem::is_regular_file(source)) throw std::runtime_error("Arquivo de origem ausente.");
