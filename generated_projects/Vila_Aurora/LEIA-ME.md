@@ -19,5 +19,3 @@ Todos os modelos sao nativos .bmodel, gerados para este projeto, sem texturas ex
 Resultado da tentativa de runtime: {"running": false, "timedOut": false, "exitCode": 1, "log": "[runtime] Failed to initialize GLFW.\n"}
 
 Validacao adicional sem janela: todos os modelos e a animacao carregaram nos loaders nativos; o script executou com os bindings reais da engine, com entradas simuladas para andar, correr, pular, liberar/recapturar cursor e 120 atualizacoes sem erro. Colisao em gameplay e aparencia grafica ainda requerem teste no runtime com display.
-
-Correcao de compatibilidade: o ID 1 foi reservado para a camera do editor. O terreno agora usa o ID 284.

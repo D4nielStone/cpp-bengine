@@ -20,9 +20,3 @@
 - [Idiomas do editor e referência Lua integrada](./LOCALIZATION.md)
 - [Estabilização e validação](./STABILIZATION.md)
 - [Avaliação de estabilidade](./STABILITY_ASSESSMENT.md)
-
-## Histórico
-
-- [Notas da versão 0.1.3](./RELEASE_v0.1.3.md)
-- [Notas da versão 0.1.2](./RELEASE_v0.1.2.md)
-- [Atualizações do pacote portátil a partir da versão 0.1.4](../README.md#portable-updates)

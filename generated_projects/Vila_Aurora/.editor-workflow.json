@@ -1,0 +1,79 @@
+{
+    "version": 1,
+    "workspace": 0,
+    "model_view_mode": 0,
+    "model_selection": 0,
+    "extrude_distance": "0.25",
+    "model_orbital": false,
+    "orbital": true,
+    "colliders": false,
+    "selected": 279,
+    "inspector": {
+        "Directional Light": true,
+        "Transform": true,
+        "Camera Post-processing": true,
+        "Renderer": true,
+        "Camera": true
+    },
+    "camera": {
+        "post_processing": {
+            "occlusion": 0,
+            "radius": 0.75,
+            "strength": 1.0,
+            "fragment_shader": ""
+        },
+        "fov": 75.0,
+        "zfar": 300.0,
+        "znear": 0.10000000149011612,
+        "scale": 5.0,
+        "ortho": false,
+        "ceu": [
+            169,
+            208,
+            224,
+            255
+        ],
+        "skybox_image": "",
+        "skybox_faces": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+        ],
+        "atmosphere_zenith": [
+            0.1599999964237213,
+            0.1599999964237213,
+            0.1599999964237213
+        ],
+        "skybox": false,
+        "fog_enabled": false,
+        "fog_density": 0.009999999776482582,
+        "fog_min_distance": 0.0,
+        "fog_max_distance": 300.0,
+        "fog_color": [
+            0.4300000071525574,
+            0.7799999713897705,
+            0.8600000143051147,
+            1.0
+        ]
+    },
+    "transform": {
+        "position": [
+            2.3262557983398438,
+            1.4679489135742188,
+            16.07789421081543
+        ],
+        "rotation": [
+            -1.1500005722045898,
+            -214.5999755859375,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    }
+}

@@ -1,5 +1,5 @@
 #pragma once
-#include "editor_context.hpp"
+#include "core/editor_context.hpp"
 #include "systems/rig_entities.hpp"
 
 namespace editor::ui {
