@@ -1,6 +1,7 @@
 #pragma once
 #include "commons_namespace.hpp"
 #include "component.hpp"
+#include "loaders/model_rig.hpp"
 #include "utils/vec.hpp"
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -17,6 +18,9 @@ namespace COMMONS_NS {
     public:
 		bgui::vec3 up, position, rotation, scale;
 		uint32_t parent_id{0};
+        std::string rig_joint_id;
+        rig_transform rig_last_pose;
+        bool rig_pose_initialized{false};
 		bgui::vec3* target;
 		bool m_usar_target, m_target_novo{ false };
 		glm::mat4 matrizmodelo;

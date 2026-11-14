@@ -1,0 +1,8 @@
+{
+    "timeoutSeconds": 30,
+    "width": 1280,
+    "height": 720,
+    "frames": 180,
+    "specification": "Personagem visivel de costas em terceira pessoa, rua central, casas coloridas, praca com fonte e vegetacao. Sem erros Lua; camera atras e acima do jogador.",
+    "project": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/project.bengine"
+}

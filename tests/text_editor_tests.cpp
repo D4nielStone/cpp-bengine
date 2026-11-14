@@ -89,3 +89,50 @@ TEST(TextEditor, ButtonLabelUsesEllipsisWithoutChangingItsBuffer) {
     label.get_requires(&expanded);
     EXPECT_EQ(expanded.m_quad_requires.size(), 8u);
 }
+
+TEST(TextEditor, PageNavigationExtendsSelectionAndRespectsDocumentLimits) {
+    bgui::scoped_interface ui_scope;
+    bgui::get_context().m_input_map.clear();
+    bgui::get_context().m_char_buffer.clear();
+    bgui::inputbox input("one\ntwo\nthree\nfour\nfive\n", "", .30f, nullptr, bgui::input_mode::multiline);
+    input.set_final_rect(0, 0, 200, 100);
+    input.set_focused(true);
+    auto& io = bgui::get_context();
+    io.m_input_map[bgui::input_key::left_shift] = bgui::input_action::press;
+    io.m_input_map[bgui::input_key::page_up] = bgui::input_action::press;
+    input.on_update();
+    EXPECT_EQ(input.get_cursor_position(), 0u);
+    io.m_input_map.clear();
+    io.m_input_map[bgui::input_key::backspace] = bgui::input_action::press;
+    input.on_update();
+    EXPECT_TRUE(input.get_buffer().empty());
+}
+
+TEST(TextEditor, MouseDragSelectsTextForReplacement) {
+    bgui::scoped_interface ui_scope;
+    bgui::get_context().m_input_map.clear();
+    bgui::get_context().m_char_buffer.clear();
+    bgui::font font;
+    font.ascent = 8; font.descent = 2;
+    for (char32_t c = 32; c < 127; ++c) {
+        bgui::character glyph; glyph.size = {8,10}; glyph.bearing = {0,8}; glyph.advance = 8;
+        font.chs.emplace(c, glyph);
+    }
+    constexpr auto resolution = bgui::font_manager::m_default_resolution;
+    bgui::asset_manager::get_instance().store_font("drag-test", resolution, std::move(font));
+    bgui::font_manager::get_instance().set_default_font("drag-test", resolution);
+    bgui::inputbox input("abcdef", "", 1.f);
+    input.set_final_rect(0, 0, 200, 40);
+    input.get_label().set_final_rect(0, 0, 200, 40);
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {0,1};
+    input.on_clicked();
+    io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    io.m_mouse_position = {24,1};
+    input.on_update();
+    EXPECT_EQ(input.get_cursor_position(), 3u);
+    input.on_released();
+    io.m_input_map.clear(); io.m_char_buffer = "X";
+    input.on_update();
+    EXPECT_EQ(input.get_buffer(), "Xdef");
+}

@@ -596,6 +596,10 @@ bool validate_scene(const rapidjson::Document& document, std::string& error) {
 
 }
 
+bool validate_scene_entities(const rapidjson::Value& entities, std::string& error) {
+    return validate_entities(entities, error);
+}
+
 project_persistence_system::project_persistence_system(
     std::shared_ptr<commons::ecs> registry,
     const std::uint32_t editor_camera_id,
@@ -662,9 +666,19 @@ bool project_persistence_system::has_unsaved_changes(const std::string& path) co
     return current.HasParseError() || previous.HasParseError() || current != previous;
 }
 
+bool project_persistence_system::save_prefab(const std::string& path, std::uint32_t root, std::string& error) const {
+    if (std::filesystem::path(path).extension() != ".bobject" || !m_registry ||
+        root == m_editor_camera_id || !m_registry->is_alive(root)) {
+        error = "Selecione uma entidade e um destino .bobject.";
+        return false;
+    }
+    std::string snapshot;
+    return serialize_project(path, error, true, snapshot, false, root);
+}
+
 bool project_persistence_system::serialize_project(
     const std::string& path, std::string& error,
-    bool write_files, std::string& snapshot, bool update_paths
+    bool write_files, std::string& snapshot, bool update_paths, std::optional<std::uint32_t> prefab_root
 ) const {
     error.clear();
     snapshot = "[";
@@ -720,7 +734,7 @@ bool project_persistence_system::serialize_project(
         return false;
     }
 
-    const bool writing_scene = is_scene_path(absolute_target) && absolute_target != m_project_path;
+    const bool writing_scene = (prefab_root.has_value() || is_scene_path(absolute_target)) && absolute_target != m_project_path;
     auto scene_target = absolute_target;
     if (!writing_scene) {
         const auto saved = m_saved_states.find(absolute_target.string());
@@ -766,8 +780,23 @@ bool project_persistence_system::serialize_project(
     scene_document.AddMember("format", scene_format, allocator);
     scene_document.AddMember("version", 1, allocator);
     rapidjson::Value entities(rapidjson::kArrayType);
+    std::unordered_set<std::uint32_t> included;
+    if (prefab_root) {
+        included.insert(*prefab_root);
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto& [id, components] : m_registry->entities) {
+                auto transform = m_registry->get<commons::transform>(id);
+                if (id != m_editor_camera_id && transform && transform->parent_id &&
+                    included.contains(transform->parent_id) && included.insert(id).second) changed = true;
+            }
+        }
+        scene_document.AddMember("prefab_root", *prefab_root, allocator);
+    }
 
     for (const auto& [id, components] : m_registry->entities) {
+        if (prefab_root && !included.contains(id)) continue;
         if (id == m_editor_camera_id)
             continue;
 
@@ -779,7 +808,7 @@ bool project_persistence_system::serialize_project(
             allocator
         );
         const auto transform = m_registry->get<commons::transform>(id);
-        if (transform && transform->parent_id)
+        if (transform && transform->parent_id && (!prefab_root || id != *prefab_root))
             entity.AddMember("parent", transform->parent_id, allocator);
 
         {
@@ -881,6 +910,7 @@ bool project_persistence_system::serialize_project(
                     value.SetString(absolute.c_str(), static_cast<rapidjson::SizeType>(absolute.size()), allocator);
                 };
                 resolve_image(component_data["skybox_image"]);
+                resolve_image(component_data["post_processing"]["fragment_shader"]);
                 for (auto& face : component_data["skybox_faces"].GetArray()) resolve_image(face);
             } else if (mask == commons::component::COMPONENTE_RENDER &&
                        !m_asset_root.empty()) {

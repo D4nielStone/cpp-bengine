@@ -21,7 +21,7 @@ public:
         style.visual.background.normal = bgui::color{.02f, .02f, .02f, .68f};
         style.visual.visible = false;
         m_title = &add<bgui::text>(tr("Arraste aqui"), .55f);
-        m_hint = &add<bgui::text>(tr("Arquivos serão copiados para o projeto"), .3f);
+        m_hint = &add<bgui::text>(tr("Arquivos serão copiados para o projeto"), .30f);
         for (auto* text : {m_title, m_hint}) {
             text->receives_input(false);
             text->set_flex(false);

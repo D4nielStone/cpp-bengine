@@ -3,6 +3,7 @@
 #include "loaders/editable_model.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <optional>
@@ -320,7 +321,43 @@ inline bool loop_cut(
         return false;
     }
 
-    std::map<mesh_edge, mesh_edge> cut_edges{{seed, selected_edge}};
+    // UV seams may store two vertex indices at the same physical corner.
+    using position = std::array<float, 3>;
+    const auto point = [&](unsigned int index) -> position {
+        const auto& p = mesh.vertices[index].position;
+        return {p.x, p.y, p.z};
+    };
+    std::map<std::pair<position, position>, std::vector<mesh_edge>> geometric_edges;
+    for (const auto& face : mesh.faces) {
+        for (std::size_t i = 0; i < face.size(); ++i) {
+            const mesh_edge edge{face[i], face[(i + 1) % face.size()]};
+            const auto a = point(edge.first), b = point(edge.second);
+            geometric_edges[std::minmax(a, b)].push_back(edge);
+        }
+    }
+    std::map<mesh_edge, mesh_edge> cut_edges;
+    const auto add_rail = [&](mesh_edge rail) {
+        const auto key = ordered_mesh_edge(rail.first, rail.second);
+        if (!cut_edges.emplace(key, rail).second) return false;
+        const auto a = point(rail.first), b = point(rail.second);
+        const auto& uses = geometric_edges.at(std::minmax(a, b));
+        if (uses.size() == 2 && point(uses[0].first) == point(uses[1].second) &&
+            point(uses[0].second) == point(uses[1].first)) {
+            for (auto other : uses) {
+                const auto other_key = ordered_mesh_edge(other.first, other.second);
+                if (other_key == key) continue;
+                if (point(other.first) != a) std::swap(other.first, other.second);
+                cut_edges.emplace(other_key, other);
+            }
+        }
+        return true;
+    };
+    const auto seed_a = point(seed.first), seed_b = point(seed.second);
+    if (!geometric_edges.contains(std::minmax(seed_a, seed_b))) {
+        error = "A face selecionada não contém uma direção de corte válida.";
+        return false;
+    }
+    add_rail(selected_edge);
     bool changed = true;
     while (changed) {
         changed = false;
@@ -346,7 +383,7 @@ inline bool loop_cut(
             const auto direction = cut_edges.at(ordered_mesh_edge(face[corner], face[(corner + 1) % 4]));
             mesh_edge rail{face[(opposite + 1) % 4], face[opposite]};
             if (direction.first != face[corner]) std::swap(rail.first, rail.second);
-            changed = cut_edges.emplace(ordered_mesh_edge(rail.first, rail.second), rail).second || changed;
+            changed = add_rail(rail) || changed;
         }
     }
 

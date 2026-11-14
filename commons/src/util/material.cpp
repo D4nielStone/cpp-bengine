@@ -184,6 +184,7 @@ bool same_texture(const texture& left, const texture& right) {
 
 bool material::same_configuration(const material& other) const {
     if (this == &other) return true;
+    if (vertex_shader != other.vertex_shader || fragment_shader != other.fragment_shader) return false;
     if (uniforms.size() != other.uniforms.size() || textures.size() != other.textures.size())
         return false;
     for (const auto& [name, value] : uniforms) {

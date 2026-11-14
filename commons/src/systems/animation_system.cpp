@@ -1,3 +1,4 @@
+#include "systems/rig_entities.hpp"
 #include "systems/animation_system.hpp"
 #include "components/transform.hpp"
 #include "components/camera.hpp"
@@ -131,6 +132,10 @@ void sample_animation(ecs& registry, uint32_t entity, const animation_clip& clip
         auto target = animation_target(registry, entity, track.target);
         if (value && target) write_animation_property(*target, track.property, *value);
     }
+    const auto bone = registry.get<transform>(entity);
+    const auto rig = registry.get<renderer>(entity);
+    if ((bone && !bone->rig_joint_id.empty()) || (rig && rig->m_modelo && rig->m_modelo->has_skeleton()))
+        synchronize_rig_entities(registry);
     if (const auto target = registry.get<renderer>(entity); target && target->m_modelo)
         target->m_modelo->apply_pose();
 }
@@ -250,5 +255,6 @@ void animation_system::update(const std::shared_ptr<ecs>& registry) {
         player->m_playing = state.playing;
         player->m_blending = !state.channels.empty();
     });
+    synchronize_rig_entities(*registry);
 }
 }

@@ -78,6 +78,31 @@ TEST_F(EditableModelTest, LoopCutSplitsQuadAndRejectsUnsupportedTopology) {
     EXPECT_NE(error.find("quadriláteras"), std::string::npos);
 }
 
+TEST_F(EditableModelTest, StockCubeCutsFourFacesAcrossTextureSeamsInEitherDirection) {
+    commons::editable_model_data cube;
+    std::string error;
+    ASSERT_TRUE(commons::load_editable_model(
+        std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / "primitive-cube.bmodel", cube, error)) << error;
+    for (unsigned int direction : {0u, 1u}) {
+        auto mesh = cube.meshes.front();
+        ASSERT_EQ(mesh.faces.size(), 6u);
+        const auto face = mesh.faces.front();
+        ASSERT_EQ(face.size(), 4u);
+        const auto first = mesh.vertices.size();
+        std::vector<editor::ui::mesh_edge> rails;
+        ASSERT_TRUE(editor::ui::loop_cut(mesh, {face[direction], face[direction + 1]}, error, &rails)) << error;
+        EXPECT_EQ(mesh.faces.size(), 10u);
+        ASSERT_EQ(rails.size(), 8u);
+        editor::ui::slide_loop_cut(mesh, first, rails, .75f);
+        std::set<std::array<float, 3>> positions;
+        for (auto i = first; i < mesh.vertices.size(); ++i) {
+            const auto& p = mesh.vertices[i].position;
+            positions.insert({p.x, p.y, p.z});
+        }
+        EXPECT_EQ(positions.size(), 4u);
+    }
+}
+
 TEST_F(EditableModelTest, LoopCutSlidesCoherentlyAcrossOppositeEdgeWinding) {
     auto mesh = quad_mesh();
     mesh.vertices.push_back({{0.f, 2.f, 0.f}, {}, {0.f, 2.f}});

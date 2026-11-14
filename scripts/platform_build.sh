@@ -34,6 +34,10 @@ elif ! "$packager" template-validate "$template" "$key" "$target" "$format" >/de
     if "$packager" template-validate "$shipped" "$key" "$target" "$format" >/dev/null 2>&1; then
         template=$shipped
     else
+        if [ "${BENGINE_PORTABLE:-}" = 1 ]; then
+            printf 'This portable release includes folder export for its own platform only. No compatible bundled template was found.\n' >&2
+            exit 6
+        fi
         printf 'No compatible precompiled template; building it once.\n'
         runtime_root="${workspace}/runtime-${format}-${key}"
         sh "${repository_root}/scripts/compile_runtime.sh" "$target" "$repository_root" "$runtime_root" "$progress_file" packaging "$format"

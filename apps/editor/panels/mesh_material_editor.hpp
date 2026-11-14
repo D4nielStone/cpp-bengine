@@ -51,6 +51,21 @@ void build_material_properties(panel& owner, bgui::linear& content,
     const material_drop_target& register_target, const std::function<void(std::string)>& status,
     bool use_scene_history) {
     const auto material = binding.read();
+    for (const bool vertex : {true, false}) {
+        content.add<bgui::text>(vertex ? "Vertex GLSL" : "Fragment GLSL", .30f);
+        auto& input = content.add<bgui::inputbox>(vertex ? material.vertex_shader : material.fragment_shader,
+            "Caminho relativo ao projeto (vazio = padrão)", .30f,
+            [binding, context, vertex, status](const std::string& value) {
+                if (!binding.current() || context->is_playing) return;
+                auto next = binding.read();
+                const auto path = value.empty() ? std::filesystem::path{} : (context->project_root / value).lexically_normal();
+                if (!path.empty() && !std::filesystem::is_regular_file(path)) { status("Arquivo GLSL não encontrado."); return; }
+                (vertex ? next.vertex_shader : next.fragment_shader) = path.string();
+                binding.commit(next);
+            });
+        input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+    }
+
     const auto albedo = material.getUniforme("material.albedo");
     commons::color color{1.f, 1.f, 1.f, 1.f};
     if (albedo.m_type == commons::uniform::type::Cor) color = albedo.valor.color_value;
@@ -59,7 +74,7 @@ void build_material_properties(panel& owner, bgui::linear& content,
         const auto& value = albedo.valor.vec4;
         color = {value.x, value.y, value.z, value.w};
     }
-    content.add<bgui::text>("Base Color", .27f).receives_input(false);
+    content.add<bgui::text>("Base Color", .30f).receives_input(false);
     auto& picker = panel::add_color(content, {color.r, color.g, color.b, color.a});
     picker.set_on_change([binding](const bgui::color& value) {
         auto next = binding.read();
@@ -82,7 +97,7 @@ void build_material_properties(panel& owner, bgui::linear& content,
             }, use_scene_history);
     };
     for (const auto& factor : commons::pbr_factors) add_factor(factor, true);
-    auto& world = panel::add_checkbox(content, "WorldTexture", .29f, commons::world_texture(material));
+    auto& world = panel::add_checkbox(content, "WorldTexture", .30f, commons::world_texture(material));
     world.set_on_change([binding](bool enabled) {
         auto next = binding.read();
         if (commons::world_texture(next) == enabled) return;
@@ -91,10 +106,10 @@ void build_material_properties(panel& owner, bgui::linear& content,
     });
     for (const auto& factor : commons::texture_factors) add_factor(factor, false);
     for (const auto& map : commons::pbr_maps) {
-        content.add<bgui::text>(map.label, .27f).receives_input(false);
+        content.add<bgui::text>(map.label, .30f).receives_input(false);
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         panel::configure_property_row(row);
-        auto& input = panel::add_input(row, material.getTextura(map.name).path, "Caminho da textura", .26f);
+        auto& input = panel::add_input(row, material.getTextura(map.name).path, "Caminho da textura", .30f);
         input.add_class("material-texture-path");
         panel::configure_property_input(input);
         auto& preview = content.add<bgui::image>();
@@ -135,7 +150,7 @@ void build_material_properties(panel& owner, bgui::linear& content,
         };
         input.m_enter_func = [assign](const std::string& path) { assign(path); };
         if (register_target) register_target(&input, assign);
-        auto& clear = row.add<bgui::button>("×", .26f, [assign] { assign({}); });
+        auto& clear = row.add<bgui::button>("×", .30f, [assign] { assign({}); });
         clear.style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);
         clear.style.layout.require_size(22.f,22.f);
     }
@@ -145,10 +160,10 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
     std::size_t index, const material_drop_target& register_target,
     const std::function<void(std::string)>& status) {
     const mesh_material_binding binding{context, renderer, renderer->m_modelo, index};
-    content.add<bgui::text>(tr("Material .bmat"), .27f).receives_input(false);
+    content.add<bgui::text>(tr("Material .bmat"), .30f).receives_input(false);
     auto& material_row = content.add<bgui::linear>(bgui::orientation::horizontal);
     panel::configure_property_row(material_row);
-    auto& material_input = panel::add_input(material_row, "", "Carregar .bmat", .26f);
+    auto& material_input = panel::add_input(material_row, "", "Carregar .bmat", .30f);
     material_input.add_class("material-asset-path");
     panel::configure_property_input(material_input);
     const auto load = [binding, context, status](const std::filesystem::path& requested) {
@@ -162,7 +177,7 @@ inline void build_mesh_material_editor(panel& owner, bgui::linear& content,
     };
     material_input.m_enter_func = [load](const std::string& path) { load(path); };
     if (register_target) register_target(&material_input, load);
-    material_row.add<bgui::button>(tr("Salvar .bmat"), .26f, [binding, context, status] {
+    material_row.add<bgui::button>(tr("Salvar .bmat"), .30f, [binding, context, status] {
         if (!binding.current() || context->is_playing) return;
         std::filesystem::path path;
         std::string error;

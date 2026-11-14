@@ -74,10 +74,14 @@ std::filesystem::path browse_native(const std::filesystem::path& initial,
         initial_name += '/';
     const char* desktop = std::getenv("XDG_CURRENT_DESKTOP");
     const bool kde = desktop && std::strstr(desktop, "KDE");
-    for (int attempt = 0; attempt < 2; ++attempt) {
+    const char* bundled_dialog = std::getenv("BENGINE_FILE_DIALOG");
+    const bool has_bundled_dialog = bundled_dialog && *bundled_dialog;
+    for (int attempt = has_bundled_dialog ? -1 : 0; attempt < 2; ++attempt) {
         const bool use_kdialog = attempt == 0 ? kde : !kde;
         std::vector<std::string> args;
-        if (use_kdialog) {
+        if (attempt == -1) {
+            args = {bundled_dialog, "--browse", initial.string(), directory ? "directory" : "file"};
+        } else if (use_kdialog) {
             args = {"kdialog", directory ? "--getexistingdirectory" : "--getopenfilename",
                     initial.string()};
             if (!directory)

@@ -335,6 +335,36 @@ void editor_api::select_entity(std::optional<entity_id> id, bool additive) {
     if (m_context) m_context->select_entity(id, additive);
 }
 
+void editor_api::select_hierarchy(entity_id id, bool additive) {
+    if (!m_context || !m_context->registry || !m_context->registry->is_alive(id) ||
+        is_locked(id) || m_context->editor_camera_entity == id) return;
+    m_context->synchronize_selection();
+    const bool deselect = additive && m_context->selected_entities.contains(id);
+    std::unordered_map<entity_id, std::vector<entity_id>> children;
+    for (const auto entity : m_context->registry->live_entities) {
+        if (const auto transform = m_context->registry->get<commons::transform>(entity))
+            if (transform->parent_id) children[transform->parent_id].push_back(entity);
+    }
+    m_context->select_entity(id, additive);
+    std::vector<entity_id> pending{id};
+    std::unordered_set<entity_id> visited;
+    while (!pending.empty()) {
+        const auto current = pending.back();
+        pending.pop_back();
+        if (!visited.insert(current).second) continue;
+        if (current != m_context->editor_camera_entity && !is_locked(current)) {
+            if (deselect) m_context->selected_entities.erase(current);
+            else m_context->selected_entities.insert(current);
+        }
+        if (const auto found = children.find(current); found != children.end())
+            pending.insert(pending.end(), found->second.begin(), found->second.end());
+    }
+    if (deselect && m_context->selected_entity &&
+        !m_context->selected_entities.contains(*m_context->selected_entity))
+        m_context->selected_entity = m_context->selected_entities.empty() ? std::nullopt
+            : std::optional<entity_id>{*m_context->selected_entities.begin()};
+}
+
 void editor_api::select_asset(editor_asset_kind kind, const std::filesystem::path& file) {
     if (!m_context) return;
     if (kind != editor_asset_kind::none) {

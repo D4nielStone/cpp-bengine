@@ -1,3 +1,4 @@
+#include "prefab_asset.hpp"
 #include "project_file_transaction.hpp"
 #include "scene_files.hpp"
 #include "project_persistence_system.hpp"
@@ -1256,4 +1257,37 @@ TEST(ProjectCreationTest, EmptyAndFppTemplatesStartWithNeutralGrayCameras) {
         });
         EXPECT_GT(cameras, 0);
     }
+}
+
+TEST(PrefabPersistence, ExportsOnlySubtreeAndInstantiatesWithUndo) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(); registry->add<commons::camera>(camera);
+    auto root = registry->create(); auto child = registry->create(); auto unrelated = registry->create();
+    registry->get<commons::transform>(child.id)->set_parent(root.id, false);
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->editor_camera_entity = camera.id;
+    context->project_root = std::filesystem::temp_directory_path();
+    context->entity_names[root.id] = "Prefab";
+    auto path = temporary_project_path(); path.replace_extension(".bobject");
+    editor::ui::project_persistence_system persistence(registry, camera.id, &context->entity_names);
+    std::string error;
+    ASSERT_TRUE(persistence.save_prefab(path.string(), root.id, error)) << error;
+    rapidjson::Document data; data.Parse(read_file(path).c_str());
+    ASSERT_EQ(data["entities"].Size(), 2u);
+    EXPECT_EQ(data["prefab_root"].GetUint(), root.id);
+    ASSERT_TRUE(editor::ui::instantiate_prefab(context, path, error)) << error;
+    ASSERT_TRUE(context->selected_entity);
+    EXPECT_NE(*context->selected_entity, root.id);
+    EXPECT_EQ(registry->live_entities.size(), 6u);
+    ASSERT_FALSE(context->undo_stack.empty());
+    context->undo_stack.back().undo();
+    EXPECT_EQ(registry->live_entities.size(), 4u);
+    context->undo_stack.back().redo();
+    EXPECT_EQ(registry->live_entities.size(), 6u);
+    data["prefab_root"].SetUint(child.id);
+    editor::ui::project_files::stage({path, editor::ui::project_files::encode(data)});
+    editor::ui::project_files::replace(path);
+    EXPECT_FALSE(editor::ui::instantiate_prefab(context, path, error));
+    EXPECT_EQ(registry->live_entities.size(), 6u);
+    std::filesystem::remove(path);
 }

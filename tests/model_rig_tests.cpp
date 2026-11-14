@@ -1,3 +1,6 @@
+#include "rig_entity_edit.hpp"
+#include "systems/rig_entities.hpp"
+#include "rig_overlay.hpp"
 #include "loaders/editable_model.hpp"
 #include "components/renderer.hpp"
 #include "systems/animation_system.hpp"
@@ -176,4 +179,93 @@ TEST_F(ModelRigTest, PaintBatchPreservesRatiosLimitsInfluencesAndRejectsInvalidV
     EXPECT_EQ(data.meshes[0].skin[0].size(), 8u);
     EXPECT_FLOAT_EQ(editor::ui::rig_vertex_weight(data.meshes[0].skin[0], "tip"), .3f);
     EXPECT_TRUE(data.validate(error)) << error;
+}
+
+TEST_F(ModelRigTest, SkeletonEntitiesPreserveHierarchyAnimateAndSurviveOwnerRemoval) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, load().release());
+    const auto bones = commons::create_rig_entities(*registry, entity.id);
+    ASSERT_EQ(bones.size(), 2u);
+    EXPECT_TRUE(commons::create_rig_entities(*registry, entity.id).empty());
+    const auto root_bone = registry->get<commons::transform>(bones[0]);
+    const auto tip = registry->get<commons::transform>(bones[1]);
+    EXPECT_EQ(root_bone->parent_id, entity.id);
+    EXPECT_EQ(tip->parent_id, bones[0]);
+    EXPECT_EQ(tip->get_world_position(), (bgui::vec3{0,1,0}));
+    tip->set_world_position({2,1,0});
+    EXPECT_EQ(tip->position, (bgui::vec3{2,0,0}));
+    commons::synchronize_rig_entities(*registry);
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    EXPECT_FLOAT_EQ(renderer->m_modelo->meshes[0].vertices()[2].position.x, 3);
+    commons::animation_clip clip;
+    clip.tracks.push_back({commons::transform::mask, "position.x", false, {{0,0},{2,2}}});
+    commons::sample_animation(*registry, bones[1], clip, 1);
+    EXPECT_FLOAT_EQ(renderer->m_modelo->meshes[0].vertices()[2].position.x, 2);
+    EXPECT_TRUE(renderer->m_modelo->set_joint_pose("tip", {{4,0,0},{0,0,0},{1,1,1}}));
+    commons::synchronize_rig_entities(*registry);
+    EXPECT_FLOAT_EQ(tip->position.x, 4);
+    registry->remove(entity.id);
+    EXPECT_FALSE(commons::rig_entity_renderer(*tip));
+    EXPECT_NO_THROW(commons::synchronize_rig_entities(*registry));
+}
+
+TEST_F(ModelRigTest, JointBindingSerializesWithoutEntityIdsAndWorldRotationUsesRest) {
+    auto data = definition();
+    data.rig.joints[1].rest.rotation = {0,0,90};
+    std::string error;
+    ASSERT_TRUE(commons::save_editable_model(root / "rotated.bmodel", data, error));
+    auto registry = std::make_shared<commons::ecs>();
+    auto owner = registry->create();
+    registry->add<commons::renderer>(owner, commons::model::prepare((root / "rotated.bmodel").string()).release());
+    const auto bones = commons::create_rig_entities(*registry, owner.id);
+    const auto bone = registry->get<commons::transform>(bones[1]);
+    bone->set_world_rotation({0,0,120});
+    EXPECT_NEAR(bone->rotation.z, 30, .001f);
+    EXPECT_FALSE(bone->set_parent(owner.id));
+    rapidjson::Document value(rapidjson::kObjectType);
+    ASSERT_TRUE(bone->serialize(value, value.GetAllocator()));
+    commons::transform restored;
+    ASSERT_TRUE(restored.analyze(value));
+    EXPECT_EQ(restored.rig_joint_id, "tip");
+    EXPECT_EQ(restored.position, bone->position);
+    value["rig_joint"].SetInt(3);
+    EXPECT_FALSE(restored.analyze(value));
+}
+
+TEST(RigOverlay, InterpolatesWeightColorsAndClipsTriangles) {
+    bgui::draw_list draw;
+    editor::ui::draw_weight_triangle(draw, {{{-10,0},editor::ui::rig_weight_color(0)},
+        {{10,0},editor::ui::rig_weight_color(1)}, {{10,20},editor::ui::rig_weight_color(1)}}, {0,0,10,10});
+    ASSERT_FALSE(draw.get_vertices().empty());
+    bool blended = false;
+    for (const auto& vertex : draw.get_vertices()) {
+        EXPECT_GE(vertex.m_position.x, 0); EXPECT_LE(vertex.m_position.x, 10);
+        EXPECT_GE(vertex.m_position.y, 0); EXPECT_LE(vertex.m_position.y, 10);
+        blended |= vertex.m_color.x > 0 && vertex.m_color.x < 1;
+    }
+    EXPECT_TRUE(blended);
+    draw.clear();
+    draw.set_clip_rect({0,0,100,100});
+    editor::ui::draw_rig_segment(draw, glm::mat4{1}, {0,0,100,100}, {0,0,0}, {0,.5f,0});
+    EXPECT_GE(draw.get_vertices().size(), 48u);
+}
+
+TEST_F(ModelRigTest, ExposingSkeletonIsOneUndoableActionWithStableIds) {
+    auto context = std::make_shared<editor::ui::editor_context>();
+    context->registry = std::make_shared<commons::ecs>();
+    auto owner = context->registry->create();
+    context->registry->add<commons::renderer>(owner, load().release());
+    ASSERT_TRUE(editor::ui::expose_rig_entities(context, owner.id));
+    ASSERT_EQ(context->undo_stack.size(), 1u);
+    const auto names = context->entity_names;
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_FALSE(editor::ui::expose_rig_entities(context, owner.id));
+    ASSERT_TRUE(context->undo());
+    EXPECT_EQ(context->registry->entities.size(), 1u);
+    EXPECT_TRUE(context->entity_names.empty());
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(context->entity_names, names);
+    for (const auto& [id, name] : names)
+        EXPECT_TRUE(commons::rig_entity_renderer(*context->registry->get<commons::transform>(id)));
 }

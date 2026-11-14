@@ -1,5 +1,9 @@
 #include "engine_version.hpp"
 #include "project_snapshot.hpp"
+#include "creative_service.hpp"
+#include "tool_catalog.hpp"
+#include <rapidjson/schema.h>
+#include <fstream>
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -19,37 +23,7 @@ namespace fs = std::filesystem;
 
 constexpr auto protocol_version = "2025-11-25";
 constexpr unsigned max_page_size = 100;
-constexpr auto tool_catalog = R"json({
-    "tools": [
-        {
-            "name": "project_info",
-            "description": "Read the saved Bubble Engine project metadata and main scene entity count.",
-            "inputSchema": {"type": "object", "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "openWorldHint": false}
-        },
-        {
-            "name": "list_entities",
-            "description": "List saved main scene entities and their component types in file order.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"offset": {"type": "integer", "minimum": 0, "maximum": 4294967295}},
-                "additionalProperties": false
-            },
-            "annotations": {"readOnlyHint": true, "openWorldHint": false}
-        },
-        {
-            "name": "get_entity",
-            "description": "Read a saved entity and its serialized components by ID.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"id": {"type": "integer", "minimum": 1, "maximum": 4294967295}},
-                "required": ["id"],
-                "additionalProperties": false
-            },
-            "annotations": {"readOnlyHint": true, "openWorldHint": false}
-        }
-    ]
-})json";
+
 
 const Value& field(const Value& object, const char* key) {
     static const Value missing;
@@ -142,9 +116,22 @@ enum class phase { connecting, initializing, ready };
 
 class server {
 public:
-    explicit server(fs::path project) : m_project(std::move(project)) {}
+    server(fs::path project, fs::path workspace, fs::path runtime)
+        : m_service(std::move(project), std::move(workspace), std::move(runtime)) {}
 
     void dispatch(std::string_view line) {
+        unsigned depth = 0;
+        bool quoted = false, escaped = false, too_deep = false;
+        for (char character : line) {
+            if (quoted) {
+                if (escaped) escaped = false;
+                else if (character == '\\') escaped = true;
+                else if (character == '"') quoted = false;
+            } else if (character == '"') quoted = true;
+            else if (character == '{' || character == '[') { if (++depth > 64) too_deep = true; }
+            else if ((character == '}' || character == ']') && depth) --depth;
+        }
+        if (too_deep) line = "{";
         Document request;
         request.Parse<rapidjson::kParseValidateEncodingFlag | rapidjson::kParseIterativeFlag>(
             line.data(), line.size());
@@ -212,22 +199,58 @@ public:
         } else if (as_text(method) == "tools/call") {
             const auto tool = as_text(field(params, "name"));
             const auto& arguments = field(params, "arguments");
-            const auto& argument = field(arguments, tool == "get_entity" ? "id" : "offset");
-            if (tool != "project_info" && tool != "list_entities" && tool != "get_entity") {
-                fail(-32602, "Unknown tool");
-            } else if ((params.IsObject() && params.HasMember("arguments") && !arguments.IsObject()) ||
-                       (arguments.IsObject() && arguments.MemberCount() != (argument.IsUint() ? 1u : 0u)) ||
-                       (tool == "project_info" && argument.IsUint()) ||
-                       (tool == "get_entity" && (!argument.IsUint() || argument.GetUint() == 0))) {
-                fail(-32602, "Invalid tool arguments");
-            } else {
-                try {
-                    response.AddMember("result",
-                        inspect_project(m_project, tool, argument.IsUint() ? argument.GetUint() : 0u, memory),
-                        memory);
-                } catch (const fs::filesystem_error&) {
-                    response.AddMember("result", tool_result({}, memory, "Could not access saved project or scene file."), memory);
-                } catch (const std::runtime_error& error) {
+            Document catalog;
+            catalog.Parse(tool_catalog);
+            const Value* definition = nullptr;
+            for (const auto& item : catalog["tools"].GetArray())
+                if (as_text(item["name"]) == tool) definition = &item;
+            Document empty(rapidjson::kObjectType);
+            const auto& input = arguments.IsNull() ? static_cast<const Value&>(empty) : arguments;
+            if (!definition) fail(-32602, "Unknown tool");
+            else {
+                rapidjson::SchemaDocument schema((*definition)["inputSchema"]);
+                rapidjson::SchemaValidator validator(schema);
+                if (!input.Accept(validator) || (params.HasMember("arguments") && !arguments.IsObject()))
+                    fail(-32602, "Invalid tool arguments");
+                else try {
+                    Value result;
+                    if (tool == "project_info" || tool == "list_entities" || tool == "get_entity") {
+                        const auto& argument = field(input, tool == "get_entity" ? "id" : "offset");
+                        result = inspect_project(m_service.project(), tool,
+                            argument.IsUint() ? argument.GetUint() : 0u, memory);
+                    } else {
+                        struct redirect {
+                            std::streambuf* previous = std::cout.rdbuf(std::cerr.rdbuf());
+                            ~redirect() { std::cout.rdbuf(previous); }
+                        } output;
+                        auto data = m_service.call(tool, input, memory);
+                        result = tool_result(std::move(data), memory);
+                        if (tool == "test_status" && result["structuredContent"].HasMember("report")) {
+                            const auto size = fs::file_size(m_service.capture());
+                            if (size > 16 * 1024 * 1024) throw std::runtime_error("Capture exceeds 16 MiB.");
+                            std::ifstream file(m_service.capture(), std::ios::binary);
+                            std::string bytes(static_cast<std::size_t>(size), '\0');
+                            if (!file.read(bytes.data(), static_cast<std::streamsize>(size)))
+                                throw std::runtime_error("Could not read complete capture.");
+                            if (!file.bad() && !bytes.empty() && bytes.size() <= 16 * 1024 * 1024) {
+                                constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                                std::string encoded;
+                                unsigned value = 0; int bits = -6;
+                                for (unsigned char byte : bytes) {
+                                    value = (value << 8) | byte; bits += 8;
+                                    while (bits >= 0) { encoded += alphabet[(value >> bits) & 63]; bits -= 6; }
+                                }
+                                if (bits > -6) encoded += alphabet[((value << 8) >> (bits + 8)) & 63];
+                                while (encoded.size() % 4) encoded += '=';
+                                Value image(rapidjson::kObjectType);
+                                image.AddMember("type", "image", memory).AddMember("mimeType", "image/png", memory);
+                                image.AddMember("data", owned_text(encoded, memory), memory);
+                                result["content"].PushBack(image, memory);
+                            }
+                        }
+                    }
+                    response.AddMember("result", result, memory);
+                } catch (const std::exception& error) {
                     response.AddMember("result", tool_result({}, memory, error.what()), memory);
                 }
             }
@@ -239,7 +262,7 @@ public:
     }
 
 private:
-    fs::path m_project;
+    creative_service m_service;
     phase m_phase = phase::connecting;
 };
 }
@@ -247,20 +270,36 @@ private:
 
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
-    if (argc != 3 || std::string_view(argv[1]) != "--project" ||
-        fs::path(argv[2]).extension() != ".bengine") {
-        std::cerr << "Usage: bengine_mcp --project <path-to-project.bengine>\n";
-        return 2;
+    fs::path project, workspace, runtime;
+    for (int i = 1; i < argc; i += 2) {
+        if (i + 1 >= argc) return 2;
+        const std::string_view key(argv[i]);
+        if (key == "--project" && project.empty()) project = argv[i + 1];
+        else if (key == "--workspace" && workspace.empty()) workspace = argv[i + 1];
+        else if (key == "--runtime" && runtime.empty()) runtime = argv[i + 1];
+        else return 2;
     }
-
-    std::error_code error;
-    const auto project = fs::canonical(argv[2], error);
-    if (error || !fs::is_regular_file(project, error)) {
-        std::cerr << "Could not open the configured Bubble Engine project.\n";
-        return 2;
-    }
-
-    bubble::mcp::server server(project);
+    try {
+        if (project.empty() && workspace.empty()) throw std::runtime_error("Configure --project or --workspace.");
+        if (!project.empty()) {
+            project = fs::canonical(project);
+            if (project.extension() != ".bengine" || !fs::is_regular_file(project))
+                throw std::runtime_error("Expected a .bengine file.");
+        }
+        if (!workspace.empty()) {
+            workspace = fs::canonical(workspace);
+            if (!fs::is_directory(workspace)) throw std::runtime_error("Expected an existing workspace directory.");
+            if (!project.empty()) {
+                const auto relative = project.lexically_relative(workspace);
+                if (relative.empty() || *relative.begin() == "..") throw std::runtime_error("Project is outside workspace.");
+            }
+        }
+        if (!runtime.empty()) {
+            runtime = fs::canonical(runtime);
+            if (!fs::is_regular_file(runtime)) throw std::runtime_error("Expected a runtime executable.");
+        }
+    } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
+    bubble::mcp::server server(project, workspace, runtime);
     constexpr std::size_t max_message_bytes = 1024 * 1024;
     std::string buffer(max_message_bytes + 2, '\0');
     while (std::cout && std::cin.getline(buffer.data(), buffer.size())) {

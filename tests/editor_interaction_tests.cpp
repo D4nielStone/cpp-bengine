@@ -1500,6 +1500,51 @@ TEST_F(EditorInteractionTest, HierarchyGroupsSelectionAndUndoesInOneStep) {
     EXPECT_EQ(registry->get<commons::transform>(first.id)->parent_id, group);
 }
 
+TEST_F(EditorInteractionTest, LargeHierarchyReusesRowsAfterScrollingAndFiltering) {
+    std::vector<std::uint32_t> ids;
+    for (int i = 0; i < 1000; ++i) {
+        const auto id = registry->create().id;
+        ids.push_back(id);
+        context->entity_names[id] = "Post " + std::to_string(i);
+    }
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::entities_view panel(context);
+    panel.build(dock);
+    auto frame = [&] { panel.update(); bgui::on_update(); };
+    for (int i = 0; i < 4; ++i) frame();
+    auto* list = find_element<bgui::linear>(dock, [](auto& item) {
+        return item.has_class("entities-list");
+    });
+    ASSERT_NE(list, nullptr);
+    auto* first = find_element<bgui::tree>(*list, [](auto& node) {
+        return node.label().get_buffer() == "Post 0";
+    });
+    ASSERT_NE(first, nullptr);
+    const auto pool_size = first->get_parent()->get_elements()[bgui::layer::base].size();
+    EXPECT_LT(pool_size, 64u);
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {list->processed_x() + 5, list->processed_y() + 25};
+    io.m_scroll_delta_y = -10000.f;
+    for (int i = 0; i < 4; ++i) frame();
+    EXPECT_GT(list->get_scroll_offset(), 0);
+    EXPECT_EQ(first->get_parent()->get_elements()[bgui::layer::base].size(), pool_size);
+    auto* last = find_element<bgui::tree>(*list, [](auto& node) {
+        return node.label().get_buffer() == "Post 999";
+    });
+    ASSERT_NE(last, nullptr);
+    last->header().on_released();
+    frame();
+    EXPECT_EQ(panel.selected(), ids.back());
+    auto* filter = find_element<bgui::inputbox>(dock, [](auto&) { return true; });
+    ASSERT_NE(filter, nullptr);
+    filter->set_buffer("Post 357");
+    frame();
+    EXPECT_EQ(first->label().get_buffer(), "Post 357");
+    first->header().on_released();
+    frame();
+    EXPECT_EQ(panel.selected(), ids[357]);
+}
+
 TEST_F(EditorInteractionTest, InspectorSavesMaterialFileAndNotifiesFilesView) {
     namespace fs = std::filesystem;
     struct temporary_folder {
@@ -1549,4 +1594,161 @@ TEST_F(EditorInteractionTest, BlockEditorFocusProtectsEntitiesFromDeleteAndViewp
     bgui::on_update();EXPECT_TRUE(registry->is_alive(entity.id));
     io.m_input_map[bgui::input_key::left_control]=bgui::input_action::press;
     EXPECT_FALSE(editor::ui::viewport_camera_modifier());
+}
+
+TEST_F(EditorInteractionTest, KeypadViewsAndProjectionDoNotRepeatWhileHeld) {
+    auto& window = bgui::get_layout().add<bgui::window>("Viewport", true);
+    window.style.layout.require_size(500.f, 400.f);
+    auto& image = window.add<bgui::image>();
+    image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    image.receives_input(true);
+    bgui::on_update();
+    auto entity = registry->create(); registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    auto transform = registry->get<commons::transform>(entity.id);
+    float time = 0;
+    editor::ui::camera_movement_system movement(camera, image, {}, [&] { return time; });
+    movement.setup(registry);
+    auto& io = bgui::get_context();
+    io.m_mouse_position = {image.processed_x()+30, image.processed_y()+30};
+    io.m_input_map[bgui::input_key::keypad_one] = bgui::input_action::press;
+    movement.update(registry);
+    EXPECT_FLOAT_EQ(transform->get_rotation().y, -90.f);
+    io.m_input_map.clear(); movement.update(registry);
+    io.m_input_map[bgui::input_key::keypad_five] = bgui::input_action::press;
+    movement.update(registry);
+    EXPECT_TRUE(camera->config.flag_orth);
+    movement.update(registry);
+    EXPECT_TRUE(camera->config.flag_orth);
+}
+
+TEST_F(EditorInteractionTest, SceneRectangleSelectsWorldOriginsAndFiltersUnavailableEntities) {
+    auto camera_entity = registry->create();
+    registry->add<commons::camera>(camera_entity);
+    auto camera = registry->get<commons::camera>(camera_entity.id);
+    camera->viewport({200, 200});
+    context->editor_camera_entity = camera_entity.id;
+    auto parent = registry->create();
+    registry->get<commons::transform>(parent.id)->set_position({5.f, 0.f, 0.f});
+    auto child = registry->create();
+    registry->get<commons::transform>(child.id)->set_parent(parent.id, false);
+    auto hidden = registry->create();
+    auto locked = registry->create();
+    auto behind = registry->create();
+    auto invisible = registry->create();
+    for (auto id : {hidden.id, locked.id, invisible.id})
+        registry->get<commons::transform>(id)->set_position({5.f, 0.f, 0.f});
+    registry->get<commons::transform>(behind.id)->set_position({-5.f, 0.f, 0.f});
+    registry->add<commons::renderer>(invisible, new commons::model());
+    registry->get<commons::renderer>(invisible.id)->visible = false;
+    context->hidden_entities.insert(hidden.id);
+    context->locked_entities.insert(locked.id);
+    auto& image = bgui::get_layout().add<bgui::image>();
+    image.set_final_rect(50, 40, 200, 200);
+    editor::ui::entity_picking_system picker(camera, image, context, {});
+    picker.select_rectangle({170, 160}, {130, 120}, false);
+    EXPECT_EQ(context->selected_entities, (std::unordered_set<std::uint32_t>{parent.id, child.id}));
+    picker.select_rectangle({130, 120}, {170, 160}, true);
+    EXPECT_EQ(context->selected_entities.size(), 2u);
+    picker.select_rectangle({50, 40}, {60, 50}, true);
+    EXPECT_EQ(context->selected_entities.size(), 2u);
+    picker.select_rectangle({50, 40}, {60, 50}, false);
+    EXPECT_TRUE(context->selected_entities.empty());
+    EXPECT_FALSE(context->selected_entity);
+}
+
+TEST_F(EditorInteractionTest, SceneRectangleDragSelectsOnReleaseAndEscapeCancels) {
+    auto& window = bgui::get_layout().add<bgui::window>("Viewport", true);
+    window.style.layout.require_size(500.f, 400.f);
+    auto& image = window.add<bgui::image>();
+    image.set_size_mode(bgui::mode::match_parent, bgui::mode::match_parent);
+    image.receives_input(true);
+    bgui::on_update();
+    auto camera_entity = registry->create();
+    registry->add<commons::camera>(camera_entity);
+    auto camera = registry->get<commons::camera>(camera_entity.id);
+    camera->viewport({image.processed_width(), image.processed_height()});
+    auto entity = registry->create();
+    registry->get<commons::transform>(entity.id)->set_position({5.f, 0.f, 0.f});
+    auto state = std::make_shared<editor::ui::viewport_input_state>();
+    editor::ui::entity_picking_system picker(camera, image, context, state);
+    picker.set_rectangle_selection_enabled(true);
+    picker.setup(registry);
+    auto& io = bgui::get_context();
+    const bgui::vec2i center{image.processed_x() + image.processed_width() / 2,
+        image.processed_y() + image.processed_height() / 2};
+    const auto press = [&] {
+        io.m_mouse_position = center - bgui::vec2i{20, 20};
+        bgui::on_update();
+        io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+        picker.update(registry);
+        io.m_mouse_position = center + bgui::vec2i{20, 20};
+        picker.update(registry);
+    };
+    const auto release = [&] {
+        io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::release;
+        picker.update(registry);
+    };
+    press();
+    EXPECT_FALSE(context->selected_entity);
+    release();
+    EXPECT_EQ(context->selected_entity, entity.id);
+    context->select_entity(std::nullopt);
+    press();
+    io.m_input_map[bgui::input_key::escape] = bgui::input_action::press;
+    picker.update(registry);
+    io.m_input_map[bgui::input_key::escape] = bgui::input_action::release;
+    release();
+    EXPECT_FALSE(context->selected_entity);
+    press();
+    state->gizmo_active = true;
+    picker.update(registry);
+    state->gizmo_active = false;
+    release();
+    EXPECT_FALSE(context->selected_entity);
+}
+
+TEST_F(EditorInteractionTest, HierarchySelectionIncludesNestedChildrenAndTogglesTheSubtree) {
+    const auto root = registry->create();
+    const auto child = registry->create();
+    const auto grandchild = registry->create();
+    const auto sibling = registry->create();
+    const auto outside = registry->create();
+    registry->get<commons::transform>(child.id)->parent_id = root.id;
+    registry->get<commons::transform>(grandchild.id)->parent_id = child.id;
+    registry->get<commons::transform>(sibling.id)->parent_id = root.id;
+    editor::ui::editor_api api(context);
+    api.select_hierarchy(child.id);
+    EXPECT_EQ(context->selected_entity, child.id);
+    EXPECT_EQ(context->selected_entities, (std::unordered_set<std::uint32_t>{child.id, grandchild.id}));
+    api.select_hierarchy(root.id);
+    EXPECT_EQ(context->selected_entity, root.id);
+    EXPECT_EQ(context->selected_entities.size(), 4u);
+    api.select_hierarchy(outside.id, true);
+    api.select_hierarchy(root.id, true);
+    EXPECT_EQ(context->selected_entities, (std::unordered_set<std::uint32_t>{outside.id}));
+    EXPECT_EQ(context->selected_entity, outside.id);
+    api.select_hierarchy(outside.id, true);
+    EXPECT_TRUE(context->selected_entities.empty());
+    EXPECT_FALSE(context->selected_entity);
+}
+
+TEST_F(EditorInteractionTest, HierarchySelectionTraversesLockedNodesAndProtectsTheEditorCamera) {
+    const auto root = registry->create();
+    const auto locked = registry->create();
+    const auto leaf = registry->create();
+    const auto camera = registry->create();
+    registry->get<commons::transform>(locked.id)->parent_id = root.id;
+    registry->get<commons::transform>(leaf.id)->parent_id = locked.id;
+    registry->get<commons::transform>(camera.id)->parent_id = root.id;
+    context->locked_entities.insert(locked.id);
+    context->editor_camera_entity = camera.id;
+    editor::ui::editor_api api(context);
+    api.select_hierarchy(root.id);
+    EXPECT_EQ(context->selected_entities, (std::unordered_set<std::uint32_t>{root.id, leaf.id}));
+    api.select_hierarchy(locked.id);
+    EXPECT_EQ(context->selected_entity, root.id);
+    registry->get<commons::transform>(root.id)->parent_id = leaf.id;
+    api.select_hierarchy(root.id);
+    EXPECT_EQ(context->selected_entities.size(), 2u);
 }

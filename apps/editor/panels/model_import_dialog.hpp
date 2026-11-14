@@ -48,13 +48,13 @@ public:
         const int dialog_width = std::max(160, std::min(1000, bgui::get_context().m_size.x - 100));
         content.style.layout.require_width(bgui::mode::pixel, dialog_width);
         content.set_scrollable(true);
-        modal.add<bgui::text>("Importador 3D — " + source.filename().string(), .36f);
-        modal.add<bgui::text>(source.string(), .25f);
-        auto& status = modal.add<bgui::text>(diagnostic, .27f);
+        modal.add<bgui::text>("Importador 3D — " + source.filename().string(), .30f);
+        modal.add<bgui::text>(source.string(), .30f);
+        auto& status = modal.add<bgui::text>(diagnostic, .30f);
         if (!scene || !scene->mRootNode) {
             status.set_buffer(diagnostic + "\nAssimp: " + m_importer->GetErrorString());
-            modal.add<bgui::text>(tr("Corrija o arquivo ou suas dependências e tente novamente. O original foi preservado."), .27f);
-            modal.add<bgui::button>(tr("Tentar novamente"), .28f, [this, source, project, destination, complete]() {
+            modal.add<bgui::text>(tr("Corrija o arquivo ou suas dependências e tente novamente. O original foi preservado."), .30f);
+            modal.add<bgui::button>(tr("Tentar novamente"), .30f, [this, source, project, destination, complete]() {
                 bgui::add_function([this, source, project, destination, complete]() { show(source, project, destination, {}, complete); });
             });
             return;
@@ -70,22 +70,22 @@ public:
         settings.set_scrollable(true);
         auto& preview_panel = columns.add<bgui::linear>(bgui::orientation::vertical);
         preview_panel.style.layout.require_mode(bgui::mode::stretch, bgui::mode::stretch);
-        preview_panel.add<bgui::text>(tr("Visualização 3D orbital"), .32f);
+        preview_panel.add<bgui::text>(tr("Visualização 3D orbital"), .30f);
         auto& preview = preview_panel.add<bgui::image>(model_import_preview(*scene, m_options));
         preview.set_size(preview_width, preview_width * 260.f / 480.f);
         auto& orbit = preview_panel.add<model_import_orbit>(m_importer, *scene, m_options, preview);
         const auto refresh_preview = [&orbit]() { orbit.refresh(); };
-        preview_panel.add<bgui::text>(tr("Arraste para orbitar · use a roda do mouse para aproximar ou afastar."), .27f);
-        preview_panel.add<bgui::button>(tr("Redefinir órbita"), .28f, [&orbit]() { orbit.reset(); });
-        preview_panel.add<bgui::button>(tr("Atualizar prévia da seleção"), .28f, refresh_preview);
+        preview_panel.add<bgui::text>(tr("Arraste para orbitar · use a roda do mouse para aproximar ou afastar."), .30f);
+        preview_panel.add<bgui::button>(tr("Redefinir órbita"), .30f, [&orbit]() { orbit.reset(); });
+        preview_panel.add<bgui::button>(tr("Atualizar prévia da seleção"), .30f, refresh_preview);
         const auto check = [&](const std::string& label, bool& value) {
-            panel::add_checkbox(settings, &value, value, label, .28f)
+            panel::add_checkbox(settings, &value, value, label, .30f)
                 .set_on_change([refresh_preview](bool) { refresh_preview(); });
         };
         check("Importar outra cópia", m_another_copy);
-        settings.add<bgui::text>(tr("Configurações de malha"), .32f);
-        settings.add<bgui::text>(tr("Filtragem de texturas (suavização)"), .28f);
-        auto& filter_label = settings.add<bgui::text>("", .28f);
+        settings.add<bgui::text>(tr("Configurações de malha"), .30f);
+        settings.add<bgui::text>(tr("Filtragem de texturas (suavização)"), .30f);
+        auto& filter_label = settings.add<bgui::text>("", .30f);
         const auto refresh_filter = [this, label = &filter_label]() {
             label->set_buffer(m_options.filtering == commons::texture_filter::bilinear ? "Bilinear" :
                 m_options.filtering == commons::texture_filter::trilinear ? "Trilinear" : "Original");
@@ -93,15 +93,15 @@ public:
         refresh_filter();
         for (const auto& [label, value] : {std::pair{"Original", commons::texture_filter::original},
             {"Bilinear", commons::texture_filter::bilinear}, {"Trilinear", commons::texture_filter::trilinear}})
-            settings.add<bgui::button>(label, .28f, [this, value, refresh_filter]() {
+            settings.add<bgui::button>(label, .30f, [this, value, refresh_filter]() {
                 m_options.filtering = value;
                 refresh_filter();
             });
         check("Inverter UVs", m_options.flip_uvs);
         check("Gerar normais suaves quando ausentes", m_options.smooth_normals);
         check("Unir vértices idênticos", m_options.join_vertices);
-        settings.add<bgui::text>(tr("Escala uniforme (> 0)"), .28f);
-        auto& scale = panel::add_input(settings, std::to_string(m_options.scale), tr("Escala uniforme (> 0)"), .28f);
+        settings.add<bgui::text>(tr("Escala uniforme (> 0)"), .30f);
+        auto& scale = panel::add_input(settings, std::to_string(m_options.scale), tr("Escala uniforme (> 0)"), .30f);
         scale.m_enter_func = [this, refresh_preview](const std::string& value) {
             double next_scale = 0;
             const auto parsed = std::from_chars(value.data(), value.data() + value.size(), next_scale);
@@ -114,7 +114,7 @@ public:
         settings.add<bgui::text>("Nodes / estrutura da cena (desmarcar exclui a geometria dos descendentes)", .30f);
         const auto node_ui = [&](const auto& self, const aiNode* node, const std::string& path, unsigned depth) -> void {
             auto& toggle = panel::add_checkbox(settings, std::string(depth * 2, ' ') + node->mName.C_Str() +
-                " [" + std::to_string(node->mNumMeshes) + " meshes]", .27f, !m_options.excluded_nodes.contains(path));
+                " [" + std::to_string(node->mNumMeshes) + " meshes]", .30f, !m_options.excluded_nodes.contains(path));
             toggle.set_on_change([this, path, refresh_preview](bool enabled) {
                 if (enabled) m_options.excluded_nodes.erase(path); else m_options.excluded_nodes.insert(path);
                 refresh_preview();
@@ -122,7 +122,7 @@ public:
             for (unsigned i = 0; i < node->mNumChildren; ++i) self(self, node->mChildren[i], path + "/" + std::to_string(i), depth + 1);
         };
         node_ui(node_ui, scene->mRootNode, "0", 0);
-        settings.add<bgui::text>("Meshes / skins / skeleton", .32f);
+        settings.add<bgui::text>("Meshes / skins / skeleton", .30f);
         check("Importar skeleton e canais dos ossos", m_options.skeleton);
         check("Importar skins e pesos dos ossos (requer skeleton)", m_options.skins);
         for (unsigned i = 0; i < scene->mNumMeshes; ++i) {
@@ -136,9 +136,9 @@ public:
             });
             for (unsigned b = 0; b < mesh->mNumBones; ++b)
                 settings.add<bgui::text>("    Bone: " + std::string(mesh->mBones[b]->mName.C_Str()) + " — " +
-                    std::to_string(mesh->mBones[b]->mNumWeights) + " pesos", .25f);
+                    std::to_string(mesh->mBones[b]->mNumWeights) + " pesos", .30f);
         }
-        settings.add<bgui::text>("Animations", .32f);
+        settings.add<bgui::text>("Animations", .30f);
         check("Importar e reproduzir animações (primeiro clipe selecionado)", m_options.animations);
         for (unsigned i = 0; i < scene->mNumAnimations; ++i) {
             const auto* clip = scene->mAnimations[i];

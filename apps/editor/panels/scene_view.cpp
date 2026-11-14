@@ -33,8 +33,8 @@ public:
 class navigation_hint final : public bgui::text {
 public:
     explicit navigation_hint(std::shared_ptr<scene_view_state> state)
-        : bgui::text("Drag: look / orbit    Shift + Left Ctrl + drag: pan\n"
-                     "Scroll: dolly    Left Ctrl + WASD / QE: move", 0.25f),
+        : bgui::text("Left drag: select    Shift: extend    Right drag: look / orbit\n"
+                     "Scroll: dolly    Left Ctrl + Shift + drag: pan", 0.25f),
           m_state(std::move(state)) {
         receives_input(false);
         set_flex(false);
@@ -204,7 +204,7 @@ void scene_view::build(bgui::dock& dock) {
     preview_header.style.layout.padding = bgui::vec4i{0};
     preview_header.receives_input(false);
     preview_header.add<bgui::icon>("camera", 0.24f).receives_input(false);
-    auto& preview_title = preview_header.add<bgui::text>(tr("Camera Preview"), 0.27f);
+    auto& preview_title = preview_header.add<bgui::text>(tr("Camera Preview"), .30f);
     preview_title.receives_input(false);
     preview_title.style.layout.require_width(bgui::mode::stretch);
     preview_title.set_wrap(false);
@@ -218,7 +218,7 @@ void scene_view::build(bgui::dock& dock) {
         m_presenter
     );
     auto& tools = bgui::panel_content(scene_window).add<tools_container, bgui::layer::overlay>(m_state);
-    auto& mode = tools.add<bgui::button>(tr("View: Normal"), 0.28f, [] {});
+    auto& mode = tools.add<bgui::button>(tr("View: Normal"), .30f, [] {});
     mode.style.layout.require_size(150.f, 26.f);
     mode.add<bgui::icon>("eye", 0.28f).receives_input(false);
     m_state->mode_button = &mode;

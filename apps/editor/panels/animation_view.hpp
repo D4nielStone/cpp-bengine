@@ -2,6 +2,7 @@
 #include "../core/localization.hpp"
 #include "panel.hpp"
 #include "animation_editor.hpp"
+#include "rig_entity_edit.hpp"
 #include <charconv>
 #include <chrono>
 #include <sstream>
@@ -62,6 +63,7 @@ public:
             if (m_selected && m_recording) m_edits.begin_recording(*m_selected);
             return;
         }
+        commons::synchronize_rig_entities(*m_context->registry);
         m_context->synchronize_selection();
         auto selected = m_context->selected_entity;
         if (selected == m_context->editor_camera_entity) selected.reset();
@@ -348,6 +350,13 @@ private:
         const auto id = *m_selected;
         const auto name = m_context->entity_names.find(id);
         m_identity->set_buffer("ANIMAÇÃO  /  " + (name == m_context->entity_names.end() ? "Entidade " + std::to_string(id) : name->second));
+        if (const auto renderer = m_context->registry->get<commons::renderer>(id);
+            renderer && renderer->m_modelo && renderer->m_modelo->has_skeleton()) {
+            body.action(tr("Expor ossos na Hierarquia"), [this, id] {
+                expose_rig_entities(m_context, id); m_dirty = true;
+            }, .24f);
+            body.label(tr("Selecione um osso na Hierarquia e ative Gravar para animar sua transformação."), .24f);
+        }
         auto file = control_row(body);
         auto player = m_edits.player(id);
         auto asset = m_edits.clip(id);
@@ -378,7 +387,7 @@ private:
             else status(error);
         },.24f);
         auto create = control_row(body);
-        auto* clip_name_input = &create.add<bgui::inputbox>("Animation", tr("Nome do novo clipe"), .24f);
+        auto* clip_name_input = &create.add<bgui::inputbox>("Animation", tr("Nome do novo clipe"), .30f);
         clip_name_input->style.layout.require_mode(bgui::mode::stretch, bgui::mode::match_parent);
         create.action(asset ? tr("Duplicar clipe") : tr("Criar clipe"), [this, id, clip_name_input] {
             std::string error;

@@ -141,6 +141,7 @@ struct uniform {
     };
 
     struct material {
+        std::string vertex_shader, fragment_shader;
         material() = default;
         material(std::map<std::string, uniform>);
         void set_uniform(const std::string&, const uniform&);

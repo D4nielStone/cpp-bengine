@@ -239,3 +239,17 @@ TEST_F(RuntimeProcessTest, LuaSwitchesScenesFromSetupAndPlansEnemyRoute) {
     ASSERT_TRUE(process.stop(error)) << error;
 }
 #endif
+
+TEST_F(RuntimeProcessTest, PreservedProjectSurvivesNaturalExitAndMissingExecutable) {
+    snapshot("exit");
+    editor::ui::runtime_process process;
+    std::string error;
+    ASSERT_TRUE(process.start(RUNTIME_PROCESS_HELPER, project, error, {true, {}})) << error;
+    ASSERT_TRUE(wait_for([&] { return !process.running(error); }));
+    EXPECT_EQ(process.exit_code(), 0);
+    EXPECT_TRUE(fs::exists(project));
+    EXPECT_TRUE(fs::exists(scene));
+    ASSERT_FALSE(process.start(root / "missing", project, error, {true, {}}));
+    EXPECT_TRUE(fs::exists(project));
+    EXPECT_TRUE(fs::exists(scene));
+}

@@ -10,18 +10,23 @@ protected:
     std::filesystem::path root;
     std::string old_path;
     std::string old_desktop;
+    std::string old_bundled;
+    bool had_bundled{};
     bool had_path{}, had_desktop{};
     void SetUp() override {
         char pattern[] = "/tmp/bengine-dialog-XXXXXX";
         root = mkdtemp(pattern);
         if (const char* value = getenv("PATH")) { had_path = true; old_path = value; }
         if (const char* value = getenv("XDG_CURRENT_DESKTOP")) { had_desktop = true; old_desktop = value; }
+        if (const char* value = getenv("BENGINE_FILE_DIALOG")) { had_bundled = true; old_bundled = value; }
+        unsetenv("BENGINE_FILE_DIALOG");
         setenv("PATH", root.c_str(), 1);
         setenv("XDG_CURRENT_DESKTOP", "GNOME", 1);
     }
     void TearDown() override {
         if (had_path) setenv("PATH", old_path.c_str(), 1); else unsetenv("PATH");
         if (had_desktop) setenv("XDG_CURRENT_DESKTOP", old_desktop.c_str(), 1); else unsetenv("XDG_CURRENT_DESKTOP");
+        if (had_bundled) setenv("BENGINE_FILE_DIALOG", old_bundled.c_str(), 1); else unsetenv("BENGINE_FILE_DIALOG");
         std::filesystem::remove_all(root);
     }
     void program(const char* name, const std::string& body) {
@@ -30,6 +35,17 @@ protected:
         std::filesystem::permissions(path, std::filesystem::perms::owner_all);
     }
 };
+
+TEST_F(NativeDialogTest, BundledDialogWorksWithoutDesktopPrograms) {
+    program("BubbleEngine", "printf '%s\\n' \"$@\" > '" + (root / "arguments").string() + "'\nprintf '%s\\n' '/tmp/my project'\n");
+    setenv("BENGINE_FILE_DIALOG", (root / "BubbleEngine").c_str(), 1);
+    std::string error;
+    EXPECT_EQ(editor::browse_native("/tmp/folder with spaces", true, error), "/tmp/my project");
+    EXPECT_TRUE(error.empty());
+    std::ifstream input(root / "arguments");
+    const std::string arguments((std::istreambuf_iterator<char>(input)), {});
+    EXPECT_EQ(arguments, "--browse\n/tmp/folder with spaces\ndirectory\n");
+}
 
 TEST_F(NativeDialogTest, PreservesPathsAndPassesFolderModeWithoutShellExpansion) {
     program("zenity", "printf '%s\\n' \"$@\" > '" + (root / "arguments").string() + "'\nprintf '%s\\n' '/tmp/pasta com espaço/projeto.bengine'\n");

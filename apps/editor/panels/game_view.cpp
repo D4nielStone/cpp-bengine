@@ -139,7 +139,7 @@ public:
         outline->style.visual.border_size = 2.f;
         outline->style.visual.border_radius = 0.f;
         for(auto*& handle : handles) {
-            handle=&add<bgui::button>("",.25f,[]{});
+            handle=&add<bgui::button>("",.30f,[]{});
             handle->set_flex(false);
             handle->get_label().set_enable(false);
             handle->style.visual.background.normal = accent;
@@ -344,7 +344,7 @@ void game_view::build(bgui::dock& dock) {
     state->image = &image;
     state->status = &content.add<bgui::text>(
         tr("Waiting for a game camera."),
-        0.27f
+        .30f
     );
     state->status->add_class("project-manager-muted");
 

@@ -83,7 +83,7 @@ jobs:
       - name: Build
         run: cmake --build out --config Release --parallel 2
       - name: Test
-        run: ctest --test-dir out --output-on-failure -C Release
+        run: ctest --test-dir out --output-on-failure --no-tests=error -C Release
       - name: Exercise runtime with the generated FPP template
         if: runner.os == 'Linux'
         run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 BENGINE_RUNTIME_SMOKE=1 ctest --test-dir out --output-on-failure -R '^RuntimeProcessTest.FppTemplateStartsAndRestartsThroughEditorProcess$'
@@ -130,13 +130,19 @@ jobs:
           python -m PyInstaller --onefile --name engine_updater --distpath updater-dist tools/release/updater.py
       - name: Package Linux engine
         if: runner.os == 'Linux'
-        run: python tools/release/package.py --build release-build --output release --updater updater-dist/engine_updater --version "$GITHUB_REF_NAME"
+        run: python tools/release/package.py --portable --build release-build --output release --updater updater-dist/engine_updater --version "$GITHUB_REF_NAME"
       - name: Package Windows engine
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          python tools/release/package.py --build release-build --output release --updater updater-dist/engine_updater.exe --version "$env:GITHUB_REF_NAME" --library-dir "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
+          python tools/release/package.py --portable --build release-build --output release --updater updater-dist/engine_updater.exe --version "$env:GITHUB_REF_NAME" --library-dir "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke test portable Linux editor without external tools
+        if: runner.os == 'Linux'
+        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tools/release/smoke.py release
+      - name: Smoke test portable Windows editor without external tools
+        if: runner.os == 'Windows'
+        run: python tools/release/smoke.py release
       - uses: actions/upload-artifact@v4
         with:
           name: engine-${{ runner.os }}
@@ -165,6 +171,7 @@ jobs:
           (cd release && sha256sum *.zip > SHA256SUMS)
           printf '![Bubble Engine preview](https://raw.githubusercontent.com/%s/%s/preview.jpg)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release/CHANGELOG.md
           gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body >> release/CHANGELOG.md
+          printf '\n## Download portátil\n\nBaixe o arquivo `*-portable.zip`, extraia e abra `BubbleEngine` (Linux) ou `BubbleEngine.exe` (Windows). Assets e bibliotecas estão incluídos. Exportação sem compilador: pasta, na plataforma da release.\n' >> release/CHANGELOG.md
           notes_path="docs/RELEASE_${GITHUB_REF_NAME}.md"
           if [ -f "$notes_path" ]; then
             printf '\n' >> release/CHANGELOG.md

@@ -60,12 +60,12 @@ void runtime_tools_view::build(bgui::dock& dock) {
         bgui::mode::match_parent
     );
 
-    m_runtime_status = &content.add<bgui::text>("Game window: stopped", 0.31f);
-    m_frame_profile = &content.add<bgui::text>("Frame: 0.00 ms | FPS: 0", 0.29f);
-    m_render_profile = &content.add<bgui::text>("Render: 0.00 ms", 0.29f);
+    m_runtime_status = &content.add<bgui::text>("Game window: stopped", .30f);
+    m_frame_profile = &content.add<bgui::text>("Frame: 0.00 ms | FPS: 0", .30f);
+    m_render_profile = &content.add<bgui::text>("Render: 0.00 ms", .30f);
     m_scene_debug = &content.add<bgui::text>(
         "Scene: 0 entities | 0 renderers | 0 cameras",
-        0.29f
+        .30f
     );
 }
 

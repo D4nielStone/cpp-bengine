@@ -99,6 +99,10 @@ bool camera::analyze(const rapidjson::Value& value)
             return false;
         next.post_processing = {static_cast<ambient_occlusion_mode>(post["occlusion"].GetUint()),
             post["radius"].GetFloat(), post["strength"].GetFloat()};
+        if (post.HasMember("fragment_shader")) {
+            if (!post["fragment_shader"].IsString()) return false;
+            next.post_processing.fragment_shader = post["fragment_shader"].GetString();
+        }
         if (!next.post_processing.valid()) return false;
     }
     next.use_skybox = false;
@@ -338,6 +342,7 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
     post.AddMember("occlusion", static_cast<unsigned>(config.post_processing.occlusion), allocator);
     post.AddMember("radius", config.post_processing.radius, allocator);
     post.AddMember("strength", config.post_processing.strength, allocator);
+    post.AddMember("fragment_shader", rapidjson::Value(config.post_processing.fragment_shader.c_str(), allocator), allocator);
     value.AddMember("post_processing", post, allocator);
 
     // fov

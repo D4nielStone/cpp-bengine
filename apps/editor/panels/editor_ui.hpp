@@ -17,6 +17,8 @@
 #include <memory>
 #include <string>
 
+namespace commons { class renderer; class model; }
+
 namespace bgui {
 class linear;
 class modal;
@@ -30,6 +32,8 @@ namespace editor::ui {
 
 class files_view;
 class scenes_view;
+class entities_view;
+class components_view;
 
 enum class editor_workspace_mode {
     editor,
@@ -94,8 +98,12 @@ public:
     }
 
     void setup_scene_management(files_view& files, std::function<void()> scene_loaded);
+    std::unordered_map<uint32_t, std::pair<std::weak_ptr<commons::renderer>, const commons::model*>> m_rig_models;
     void update();
     void reset_ui();
+    void refresh_feature_settings();
+    std::optional<std::uint32_t> managed_entity_at(bgui::vec2i position) const;
+    bool drop_managed_asset(const std::filesystem::path& path, bgui::vec2i position);
 
 private:
     std::function<void(std::function<void()>)> m_load_dispatcher;
@@ -113,6 +121,8 @@ private:
     panel_manager m_management_panel_manager;
     panel_manager m_scripting_panel_manager;
     scenes_view* m_scenes{};
+    entities_view* m_managed_entities{};
+    components_view* m_managed_components{};
     std::function<void()> m_show_scene_workflow, m_show_scripting;
     files_view* m_files{};
     std::function<void()> m_scene_loaded;
@@ -123,6 +133,7 @@ private:
     std::shared_ptr<commons::ecs> m_registry;
     std::string m_project_path;
     bool m_project_load_pending{false};
+    bool m_visual_scripting_enabled{false};
     std::function<void(const std::string&)> m_project_loaded_callback;
     std::function<bool(bool, std::string&)> m_play_state_callback;
     std::function<bool(std::string&)> m_runtime_running_callback;

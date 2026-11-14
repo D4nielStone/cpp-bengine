@@ -40,6 +40,7 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
                 value = std::filesystem::path(value).is_absolute() ? to.string() : to.lexically_relative(root).generic_string();
         };
         relocate(camera->config.skybox_image);
+        relocate(camera->config.post_processing.fragment_shader);
         for (auto& face : camera->skybox_faces) relocate(face);
     });
     context->registry->cada<commons::renderer>([&](auto id) {
@@ -50,6 +51,8 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
         if (moving_model) model->relocate_source_path(to);
         for (auto& mesh : model->meshes) {
             auto material = mesh.getMaterial();
+            if (!material.vertex_shader.empty() && absolute(material.vertex_shader) == from) material.vertex_shader = to.string();
+            if (!material.fragment_shader.empty() && absolute(material.fragment_shader) == from) material.fragment_shader = to.string();
             for (auto& [name, texture] : material.textures) {
                 const auto path = absolute(texture.path);
                 if (path == from) texture.path = to.string();

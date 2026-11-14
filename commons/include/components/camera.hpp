@@ -21,6 +21,7 @@ namespace COMMONS_NS {
         ambient_occlusion_mode occlusion{ambient_occlusion_mode::off};
         float radius{0.75f};
         float strength{1.f};
+        std::string fragment_shader;
 
         bool valid() const;
     };

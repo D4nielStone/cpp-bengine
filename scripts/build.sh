@@ -32,7 +32,7 @@ cmake -S "$repo_root" -B "$build_dir" \
     -DBUILD_TESTING="$run_tests" \
     -DBUILD_RUNTIME=ON \
     -DBUILD_EDITOR=ON
-cmake --build "$build_dir" --config Release --parallel 2
+cmake --build "$build_dir" --config Release --parallel "${BENGINE_BUILD_JOBS:-2}"
 
 if [ "$run_tests" = ON ]; then
     ctest --test-dir "$build_dir" --output-on-failure -C Release

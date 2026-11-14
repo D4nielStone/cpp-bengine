@@ -14,7 +14,11 @@ struct lua_script_template {
 };
 
 inline constexpr std::array lua_script_templates{
-    lua_script_template{"Arquivo em branco", ""},
+    lua_script_template{"Arquivo em branco", R"lua(--@property {"name":"my_property","type":"number","default":0}
+function setup() end
+
+function update() end
+)lua"},
     lua_script_template{"Controle FPP (jogador e câmera)", R"lua(--@property {"name":"player","type":"entity","default":null}
 --@property {"name":"camera","type":"entity","default":null}
 --@property {"name":"move_speed","type":"number","default":5}

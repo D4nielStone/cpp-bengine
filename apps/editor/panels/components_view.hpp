@@ -255,7 +255,7 @@ private:
 
     void build_material_file(const std::filesystem::path& requested) {
         auto& content = add_section(requested.filename().string(), false, {}).children();
-        auto& status = content.add<bgui::text>(tr("Alterações são salvas no arquivo."), .27f);
+        auto& status = content.add<bgui::text>(tr("Alterações são salvas no arquivo."), .30f);
         struct file_binding {
             std::shared_ptr<editor_context> context;
             std::filesystem::path selected;
@@ -350,14 +350,14 @@ private:
 
         if (!image.empty()) {
             auto& content = add_section(image.filename().string(), false, {}).children();
-            auto& status = content.add<bgui::text>(tr("Reopen the scene to apply texture changes."), 0.27f);
+            auto& status = content.add<bgui::text>(tr("Reopen the scene to apply texture changes."), .30f);
             int percent = commons::default_texture_resolution_percent;
             try {
                 percent = commons::texture_resolution_percent(image);
             } catch (const std::exception& error) {
                 status.set_buffer(error.what());
             }
-            content.add<bgui::field>(tr("Texture Resolution (%)"), std::to_string(percent), 0.27f,
+            content.add<bgui::field>(tr("Texture Resolution (%)"), std::to_string(percent), .30f,
                 [image, &status](const std::string& input) {
                     int value{};
                     const auto parsed = std::from_chars(input.data(), input.data() + input.size(), value);
@@ -386,7 +386,7 @@ private:
         if (!selected) {
             auto& message = m_root->add<bgui::text>(
                 tr("Select an entity to inspect its components."),
-                0.27f
+                .30f
             );
             message.style.layout.require_mode(
                 bgui::mode::match_parent,
@@ -401,7 +401,7 @@ private:
     void build_entity(const entity_id id) {
         const auto registry = m_context->registry;
         if (m_context->editor_camera_entity == id) {
-            m_toolbar->add<bgui::text>(tr("Editor Camera"), 0.27f);
+            m_toolbar->add<bgui::text>(tr("Editor Camera"), .30f);
             if (auto camera = registry->get<commons::camera>(id))
                 add_camera(id, camera);
             return;
@@ -427,7 +427,7 @@ private:
 
         if (auto path = registry->get<commons::pathfinder>(id)) {
             auto& content = add_section("Pathfinder", true, [this,id] { remove_component<commons::pathfinder>(id); }).children();
-            content.add<bgui::text>("A* XZ | Lua: FindPath / GetPath | F3", .25f);
+            content.add<bgui::text>("A* XZ | Lua: FindPath / GetPath | F3", .30f);
             add_float(content, "Cell Size", path->cell_size, [path] { return path->cell_size; },
                 [path](float n) { if (std::isfinite(n)) path->configure(std::clamp(n,.05f,100.f),path->agent_radius,path->search_radius); });
             add_float(content, "Agent Radius", path->agent_radius, [path] { return path->agent_radius; },
@@ -446,8 +446,8 @@ private:
             if(e && std::find(h->elements.begin(),h->elements.end(),e)!=h->elements.end()) {
                 auto& content=section.children();
                 auto string_field=[&](const std::string& label, std::string commons::hud_element::* member) {
-                    content.add<bgui::text>(label,.27f);
-                    auto& input=content.add<bgui::inputbox>(e.get()->*member,"",.27f);
+                    content.add<bgui::text>(label,.30f);
+                    auto& input=content.add<bgui::inputbox>(e.get()->*member,"",.30f);
                     configure_property_input(input);
                     track_property_input(input,[e,member]{return e.get()->*member;});
                     input.m_enter_func=[this,h,e,member](const std::string& next) {
@@ -472,9 +472,9 @@ private:
                 add_vec_field(content,"Position",e->position,[e]{return e->position;},[e](size_t axis,float n){e->position[axis]=n;});
                 auto& color=panel::add_color(content,e->color);
                 color.set_on_change([this,e](const bgui::color& n){auto old=e->color;e->color=n;m_context->record_action([e,old]{e->color=old;},[e,n]{e->color=n;});});
-                auto& align=content.add<bgui::combo_box>(std::vector<std::string>{"Start","Center","End"},.27f,size_t(e->alignment));
+                auto& align=content.add<bgui::combo_box>(std::vector<std::string>{"Start","Center","End"},.30f,size_t(e->alignment));
                 align.set_on_change([this,e](size_t n,const std::string&){auto old=e->alignment;e->alignment=int(n);m_context->record_action([e,old]{e->alignment=old;},[e,n]{e->alignment=int(n);});});
-            } else section.children().add<bgui::text>(tr("Select a widget in Game to edit it."),.27f);
+            } else section.children().add<bgui::text>(tr("Select a widget in Game to edit it."),.30f);
         }
         if (auto player = registry->get<commons::sound_player>(id))
             add_sound_player(id, player);
@@ -483,10 +483,10 @@ private:
             auto& section = add_section("Physics", true,
                 [this, id]() { remove_component<commons::physics>(id); });
             auto& content = section.children();
-            content.add<bgui::text>(tr("Body Type"), 0.27f);
+            content.add<bgui::text>(tr("Body Type"), .30f);
             auto& types = content.add<bgui::combo_box>(
                 std::vector<std::string>{"Rigid Body", "Character Body", "Static Body"},
-                0.26f, static_cast<std::size_t>(physics->type));
+                .30f, static_cast<std::size_t>(physics->type));
             types.set_on_change([this, physics, &types](std::size_t index, const std::string&) {
                 const auto before = physics->type;
                 if (before == static_cast<commons::physics::body_type>(index))
@@ -506,7 +506,7 @@ private:
                     physics->setMass(mass); physics->set_body_type(before);
                 }, [physics, after]() { physics->set_body_type(after); });
             });
-            content.add<bgui::text>(tr("Collision Shape"), 0.27f);
+            content.add<bgui::text>(tr("Collision Shape"), .30f);
             const auto visual = registry->get<commons::renderer>(id);
             std::vector<std::string> shape_options{
                 "Box", "Capsule", "Sphere", "Cylinder", "Cone", "Plane"
@@ -516,7 +516,7 @@ private:
                 shape_options.push_back("Model");
             auto& shapes = content.add<bgui::combo_box>(
                 std::move(shape_options),
-                0.26f, static_cast<std::size_t>(physics->e_forma));
+                .30f, static_cast<std::size_t>(physics->e_forma));
             shapes.set_on_change([this, physics, visual](std::size_t index, const std::string&) {
                 const auto before = physics->e_forma;
                 const auto after = static_cast<commons::physics::shapes>(index);
@@ -533,10 +533,10 @@ private:
                     [apply, after]() { apply(after); });
             });
             if (physics->e_forma == commons::physics::shapes::mesh_shape) {
-                content.add<bgui::text>(tr("Model Collider"), 0.27f);
+                content.add<bgui::text>(tr("Model Collider"), .30f);
                 auto& model_colliders = content.add<bgui::combo_box>(
                     std::vector<std::string>{"Convex Hull", "Concave Mesh"},
-                    0.26f,
+                    .30f,
                     static_cast<std::size_t>(physics->model_collider)
                 );
                 model_colliders.set_on_change(
@@ -574,11 +574,11 @@ private:
                 if (physics->model_collider ==
                         commons::physics::model_collider_type::concave)
                     content.add<bgui::text>(
-                        tr("Concave mesh colliders require a Static Body."), 0.25f
+                        tr("Concave mesh colliders require a Static Body."), .30f
                     );
             }
             auto toggle = [this, physics, &content](const char* label, bool commons::physics::*field) {
-                auto& checkbox = panel::add_checkbox(content, label, 0.26f, physics.get()->*field);
+                auto& checkbox = panel::add_checkbox(content, label, .30f, physics.get()->*field);
                 checkbox.set_on_change([this, physics, field](bool value) {
                     const bool previous = physics.get()->*field;
                     physics.get()->*field = value;
@@ -658,7 +658,7 @@ private:
         auto& name_input = panel::add_input(header,
             entity_name(id),
             "Entity name...",
-            0.27f,
+            .30f,
             [this, id](const std::string& name) {
                 const auto previous = m_context->entity_names.find(id);
                 const std::optional<std::string> old_name =
@@ -696,8 +696,8 @@ private:
 
     void add_animation(entity_id id, const std::shared_ptr<commons::animation>& player) {
         auto& content = add_section("Animation", true, [this,id] { remove_component<commons::animation>(id); }).children();
-        auto& status = content.add<bgui::text>(tr("Animation Clip (.banim)"), .25f);
-        auto& file = content.add<bgui::inputbox>(player->clip, "assets/animations/MyClip.banim", .27f,
+        auto& status = content.add<bgui::text>(tr("Animation Clip (.banim)"), .30f);
+        auto& file = content.add<bgui::inputbox>(player->clip, "assets/animations/MyClip.banim", .30f,
             [this,id,&status](const std::string value) {
                 std::string error;
                 if (!animation_editor(m_context).assign(id,value,error)) status.set_buffer(error);
@@ -716,7 +716,7 @@ private:
         if (!clips.empty()) {
             std::sort(clips.begin(),clips.end());
             clips.insert(clips.begin(),"Escolher clipe do projeto...");
-            auto& picker=content.add<bgui::combo_box>(clips,.27f);
+            auto& picker=content.add<bgui::combo_box>(clips,.30f);
             picker.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel);
             picker.style.layout.require_height(bgui::mode::pixel,22.f);
             picker.set_on_change([this,id,&status](std::size_t index,const std::string& path) {
@@ -727,7 +727,7 @@ private:
             });
         }
         add_toggle(content, "Play Automatically", player, &commons::animation::autoplay);
-        auto& speed = content.add<bgui::field>(tr("Speed"),std::to_string(player->speed),.27f,
+        auto& speed = content.add<bgui::field>(tr("Speed"),std::to_string(player->speed),.30f,
             [this,id,&status](const std::string text) {
                 double value{};
                 const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
@@ -736,7 +736,7 @@ private:
                     !animation_editor(m_context).settings(id,current->autoplay,value)) status.set_buffer("Speed deve estar entre 0 e 100.");
             });
         configure_property_field(speed);
-        content.add<bgui::button>(tr("Editar animação / criar clipe"),.27f,[this] {
+        content.add<bgui::button>(tr("Editar animação / criar clipe"),.30f,[this] {
             if(m_open_animation) m_open_animation();
         });
     }
@@ -745,7 +745,7 @@ private:
         const auto registry = m_context->registry;
         auto& add_component_button = m_root->add<bgui::button>(
             tr("Add Component"),
-            0.26f,
+            .30f,
             [this]() {
                 if (m_component_options)
                     m_component_options->set_enable(
@@ -776,21 +776,21 @@ private:
         );
         m_component_options->set_enable(false);
         if (!registry->get<commons::transform>(id))
-            m_component_options->add<bgui::button>(tr("Transform"), 0.26f,
+            m_component_options->add<bgui::button>(tr("Transform"), .30f,
                 [this, id]() { add_component<commons::transform>(id); });
         if (!registry->get<commons::renderer>(id))
-            m_component_options->add<bgui::button>(tr("Renderer"), 0.26f,
+            m_component_options->add<bgui::button>(tr("Renderer"), .30f,
                 [this, id]() { add_component<commons::renderer>(id); });
         if (!registry->get<commons::pathfinder>(id))
-            m_component_options->add<bgui::button>("Pathfinder", .26f,
+            m_component_options->add<bgui::button>("Pathfinder", .30f,
                 [this,id] { add_component<commons::pathfinder>(id); });
         if (!registry->get<commons::animation>(id))
-            m_component_options->add<bgui::button>(tr("Animation"), .26f,
+            m_component_options->add<bgui::button>(tr("Animation"), .30f,
                 [this,id] { add_component<commons::animation>(id); });
         if (can_add_camera) {
             auto& camera_button = m_component_options->add<bgui::button>(
                 tr("Camera"),
-                0.26f,
+                .30f,
                 [this, id]() { add_component<commons::camera>(id); }
             );
             camera_button.add_class("editor-input");
@@ -798,7 +798,7 @@ private:
         if (can_add_directional_light) {
             auto& light_button = m_component_options->add<bgui::button>(
                 tr("Directional Light"),
-                0.26f,
+                .30f,
                 [this, id]() {
                     add_component<commons::directional_light>(id);
                 }
@@ -808,25 +808,25 @@ private:
         if (can_add_spot_light) {
             auto& light_button = m_component_options->add<bgui::button>(
                 tr("Spot Light"),
-                0.26f,
+                .30f,
                 [this, id]() { add_component<commons::spot_light>(id); }
             );
             light_button.add_class("editor-input");
         }
         if (can_add_sound_listener)
-            m_component_options->add<bgui::button>(tr("Sound Listener"), 0.26f,
+            m_component_options->add<bgui::button>(tr("Sound Listener"), .30f,
                 [this, id]() { add_component<commons::sound_listener>(id); });
         if (!registry->get<commons::hud>(id))
-            m_component_options->add<bgui::button>("HUD", 0.26f,
+            m_component_options->add<bgui::button>("HUD", .30f,
                 [this, id]() { add_component<commons::hud>(id); });
         if (can_add_sound_player)
-            m_component_options->add<bgui::button>(tr("Sound Player"), 0.26f,
+            m_component_options->add<bgui::button>(tr("Sound Player"), .30f,
                 [this, id]() { add_component<commons::sound_player>(id); });
         if (!registry->get<commons::physics>(id))
-            m_component_options->add<bgui::button>(tr("Physics"), 0.26f,
+            m_component_options->add<bgui::button>(tr("Physics"), .30f,
                 [this, id]() { add_component<commons::physics>(id); });
         auto& script_input = panel::add_input(*m_component_options,
-            "", "Add Lua script: drop a file or enter its path", 0.27f);
+            "", "Add Lua script: drop a file or enter its path", .30f);
         configure_property_input(script_input);
         script_input.style.layout.require_width(bgui::mode::match_parent);
         auto append_script = [this, id](const std::filesystem::path& path) {
@@ -836,12 +836,12 @@ private:
         };
         script_input.m_enter_func = [append_script](const std::string& path) { append_script(path); };
         m_asset_targets.push_back({&script_input, append_script});
-        m_edit_status = &m_root->add<bgui::text>("", 0.25f);
+        m_edit_status = &m_root->add<bgui::text>("", .30f);
     }
 
     void add_rgb_picker(bgui::linear& content, const std::string& label,
         std::function<bgui::vec3()> read, std::function<void(bgui::vec3)> write) {
-        content.add<bgui::text>(label, .27f);
+        content.add<bgui::text>(label, .30f);
         const auto value = read();
         auto& picker = panel::add_color(content, {value.x, value.y, value.z, 1.f});
         if (label == "Fog") picker.add_class("inspector-fog-color");
@@ -863,7 +863,7 @@ private:
         const bool expanded = expansion == m_context->inspector_sections.end()
             ? true
             : expansion->second;
-        auto& section = m_root->add<bgui::tree>(name, 0.26f, expanded);
+        auto& section = m_root->add<bgui::tree>(name, .30f, expanded);
         section.add_class("editor-section");
         section.header().style.layout.padding = bgui::vec4i{4, 1, 4, 1};
         section.set_icon(name == "Transform" ? "directory_open" :
@@ -881,7 +881,7 @@ private:
         if (removable) {
             auto& remove_button = section.header().add<bgui::button>(
                 "",
-                0.27f,
+                .30f,
                 remove_component
             );
             remove_button.add_class("editor-icon-button");
@@ -964,7 +964,7 @@ private:
         add_toggle(section.children(), "Cast Shadows", renderer, &commons::renderer::cast_shadows);
         add_toggle(section.children(), "Receive Shadows", renderer, &commons::renderer::receive_shadows);
         auto& model_field = panel::add_field(section.children(),
-            "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", 0.27f);
+            "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", .30f);
         configure_property_field(model_field);
         auto* model_input = &model_field.get_inputbox();
         auto assign_model = [this, id, renderer](const std::filesystem::path& requested) {
@@ -1004,7 +1004,7 @@ private:
         if (!renderer->m_modelo)
             return;
         for (std::size_t index = 0; index < renderer->m_modelo->meshes.size(); ++index) {
-            auto& group = section.children().add<bgui::tree>("Malha " + std::to_string(index + 1), .26f, true);
+            auto& group = section.children().add<bgui::tree>("Malha " + std::to_string(index + 1), .30f, true);
             build_mesh_material_editor(*this, group.children(), m_context, renderer, index,
                 [this](auto* element, auto assign) { m_asset_targets.push_back({element, std::move(assign)}); },
                 [this](std::string message) { if (m_edit_status) m_edit_status->set_buffer(std::move(message)); });
@@ -1029,7 +1029,7 @@ private:
                     refresh();
                 });
             auto& input = panel::add_input(section.children(),
-                entries[index]->file, "Drop a Lua script or enter its path", 0.27f);
+                entries[index]->file, "Drop a Lua script or enter its path", .30f);
             configure_property_input(input);
             input.style.layout.require_width(bgui::mode::match_parent);
             auto assign = [this, id, index](const std::filesystem::path& path) {
@@ -1042,7 +1042,7 @@ private:
             auto entry = entries[index];
             std::string error;
             if (!entry->load_properties(error)) {
-                section.children().add<bgui::text>(error, 0.27f);
+                section.children().add<bgui::text>(error, .30f);
                 continue;
             }
             for (const auto& property : entry->properties)
@@ -1084,8 +1084,8 @@ private:
                 ids.push_back(current);
                 labels.push_back("Entidade ausente (#" + std::to_string(current) + ")");
             }
-            content.add<bgui::text>(property.name, .27f);
-            auto& picker = content.add<bgui::combo_box>(labels, .27f, selected);
+            content.add<bgui::text>(property.name, .30f);
+            auto& picker = content.add<bgui::combo_box>(labels, .30f, selected);
             picker.add_class("lua-property-entity");
             picker.add_class("lua-entity-" + property.name);
             picker.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
@@ -1096,16 +1096,16 @@ private:
                 change(target);
             });
         } else if (property.type == "boolean") {
-            auto& checkbox = panel::add_checkbox(content, property.name, .26f, std::get<bool>(property.value));
+            auto& checkbox = panel::add_checkbox(content, property.name, .30f, std::get<bool>(property.value));
             checkbox.set_on_change([change](bool value) { change(value); });
         } else if (property.type == "color") {
-            content.add<bgui::text>(property.name, .27f);
+            content.add<bgui::text>(property.name, .30f);
             const auto color = std::get<std::array<float, 4>>(property.value);
             auto& picker = panel::add_color(content, bgui::color{color[0], color[1], color[2], color[3]});
             picker.set_on_change([change](const bgui::color& value) {
                 change(std::array<float, 4>{value.x, value.y, value.z, value.w});
             });
-            auto& alpha = panel::add_field(content, property.name + " Alpha", std::to_string(color[3]), .27f,
+            auto& alpha = panel::add_field(content, property.name + " Alpha", std::to_string(color[3]), .30f,
                 [this, script, name = property.name, change](const std::string& text) {
                     float value{};
                     const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
@@ -1144,7 +1144,7 @@ private:
                     change(!relative.empty() && *relative.begin() != ".." ? relative.generic_string() : path.string());
                 } else change(text);
             };
-            auto& field = panel::add_field(content, property.name, buffer, .27f, assign);
+            auto& field = panel::add_field(content, property.name, buffer, .30f, assign);
             configure_property_field(field);
             field.add_class("lua-property-" + property.type);
             if (property.type == "image") m_asset_targets.push_back({&field.get_inputbox(),
@@ -1197,9 +1197,9 @@ private:
             [camera](float value) { if (value > 0.f) camera->config.scale = value; }
         );
 
-        content.add<bgui::text>(tr("With skybox disabled, the atmosphere gradient is used."), 0.25f);
+        content.add<bgui::text>(tr("With skybox disabled, the atmosphere gradient is used."), .30f);
         auto& skybox_enabled = panel::add_checkbox(content,
-            "Enable Skybox", 0.26f, camera->config.use_skybox);
+            "Enable Skybox", .30f, camera->config.use_skybox);
         skybox_enabled.set_on_change([this, camera](bool enabled) {
             const bool previous = camera->config.use_skybox;
             if (previous == enabled) return;
@@ -1210,9 +1210,9 @@ private:
         });
         auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
         configure_property_row(row);
-        auto& label = row.add<bgui::text>(tr("Cubemap image (4 x 3 cross)"), 0.27f);
+        auto& label = row.add<bgui::text>(tr("Cubemap image (4 x 3 cross)"), .30f);
         configure_property_label(label);
-        auto& input = panel::add_input(row, camera->config.skybox_image, "Drop a horizontal cross image", 0.26f);
+        auto& input = panel::add_input(row, camera->config.skybox_image, "Drop a horizontal cross image", .30f);
         configure_property_input(input);
         auto assign = [this, camera](const std::filesystem::path& path) {
             auto before = camera->config.skybox_image;
@@ -1239,7 +1239,7 @@ private:
             [camera](bgui::vec3 v) { camera->config.sky_solid_color = {v.x,v.y,v.z,1.f}; });
 
         auto& fog_enabled = panel::add_checkbox(content,
-            "Enable Fog", 0.26f, camera->config.fog_enabled);
+            "Enable Fog", .30f, camera->config.fog_enabled);
         fog_enabled.set_on_change([this, camera](bool enabled) {
             const bool previous = camera->config.fog_enabled;
             if (previous == enabled) return;
@@ -1273,9 +1273,23 @@ private:
         using commons::ambient_occlusion_mode;
         using commons::camera_post_processing;
         auto& post = add_section("Camera Post-processing", false, {}).children();
-        post.add<bgui::text>(tr("Ambient Occlusion"), .27f);
+        post.add<bgui::text>("Pós-processamento GLSL", .30f);
+        auto& fragment = post.add<bgui::inputbox>(camera->config.post_processing.fragment_shader,
+            "Arquivo .frag relativo ao projeto", .30f,
+            [this, camera](const std::string& value) {
+                if (m_context->is_playing || !m_context->registry->is_alive(camera->my_object) ||
+                    m_context->registry->get<commons::camera>(camera->my_object) != camera) return;
+                const auto previous = camera->config.post_processing.fragment_shader;
+                camera->config.post_processing.fragment_shader = value;
+                camera->skybox_asset_root = m_context->project_root.string();
+                m_context->record_action(
+                    [camera, previous] { camera->config.post_processing.fragment_shader = previous; },
+                    [camera, value] { camera->config.post_processing.fragment_shader = value; });
+            });
+        fragment.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        post.add<bgui::text>(tr("Ambient Occlusion"), .30f);
         auto& mode = post.add<bgui::combo_box>(std::vector<std::string>{"Off", "SSAO", "HBAO", "GTAO"},
-            .27f, static_cast<std::size_t>(camera->config.post_processing.occlusion));
+            .30f, static_cast<std::size_t>(camera->config.post_processing.occlusion));
         mode.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         mode.style.layout.require_height(bgui::mode::pixel, 24.f);
         mode.set_on_change([this, camera](std::size_t index, const std::string&) {
@@ -1297,7 +1311,7 @@ private:
 
         auto& orthographic = panel::add_checkbox(content,
             "Orthographic",
-            0.26f,
+            .30f,
             camera->config.flag_orth
         );
         orthographic.set_on_change(
@@ -1318,7 +1332,7 @@ private:
     template<class Content, class Component>
     void add_toggle(Content& content, const char* label,
         std::shared_ptr<Component> component, bool Component::*field) {
-        auto& checkbox = panel::add_checkbox(content, label, 0.26f, component.get()->*field);
+        auto& checkbox = panel::add_checkbox(content, label, .30f, component.get()->*field);
         checkbox.set_on_change([this, component, field](bool enabled) {
             const bool previous = component.get()->*field;
             if (previous == enabled) return;
@@ -1400,7 +1414,7 @@ private:
         add_vec_field(content, "Direction", light->direction,
             [light]() { return light->direction; },
             [light](std::size_t axis, float value) { light->direction[axis] = value; });
-        content.add<bgui::text>(tr("Color"), 0.27f);
+        content.add<bgui::text>(tr("Color"), .30f);
         auto& color_picker = panel::add_color(content,
             bgui::color{light->color.x, light->color.y, light->color.z, 1.f});
         color_picker.set_on_change([this, light](const bgui::color& color) {
@@ -1455,7 +1469,7 @@ private:
             [this, id]() { remove_component<commons::sound_player>(id); }
         );
         auto& content = section.children();
-        auto& clip_field = panel::add_field(content, "Audio Clip", player->clip, 0.27f);
+        auto& clip_field = panel::add_field(content, "Audio Clip", player->clip, .30f);
         configure_property_field(clip_field);
         auto& clip_input = clip_field.get_inputbox();
         const auto assign_clip = [this, player, input = &clip_input](

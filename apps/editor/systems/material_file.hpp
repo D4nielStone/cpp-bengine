@@ -39,6 +39,10 @@ inline std::string encode_material_edit(const commons::material& material,
     auto& allocator = previous.GetAllocator();
     previous["uniforms"].CopyFrom(updated["uniforms"], allocator);
     previous["textures"].CopyFrom(maps, allocator);
+    for (const auto* key : {"vertex_shader", "fragment_shader"}) {
+        if (previous.HasMember(key)) previous[key].CopyFrom(updated[key], allocator);
+        else previous.AddMember(rapidjson::Value(key, allocator), rapidjson::Value(updated[key], allocator), allocator);
+    }
     return project_files::encode(previous);
 }
 

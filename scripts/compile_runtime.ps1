@@ -13,6 +13,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($env:BENGINE_PORTABLE -eq "1") { throw "The portable release uses a precompiled runtime. Choose folder export for this platform." }
 # Windows targets compile on Windows; WSL is used only for Linux targets.
 if ($Target -eq "windows") {
     function Write-ProgressFile([int]$Percent, [string]$Status) {

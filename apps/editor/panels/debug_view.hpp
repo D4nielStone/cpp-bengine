@@ -40,11 +40,11 @@ public:
         auto& toolbar = content.add<bgui::linear>(bgui::orientation::horizontal);
         toolbar.add_class("debug-toolbar");
         toolbar.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
-        m_status = &toolbar.add<bgui::text>(tr("0 registros"), .27f);
+        m_status = &toolbar.add<bgui::text>(tr("0 registros"), .30f);
         m_status->add_class("debug-log-status");
         m_status->style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
         auto& clear = toolbar.add<bgui::button>(
-            tr("Limpar"), .28f, [] { commons::script_log::instance().clear(); }
+            tr("Limpar"), .30f, [] { commons::script_log::instance().clear(); }
         );
         clear.add_class("debug-clear-button");
         clear.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::wrap_content);

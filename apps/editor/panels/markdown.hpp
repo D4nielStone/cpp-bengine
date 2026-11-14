@@ -42,7 +42,7 @@ inline std::vector<bgui::element*> render_markdown(bgui::linear& parent, const s
             display = std::regex_replace(display, std::regex(R"(`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_)"), "$1$2$3$4$5");
             display = std::regex_replace(display, std::regex(R"(~~([^~]+)~~)"), "$1");
         }
-        auto& paragraph = parent.add<bgui::text>(display, heading ? 0.34f + (6 - heading) * 0.035f : 0.34f);
+        auto& paragraph = parent.add<bgui::text>(display, heading ? .30f + (6 - heading) * 0.035f : .30f);
         paragraph.set_wrap(true);
         paragraph.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
         paragraph.style.layout.margin = bgui::vec4i{0, heading ? 10 : 2, 0, heading ? 6 : 2};

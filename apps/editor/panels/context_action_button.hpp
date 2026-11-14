@@ -26,7 +26,7 @@ public:
         style.layout.limit_min = {220, 10};
         set_position(position.x, position.y);
         for (auto& [label, action] : actions) {
-            auto& option = add<bgui::button>(label, .3f, [this, action]() {
+            auto& option = add<bgui::button>(label, .30f, [this, action]() {
                 if (m_owner.expired()) { close(); return; }
                 auto owner = m_owner;
                 close();

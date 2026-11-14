@@ -12,6 +12,7 @@
 #include "project_context_menu.hpp"
 #include "entity_clipboard.hpp"
 #include "primitive_entities.hpp"
+#include "prefab_drag_preview.hpp"
 
 namespace {
 template<class T, class Predicate>
@@ -1191,4 +1192,67 @@ TEST_F(EditorAssetWorkflowTest, BlockEditorShortcutsNeverConsumeSceneHistoryOrEn
         io.m_input_map[key]=bgui::input_action::press;shortcuts.on_update();
     }
     EXPECT_FALSE(undone);EXPECT_EQ(context->undo_stack.size(),1u);EXPECT_EQ(clipboard,"script clipboard");
+}
+
+TEST(MaterialShaders, ShaderPathsRoundTripThroughMaterialAsset) {
+    const auto root = std::filesystem::temp_directory_path() / ("bengine-shader-material-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    commons::material source;
+    source.vertex_shader = (root / "shader.vert").string();
+    source.fragment_shader = (root / "shader.frag").string();
+    std::filesystem::path saved;
+    std::string error;
+    ASSERT_TRUE(commons::store_material_asset(root / "materials", source, saved, error)) << error;
+    commons::material restored;
+    ASSERT_TRUE(commons::load_material_asset(saved, restored, error)) << error;
+    EXPECT_EQ(restored.vertex_shader, source.vertex_shader);
+    EXPECT_EQ(restored.fragment_shader, source.fragment_shader);
+    EXPECT_TRUE(source.same_configuration(restored));
+    restored.fragment_shader.clear();
+    EXPECT_FALSE(source.same_configuration(restored));
+    std::filesystem::remove_all(root);
+}
+
+TEST(MaterialShaders, EditingExistingMaterialPreservesShaderReferences) {
+    commons::material source;
+    const auto directory = std::filesystem::temp_directory_path();
+    const auto previous = commons::encode_material_asset(source, directory);
+    source.fragment_shader = (directory / "effect.frag").string();
+    const auto updated = editor::ui::encode_material_edit(source, directory, previous);
+    rapidjson::Document data; data.Parse(updated.c_str());
+    ASSERT_TRUE(data.HasMember("fragment_shader"));
+    EXPECT_STREQ(data["fragment_shader"].GetString(), "effect.frag");
+}
+
+TEST_F(EditorAssetWorkflowTest, PrefabPreviewUsesChildGeometryWithoutChangingTheSceneOrHistory) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera = registry->create(); registry->add<commons::camera>(camera);
+    auto root = registry->create();
+    auto child = registry->create();
+    registry->get<commons::transform>(root.id)->set_position({7.f, 0.f, 0.f});
+    registry->get<commons::transform>(child.id)->set_parent(root.id, false);
+    registry->get<commons::transform>(child.id)->set_position({2.f, 0.f, 0.f});
+    registry->add<commons::renderer>(child, new commons::model((std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / "primitive-cube.bmodel").string()));
+    auto context = std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root = folder;
+    context->select_entity(root.id);
+    editor::ui::project_persistence_system persistence(registry, camera.id);
+    std::string error;
+    const auto path = folder / "preview.bobject";
+    ASSERT_TRUE(persistence.save_prefab(path.string(), root.id, error)) << error;
+    const auto alive = registry->live_entities;
+    editor::ui::prefab_drag_preview preview;
+    ASSERT_TRUE(preview.load(path, folder, error)) << error;
+    ASSERT_FALSE(preview.triangles().empty());
+    float low = std::numeric_limits<float>::max(), high = -low;
+    for (const auto& face : preview.triangles())
+        for (const auto& vertex : face) { low = std::min(low, vertex.x); high = std::max(high, vertex.x); }
+    EXPECT_NEAR((low + high) * .5f, 2.f, .001f);
+    EXPECT_EQ(registry->live_entities, alive);
+    EXPECT_EQ(context->selected_entity, root.id);
+    EXPECT_TRUE(context->undo_stack.empty());
+    preview.clear();
+    EXPECT_TRUE(preview.triangles().empty());
+    EXPECT_FALSE(preview.load(folder / "missing.bobject", folder, error));
+    EXPECT_TRUE(preview.triangles().empty());
 }

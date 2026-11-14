@@ -13,7 +13,7 @@ class lua_inputbox : public bgui::inputbox {
 public:
     explicit lua_inputbox(const std::string& buffer,
         std::function<std::string(const std::string&)> translate = {})
-        : inputbox(buffer, "", 0.28f, nullptr, bgui::input_mode::multiline), m_translate(std::move(translate)) {
+        : inputbox(buffer, "", .30f, nullptr, bgui::input_mode::multiline), m_translate(std::move(translate)) {
         m_popup = &add<bgui::linear, bgui::layer::overlay>(bgui::orientation::vertical);
         m_popup->add_class("context-menu-popup");
         m_popup->add_class("lua-completion-popup");
@@ -81,7 +81,7 @@ public:
             m_suggestions = completion->members;
             m_selected = 0;
             for (std::size_t i = 0; i < m_suggestions.size(); ++i) {
-                auto& option = m_popup->add<bgui::button>(m_suggestions[i], 0.28f, [this, i]() { accept(i); });
+                auto& option = m_popup->add<bgui::button>(m_suggestions[i], .30f, [this, i]() { accept(i); });
                 const auto description = completion->description(m_suggestions[i]);
                 option.set_tooltip(m_suggestions[i], m_translate ? m_translate(description) : description);
                 option.add_class("context-menu-option");

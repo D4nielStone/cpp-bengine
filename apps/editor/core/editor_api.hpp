@@ -44,6 +44,7 @@ public:
     bool can_delete_selection() const;
     bool is_playing() const;
     void select_entity(std::optional<entity_id> id, bool additive = false);
+    void select_hierarchy(entity_id id, bool additive = false);
     void toggle_visibility(entity_id id);
     void toggle_lock(entity_id id);
     void select_asset(editor_asset_kind kind, const std::filesystem::path& file);

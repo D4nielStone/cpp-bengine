@@ -126,6 +126,8 @@ public:
         m_check_scene_delete = std::move(guard);
     }
 
+    void open_text_document(const std::filesystem::path& path) { open_document(path); }
+
     std::string document_contents(const std::filesystem::path& path) {
         update_document_editor();
         if(const auto found=m_documents.find(path);found!=m_documents.end()) return found->second.buffer;
@@ -520,13 +522,16 @@ private:
             std::function<void()> on_click,
             std::function<void(const bgui::vec2i&)> on_drop
         )
-            : context_action_button(label, 0.28f, on_click),
+            : context_action_button(label, .30f, on_click),
               m_on_drop(std::move(on_drop)) {}
+
+        std::filesystem::path asset_path;
 
         void stack_contents() { m_orientation = bgui::orientation::vertical; }
 
         void on_pressed() override {
             asset_drag_active = false;
+            asset_drag_path.clear();
             m_dragged = false;
             m_drag_distance = 0;
             bgui::button::on_pressed();
@@ -540,6 +545,7 @@ private:
             if (m_drag_distance >= 5) {
                 m_dragged = true;
                 asset_drag_active = true;
+                asset_drag_path = asset_path;
             }
         }
 
@@ -661,8 +667,8 @@ private:
             bgui::mode::wrap_content
         );
         status_row.style.layout.padding = bgui::vec4i{6, 2, 6, 2};
-        status_row.add<bgui::button>(tr("API Reference"), .28f, []() { open_api_reference(); });
-        m_document_status = &status_row.add<bgui::text>("", 0.25f);
+        status_row.add<bgui::button>(tr("API Reference"), .30f, []() { open_api_reference(); });
+        m_document_status = &status_row.add<bgui::text>("", .30f);
         m_document_status->style.layout.require_mode(
             bgui::mode::stretch,
             bgui::mode::wrap_content
@@ -736,7 +742,7 @@ private:
                 m_active_content.push_back(&image);
             } catch (const std::exception& error) {
                 auto& message = m_document_body->add<bgui::text>(
-                    "Não foi possível abrir a imagem: " + std::string(error.what()), 0.28f);
+                    "Não foi possível abrir a imagem: " + std::string(error.what()), .30f);
                 m_active_content.push_back(&message);
             }
         } else if (is_markdown_file(doc.path)) {
@@ -747,12 +753,13 @@ private:
                     [](const std::string& text) { return tr(text); });
             else
                 doc.editor = &panel::add_input(*m_document_body,
-                    doc.buffer, "", 0.28f, nullptr, bgui::input_mode::multiline);
+                    doc.buffer, "", .30f, nullptr, bgui::input_mode::multiline);
             doc.editor->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
             doc.editor->style.layout.padding = bgui::vec4i{0};
             doc.editor->get_label().style.layout.margin = bgui::vec4i{0};
             doc.editor->set_wrap(false);
             doc.editor->set_editor_guides_enabled(false);
+            doc.editor->set_line_numbers_enabled(true);
             doc.editor->set_scrollable(true);
             doc.editor->set_highlight_rules(highlight_rules(doc.path));
             m_active_content.push_back(doc.editor);
@@ -1053,7 +1060,7 @@ private:
 
     void build_folder_node(const std::filesystem::path& directory, bgui::linear& parent) {
         const bool expanded = m_expanded_directories.contains(directory);
-        auto& node = parent.add<bgui::tree>(directory_label(directory), 0.27f, expanded);
+        auto& node = parent.add<bgui::tree>(directory_label(directory), .30f, expanded);
         node.set_icon(directory == m_project_root ? "home" : "folder", 0.24f);
         m_folder_targets.emplace_back(&node.header(), directory);
         node.header().set_function([this, directory]() {
@@ -1100,7 +1107,7 @@ private:
             relative_directory.empty() || relative_directory == "."
                 ? "Projeto"
                 : relative_directory.generic_string(),
-            0.32f
+            .30f
         );
         configure_label(path_label);
         path_label.add_class("editor-header");
@@ -1140,7 +1147,7 @@ private:
 
         std::sort(folders.begin(), folders.end());
         for (const auto& directory : folders) {
-            auto& item = entries.add<bgui::button>("", .28f, [this, directory]() {
+            auto& item = entries.add<bgui::button>("", .30f, [this, directory]() {
                 m_current_directory = directory;
                 m_selected_file.clear();
                 request_refresh();
@@ -1148,7 +1155,7 @@ private:
             item.add_class("file-folder-target");
             item.get_label().set_enable(false);
             item.add<bgui::icon>("folder", .27f).receives_input(false);
-            auto& label = item.add<bgui::text>(directory.filename().string(), .28f);
+            auto& label = item.add<bgui::text>(directory.filename().string(), .30f);
             label.receives_input(false);
             label.set_wrap(false);
             label.style.layout.require_mode(bgui::mode::stretch, bgui::mode::wrap_content);
@@ -1193,11 +1200,12 @@ private:
                             try { move_file(file, directory); }
                             catch (const std::exception& error) { set_asset_status(error.what()); }
                         });
-                    } else if (m_on_drop && (is_model_file(file) || is_image_file(file) || is_lua_script(file) || is_material_file(file))) {
+                    } else if (m_on_drop && (is_model_file(file) || is_image_file(file) || is_lua_script(file) || is_material_file(file) || file.extension() == ".bobject")) {
                         m_on_drop(file, position);
                     }
                 }
             );
+            item.asset_path = file;
             item.context_options = [this, file]() {
                 context_actions actions{
                     {"Abrir / Editar", [this, file]() { select_file(file); }},
@@ -1225,7 +1233,7 @@ private:
             }
             auto& label = item.add<bgui::text>(
                 file.filename().string(),
-                0.28f
+                .30f
             );
             label.receives_input(false);
             label.set_wrap(false);
@@ -1317,6 +1325,7 @@ private:
     context_actions file_actions() {
         context_actions actions{
             {"Novo material...", [this]() { show_new_material_dialog(); }},
+            {"Novo shader GLSL...", [this]() { show_new_shader_dialog(); }},
             {"Novo script Lua...", [this]() { show_new_script_dialog(); }},
             {m_import_another_copy
                 ? "Importar outra cópia: ativado"
@@ -1343,6 +1352,37 @@ private:
         return actions;
     }
 
+    void show_new_shader_dialog() {
+        if (m_new_asset_modal) return;
+        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+        m_new_asset_modal = &modal;
+        auto& name = modal.content().add<bgui::inputbox>("effect.frag", "Arquivo .frag", .30f);
+        auto& preset = modal.content().add<bgui::combo_box>(std::vector<std::string>{"Material", "Pós-processamento"}, .30f);
+        const auto root = m_project_root, directory = m_current_directory;
+        modal.set_confirmation_text("Criar");
+        modal.set_on_confirm([this, root, directory, &name, &preset] {
+            m_new_asset_modal = nullptr;
+            try {
+                if (root != m_project_root || (m_can_modify_files && !m_can_modify_files()))
+                    throw std::runtime_error("O projeto mudou ou está em execução.");
+                const std::filesystem::path filename(name.get_buffer());
+                if (filename.has_parent_path() || filename.extension() != ".frag")
+                    throw std::runtime_error("Use um nome de arquivo com extensão .frag.");
+                const auto path = directory / filename;
+                if (std::filesystem::exists(path)) throw std::runtime_error("O arquivo já existe.");
+                const std::string source = preset.get_selected_index() == 0
+                    ? "#version 330 core\nout vec4 FragColor;\nvoid main() { FragColor = vec4(0.8, 0.4, 0.2, 1.0); }\n"
+                    : "#version 330 core\nin vec2 uv;\nout vec4 FragColor;\nuniform sampler2D sceneColor;\nuniform vec2 viewportSize;\nvoid main() { FragColor = texture(sceneColor, uv); }\n";
+                project_files::stage({path, source}); project_files::replace(path);
+                open_document(path); request_refresh();
+            } catch (const std::exception& error) { m_asset_status = error.what(); }
+        });
+        modal.add<bgui::button>(tr("Cancelar"), .30f, [this, surface = &modal] {
+            if (m_new_asset_modal == surface) m_new_asset_modal = nullptr;
+            bgui::add_function([surface] { bgui::get_layout().remove(surface); });
+        });
+    }
+
     void show_new_material_dialog() {
         if (m_new_asset_modal) return;
         if (m_can_modify_files && !m_can_modify_files()) {
@@ -1351,8 +1391,8 @@ private:
         }
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_new_asset_modal = &modal;
-        modal.add<bgui::text>(tr("Nome do novo material"), .3f);
-        auto& filename = panel::add_input(modal.content(), "", "Material.bmat", .27f);
+        modal.add<bgui::text>(tr("Nome do novo material"), .30f);
+        auto& filename = panel::add_input(modal.content(), "", "Material.bmat", .30f);
         filename.add_class("new-material-name");
         modal.set_confirmation_text(tr("Criar"));
         modal.set_on_confirm([this, input = &filename, directory = m_current_directory]() {
@@ -1365,7 +1405,7 @@ private:
                 select_file(created);
             } catch (const std::exception& error) { set_asset_status(error.what()); }
         });
-        modal.add<bgui::button>(tr("Cancelar"), .3f, [this, surface = &modal]() {
+        modal.add<bgui::button>(tr("Cancelar"), .30f, [this, surface = &modal]() {
             m_new_asset_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         });
@@ -1378,12 +1418,12 @@ private:
         const auto project=m_project_root;
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_new_asset_modal = &modal;
-        modal.add<bgui::text>(tr("Nome do novo script Lua"), .3f);
-        auto& filename = panel::add_input(modal.content(), m_new_script_name, "Script.lua", .27f);
+        modal.add<bgui::text>(tr("Nome do novo script Lua"), .30f);
+        auto& filename = panel::add_input(modal.content(), m_new_script_name, "Script.lua", .30f);
         filename.add_class("new-script-name");
         std::vector<std::string> template_names;
         for (const auto& entry : lua_script_templates) template_names.emplace_back(entry.name);
-        auto& preset = modal.content().add<bgui::combo_box>(std::move(template_names), .27f);
+        auto& preset = modal.content().add<bgui::combo_box>(std::move(template_names), .30f);
         preset.add_class("new-script-template");
         preset.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::pixel);
         preset.style.layout.require_height(bgui::mode::pixel, 30.f);
@@ -1407,7 +1447,7 @@ private:
             }
             request_refresh();
         });
-        modal.add<bgui::button>(tr("Cancelar"), .3f, [this, surface = &modal]() {
+        modal.add<bgui::button>(tr("Cancelar"), .30f, [this, surface = &modal]() {
             if (m_new_asset_modal == surface) m_new_asset_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         }).add_class("cancel-new-script");
@@ -1421,8 +1461,8 @@ private:
         }
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_delete_modal = &modal;
-        modal.add<bgui::text>("Excluir definitivamente “" + file.lexically_relative(m_project_root).generic_string() + "”?", .32f);
-        modal.add<bgui::text>(tr("Esta ação não pode ser desfeita. Alterações não salvas serão descartadas. Referências ao arquivo poderão ficar ausentes."), .27f);
+        modal.add<bgui::text>("Excluir definitivamente “" + file.lexically_relative(m_project_root).generic_string() + "”?", .30f);
+        modal.add<bgui::text>(tr("Esta ação não pode ser desfeita. Alterações não salvas serão descartadas. Referências ao arquivo poderão ficar ausentes."), .30f);
         modal.set_confirmation_text(tr("Excluir definitivamente"));
         modal.set_on_confirm([this, file, project=m_project_root, removed]() {
             m_delete_modal = nullptr;
@@ -1433,14 +1473,14 @@ private:
                 set_asset_status("Arquivo excluído definitivamente.");
             } catch (const std::exception& error) { set_asset_status(error.what()); }
         });
-        modal.add<bgui::button>(tr("Cancelar"), .3f, [this, surface = &modal]() {
+        modal.add<bgui::button>(tr("Cancelar"), .30f, [this, surface = &modal]() {
             m_delete_modal = nullptr;
             bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
         }).add_class("cancel-file-delete");
     }
 
     void add_message(const std::string& message) {
-        auto& label = m_file_area->add<bgui::text>(message, 0.28f);
+        auto& label = m_file_area->add<bgui::text>(message, .30f);
         configure_label(label);
     }
 

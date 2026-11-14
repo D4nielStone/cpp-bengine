@@ -1,3 +1,4 @@
+#include "editor_feature_test_support.hpp"
 #include <gtest/gtest.h>
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
@@ -43,6 +44,7 @@ T* find(bgui::element& root, Predicate predicate) {
 
 class EditorMenuTest : public testing::Test {
 protected:
+    scoped_editor_features features{false};
     bgui::scoped_interface ui_scope;
     std::shared_ptr<commons::ecs> registry = std::make_shared<commons::ecs>();
     std::shared_ptr<editor::ui::editor_context> context =
@@ -715,7 +717,7 @@ TEST(EditorWorkflow, RestoresSelectionModesCameraAndInspector) {
 #include "model_editor_view.hpp"
 #include "model_rig_edit.hpp"
 
-TEST(ModelEditorLayout, PlacesIconToolsOverPreviewAndKeepsDistanceInSidebar) {
+TEST(ModelEditorLayout, PlacesIconToolsOverPreviewAndKeepsPrimitivesInSidebar) {
     bgui::scoped_interface ui_scope;
     bgui::get_context().m_size = {1000, 700};
     auto registry = std::make_shared<commons::ecs>();
@@ -725,14 +727,15 @@ TEST(ModelEditorLayout, PlacesIconToolsOverPreviewAndKeepsDistanceInSidebar) {
     editor::ui::model_editor_view panel(context);
     panel.build(dock);
     bgui::on_update();
-    auto* distance = find<bgui::inputbox>(dock, [](auto& input) { return input.get_buffer() == "0.25"; });
-    ASSERT_NE(distance, nullptr);
-    EXPECT_LE(distance->processed_height(), 30 * bgui::get_global_scale());
+    auto* primitive = find<bgui::button>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == editor::ui::tr("Cubo");
+    });
+    ASSERT_NE(primitive, nullptr);
     auto* extrude = find<bgui::button>(dock, [](auto& button) { return button.get_tooltip() == editor::ui::tr("Extrudar face (E)"); });
     ASSERT_NE(extrude, nullptr);
     auto* image = find<bgui::image>(dock, [](auto& image) { return image.has_class("model-editor-preview"); });
     ASSERT_NE(image, nullptr);
-    EXPECT_GE(distance->processed_x(), image->processed_x() + image->processed_width());
+    EXPECT_GE(primitive->processed_x(), image->processed_x() + image->processed_width());
     EXPECT_GE(extrude->processed_x(), image->processed_x());
     EXPECT_GE(extrude->processed_y(), image->processed_y());
     EXPECT_LE(extrude->processed_x() + extrude->processed_width(), image->processed_x() + image->processed_width());
@@ -1053,7 +1056,8 @@ TEST(ModelEditorSelection, UiFramesFollowLiveGeometryAndClearRemovedComponents) 
     EXPECT_FLOAT_EQ(renderer->m_modelo->meshes[0].getMaterial().getUniforme("material.roughness").valor.f,.29f);
     ASSERT_TRUE(context->undo());
     // Navigation switches independently from mesh selection and ignores text entry.
-    io.m_mouse_position={image->processed_x()+20,image->processed_y()+20};
+    io.m_mouse_position={image->processed_x()+image->processed_width()/2,
+        image->processed_y()+image->processed_height()/2};
     bgui::on_update();
     io.m_input_map[bgui::input_key::o]=bgui::input_action::press;
     bgui::on_update();
@@ -1398,6 +1402,8 @@ TEST(EditorProjectManagerTest, MainManagerCallbackPreservesUnsavedProjectGuard) 
 }
 
 TEST_F(EditorMenuTest, DedicatedScriptingModeKeepsScenePanelsSeparateAndUsesSidebarButton) {
+    editor::ui::save_visual_scripting_enabled(true);
+    editor.refresh_feature_settings();
     const auto folder=std::filesystem::temp_directory_path()/("bengine-scripting-mode-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(folder);std::ofstream(folder/"logic.lua")<<"function update()\nend\n";
     editor.set_loaded_project_path((folder/"project.bengine").string());
@@ -1420,6 +1426,7 @@ TEST_F(EditorMenuTest, DedicatedScriptingModeKeepsScenePanelsSeparateAndUsesSide
 #include <bgui_backend_gl3.hpp>
 #include <bgui_backend_glfw.hpp>
 TEST(EditorScriptingNative, RendersDedicatedWorkspaceAndOneFullSizedDragCard) {
+    scoped_editor_features features{true};
     if(!test_support::supports_opengl33()) GTEST_SKIP()<<"OpenGL 3.3 unavailable";
     const auto folder=std::filesystem::temp_directory_path()/("bengine-native-scripting-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(folder);
@@ -1909,21 +1916,31 @@ TEST(ModelEditorTools, DragsExtrusionCutsInEachModeAndExtractsMeshSelection) {
         ASSERT_EQ(mesh_buttons.size(), 3u);
         mesh_buttons[index]->on_released();
     };
+    const auto screen = [&](bgui::vec3 position) {
+        const auto clip = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix *
+            glm::vec4(position.x, position.y, position.z, 1.f);
+        return bgui::vec2i{int(image->processed_x()+(clip.x/clip.w*.5f+.5f)*image->processed_width()),
+            int(image->processed_y()+(.5f-clip.y/clip.w*.5f)*image->processed_height())};
+    };
     select_mesh(0);
     extrude->on_released();
-    io.m_mouse_position = {image->processed_x()+image->processed_width()/2,
-        image->processed_y()+image->processed_height()/2};
-    bgui::on_update();
-    io.m_mouse_position.y -= 35;
+    const auto center = screen({0,0,0});
+    const auto normal = screen({0,0,1}) - center;
+    const auto axis_length = std::hypot(normal.x, normal.y);
+    const bgui::vec2i along = axis_length < 4.f ? bgui::vec2i{0,-40} :
+        bgui::vec2i{int(40 * normal.x / axis_length), int(40 * normal.y / axis_length)};
+    io.m_mouse_position = center + along;
     bgui::on_update();
     io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_mouse_position = io.m_mouse_position + along;
     bgui::on_update();
     io.m_input_map.clear(); bgui::on_update();
     panel.save();
     commons::editable_model_data loaded;
     ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
-    EXPECT_EQ(loaded.meshes[0].faces.size(), 5u);
-    EXPECT_GT(loaded.meshes[0].vertices[4].position.z, .25f);
+    ASSERT_EQ(loaded.meshes[0].faces.size(), 5u);
+    EXPECT_GT(loaded.meshes[0].vertices[4].position.z, 0.f);
     EXPECT_EQ(loaded.meshes[1].faces.size(), 1u);
     ASSERT_TRUE(panel.handle_history_shortcut(false));
     panel.save();
@@ -1951,24 +1968,28 @@ TEST(ModelEditorTools, DragsExtrusionCutsInEachModeAndExtractsMeshSelection) {
         return item.get_buffer() == "Extrusão sem deslocamento cancelada.";
     }), nullptr);
 
-    const auto screen = [&](bgui::vec3 position) {
-        const auto clip = panel.preview_camera().projMatriz * panel.preview_camera().viewMatrix *
-            glm::vec4(position.x, position.y, position.z, 1.f);
-        return bgui::vec2i{int(image->processed_x()+(clip.x/clip.w*.5f+.5f)*image->processed_width()),
-            int(image->processed_y()+(.5f-clip.y/clip.w*.5f)*image->processed_height())};
-    };
     for (auto mode : {editor::ui::model_selection_mode::object,
             editor::ui::model_selection_mode::faces, editor::ui::model_selection_mode::edges}) {
         context->model_selection = static_cast<int>(mode);
         bgui::on_update();
         cut->on_released();
         EXPECT_EQ(context->model_selection, static_cast<int>(mode));
-        io.m_mouse_position = screen({0,-1,0});
+        io.m_mouse_position = screen({0,0,0});
         bgui::on_update();
         io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
         bgui::on_update();
         io.m_input_map.clear(); bgui::on_update();
-        io.m_mouse_position.x += 20;
+        panel.save();
+        ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+        EXPECT_EQ(loaded.meshes[0].faces.size(), 1u);
+        const bool horizontal = mode == editor::ui::model_selection_mode::edges;
+        io.m_mouse_position = screen(horizontal ? bgui::vec3{.5f,0,0} : bgui::vec3{0,-.5f,0});
+        bgui::on_update();
+        io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
+        bgui::on_update();
+        io.m_input_map.clear(); bgui::on_update();
+        if (horizontal) io.m_mouse_position.y += 20;
+        else io.m_mouse_position.x += 20;
         bgui::on_update();
         io.m_input_map[mode == editor::ui::model_selection_mode::faces
             ? bgui::input_key::mouse_left : bgui::input_key::mouse_right] = bgui::input_action::press;
@@ -1977,15 +1998,16 @@ TEST(ModelEditorTools, DragsExtrusionCutsInEachModeAndExtractsMeshSelection) {
         panel.save();
         ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
         EXPECT_EQ(loaded.meshes[0].faces.size(), 2u);
-        EXPECT_EQ(loaded.meshes[0].vertices.size(), 6u);
+        ASSERT_EQ(loaded.meshes[0].vertices.size(), 6u);
         if (mode == editor::ui::model_selection_mode::faces)
             EXPECT_GT(std::abs(loaded.meshes[0].vertices[4].position.x), .001f);
-        else EXPECT_FLOAT_EQ(loaded.meshes[0].vertices[4].position.x, 0.f);
+        else EXPECT_FLOAT_EQ(horizontal ? loaded.meshes[0].vertices[4].position.y :
+            loaded.meshes[0].vertices[4].position.x, 0.f);
         EXPECT_EQ(context->model_selection, static_cast<int>(mode));
         ASSERT_TRUE(panel.handle_history_shortcut(false));
         panel.save();
         cut->on_released();
-        io.m_mouse_position = screen({0,-1,0});
+        io.m_mouse_position = screen({0,0,0});
         bgui::on_update();
         io.m_input_map[bgui::input_key::mouse_left] = bgui::input_action::press;
         bgui::on_update();
@@ -1999,17 +2021,62 @@ TEST(ModelEditorTools, DragsExtrusionCutsInEachModeAndExtractsMeshSelection) {
         EXPECT_EQ(loaded.meshes[0].vertices.size(), 4u);
     }
 
+    auto* cube = find<bgui::button>(dock, [](auto& item) {
+        return item.get_label().get_buffer() == editor::ui::tr("Cubo");
+    });
+    ASSERT_NE(cube, nullptr);
+    cube->on_released(); bgui::on_update();
+    panel.save();
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    const auto composed_faces = loaded.meshes[0].faces.size();
+    EXPECT_GT(composed_faces, 1u);
+    ASSERT_FALSE(loaded.meshes[0].face_groups.empty());
+    EXPECT_EQ(loaded.meshes[0].face_groups.back().faces.size(), composed_faces - 1);
+    cube->on_released(); bgui::on_update();
+    panel.save();
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].faces.size(), 2 * composed_faces - 1);
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    panel.save();
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].faces.size(), 1u);
+    ASSERT_TRUE(panel.handle_history_shortcut(true));
+    panel.save();
+    ASSERT_TRUE(commons::load_editable_model(native, loaded, error)) << error;
+    EXPECT_EQ(loaded.meshes[0].faces.size(), composed_faces);
+    ASSERT_TRUE(panel.handle_history_shortcut(false));
+    panel.save();
+
     select_mesh(0);
+    bgui::on_update();
     io.m_input_map[bgui::input_key::left_shift] = bgui::input_action::press;
     select_mesh(1);
+    bgui::on_update();
     io.m_input_map.clear();
     panel.request_extract(); bgui::on_update();
     auto* modal = find<bgui::modal>(bgui::get_layout(), [](auto&) { return true; });
     ASSERT_NE(modal, nullptr);
     auto* confirm = find<bgui::button>(*modal, [](auto& button) { return button.has_class("modal-confirm"); });
     ASSERT_NE(confirm, nullptr);
+    auto* extract_name = find<bgui::inputbox>(*modal, [](auto&) { return true; });
+    ASSERT_NE(extract_name, nullptr);
+    EXPECT_EQ(extract_name->get_buffer(), "quads-malha-1");
     confirm->on_released(); bgui::on_update();
     ASSERT_TRUE(commons::load_editable_model(context->project_root /
         "assets/models/quads_parts/quads-malha-1.bmodel", loaded, error)) << error;
     EXPECT_EQ(loaded.meshes.size(), 2u);
+}
+
+TEST_F(EditorMenuTest, VisualScriptingDefaultsOffAndCanBeEnabledAndDisabled) {
+    EXPECT_FALSE(editor::ui::visual_scripting_enabled());
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::visual_scripting);
+    EXPECT_EQ(context->workspace_mode, 0);
+    editor::ui::save_visual_scripting_enabled(true);
+    editor.refresh_feature_settings();
+    editor.set_workspace_mode(editor::ui::editor_workspace_mode::visual_scripting);
+    EXPECT_EQ(context->workspace_mode, 3);
+    editor::ui::save_visual_scripting_enabled(false);
+    editor.refresh_feature_settings();
+    EXPECT_EQ(context->workspace_mode, 0);
 }

@@ -1,0 +1,359 @@
+{
+  "server": "/home/d4nl/repos/cpp-bengine/out/editor-workflows/apps/bengine_mcp",
+  "calls": [
+    {
+      "tool": "create_project",
+      "result": {
+        "project": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/project.bengine"
+      }
+    },
+    {
+      "tool": "authoring_guide",
+      "result": {
+        "workflow": [
+          "create_project or open_project",
+          "create_model / write_asset",
+          "read_file then compose_scene",
+          "set_main_scene",
+          "run_test then poll test_status and review PNG against specification"
+        ],
+        "editing": "Saved files only. Close editor or reload after MCP changes. Existing file edits require exact expectedContents. Lua scripts execute only in runtime tests.",
+        "entityExample": {
+          "id": 1,
+          "name": "Animated cube",
+          "components": {
+            "transform": {
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "scale": [
+                1,
+                1,
+                1
+              ]
+            },
+            "renderer": {
+              "model": "assets/models/cube.bmodel",
+              "materials": [
+                {
+                  "albedo": [
+                    0.2,
+                    0.5,
+                    1,
+                    1
+                  ]
+                }
+              ]
+            },
+            "animation": {
+              "clip": "assets/animations/spin.banim",
+              "autoplay": true,
+              "speed": 1
+            },
+            "code": {
+              "directory": "scripts/example.lua"
+            }
+          }
+        },
+        "cameraExample": {
+          "id": 2,
+          "name": "Camera",
+          "components": {
+            "transform": {
+              "position": [
+                0,
+                1,
+                5
+              ],
+              "rotation": [
+                0,
+                -90,
+                0
+              ],
+              "scale": [
+                1,
+                1,
+                1
+              ]
+            },
+            "camera": {}
+          }
+        },
+        "animationExample": {
+          "format": "bubble-animation-clip",
+          "version": 1,
+          "duration": 2,
+          "loop": true,
+          "tracks": [
+            {
+              "component": 8,
+              "property": "rotation.y",
+              "stepped": false,
+              "keys": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  2,
+                  360
+                ]
+              ]
+            }
+          ]
+        },
+        "modelExample": {
+          "format": "bengine-model",
+          "version": 1,
+          "meshes": [
+            {
+              "vertices": [
+                [
+                  -0.5,
+                  0,
+                  -0.5,
+                  0,
+                  0
+                ],
+                [
+                  0.5,
+                  0,
+                  -0.5,
+                  1,
+                  0
+                ],
+                [
+                  0.5,
+                  0,
+                  0.5,
+                  1,
+                  1
+                ],
+                [
+                  -0.5,
+                  0,
+                  0.5,
+                  0,
+                  1
+                ]
+              ],
+              "faces": [
+                [
+                  0,
+                  3,
+                  2,
+                  1
+                ]
+              ]
+            }
+          ]
+        },
+        "scriptExample": "function setup()\n    Debug.Log(\"Scene ready\")\nend\n\nfunction update()\nend\n",
+        "capture": "Camera framebuffer only; HUD excluded. width/height 64..2048, frames 1..3600. Real-time simulation, not deterministic. Reports do not automatically verify visual expectations. Artifacts persist in the project captures directory. PNG is also returned as MCP image content."
+      }
+    },
+    {
+      "tool": "create_model",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/cubo.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/telhado.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/arvore.bmodel"
+      }
+    },
+    {
+      "tool": "read_file",
+      "result": {
+        "contents": "{\"format\":\"bengine-model\",\"version\":1,\"meshes\":[{\"vertices\":[[-0.19,0.0,-0.19,0,0],[0.19,0.0,-0.19,0,0],[0.19,2.0,-0.19,0,0],[-0.19,2.0,-0.19,0,0],[-0.19,0.0,0.19,0,0],[0.19,0.0,0.19,0,0],[0.19,2.0,0.19,0,0],[-0.19,2.0,0.19,0,0]],\"faces\":[[0,3,2,1],[4,5,6,7],[0,4,7,3],[1,2,6,5],[0,1,5,4],[3,7,6,2]]},{\"vertices\":[[1.65,0,0.0,0.0,0],[1.1667261889578033,0,1.1667261889578033,0.125,0],[1.0103336092965664e-16,0,1.65,0.25,0],[-1.1667261889578033,0,1.1667261889578033,0.375,0],[-1.65,0,2.0206672185931328e-16,0.5,0],[-1.1667261889578036,0,-1.1667261889578033,0.625,0],[-3.031000827889699e-16,0,-1.65,0.75,0],[1.1667261889578031,0,-1.1667261889578036,0.875,0],[0,3.8,0,0.5,1]],\"faces\":[[0,8,1],[1,8,2],[2,8,3],[3,8,4],[4,8,5],[5,8,6],[6,8,7],[7,8,0],[0,1,2,3,4,5,6,7]]}]}"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/arvore.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/banco.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/poste.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/floreira.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/models/carro.bmodel"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/assets/animations/estrela.banim"
+      }
+    },
+    {
+      "tool": "write_asset",
+      "result": {
+        "path": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/scripts/terceira_pessoa.lua"
+      }
+    },
+    {
+      "tool": "compose_scene",
+      "result": {
+        "entityCount": 283
+      }
+    },
+    {
+      "tool": "read_file",
+      "result": {
+        "contents": "{\n    \"format\": \"bubble-engine-project\",\n    \"version\": 2,\n    \"engine_version\": \"0.1.4\",\n    \"minimum_engine_version\": \"0.1.4\",\n    \"project_version\": \"0.1.0\",\n    \"settings\": {\n        \"gravity\": [\n            0.0,\n            -9.800000190734863,\n            0.0\n        ],\n        \"editor_camera_transform\": {\n            \"position\": [\n                0.0,\n                0.0,\n                0.0\n            ],\n            \"rotation\": [\n                0.0,\n                0.0,\n                0.0\n            ],\n            \"scale\": [\n                1.0,\n                1.0,\n                1.0\n            ]\n        },\n        \"editor_camera\": {\n            \"post_processing\": {\n                \"occlusion\": 0,\n                \"radius\": 0.75,\n                \"strength\": 1.0,\n                \"fragment_shader\": \"\"\n            },\n            \"fov\": 75.0,\n            \"zfar\": 300.0,\n            \"znear\": 0.10000000149011612,\n            \"scale\": 5.0,\n            \"ortho\": false,\n            \"ceu\": [\n                40,\n                40,\n                40,\n                255\n            ],\n            \"skybox_image\": \"\",\n            \"skybox_faces\": [\n                \"\",\n                \"\",\n                \"\",\n                \"\",\n                \"\",\n                \"\"\n            ],\n            \"atmosphere_zenith\": [\n                0.1599999964237213,\n                0.1599999964237213,\n                0.1599999964237213\n            ],\n            \"skybox\": false,\n            \"fog_enabled\": false,\n            \"fog_density\": 0.009999999776482582,\n            \"fog_min_distance\": 0.0,\n            \"fog_max_distance\": 300.0,\n            \"fog_color\": [\n                0.4300000071525574,\n                0.7799999713897705,\n                0.8600000143051147,\n                1.0\n            ]\n        }\n    },\n    \"scene\": \"project.scene\"\n}"
+      }
+    },
+    {
+      "tool": "set_main_scene",
+      "result": {
+        "scene": "/home/d4nl/repos/cpp-bengine/generated_projects/Vila_Aurora/vila_aurora.scene"
+      }
+    },
+    {
+      "tool": "project_info",
+      "result": {
+        "format": "bubble-engine-project",
+        "version": 2,
+        "project_version": "0.1.0",
+        "engine_version": "0.1.4",
+        "minimum_engine_version": "0.1.4",
+        "scene": "vila_aurora.scene",
+        "settings": {
+          "gravity": [
+            0.0,
+            -9.800000190734863,
+            0.0
+          ],
+          "editor_camera_transform": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "editor_camera": {
+            "post_processing": {
+              "occlusion": 0,
+              "radius": 0.75,
+              "strength": 1.0,
+              "fragment_shader": ""
+            },
+            "fov": 75.0,
+            "zfar": 300.0,
+            "znear": 0.10000000149011612,
+            "scale": 5.0,
+            "ortho": false,
+            "ceu": [
+              40,
+              40,
+              40,
+              255
+            ],
+            "skybox_image": "",
+            "skybox_faces": [
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            "atmosphere_zenith": [
+              0.1599999964237213,
+              0.1599999964237213,
+              0.1599999964237213
+            ],
+            "skybox": false,
+            "fog_enabled": false,
+            "fog_density": 0.009999999776482582,
+            "fog_min_distance": 0.0,
+            "fog_max_distance": 300.0,
+            "fog_color": [
+              0.4300000071525574,
+              0.7799999713897705,
+              0.8600000143051147,
+              1.0
+            ]
+          }
+        },
+        "entityCount": 283
+      }
+    },
+    {
+      "tool": "run_test",
+      "result": {
+        "started": true
+      }
+    },
+    {
+      "tool": "test_status",
+      "result": {
+        "running": true,
+        "timedOut": false,
+        "exitCode": -1,
+        "log": ""
+      }
+    },
+    {
+      "tool": "test_status",
+      "result": {
+        "running": false,
+        "timedOut": false,
+        "exitCode": 1,
+        "log": "[runtime] Failed to initialize GLFW.\n"
+      }
+    },
+    {
+      "tool": "compose_scene",
+      "result": "Orientacao inicial do personagem ajustada para olhar ao centro da vila."
+    },
+    {
+      "tool": "compose_scene",
+      "result": "fixed: terrain moved from 1 to 284"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+#include "editor_features.hpp"
 #include <glad.h>
 #include "scene_workflow.hpp"
 #include "panel_manager.hpp"
@@ -81,8 +82,8 @@ void choose_script_object(const std::shared_ptr<workflow_state>& state,const fs:
     }
     if(ids.empty()) {state->status=remove?"Nenhum objeto usa este script.":"Nenhum objeto desbloqueado disponível.";++state->revision;return;}
     auto& modal=bgui::get_layout().add<bgui::modal,bgui::layer::overlay>();
-    modal.add<bgui::text>(remove?"Remover script do objeto":"Aplicar script ao objeto",.34f);
-    modal.add<bgui::text>(path.filename().string(),.28f);
+    modal.add<bgui::text>(remove?"Remover script do objeto":"Aplicar script ao objeto",.30f);
+    modal.add<bgui::text>(path.filename().string(),.30f);
     std::size_t selected=0;
     for(std::size_t i=0;i<ids.size();++i) if(context->selected_entity==ids[i]) selected=i;
     auto& objects=modal.content().add<bgui::combo_box>(labels,.30f,selected);
@@ -212,7 +213,7 @@ public:
         bgui::panel_facade facade(d,"Scripts do projeto",bgui::dock_area::left,.30f); init(d,facade);
         auto body=facade.content(); body.native().set_scrollable(false);
         body.label("Todos os arquivos .lua",.3f);
-        filter=&body.add<bgui::inputbox>("","Filtrar caminho ou nome",.28f,[this](const std::string&){refresh=true;});
+        filter=&body.add<bgui::inputbox>("","Filtrar caminho ou nome",.30f,[this](const std::string&){refresh=true;});
         filter->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
         body.action("Atualizar scripts",[this]{refresh=true; ++state->graph_revision;});
         status=&body.label("",.26f);
@@ -433,7 +434,7 @@ public:
             } catch(const std::exception& error) {status->set_buffer(error.what());}
         });
         status=&body.label("",.27f);
-        editor=&body.add<bgui::inputbox>("","Objetivos da cena\nEventos e diálogos\nTarefas de desenvolvimento",.32f,
+        editor=&body.add<bgui::inputbox>("","Objetivos da cena\nEventos e diálogos\nTarefas de desenvolvimento",.30f,
             [this](const std::string&){sync();},bgui::input_mode::multiline);
         editor->type="scene-development-outline";
         editor->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);
@@ -563,14 +564,14 @@ class graph_panel final : public workflow_panel {
         }
         for(auto& [layer,children]:details->get_elements()) while(!children.empty()) details->remove(children.back().get());
         const auto& node=canvas->graph.nodes[i];
-        details->add<bgui::button>("Editar roteiro",.27f,[s=state,path=node.path]{if(s->open_outline) s->open_outline(path);});
-        details->add<bgui::text>(node.path.lexically_relative(root).generic_string()+" | X "+std::to_string(int(node.x))+" / Y "+std::to_string(int(node.y)),.28f);
-        details->add<bgui::button>("Abrir cena",.27f,[s=state,path=node.path]{s->open_scene(path);});
+        details->add<bgui::button>("Editar roteiro",.30f,[s=state,path=node.path]{if(s->open_outline) s->open_outline(path);});
+        details->add<bgui::text>(node.path.lexically_relative(root).generic_string()+" | X "+std::to_string(int(node.x))+" / Y "+std::to_string(int(node.y)),.30f);
+        details->add<bgui::button>("Abrir cena",.30f,[s=state,path=node.path]{s->open_scene(path);});
         for(const auto& edge:canvas->graph.edges) if(edge.from==i) {
             const auto label=(edge.unresolved?"? ":"-> ")+(edge.target.empty()?"Destino calculado em Lua":edge.target)+" · "+edge.script.filename().string();
-            details->add<bgui::button>(label,.26f,[s=state,file=edge.script]{s->open_script(file);});
+            details->add<bgui::button>(label,.30f,[s=state,file=edge.script]{s->open_script(file);});
         }
-        for(const auto& file:node.scripts) details->add<bgui::button>("Script: "+file.lexically_relative(root).generic_string(),.26f,[s=state,file]{s->open_script(file);});
+        for(const auto& file:node.scripts) details->add<bgui::button>("Script: "+file.lexically_relative(root).generic_string(),.30f,[s=state,file]{s->open_script(file);});
     }
 public:
     using workflow_panel::workflow_panel;
@@ -580,7 +581,7 @@ public:
         auto body=facade.content(); body.native().set_scrollable(false);
         auto& controls=body.add<bgui::grid>(bgui::vec2i{105,28},bgui::vec2i{4,4});
         controls.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-        const auto action=[&](const std::string& text,std::function<void()> f){controls.add<bgui::button>(text,.26f,std::move(f));};
+        const auto action=[&](const std::string& text,std::function<void()> f){controls.add<bgui::button>(text,.30f,std::move(f));};
         action("Atualizar grafo",[this]{++state->graph_revision;});
         action("-",[this]{canvas->zoom=std::max(.1f,canvas->zoom/1.2f); canvas->mark_layout_dirty();});
         action("+",[this]{canvas->zoom=std::min(2.f,canvas->zoom*1.2f); canvas->mark_layout_dirty();});
@@ -645,7 +646,7 @@ public:
         set_flex(false); receives_input(false); set_input_passthrough(true);
         style.visual.visible=false;set_enable(false);
         caption=&add<bgui::text>("",.30f);
-        values=&add<bgui::text>("",.25f);
+        values=&add<bgui::text>("",.30f);
         for(auto* t:{caption,values}) {t->set_flex(false); t->set_wrap(false); t->receives_input(false);}
     }
     void begin(const vl::block& b) {
@@ -799,7 +800,7 @@ class blocks_panel final : public workflow_panel {
             const auto model=vl::parse(c.source);std::string hint;
             if(!model.empty()) for(const auto& f:vl::slots(model.front())) {if(!hint.empty()) hint+="  ";hint+=f.label;}
             if(hint.empty()) hint="Sem argumentos";
-            auto& info=add<bgui::text>(hint,.28f);info.receives_input(false);info.set_wrap(false);
+            auto& info=add<bgui::text>(hint,.30f);info.receives_input(false);info.set_wrap(false);
             get_label().style.layout.align={bgui::alignment::start,bgui::alignment::start};
             info.style.layout.align={bgui::alignment::start,bgui::alignment::start};
         }
@@ -1042,7 +1043,7 @@ class blocks_panel final : public workflow_panel {
             group.select(state->selected==b.id);
             auto& heading=group.add<bgui::linear>(bgui::orientation::horizontal);
             heading.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-            auto& toggle=heading.add<bgui::button>(collapsed.contains(b.id)?"+":"-",.28f,[this,id=b.id]{fold(id,!collapsed.contains(id));});
+            auto& toggle=heading.add<bgui::button>(collapsed.contains(b.id)?"+":"-",.30f,[this,id=b.id]{fold(id,!collapsed.contains(id));});
             toggle.style.layout.require_mode(bgui::mode::pixel,bgui::mode::pixel);
             toggle.style.layout.require_size(28,32);
             auto& title=heading.add<handle>(*this,b.id,":: "+vl::title(b));
@@ -1087,12 +1088,12 @@ class blocks_panel final : public workflow_panel {
                 body.style.visual.background.normal=bgui::color{.07f,.09f,.12f,1};
                 body.style.visual.border_radius=3;
                 render(body,b.children,b.id);
-                auto& slot=body.add<bgui::button>("+ Encaixar aqui",.24f,[this,id=b.id]{select(id);});
+                auto& slot=body.add<bgui::button>("+ Encaixar aqui",.30f,[this,id=b.id]{select(id);});
                 slot.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::pixel); slot.style.layout.require_height(bgui::mode::pixel,24);
                 slot.style.visual.background.normal=bgui::color{.12f,.16f,.20f,1};
                 slot.style.visual.border.normal=color; slot.style.visual.border_size=1;
                 targets.push_back({&slot,b.id,0});
-                auto& closing=content.add<bgui::text>(b.type==vl::kind::function?"Fim da função":b.type==vl::kind::branch?"Fim do ramo":"Fim do bloco",.24f);
+                auto& closing=content.add<bgui::text>(b.type==vl::kind::function?"Fim da função":b.type==vl::kind::branch?"Fim do ramo":"Fim do bloco",.30f);
                 closing.receives_input(false);
             }
         }
@@ -1108,7 +1109,7 @@ class blocks_panel final : public workflow_panel {
         identity->set_buffer(state->script.empty()?"Selecione um script no painel de scripts":state->script.filename().string()+" · Lua ↔ blocos");
         status->set_buffer(state->status);
         if(!state->script.empty()) render(*tree,state->document.blocks(),0);
-        auto& end=tree->add<bgui::button>("+ Nível principal",.26f,[this]{select(0);});
+        auto& end=tree->add<bgui::button>("+ Nível principal",.30f,[this]{select(0);});
         targets.push_back({&end,0,0});
         tree->cascade_style();
         tree->restore_scroll(scroll);
@@ -1138,14 +1139,14 @@ public:
         identity=&body.label("",.36f);
         auto& action_grid=body.add<bgui::grid>(bgui::vec2i{132,32},bgui::vec2i{4,4});
         action_grid.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
-        const auto action=[&](const std::string& label,std::function<void()> f){auto& button=action_grid.add<bgui::button>(tr(label),.32f,std::move(f));
+        const auto action=[&](const std::string& label,std::function<void()> f){auto& button=action_grid.add<bgui::button>(tr(label),.30f,std::move(f));
             if(label=="Salvar Lua") button.add_class("primary");
             if(label=="Excluir bloco") button.add_class("danger");};
         action("Salvar Lua",[this]{save();bgui::focus_keyboard(*tree);});
         action("Reler do disco",[this,s=state]{
             if(reload_modal || s->script.empty() || !s->editable()) return;
             auto& modal=bgui::get_layout().add<bgui::modal,bgui::layer::overlay>(); reload_modal=&modal;
-            modal.add<bgui::text>("Descartar as alterações deste script nos editores de texto e blocos e reler o arquivo do disco?",.29f);
+            modal.add<bgui::text>("Descartar as alterações deste script nos editores de texto e blocos e reler o arquivo do disco?",.30f);
             modal.set_confirmation_text("Descartar e reler");
             modal.set_on_confirm([this,s,path=s->script,root=s->root()]{
                 reload_modal=nullptr;
@@ -1153,7 +1154,7 @@ public:
                 try {s->files.discard_script_draft_and_reload(path);s->open(path,false);}
                 catch(const std::exception& e){s->status=e.what();++s->revision;}
             });
-            modal.add<bgui::button>("Cancelar",.28f,[this,p=&modal]{reload_modal=nullptr;bgui::add_function([p]{bgui::get_layout().remove(p);});});
+            modal.add<bgui::button>("Cancelar",.30f,[this,p=&modal]{reload_modal=nullptr;bgui::add_function([p]{bgui::get_layout().remove(p);});});
         });
         action("Desfazer",[this]{history(false);});
         action("Refazer",[this]{history(true);});
@@ -1174,9 +1175,9 @@ public:
         palette.type="visual-script-palette";
         palette.style.layout.require_mode(bgui::mode::pixel,bgui::mode::match_parent);palette.style.layout.require_width(bgui::mode::pixel,230);
         palette.style.layout.padding={10,8,10,8};
-        category_title=&palette.add<bgui::text>("Objeto",.36f);
+        category_title=&palette.add<bgui::text>("Objeto",.30f);
         command_query.clear();
-        command_filter=&palette.add<bgui::inputbox>("","Buscar comando",.32f,[](const std::string&){});
+        command_filter=&palette.add<bgui::inputbox>("","Buscar comando",.30f,[](const std::string&){});
         command_filter->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
         command_palette=&palette.add<bgui::linear>(bgui::orientation::vertical);
         command_palette->style.layout.require_mode(bgui::mode::match_parent,bgui::mode::stretch);command_palette->set_scrollable(true);
@@ -1227,7 +1228,9 @@ scene_workflow_actions install_scene_workflow(panel_manager& scene_manager,panel
     auto& scripts=script_manager.add<scripts_panel>(state);
     auto& blocks=script_manager.add<blocks_panel>(state);
     state->open_script=[&blocks,s=std::weak_ptr<workflow_state>(state),activate=std::move(activate_scripting)](const fs::path& path){
-        if(auto state=s.lock()) {if(activate) activate();state->open(path);blocks.show();}
+        if(auto state=s.lock()) {
+            if (!visual_scripting_enabled()) { state->files.open_text_document(path); return; }
+            if(activate) activate();state->open(path);blocks.show();}
     };
     return {
         [&graph,&outline,&source_control,&diff,s=std::weak_ptr<workflow_state>(state)]{graph.show();outline.show();source_control.show();diff.show();if(auto state=s.lock()) ++state->graph_revision;},

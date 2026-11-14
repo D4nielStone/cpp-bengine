@@ -81,8 +81,9 @@ public:
                         auto source = std::static_pointer_cast<commons::transform>(component);
                         value.components.push_back([position = source->get_position(), rotation = source->get_rotation(),
                             scale = source->get_scale(), up = source->get_up(), target = source->get_target(),
-                            use_target = source->is_using_target()](commons::ecs& ecs, commons::entity entity) {
+                            use_target = source->is_using_target(), joint = source->rig_joint_id](commons::ecs& ecs, commons::entity entity) {
                             auto transform = ecs.get<commons::transform>(entity.id);
+                            transform->rig_joint_id = joint;
                             transform->set_position(position); transform->set_rotation(rotation);
                             transform->set_scale(scale); transform->set_up(up);
                             if (use_target) transform->look_at_vector(target);

@@ -10,6 +10,8 @@
 #include "primitive_catalog.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -68,6 +70,10 @@ private:
         bgui::icon* lock{nullptr};
         bgui::tree* node{nullptr};
         std::optional<row_state> applied_state{};
+        bgui::button* eye_button{};
+        bgui::button* lock_button{};
+        std::optional<editor_entity_kind> kind;
+        std::size_t binding_version{};
     };
 
     static constexpr const char* selected_class = "editor-entity-row-selected";
@@ -88,10 +94,28 @@ private:
     std::vector<row> m_rows;
     std::vector<entry> m_last_entries;
     std::string m_last_filter;
+    static constexpr int row_height = 26;
+    static constexpr std::size_t virtualization_threshold = 128;
+    struct visible_entry { std::size_t index, depth; bool branch, expanded; };
+    std::vector<visible_entry> m_visible;
+    bgui::linear* m_pool{};
+    bgui::element* m_before{};
+    bgui::element* m_after{};
+    bgui::text* m_empty{};
+    std::size_t m_binding_version{}, m_applied_version{}, m_first{}, m_end{};
+    float m_pool_scale{};
+    std::uint64_t m_scene_revision{}, m_properties_revision{};
+    std::chrono::steady_clock::time_point m_snapshot_due{};
+    bool m_structure_dirty{}, m_filtered{};
+    std::unordered_set<entity_id> m_folded_matches;
 
     void drop_entity(const entity_id dragged_id, const bgui::vec2i& position) {
+        if (!m_list || !m_scene_tree) return;
+        const auto clip = m_list->get_children_clip_rect();
+        if (position.x < clip.x || position.x >= clip.x + clip.z ||
+            position.y < clip.y || position.y >= clip.y + clip.w) return;
         for (const auto& item : m_rows) {
-            if (!item.target)
+            if (!item.target || !item.node->is_enabled() || !m_scene_tree->is_expanded())
                 continue;
             const auto rect = item.target->processed_rect();
             if (position.x >= rect.x && position.x < rect.x + rect.z &&
@@ -158,7 +182,7 @@ private:
         const bgui::color selected_background{0.216f, 0.216f, 0.216f, 1.f};
 
         for (auto& item : m_rows) {
-            if (!item.selection)
+            if (!item.selection || !item.node->is_enabled())
                 continue;
 
             const row_state state{
@@ -216,8 +240,56 @@ private:
         if (m_presenter.api().is_locked(id))
             return;
 
-        m_presenter.api().select_entity(id, bgui::get_pressed(bgui::input_key::left_control));
+        m_presenter.api().select_hierarchy(id, bgui::get_pressed(bgui::input_key::left_control) ||
+            bgui::get_pressed(bgui::input_key::right_control));
         update_row_styles();
+    }
+
+    row& create_row(bgui::linear& parent) {
+        auto& node = parent.add<bgui::tree>("", .30f, false);
+        auto& header = node.header();
+        node.label().set_wrap(false);
+        auto& eye = header.add<bgui::button>("", .30f, nullptr);
+        auto& lock = header.add<bgui::button>("", .30f, nullptr);
+        configure_icon_button(eye, 20);
+        configure_icon_button(lock, 20);
+        auto& eye_icon = add_button_icon(eye, "eye", .24f);
+        auto& lock_icon = add_button_icon(lock, "key", .24f);
+        auto& result = m_rows.emplace_back();
+        result.node = &node;
+        result.target = result.selection = &header;
+        result.expand = &node.disclosure();
+        result.children = &node.children();
+        result.visibility = &eye_icon;
+        result.lock = &lock_icon;
+        result.eye_button = &eye;
+        result.lock_button = &lock;
+        return result;
+    }
+
+    void bind_row(row& slot, const entry& item, bool branch, bool expanded) {
+        const auto id = item.id;
+        slot.id = id;
+        slot.node->set_leaf(!branch);
+        slot.node->set_expanded(expanded);
+        slot.node->label().set_buffer(item.label);
+        if (slot.kind != item.kind) {
+            slot.kind = item.kind;
+            const char* icon = "circle";
+            if (item.kind == editor_entity_kind::camera) icon = "camera";
+            if (item.kind == editor_entity_kind::light) icon = "lightbulb";
+            if (item.kind == editor_entity_kind::mesh) icon = "cube";
+            slot.node->set_icon(icon, .24f);
+        }
+        slot.selection->set_function([this, id] { select(id); });
+        slot.node->set_on_drop([this, id](const bgui::vec2i& pos) { drop_entity(id, pos); });
+        slot.eye_button->set_function([this, id] {
+            m_presenter.api().toggle_visibility(id); update_row_styles();
+        });
+        slot.lock_button->set_function([this, id] {
+            m_presenter.api().toggle_lock(id); update_row_styles();
+        });
+        slot.applied_state.reset();
     }
 
     void build_entity_node(
@@ -233,46 +305,11 @@ private:
         const bool has_children = child_it != children_by_parent.end() &&
             !child_it->second.empty();
 
-        auto& node = parent.add<bgui::tree>(item.label, 0.28f, has_children);
-        node.set_leaf(!has_children);
-        switch (item.kind) {
-        case editor_entity_kind::camera: node.set_icon("camera", 0.24f); break;
-        case editor_entity_kind::light: node.set_icon("lightbulb", 0.24f); break;
-        case editor_entity_kind::mesh: node.set_icon("cube", 0.24f); break;
-        case editor_entity_kind::generic: node.set_icon("circle", 0.24f); break;
-        }
-        if (entities_presenter::normalized_filter(m_filter->get_buffer()).empty() && m_expanded_entities.contains(item.id))
-            node.set_expanded(m_expanded_entities.at(item.id));
-        auto& row_layout = node.header();
-        const auto id = item.id;
-        row_layout.set_function([this, id]() { select(id); });
-        node.set_on_drop(
-            [this, id](const bgui::vec2i& position) {
-                drop_entity(id, position);
-            }
-        );
-        node.label().set_wrap(false);
-
-        auto& visibility_button = row_layout.add<bgui::button>(
-            "",
-            0.26f,
-            [this, id]() { m_presenter.api().toggle_visibility(id); update_row_styles(); }
-        );
-        configure_icon_button(visibility_button, 20);
-        auto& visibility_icon = add_button_icon(visibility_button, "eye", 0.24f);
-
-        auto& lock_button = row_layout.add<bgui::button>(
-            "",
-            0.26f,
-            [this, id]() { m_presenter.api().toggle_lock(id); update_row_styles(); }
-        );
-        configure_icon_button(lock_button, 20);
-        auto& lock_icon = add_button_icon(lock_button, "key", 0.24f);
-
-        auto& nested = node.children();
-
-        m_rows.push_back({id, &row_layout, &row_layout, &node.disclosure(), &nested,
-            &visibility_icon, &lock_icon, &node});
+        auto& slot = create_row(parent);
+        const bool expanded = has_children && (m_filtered || !m_expanded_entities.contains(item.id) ||
+            m_expanded_entities.at(item.id));
+        bind_row(slot, item, has_children, expanded);
+        auto& nested = *slot.children;
         if (has_children) {
             for (const auto child_id : child_it->second) {
                 const auto child = entries_by_id.find(child_id);
@@ -282,6 +319,86 @@ private:
             }
         }
         recursion_path.erase(item.id);
+    }
+
+    void flatten() {
+        const auto hierarchy = entities_presenter::build_hierarchy(m_last_entries,
+            entities_presenter::normalized_filter(m_last_filter));
+        m_visible.clear();
+        std::vector<std::pair<entity_id, std::size_t>> pending;
+        for (auto it = hierarchy.roots.rbegin(); it != hierarchy.roots.rend(); ++it)
+            pending.emplace_back(*it, 0);
+        while (!pending.empty()) {
+            const auto [id, depth] = pending.back();
+            pending.pop_back();
+            const auto children = hierarchy.children_by_parent.find(id);
+            const bool branch = children != hierarchy.children_by_parent.end();
+            const bool expanded = branch && (m_filtered ? !m_folded_matches.contains(id) :
+                !m_expanded_entities.contains(id) || m_expanded_entities.at(id));
+            const auto index = static_cast<std::size_t>(hierarchy.entries_by_id.at(id) - m_last_entries.data());
+            m_visible.push_back({index, depth, branch, expanded});
+            if (expanded)
+                for (auto it = children->second.rbegin(); it != children->second.rend(); ++it)
+                    pending.emplace_back(*it, depth + 1);
+        }
+        ++m_binding_version;
+        m_structure_dirty = false;
+    }
+
+    void update_pool() {
+        if (!m_pool || !m_scene_tree->is_expanded()) return;
+        if (!m_structure_dirty && bgui::get_pressed(bgui::input_key::mouse_left)) {
+            for (auto* target = bgui::get_mouse_target(); target; target = target->get_parent())
+                if (target == m_pool) return;
+        }
+        if (m_structure_dirty) flatten();
+        const auto scale = bgui::get_global_scale();
+        const int pixels = std::max(1, static_cast<int>(row_height * scale));
+        const int header = m_scene_tree->header().processed_height();
+        const auto count = m_visible.size();
+        const auto capacity = static_cast<std::size_t>(std::max(0, m_list->processed_height()) / pixels + 4);
+        const auto scroll = std::max(0, m_list->get_scroll_offset() - header);
+        const auto first = std::min(count > capacity ? count - capacity : 0,
+            static_cast<std::size_t>(std::max(0, scroll / pixels - 1)));
+        const auto end = std::min(count, first + capacity);
+        if (m_first != first || m_end != end || m_applied_version != m_binding_version || m_pool_scale != scale) {
+            auto spacer = [pixels, scale](bgui::element& element, std::size_t rows) {
+                element.set_enable(rows != 0);
+                element.style.layout.require_height(bgui::mode::pixel, static_cast<float>(rows) * pixels / scale);
+                element.mark_style_dirty();
+            };
+            spacer(*m_before, first);
+            spacer(*m_after, count - end);
+            m_pool_scale = scale;
+            m_first = first;
+            m_end = end;
+            m_applied_version = m_binding_version;
+        }
+        while (m_rows.size() < end - first) create_row(*m_pool);
+        for (std::size_t i = 0; i < m_rows.size(); ++i) {
+            auto& slot = m_rows[i];
+            const bool used = i < end - first;
+            slot.node->set_enable(used);
+            if (!used) continue;
+            const auto& info = m_visible[first + i];
+            const auto& item = m_last_entries[info.index];
+            if (slot.id == item.id && slot.binding_version == m_binding_version) continue;
+            bind_row(slot, item, info.branch, info.expanded);
+            slot.binding_version = m_binding_version;
+            slot.node->style.layout.require_height(bgui::mode::pixel, row_height);
+            slot.node->style.layout.margin = bgui::vec4i{0};
+            slot.node->style.layout.padding = bgui::vec4i{
+                static_cast<int>(std::min<std::size_t>(info.depth, 20)) * 14, 0, 0, 0};
+            slot.node->mark_style_dirty();
+            slot.expand->set_function([this, id = item.id, expanded = info.expanded] {
+                if (m_filtered) {
+                    if (expanded) m_folded_matches.insert(id);
+                    else m_folded_matches.erase(id);
+                } else m_expanded_entities[id] = !expanded;
+                m_structure_dirty = true;
+            });
+        }
+        if (m_empty) m_empty->set_enable(count == 0);
     }
 
     static void clear_tree(bgui::tree& tree) {
@@ -357,7 +474,7 @@ public:
                     try { if (const auto id = m_presenter.api().create_primitive(i)) { select(*id); refresh(); } }
                     catch (const std::exception& e) {
                         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
-                        modal.add<bgui::text>(e.what(), .3f);
+                        modal.add<bgui::text>(e.what(), .30f);
                     }
                 });
             }
@@ -365,12 +482,12 @@ public:
         };
         add_entity.set_function([button = &add_entity]() { button->open_context(); });
 
-        auto& group_entities = m_toolbar->add<bgui::button>(tr("Agrupar"), .26f,
+        auto& group_entities = m_toolbar->add<bgui::button>(tr("Agrupar"), .30f,
             [this] { m_presenter.api().group_selected_entities(); refresh(); });
         group_entities.style.layout.require_size(76.f, 28.f);
         auto& remove_entity = m_toolbar->add<bgui::button>(
             "",
-            0.28f,
+            .30f,
             [this]() { m_presenter.api().delete_selected_entity(); }
         );
         remove_entity.add_class("entities-remove-button");
@@ -393,7 +510,7 @@ public:
         m_filter = &panel::add_input(*m_toolbar,
             "",
             "Search entities...",
-            0.3f
+            .30f
         );
         m_filter->add_class("editor-input");
         m_filter->style.layout.require_mode(
@@ -432,10 +549,21 @@ public:
             m_delete_button->set_style_state(can_delete ? bgui::state::normal : bgui::state::disabled);
         }
 
-        m_presenter.api().synchronize_scene();
-        const auto entries = m_presenter.entries();
-        if (entries != m_last_entries || m_filter->get_buffer() != m_last_filter)
-            refresh(entries);
+        const auto now = std::chrono::steady_clock::now();
+        const auto events = m_presenter.api().events();
+        const auto scene_revision = events.revision(editor_event::scene);
+        const auto properties_revision = events.revision(editor_event::properties);
+        if (!m_pool || now >= m_snapshot_due || scene_revision != m_scene_revision ||
+            properties_revision != m_properties_revision || m_filter->get_buffer() != m_last_filter) {
+            m_presenter.api().synchronize_scene();
+            const auto entries = m_presenter.entries();
+            if (entries != m_last_entries || m_filter->get_buffer() != m_last_filter)
+                refresh(entries);
+            m_scene_revision = scene_revision;
+            m_properties_revision = properties_revision;
+            m_snapshot_due = now + std::chrono::milliseconds(250);
+        }
+        update_pool();
         update_row_styles();
     }
 
@@ -455,7 +583,7 @@ public:
             return position.x >= rect.x && position.x < rect.x + rect.z &&
                 position.y >= rect.y && position.y < rect.y + rect.w;
         };
-        if (!contains(*m_root)) return std::nullopt;
+        if (!contains(*m_list)) return std::nullopt;
         for (const auto& row : m_rows) {
             bool enabled = true;
             for (auto* parent = row.target; parent; parent = parent->get_parent())
@@ -474,28 +602,44 @@ private:
         if (!m_list)
             return;
 
-        for (const auto& row : m_rows)
-            if (row.node)
-                m_expanded_entities[row.id] = row.node->is_expanded();
-        m_rows.clear();
-        const auto filter = entities_presenter::normalized_filter(
-            m_filter ? m_filter->get_buffer() : std::string{}
-        );
-        const auto hierarchy = entities_presenter::build_hierarchy(entries, filter);
-
+        if (!m_pool && !m_filtered)
+            for (const auto& row : m_rows)
+                if (row.node) m_expanded_entities[row.id] = row.node->is_expanded();
+        const auto filter = entities_presenter::normalized_filter(m_filter->get_buffer());
+        if (m_filter->get_buffer() != m_last_filter) m_folded_matches.clear();
+        m_filtered = !filter.empty();
         const bool create_scene_tree = !m_scene_tree;
         if (!m_scene_tree) {
-            m_scene_tree = &m_list->add<bgui::tree>(
-                "Scene",
-                0.28f,
-                false
-            );
+            m_scene_tree = &m_list->add<bgui::tree>("Scene", .30f, true);
             m_scene_tree->set_icon("directory_open", 0.24f);
-        } else {
-            clear_tree(*m_scene_tree);
         }
-
+        m_last_entries = entries;
+        m_last_filter = m_filter->get_buffer();
+        if (entries.size() >= virtualization_threshold) {
+            if (!m_pool) {
+                m_rows.clear();
+                clear_tree(*m_scene_tree);
+                auto& parent = m_scene_tree->children();
+                m_before = &parent.add<bgui::element>();
+                m_pool = &parent.add<bgui::linear>(bgui::orientation::vertical);
+                m_pool->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+                m_after = &parent.add<bgui::element>();
+                for (auto* spacer : {m_before, m_after}) {
+                    spacer->style.visual.visible = false;
+                    spacer->receives_input(false);
+                }
+                m_empty = &parent.add<bgui::text>("No entities found", .30f);
+            }
+            m_structure_dirty = true;
+            update_pool();
+            update_row_styles();
+            return;
+        }
+        m_pool = nullptr;
+        m_empty = nullptr;
         m_rows.clear();
+        clear_tree(*m_scene_tree);
+        const auto hierarchy = entities_presenter::build_hierarchy(entries, filter);
         std::unordered_set<entity_id> recursion_path;
         for (const auto id : hierarchy.roots) {
             const auto item = hierarchy.entries_by_id.find(id);
@@ -507,16 +651,13 @@ private:
         if (!hierarchy.has_matches) {
             auto& empty = m_scene_tree->children().add<bgui::text>(
                 filter.empty() ? "No entities" : "No entities found",
-                0.26f
+                .30f
             );
             empty.add_class("entities-empty");
         }
 
         if (create_scene_tree)
             m_scene_tree->set_expanded(true);
-
-        m_last_entries = entries;
-        m_last_filter = m_filter ? m_filter->get_buffer() : std::string{};
 
         update_row_styles();
     }

@@ -1,3 +1,5 @@
+#include "rig_entity_edit.hpp"
+#include "editor_features.hpp"
 #include "../core/localization.hpp"
 #include "scene_loading_modal.hpp"
 #define GLFW_INCLUDE_NONE
@@ -10,6 +12,8 @@
 #include "editor_ui.hpp"
 #include "files_view.hpp"
 #include "scenes_view.hpp"
+#include "entities_view.hpp"
+#include "components_view.hpp"
 #include "scene_workflow.hpp"
 #include "native_file_dialog.hpp"
 #include "material_unification.hpp"
@@ -258,11 +262,35 @@ editor_ui::editor_ui(
                 if (m_project_manager_callback) m_project_manager_callback();
                 else { if (!m_project_modal) create_project_modal(m_project_path, ""); m_project_modal->set_enable(true); }
             });
+            menu.add_button("Salvar seleção como prefab...", [this] {
+                if (!m_context || !m_context->selected_entity || m_context->is_playing) return;
+                auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+                auto& input = modal.content().add<bgui::inputbox>("object.bobject", "Nome do prefab", .30f);
+                auto& status = modal.content().add<bgui::text>("", .30f);
+                const auto selected = *m_context->selected_entity;
+                modal.content().add<bgui::button>("Salvar", .30f, [this, selected, &input, &status, &modal] {
+                    try {
+                        const std::filesystem::path name(input.get_buffer());
+                        if (name.has_parent_path() || name.extension() != ".bobject")
+                            throw std::runtime_error("Use um nome de arquivo com extensão .bobject.");
+                        const auto directory = project_root() / "assets" / "prefabs";
+                        std::filesystem::create_directories(directory);
+                        const auto path = directory / name;
+                        if (std::filesystem::exists(path)) throw std::runtime_error("O arquivo já existe. Escolha outro nome.");
+                        std::string error;
+                        if (!m_project_persistence.save_prefab(path.string(), selected, error))
+                            throw std::runtime_error(error);
+                        if (m_files) m_files->refresh_files();
+                        modal.set_enable(false);
+                    } catch (const std::exception& error) { status.set_buffer(error.what()); }
+                });
+                modal.set_confirmation_text("Cancelar");
+            });
             menu.add_button(tr("Animação"), [this] { if (m_animation_callback) m_animation_callback(); });
             menu.add_button(tr("Gerenciar cenas"), [this]() {
                 set_workspace_mode(editor_workspace_mode::scene_management);
             });
-            menu.add_button(tr("Scripting visual"),[this]{set_workspace_mode(editor_workspace_mode::visual_scripting);});
+            if (m_visual_scripting_enabled) menu.add_button(tr("Scripting visual"),[this]{set_workspace_mode(editor_workspace_mode::visual_scripting);});
             menu.add_separator();
             menu.add_button(tr("Exit"), [this]() { confirm_exit(); });
         }
@@ -300,7 +328,7 @@ editor_ui::editor_ui(
                 const auto unified = editor::unify_scene_materials(*m_registry);
                 auto& result = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
                 result.add<bgui::text>(unified == 0 ? "No duplicate materials found."
-                    : "Duplicate material assignments unified: " + std::to_string(unified), 0.28f);
+                    : "Duplicate material assignments unified: " + std::to_string(unified), .30f);
                 result.set_confirmation_text("OK");
             });
         }
@@ -352,7 +380,7 @@ editor_ui::editor_ui(
             );
         }
     );
-    menu_bar.add<bgui::button>(tr("API Reference"), .3f, []() { open_api_reference(); });
+    menu_bar.add<bgui::button>(tr("API Reference"), .30f, []() { open_api_reference(); });
     add_flexible_spacer(menu_bar);
 
     auto& play_container = menu_bar.add<bgui::linear>();
@@ -428,7 +456,7 @@ editor_ui::editor_ui(
 
     m_pause_button = &play_container.add<bgui::button>(
         "",
-        0.3f,
+        .30f,
         [this]() {
             if (!m_is_playing || !m_runtime_pause_callback)
                 return;
@@ -504,7 +532,7 @@ editor_ui::editor_ui(
     ) {
         auto& button = side_bar.add<bgui::button>(
             "",
-            0.3f,
+            .30f,
             [this, mode]() { set_workspace_mode(mode); }
         );
         button.style.layout.require_mode(
@@ -558,10 +586,20 @@ editor_ui::editor_ui(
 
     add_workspace_button("code",editor_workspace_mode::visual_scripting,3);
     add_vertical_spacer();
+    refresh_feature_settings();
     set_workspace_mode(editor_workspace_mode::editor);
 }
 
-void editor_ui::set_workspace_mode(const editor_workspace_mode mode) {
+void editor_ui::refresh_feature_settings() {
+    m_visual_scripting_enabled = visual_scripting_enabled();
+    if (m_workspace_buttons[3]) m_workspace_buttons[3]->set_enable(m_visual_scripting_enabled);
+    if (!m_visual_scripting_enabled && m_context && m_context->workspace_mode == 3)
+        set_workspace_mode(editor_workspace_mode::editor);
+}
+
+void editor_ui::set_workspace_mode(editor_workspace_mode mode) {
+    if (mode == editor_workspace_mode::visual_scripting && !m_visual_scripting_enabled)
+        mode = editor_workspace_mode::editor;
     const auto selected_mode =
         mode == editor_workspace_mode::model_editing ||
                 mode == editor_workspace_mode::scene_management || mode==editor_workspace_mode::visual_scripting
@@ -618,16 +656,16 @@ void editor_ui::create_build_modal() {
     m_build_modal->content().add<bgui::text>(
         "Choose Linux or Windows x64. Native builds use the host compiler. "
         "Windows hosts require WSL2 only for Linux.",
-        0.3f
+        .30f
     );
     m_build_modal->content().add<bgui::text>(
         tr("Game export directory"),
-        0.3f
+        .30f
     );
     m_build_directory_input = &panel::add_input(m_build_modal->content(),
         m_build_directory.string(),
         "Choose an export directory...",
-        0.28f
+        .30f
     );
     m_build_directory_input->m_enter_func = [this](const std::string& buffer) {
         m_build_directory = buffer;
@@ -641,21 +679,21 @@ void editor_ui::create_build_modal() {
     );
     m_build_directory_browse_button = &directory_actions.add<bgui::button>(
         tr("Browse"),
-        0.28f,
+        .30f,
         [this]() {
             create_build_directory_modal();
         }
     );
     m_build_modal->content().add<bgui::text>(
         "Game files are exported to <directory>/<target>. Build files stay in the cache.",
-        0.25f
+        .30f
     );
     auto& compact = panel::add_checkbox(m_build_modal->content(),
-        "Single executable (compressed assets, read directly without extraction)", 0.25f, m_single_executable);
+        "Single executable (compressed assets, read directly without extraction)", .30f, m_single_executable);
     m_single_executable_checkbox = &compact;
     compact.set_on_change([this](bool value) { if (!m_build_running) m_single_executable = value; });
     m_build_modal->content().add<bgui::text>("Precompiled runtime template (optional; empty = automatic)", 0.25f);
-    auto& runtime_template = panel::add_input(m_build_modal->content(), m_runtime_template.string(), "Template folder...", 0.25f);
+    auto& runtime_template = panel::add_input(m_build_modal->content(), m_runtime_template.string(), "Template folder...", .30f);
     m_runtime_template_input = &runtime_template;
     runtime_template.m_enter_func = [this](const std::string& value) { if (!m_build_running) m_runtime_template = value; };
     const auto add_target = [this](const char* icon_name,
@@ -676,15 +714,15 @@ void editor_ui::create_build_modal() {
         );
         icon.style.layout.require_width(bgui::mode::pixel, 28.f);
         icon.style.layout.require_height(bgui::mode::pixel, 28.f);
-        row.add<bgui::text>(label, 0.3f);
+        row.add<bgui::text>(label, .30f);
         row.add<bgui::button>(
             target == build_target::windows
                 ? "Build Windows"
                 : "Build Linux",
-            0.28f,
+            .30f,
             [this, target]() { start_platform_build(target); }
         );
-        m_build_modal->content().add<bgui::text>(requirements, 0.25f);
+        m_build_modal->content().add<bgui::text>(requirements, .30f);
     };
     add_target(
         "linux",
@@ -700,7 +738,7 @@ void editor_ui::create_build_modal() {
     );
     m_build_status = &m_build_modal->content().add<bgui::text>(
         tr("No build started."),
-        0.28f
+        .30f
     );
     m_build_progress = &m_build_modal->content().add<bgui::progress_bar>(
         0.f,
@@ -919,7 +957,7 @@ void editor_ui::create_global_lighting_modal() {
     >();
     m_global_lighting_modal->content().add<bgui::text>(
         tr("Configure the scene's global directional light."),
-        0.3f
+        .30f
     );
 
     auto add_vector = [this](
@@ -1036,7 +1074,7 @@ void editor_ui::create_global_physics_modal() {
     >();
     m_global_physics_modal->content().add<bgui::text>(
         tr("Configure global gravity for this project."),
-        0.3f
+        .30f
     );
     auto& gravity = m_global_physics_modal->content().add<bgui::vector_field>(
         "Gravity",
@@ -1111,25 +1149,25 @@ void editor_ui::open_editor_camera_modal() {
     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
     m_editor_camera_modal = &modal;
     modal.add<bgui::text>(tr("Editor Camera Settings"), 0.4f);
-    modal.add<bgui::text>(tr("Configure the editor camera projection."), 0.28f);
+    modal.add<bgui::text>(tr("Configure the editor camera projection."), .30f);
 
     const std::array labels{"Field of View", "Near Clip", "Far Clip", "Orthographic Scale"};
     std::array<bgui::inputbox*, labels.size()> inputs{};
     const std::array values{camera->config.fov, camera->config.corte_curto,
         camera->config.corte_longo, camera->config.scale};
     for (std::size_t i = 0; i < inputs.size(); ++i) {
-        auto& field = panel::add_field(modal.content(), labels[i], format_number(values[i]), 0.28f);
+        auto& field = panel::add_field(modal.content(), labels[i], format_number(values[i]), .30f);
         inputs[i] = &field.get_inputbox();
         inputs[i]->add_class("editor-input");
     }
     auto& orthographic = panel::add_checkbox(
-        modal.content(), "Orthographic", 0.29f, camera->config.flag_orth
+        modal.content(), "Orthographic", .30f, camera->config.flag_orth
     );
-    auto& status = modal.add<bgui::text>("", 0.27f);
+    auto& status = modal.add<bgui::text>("", .30f);
     modal.set_confirmation_text(tr("Cancel"));
     modal.set_on_confirm([this]() { m_editor_camera_modal = nullptr; });
 
-    modal.add<bgui::button>(tr("Apply"), 0.3f,
+    modal.add<bgui::button>(tr("Apply"), .30f,
         [this, camera, camera_id, inputs, orthographic = &orthographic,
          status = &status, surface = &modal]() {
             if (!m_context || !m_context->registry ||
@@ -1333,7 +1371,7 @@ void editor_ui::create_project_modal(
     >();
     m_project_modal->set_enable(false);
     m_project_modal->content().add<bgui::text>(tr("Project Manager"), 0.46f);
-    m_project_modal->content().add<bgui::text>(tr("Recent projects"), 0.32f);
+    m_project_modal->content().add<bgui::text>(tr("Recent projects"), .30f);
     std::ifstream recent_input(recent_projects_path());
     std::size_t recent_count = 0;
     for (std::string recent; std::getline(recent_input, recent);) {
@@ -1365,15 +1403,15 @@ void editor_ui::create_project_modal(
             break;
     }
     if (recent_count == 0)
-        m_project_modal->content().add<bgui::text>(tr("No recent projects"), 0.26f);
+        m_project_modal->content().add<bgui::text>(tr("No recent projects"), .30f);
     m_project_modal->content().add<bgui::text>(
         tr("Open an existing project"),
-        0.34f
+        .30f
     );
     m_project_directory_input = &panel::add_input(m_project_modal->content(),
         selected_path,
         "Project directory or file...",
-        0.32f
+        .30f
     );
     auto& path_actions = m_project_modal->content().add<bgui::linear>(
         bgui::orientation::horizontal
@@ -1384,22 +1422,22 @@ void editor_ui::create_project_modal(
     );
     path_actions.add<bgui::button>(
         tr("Browse"),
-        0.3f,
+        .30f,
         [this]() {
             if (m_project_directory_input)
                 refresh_project_picker(m_project_directory_input->get_buffer());
         }
     );
-    path_actions.add<bgui::button>(tr("New Project..."), 0.3f, [this]() {
+    path_actions.add<bgui::button>(tr("New Project..."), .30f, [this]() {
         create_new_project_modal();
         if (m_new_project_modal)
             m_new_project_modal->set_enable(true);
     });
     m_project_picker_status = &m_project_modal->content().add<bgui::text>(
         status,
-        0.28f
+        .30f
     );
-    path_actions.add<bgui::button>(tr("Open"), 0.3f, [this]() { load_project_selection(); });
+    path_actions.add<bgui::button>(tr("Open"), .30f, [this]() { load_project_selection(); });
     m_project_modal->set_confirmation_text(tr("Cancel"));
     m_project_modal->set_on_confirm([this]() {
         m_project_modal = nullptr;
@@ -1420,27 +1458,27 @@ void editor_ui::create_new_project_modal() {
     content.add<bgui::text>(tr("Create a project"), 0.4f);
     content.add<bgui::text>(
         tr("A project folder with the starter scene and asset folders will be created."),
-        0.28f
+        .30f
     );
-    content.add<bgui::text>(tr("Project name"), 0.28f);
+    content.add<bgui::text>(tr("Project name"), .30f);
     m_new_project_name_input = &panel::add_input(content,
-        "New Project", "Project name", 0.32f
+        "New Project", "Project name", .30f
     );
-    content.add<bgui::text>(tr("Location"), 0.28f);
+    content.add<bgui::text>(tr("Location"), .30f);
     const auto default_location = std::filesystem::path(m_project_path).parent_path();
     m_new_project_location_input = &panel::add_input(content,
         default_location.empty()
             ? std::filesystem::current_path().string()
             : default_location.string(),
-        "Parent folder", 0.32f
+        "Parent folder", .30f
     );
-    auto& status = content.add<bgui::text>("", 0.28f);
+    auto& status = content.add<bgui::text>("", .30f);
     auto& actions = content.add<bgui::linear>(bgui::orientation::horizontal);
     actions.style.layout.require_mode(
         bgui::mode::match_parent,
         bgui::mode::wrap_content
     );
-    actions.add<bgui::button>(tr("Browse..."), 0.3f, [this, &status]() {
+    actions.add<bgui::button>(tr("Browse..."), .30f, [this, &status]() {
         std::string error;
         const auto selected = editor::browse_native(
             m_new_project_location_input->get_buffer(), true, error);
@@ -1455,7 +1493,7 @@ void editor_ui::create_new_project_modal() {
         m_new_project_name_input = nullptr;
         m_new_project_location_input = nullptr;
     });
-    actions.add<bgui::button>(tr("Create Project"), 0.3f, [this, &status]() {
+    actions.add<bgui::button>(tr("Create Project"), .30f, [this, &status]() {
         const auto name = m_new_project_name_input->get_buffer();
         const auto first = name.find_first_not_of(" \t\r\n");
         const std::filesystem::path name_path(name);
@@ -1506,7 +1544,7 @@ void editor_ui::create_exit_modal() {
     >();
     m_exit_modal->content().add<bgui::text>(
         tr("Save changes before closing the editor?"),
-        0.34f
+        .30f
     );
     m_exit_modal->set_confirmation_text(tr("Save and Exit"));
     m_exit_modal->set_on_confirm([this]() {
@@ -1530,13 +1568,13 @@ void editor_ui::create_exit_modal() {
         bgui::mode::match_parent,
         bgui::mode::wrap_content
     );
-    exit_actions.add<bgui::button>(tr("Discard and Exit"), 0.3f, [this]() {
+    exit_actions.add<bgui::button>(tr("Discard and Exit"), .30f, [this]() {
         if (m_exit_modal)
             m_exit_modal->set_enable(false);
         if (m_exit_callback)
             m_exit_callback();
     });
-    exit_actions.add<bgui::button>(tr("Cancel"), 0.3f, [this]() {
+    exit_actions.add<bgui::button>(tr("Cancel"), .30f, [this]() {
         if (m_exit_modal)
             m_exit_modal->set_enable(false);
     });
@@ -1621,6 +1659,25 @@ void editor_ui::apply_layout(bool wide) {
     if (documents.size() > 1)
         configuration.tab_groups.push_back({documents.front(), documents.front(), documents});
     m_dock.apply_configuration(configuration);
+    for (auto* dock : {&m_model_dock, &m_management_dock}) {
+        auto layout = dock->get_configuration();
+        layout.splits.clear(); layout.tab_groups.clear();
+        layout.left_ratio = .20f; layout.right_ratio = .28f; layout.bottom_ratio = .25f;
+        std::vector<std::string> left, right, bottom;
+        for (auto& window : layout.windows) {
+            window.floating = false; window.weight = 1.f;
+            if (window.title == tr("Hierarchy") || window.title == tr("Cenas") || window.title == "Source Control") {
+                window.area = bgui::dock_area::left; left.push_back(window.title);
+            } else if (window.title == tr("Edição do modelo") || window.title == "Conexões entre cenas") {
+                window.area = bgui::dock_area::center;
+            } else if (window.title == tr("Animações do modelo") || window.title == tr("Animação") || window.title == "Diff") {
+                window.area = bgui::dock_area::bottom; bottom.push_back(window.title);
+            } else { window.area = bgui::dock_area::right; right.push_back(window.title); }
+        }
+        for (auto* tabs : {&left, &right, &bottom})
+            if (tabs->size() > 1) layout.tab_groups.push_back({tabs->front(), tabs->front(), *tabs});
+        dock->apply_configuration(layout);
+    }
 }
 
 void editor_ui::open_preferences_modal() {
@@ -1629,15 +1686,15 @@ void editor_ui::open_preferences_modal() {
     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
     auto& content = modal.content().add<preferences_content>();
     content.add<bgui::text>(tr("Editor Preferences"), .4f);
-    content.add<bgui::text>(tr("Preferences apply to this editor session."), .26f);
-    content.add<bgui::text>(tr("Default language (restart editor)"), .28f);
+    content.add<bgui::text>(tr("Preferences apply to this editor session."), .30f);
+    content.add<bgui::text>(tr("Default language (restart editor)"), .30f);
     const auto languages = available_languages();
     const auto saved_language = localization::read_preference(language_preference_path());
     const auto selected = std::find(languages.begin(), languages.end(), saved_language);
-    auto& language = content.add<bgui::combo_box>(languages, .3f,
+    auto& language = content.add<bgui::combo_box>(languages, .30f,
         selected == languages.end() ? 0 : static_cast<std::size_t>(selected - languages.begin()));
     auto& grid = panel::add_checkbox(content,
-        "Show scene grid", .3f, m_context->preferences.show_grid);
+        "Show scene grid", .30f, m_context->preferences.show_grid);
     const std::array labels{
         tr("Movement speed (0.1 - 100)"), tr("Sprint multiplier (1 - 10)"),
         tr("Mouse sensitivity (0.01 - 2)"), tr("Zoom sensitivity (0.01 - 10)"),
@@ -1651,16 +1708,16 @@ void editor_ui::open_preferences_modal() {
     std::array<bgui::inputbox*, 5> inputs{};
     const auto current = values(m_context->preferences);
     for (std::size_t i = 0; i < inputs.size(); ++i) {
-        content.add<bgui::text>(labels[i], .28f);
-        inputs[i] = &panel::add_input(content, format_number(current[i]), "", .3f);
+        content.add<bgui::text>(labels[i], .30f);
+        inputs[i] = &panel::add_input(content, format_number(current[i]), "", .30f);
     }
-    auto& status = content.add<bgui::text>("", .27f);
-    content.add<bgui::button>(tr("Reset Navigation"), .3f, [inputs, values]() {
+    auto& status = content.add<bgui::text>("", .30f);
+    content.add<bgui::button>(tr("Reset Navigation"), .30f, [inputs, values]() {
         const auto defaults = values(editor_preferences{});
         for (std::size_t i = 0; i < inputs.size(); ++i)
             inputs[i]->set_buffer(format_number(defaults[i]));
     });
-    content.add<bgui::button>(tr("Apply"), .3f,
+    content.add<bgui::button>(tr("Apply"), .30f,
         [context = m_context, inputs, &language, &grid, &status, &modal]() {
             editor_preferences candidate;
             candidate.show_grid = grid.checked();
@@ -1776,6 +1833,8 @@ void editor_ui::setup_scene_management(files_view& files, std::function<void()> 
         [this]{set_workspace_mode(editor_workspace_mode::visual_scripting);}, m_context);
     m_show_scene_workflow=std::move(workflow.scenes);m_show_scripting=std::move(workflow.scripting);
     m_scenes->set_visual_action(m_show_scene_workflow);
+    m_managed_entities = &m_management_panel_manager.add<entities_view>(m_context);
+    m_managed_components = &m_management_panel_manager.add<components_view>(m_context);
 }
 
 void editor_ui::open_managed_scene(const std::filesystem::path& path) {
@@ -1828,7 +1887,28 @@ void editor_ui::open_managed_scene(const std::filesystem::path& path) {
         }, manifest ? path : std::filesystem::path{});
 }
 
+std::optional<std::uint32_t> editor_ui::managed_entity_at(bgui::vec2i position) const {
+    return m_management_dock.is_enabled() && m_managed_entities ? m_managed_entities->entity_at(position) : std::nullopt;
+}
+
+bool editor_ui::drop_managed_asset(const std::filesystem::path& path, bgui::vec2i position) {
+    return m_management_dock.is_enabled() && m_managed_components && m_managed_components->drop_asset(path, position);
+}
+
 void editor_ui::update() {
+    if (!m_context->is_playing) {
+        std::vector<uint32_t> pending;
+        m_context->registry->cada<commons::renderer>([&](uint32_t id) {
+            const auto renderer = m_context->registry->get<commons::renderer>(id);
+            if (!renderer->m_modelo || !renderer->m_modelo->has_skeleton()) return;
+            auto& seen = m_rig_models[id];
+            if (seen.first.lock() == renderer && seen.second == renderer->m_modelo) return;
+            seen = {renderer, renderer->m_modelo};
+            pending.push_back(id);
+        });
+        for (auto id : pending) expose_rig_entities(m_context, id);
+        commons::synchronize_rig_entities(*m_context->registry);
+    }
     m_panel_manager.update();
     m_model_panel_manager.update();
     if (m_management_dock.is_enabled()) m_management_panel_manager.update();

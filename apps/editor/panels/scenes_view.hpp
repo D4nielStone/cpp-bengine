@@ -34,15 +34,15 @@ public:
         body.add_class("editor-surface");
         body.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
         body.style.layout.padding = bgui::vec4i{12, 8, 12, 8};
-        m_active_label = &body.add<bgui::text>(tr("Cena ativa"), .38f);
-        m_name = &add_input(body, "", "Nome da cena nova ou duplicada", .33f);
+        m_active_label = &body.add<bgui::text>(tr("Cena ativa"), .30f);
+        m_name = &add_input(body, "", "Nome da cena nova ou duplicada", .30f);
         m_name->add_class("scene-file-name");
         auto& actions = body.add<bgui::linear>(bgui::orientation::horizontal);
         configure_row(actions);
-        actions.add<bgui::button>(tr("Criar cena"), .33f, [this] { m_create({}, m_name->get_buffer()); }).add_class("primary");
-        actions.add<bgui::button>(tr("Atualizar lista"), .33f, [this] { m_refresh = true; });
-        actions.add<bgui::button>("Mostrar conexões", .32f, [this] { if(m_visual) m_visual(); });
-        m_status = &body.add<bgui::text>("", .33f);
+        actions.add<bgui::button>(tr("Criar cena"), .30f, [this] { m_create({}, m_name->get_buffer()); }).add_class("primary");
+        actions.add<bgui::button>(tr("Atualizar lista"), .30f, [this] { m_refresh = true; });
+        actions.add<bgui::button>("Mostrar conexões", .30f, [this] { if(m_visual) m_visual(); });
+        m_status = &body.add<bgui::text>("", .30f);
         m_list = &body.add<bgui::linear>(bgui::orientation::vertical);
         m_list->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::stretch);
         m_list->set_scrollable(true);
@@ -85,14 +85,14 @@ public:
         try {
             const auto scenes = scene_files::list(m_root, m_manifest);
             if (scenes.empty())
-                m_list->add<bgui::text>(tr("Nenhuma cena encontrada na pasta do projeto."), .33f);
+                m_list->add<bgui::text>(tr("Nenhuma cena encontrada na pasta do projeto."), .30f);
             for (const auto& path : scenes) {
                 auto& row = m_list->add<bgui::linear>(bgui::orientation::horizontal);
                 configure_row(row);
                 row.add_class("scene-file-row");
                 row.style.layout.padding = bgui::vec4i{10, 8, 10, 8};
                 row.style.layout.margin = bgui::vec4i{0, 3, 0, 3};
-                auto& name = row.add<bgui::text>(display_name(path), .33f);
+                auto& name = row.add<bgui::text>(display_name(path), .30f);
                 name.style.layout.align = bgui::vec<2, bgui::alignment>{bgui::alignment::start, bgui::alignment::center};
                 name.style.layout.require_mode(
                     bgui::mode::stretch, bgui::mode::wrap_content);
@@ -101,12 +101,12 @@ public:
                     row.style.visual.background.normal = bgui::color{.18f, .18f, .18f, 1.f};
                 }
                 if (path != m_active)
-                    row.add<bgui::button>(m_manifest ? "Abrir e tornar inicial" : "Abrir", .32f,
+                    row.add<bgui::button>(m_manifest ? "Abrir e tornar inicial" : "Abrir", .30f,
                         [this, path] { m_open(path); });
-                row.add<bgui::button>(tr("Duplicar"), .32f,
+                row.add<bgui::button>(tr("Duplicar"), .30f,
                     [this, path] { m_create(path, m_name->get_buffer()); });
                 if (path != m_active)
-                    row.add<bgui::button>(tr("Excluir..."), .32f, [this, path] { confirm_delete(path); });
+                    row.add<bgui::button>(tr("Excluir..."), .30f, [this, path] { confirm_delete(path); });
             }
         } catch (const std::filesystem::filesystem_error& error) {
             status(error.what());
@@ -142,13 +142,13 @@ private:
         if (m_delete_modal) return;
         auto& dialog = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_delete_modal = &dialog;
-        dialog.add<bgui::text>("Excluir definitivamente “" + display_name(path) + "”?", .32f);
+        dialog.add<bgui::text>("Excluir definitivamente “" + display_name(path) + "”?", .30f);
         dialog.set_confirmation_text(tr("Excluir definitivamente"));
         dialog.set_on_confirm([this, path] {
             m_delete_modal = nullptr;
             m_erase(path);
         });
-        dialog.add<bgui::button>(tr("Cancelar"), .33f, [this, pointer = &dialog] {
+        dialog.add<bgui::button>(tr("Cancelar"), .30f, [this, pointer = &dialog] {
             m_delete_modal = nullptr;
             bgui::add_function([pointer] { bgui::get_layout().remove(pointer); });
         });

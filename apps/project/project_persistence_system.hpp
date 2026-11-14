@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -16,6 +17,8 @@
 namespace commons { struct animation_clip; }
 
 namespace editor::ui {
+
+bool validate_scene_entities(const rapidjson::Value& entities, std::string& error);
 
 class project_persistence_system final {
 public:
@@ -47,6 +50,7 @@ public:
     using animation_assets_provider = std::function<std::vector<std::shared_ptr<commons::animation_clip>>() >;
     void set_animation_assets_provider(animation_assets_provider provider) { m_animation_assets_provider=std::move(provider); }
     bool save(const std::string& path, std::string& error) const;
+    bool save_prefab(const std::string& path, std::uint32_t root, std::string& error) const;
     bool save_snapshot(const std::string& path, std::string& error) const;
     bool load(const std::string& path, std::string& error) const;
     bool switch_scene(const std::string& project, const std::filesystem::path& scene, std::string& error) const;
@@ -65,7 +69,7 @@ public:
 private:
     bool load_impl(const std::string& path, const std::filesystem::path& scene, std::string& error, bool runtime = false) const;
     bool serialize_project(const std::string& path, std::string& error,
-        bool write_files, std::string& snapshot, bool update_paths = true) const;
+        bool write_files, std::string& snapshot, bool update_paths = true, std::optional<std::uint32_t> prefab_root = {}) const;
     struct saved_state {
         std::string snapshot;
         std::filesystem::path scene_path;

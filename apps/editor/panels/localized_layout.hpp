@@ -20,7 +20,7 @@ private:
     void visit(bgui::layout& layout) {
         constexpr std::array keys{"Scene", "Hierarchy", "Inspector", "Debug", "Arquivos",
             "Arquivos 3D", "Animação", "Cenas", "Game", "Camera Preview", "Editor Diagnostics",
-            "Edição do modelo", "Malhas"};
+            "Edição do modelo", "Malhas", "Rig e Weight Paint", "Animações do modelo"};
         for (auto& [layer, children] : layout.get_elements()) {
             for (auto& child : children) {
                 if (auto* window = dynamic_cast<bgui::window*>(child.get())) {

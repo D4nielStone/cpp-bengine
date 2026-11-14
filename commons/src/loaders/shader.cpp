@@ -5,11 +5,21 @@
 #include <vector>
 #include <glm/glm.hpp>
 #include <stdexcept>
+#include <chrono>
 
 using namespace COMMONS_NS;
 
 namespace {
     std::unordered_map<unsigned int, std::unordered_map<std::string, int>> uniform_location_cache;
+    struct shader_revision {
+        std::filesystem::file_time_type vertex{}, fragment{};
+        std::chrono::steady_clock::time_point checked{};
+        bool attempted{false};
+    };
+    std::unordered_map<std::string, shader_revision> shader_revisions;
+    std::string program_key(const std::string& vertex, const std::string& fragment) {
+        return vertex + "\n" + fragment;
+    }
 
     std::filesystem::path safe_absolute(const std::filesystem::path& p)
     {
@@ -68,7 +78,10 @@ namespace {
 
 void COMMONS_NS::desload_shaders()
 {
+    if (glad_glGetString && glGetString(GL_VERSION))
+        for (const auto& [key, program] : shaders) if (program) glDeleteProgram(program);
     shaders.clear();
+    shader_revisions.clear();
     uniform_location_cache.clear();
 }
 
@@ -78,78 +91,56 @@ const char* shader_exception::what() const noexcept {
     return msg_.c_str();
 }
 
-shader::shader(const char* vertexPath, const char* fragmentPath) : ID(0) {
+shader::shader(const char* vertexPath, const char* fragmentPath) : vert(vertexPath), frag(fragmentPath), ID(0) {
     if (glad_glCreateProgram != nullptr)
         compilar(vertexPath, fragmentPath);
 }
 
 void shader::compilar(const char* vertexPath, const char* fragmentPath) {
-    if (glad_glCreateProgram == nullptr) {
-        ID = 0;
-        return;
-    }
-
     vert = vertexPath; frag = fragmentPath;
-    // Verifica se o shader já foi compilado
-    if(shaders.find(fragmentPath) != shaders.end())
-    {
-        ID = shaders[fragmentPath];
-        return;
-    }
-    // Cria o programa shader
+    if (!glad_glCreateProgram || !glGetString(GL_VERSION)) { ID = 0; return; }
+    const auto key = program_key(vert, frag);
+    auto& revision = shader_revisions[key];
+    const auto cached = shaders.find(key);
+    ID = cached == shaders.end() ? 0 : cached->second;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - revision.checked < std::chrono::milliseconds(500)) return;
+    revision.checked = now;
+    GLuint vertex = 0, fragment = 0, program = 0;
     try {
-        ID = glCreateProgram();
+        const auto vertex_file = resolve_shader_path(vertexPath);
+        const auto fragment_file = resolve_shader_path(fragmentPath);
+        std::error_code error;
+        const auto vertex_time = std::filesystem::last_write_time(vertex_file, error);
+        const auto fragment_time = std::filesystem::last_write_time(fragment_file, error);
+        if (revision.attempted && revision.vertex == vertex_time && revision.fragment == fragment_time) return;
+        revision.attempted = true; revision.vertex = vertex_time; revision.fragment = fragment_time;
+        const auto vertex_code = read_shader_file(vertex_file), fragment_code = read_shader_file(fragment_file);
+        const auto* vs = vertex_code.c_str(); const auto* fs = fragment_code.c_str();
+        vertex = glCreateShader(GL_VERTEX_SHADER); fragment = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(vertex, 1, &vs, nullptr); glCompileShader(vertex);
+        glShaderSource(fragment, 1, &fs, nullptr); glCompileShader(fragment);
+        if (!checkCompileErrors(vertex, "VERTEX") || !checkCompileErrors(fragment, "FRAGMENT"))
+            throw std::runtime_error("GLSL compilation failed: " + frag);
+        program = glCreateProgram();
+        glAttachShader(program, vertex); glAttachShader(program, fragment); glLinkProgram(program);
+        if (!checkLinkErrors(program)) throw std::runtime_error("GLSL link failed: " + frag);
+        if (ID) { uniform_location_cache.erase(ID); glDeleteProgram(ID); }
+        ID = program; shaders[key] = ID; program = 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
     }
-    catch (const std::exception& e) {
-        std::cerr << "Erro ao create shader_program: " << e.what() << std::endl;
-    }
-
-    const auto vertex_file = resolve_shader_path(vertexPath);
-    const auto fragment_file = resolve_shader_path(fragmentPath);
-    const std::string vertexCode = read_shader_file(vertex_file);
-    const std::string fragmentCode = read_shader_file(fragment_file);
-    const char* vertexshaderSource = vertexCode.c_str();
-    const char* fragmentshaderSource = fragmentCode.c_str();
-    // Compilação do Malha shader
-    GLuint vertexshader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexshader, 1, &vertexshaderSource, NULL);
-    glCompileShader(vertexshader);
-    if (!checkCompileErrors(vertexshader, "VERTEX")) return;
-
-    // Compilação do Fragment shader
-    GLuint fragmentshader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentshader, 1, &fragmentshaderSource, NULL);
-    glCompileShader(fragmentshader);
-    if (!checkCompileErrors(fragmentshader, "FRAGMENT")) return;
-
-    // Vinculação e linkagem dos shaders
-    glAttachShader(ID, vertexshader);
-    glAttachShader(ID, fragmentshader);
-    glLinkProgram(ID);
-    if (!checkLinkErrors(ID)) return;
-
-    // Limpeza
-    glDeleteShader(vertexshader);
-    glDeleteShader(fragmentshader);
-
-
-    shaders[fragmentPath] = ID;
+    if (vertex) glDeleteShader(vertex);
+    if (fragment) glDeleteShader(fragment);
+    if (program) glDeleteProgram(program);
 }
 
-void shader::use()
-{
-    if (glad_glUseProgram == nullptr || ID == 0)
-        return;
-
-    if(shaders.find(frag) != shaders.end())
-    {
-        glUseProgram(ID);
-    }
-    else
-    {
-        compilar(vert.c_str(), frag.c_str());
-
-    }
+void shader::use() {
+    if (!glad_glUseProgram) return;
+    const auto found = shaders.find(program_key(vert, frag));
+    if (found != shaders.end()) ID = found->second;
+    else compilar(vert.c_str(), frag.c_str());
+    if (ID) glUseProgram(ID);
 }
 
 int shader::uniform_location(const std::string& name) const {

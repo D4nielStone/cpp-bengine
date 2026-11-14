@@ -66,3 +66,5 @@ Cache/
 !commons/assets/locales/
 !commons/assets/locales/*.json
 editor-preferences.json*
+
+editor-features.json*

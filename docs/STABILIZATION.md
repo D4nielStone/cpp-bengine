@@ -812,3 +812,87 @@ nenhuma falha nova foi identificada.
   graphics or other-platform verification was performed in this session.
 - `git diff --check` passed in both cpp-bengine and cpp-bgui. Complete build
   and CTest output: `/tmp/bengine-precommit-validation.log`.
+
+## Editor workflow and text-input changes (2026-11-13)
+
+Input inspection found missing GLFW Page Up/Down/keypad mappings and inputbox selection reset without a drag-selection lifecycle. Added keypad navigation aliases only for focused text fields, page movement/Shift selection, mouse drag selection, and vertical cursor reveal for scrolling multiline input. Native numpad events remain available to viewport navigation. Backend changes live in the nested `cpp-bgui/backend` submodule.
+
+Added regression coverage in `TextEditor.PageNavigationExtendsSelectionAndRespectsDocumentLimits` and `TextEditor.MouseDragSelectsTextForReplacement`. Prefab persistence and shader round-trip/failure behavior have separate regression tests. Validation results are recorded after the integrated build. Physical keyboard Num Lock combinations, IME behavior and interactive docking/weight-paint usability require desktop verification.
+
+## Creative MCP authoring and runtime capture — 2026-11-13
+
+- Extended the existing stdio server with project creation/selection, asset discovery,
+  native mesh creation, validated scene composition, Lua syntax checking, `.banim`
+  authoring and guarded startup-scene edits. Existing inspection tools remain available.
+- Reused project templates, native validators and recoverable transactions. Writes
+  require an exact preimage for existing files and reject traversal/symlinks. Active
+  tests block edits. The shared runtime launcher has an opt-in project-preserving
+  path; its previous editor snapshot ownership behavior is unchanged.
+- Added bounded runtime tests, camera PNG capture, persistent specifications/reports,
+  stderr/stdout isolation and MCP image content. Runtime initialization errors now
+  return a logged error instead of escaping `main`. Capture is camera-only, excludes
+  HUD, uses real simulation time and requires agent review of visual expectations.
+- Clean configuration/build used `/tmp/bengine-mcp-build`, with cached GoogleTest
+  and miniaudio sources because network DNS prevented the integrated script's first
+  dependency fetch. Built `bengine_mcp`, `runtime_app`, `runtime_process_tests`.
+- Validation: 12 stdio MCP regressions passed; six runtime process lifecycle tests
+  passed. The protocol test uses a fixture PNG to verify image transport, not rendering.
+  Two existing graphics tests and the opt-in MCP capture test were skipped in CTest.
+  An explicit real-runtime capture attempt could not open display `:0`. Verified the
+  resulting MCP status contains exit code 1 and `Failed to initialize GLFW`, with no
+  image. Actual rendered PNG appearance/resolution and Windows execution remain
+  unverified in this environment. No claim of a fully executed graphical suite.
+- Run the real capture workflow with `BENGINE_MCP_GRAPHICS_TEST=1 ctest --test-dir
+  <build-dir> --output-on-failure -R '^mcp_runtime_capture$'` in a working OpenGL session.
+
+### Portable release packaging (2026-11-13)
+
+- Added a self-contained portable entry point with a ZIP payload, persistent user
+  state, bundled Linux file picker and native precompiled folder-export template.
+- Release packaging rejects development builds and includes Windows MSVC runtime
+  DLLs. CI verifies payload hashes/Tcl/template loading without PATH tools and
+  checks Linux editor first-frame readiness from the extracted portable ZIP.
+- Local Python release tests: 15 passed; native file dialog tests: 6 passed;
+  focused release/export/build/dialog CTest run: 32 passed. The affected editor target compiled.
+  Full portable generation could not run locally: PyInstaller was absent and pip
+  could not resolve the package server in the restricted environment. Windows and
+  the frozen executable still require the release CI and desktop validation.
+
+## Dock controls and large text rendering (2026-11-13)
+
+- Confirmed that dock overflow controls were passive text and tab selection always forced the panel open. The overflow is now a button with the existing BGUI context menu (expand/collapse, next tab, float panel). Clicking the active tab toggles its content; selecting another tab or focusing a window expands it. Collapsed outer areas return space to the center without changing saved ratios. Collapse state is transient; workspace serialization remains unchanged.
+- Separated line numbers from scope guides with `text::set_line_numbers_enabled` and the inputbox forwarding method. File editors enable numbers and leave scope guides disabled.
+- Text caches UTF-8 decoding and layout metrics, indexes rendering in 64-line chunks, and starts drawing at the chunk intersecting the clip rectangle. Unwrapped text without scope guides stops drawing below the viewport. The original byte buffer, global selection/caret offsets, syntax colors, and save path remain intact. Wrapped text and scope-guide rendering retain the full traversal.
+- This is rendering chunking, not disk paging: the document, highlight state and undo snapshots remain in memory; edits still rebuild decoding/highlighting. Extremely long individual lines and full-document editing costs are not eliminated.
+- Regression coverage exercises tab toggling, opening the overflow menu, compacting/restoring a bottom dock, and clipped chunk rendering against the full traversal with line numbers. Validation results are recorded below after execution.
+
+### Dock presentation and hierarchy virtualization (2026-11-14)
+
+- Side docks collapse to a narrow rail of square tabs with centered dots;
+  top and bottom docks give their freed height to the center or opposite dock.
+  The three-dot menu uses explicit circle widgets and clamps to the viewport.
+- Hierarchy scenes with at least 128 entities reuse visible tree rows and
+  spacers for scrolling. Expansion, filtering, selection and drag targets bind
+  to the current entity; a periodic snapshot also catches changes without an
+  editor event. Existing text chunking and independent line numbers remain in
+  the maintained BGUI submodule.
+- Added headless dock regressions for both lateral areas, both vertical areas,
+  center and opposite neighbors, scales 1 and 1.5, and menu placement. Added
+  an editor test for a 1,000-entity hierarchy with scroll and filter rebinding.
+  Standalone BGUI configured with OpenGL, GLFW and FreeType disabled, built
+  successfully and passed all 20 CTest groups. Visual display and GPU behavior
+  were not manually verified.
+
+- Follow-up: the three-dot popup was enabled but its parent control sorted
+  behind pinned windows, so the window painted over it and received clicks.
+  The overflow control now sorts above windows. A regression sends real mouse
+  press/release events to the popup option and checks that it collapses the
+  panel. Collapsed side rails use the normal tab header height for their square
+  width and each tab height, including groups with multiple tabs. Sole outer
+  docks also shrink their allocated width or height when collapsed. The BGUI
+  headless build and all 20 CTest groups passed after these changes. The
+  integrated editor_interaction_tests target compiled and its 1,000-entity
+  hierarchy case passed; the full interaction binary passed 55 of 56 tests.
+  KeypadViewsAndProjectionDoNotRepeatWhileHeld failed on camera rotation and
+  orthographic toggling, separate from dock rendering. Desktop rendering remains
+  to be checked interactively.

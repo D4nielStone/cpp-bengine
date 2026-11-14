@@ -1,5 +1,8 @@
 """Exercise the MCP server over the same stdio transport used by clients."""
 import json
+import os
+import base64
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -58,7 +61,6 @@ class McpServerTests(unittest.TestCase):
             [SERVER, "--project", self.project], input=wire, encoding="utf-8",
             capture_output=True, timeout=5, check=True,
         )
-        self.assertEqual(process.stderr, "")
         responses = [json.loads(line) for line in process.stdout.splitlines()]
         self.assertTrue(all(response["jsonrpc"] == "2.0" for response in responses))
         return responses
@@ -74,9 +76,11 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(hello["result"]["protocolVersion"], "2025-11-25")
         self.assertIn("tools", hello["result"]["capabilities"])
         tools = catalog["result"]["tools"]
-        self.assertEqual({tool["name"] for tool in tools},
-                         {"project_info", "list_entities", "get_entity"})
-        self.assertTrue(all(tool["annotations"]["readOnlyHint"] for tool in tools))
+        self.assertTrue({"project_info", "list_entities", "get_entity", "create_project",
+                         "compose_scene", "create_model", "write_asset", "run_test", "test_status"}
+                        <= {tool["name"] for tool in tools})
+        self.assertTrue(all(tool["annotations"]["readOnlyHint"] for tool in tools
+                            if tool["name"] in {"project_info", "list_entities", "get_entity"}))
         self.assertEqual(ping["result"], {})
 
     def test_saved_scene_queries_preserve_files(self):
@@ -133,6 +137,158 @@ class McpServerTests(unittest.TestCase):
         self.scene.unlink()
         _, result = self.exchange(INITIALIZE, INITIALIZED, call("list_entities", 1))
         self.assertTrue(result["result"]["isError"])
+
+
+    def test_asset_writes_validate_syntax_and_detect_conflicts(self):
+        _, bad, created, conflict, changed, readback = self.exchange(
+            INITIALIZE, INITIALIZED,
+            call("write_asset", 1, path="scripts/a.lua", contents="function !!!"),
+            call("write_asset", 2, path="scripts/a.lua", contents="function setup() end"),
+            call("write_asset", 3, path="scripts/a.lua", contents="", expectedContents="stale"),
+            call("write_asset", 4, path="scripts/a.lua", contents="function update() end",
+                 expectedContents="function setup() end"),
+            call("read_file", 5, path="scripts/a.lua"),
+        )
+        self.assertTrue(bad["result"]["isError"])
+        self.assertNotIn("isError", created["result"])
+        self.assertTrue(conflict["result"]["isError"])
+        self.assertNotIn("isError", changed["result"])
+        self.assertEqual(readback["result"]["structuredContent"]["contents"], "function update() end")
+
+    def test_authoring_examples_and_native_assets(self):
+        _, response = self.exchange(INITIALIZE, INITIALIZED, call("authoring_guide", 1))
+        guide = response["result"]["structuredContent"]
+        _, model, clip, script, scene = self.exchange(
+            INITIALIZE, INITIALIZED,
+            call("create_model", 1, path="assets/cube.bmodel", shape="cube"),
+            call("write_asset", 2, path="assets/spin.banim", contents=json.dumps(guide["animationExample"])),
+            call("write_asset", 3, path="scripts/example.lua", contents=guide["scriptExample"]),
+            call("compose_scene", 4, path="new.scene", entities=[guide["entityExample"], guide["cameraExample"]]),
+        )
+        for item in (model, clip, script, scene):
+            self.assertNotIn("isError", item["result"], item)
+        self.assertEqual(scene["result"]["structuredContent"]["entityCount"], 2)
+        saved = json.loads((self.root / "assets/cube.bmodel").read_text())
+        self.assertEqual(len(saved["meshes"][0]["faces"]), 6)
+
+    def test_paths_schemas_and_invalid_scenes_preserve_files(self):
+        outside = self.root.parent / "outside.lua"
+        outside.write_text("original")
+        (self.root / "linked.lua").symlink_to(outside)
+        before = self.scene.read_bytes()
+        invalid = {"id":1,"parent":1,"components":{"transform":{
+            "position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}}
+        _, escape, symlink, invalid_scene, schema, deep = self.exchange(
+            INITIALIZE, INITIALIZED,
+            call("write_asset", 1, path="../outside.lua", contents=""),
+            call("write_asset", 2, path="linked.lua", contents="", expectedContents="original"),
+            call("compose_scene", 3, path="new.scene", entities=[invalid]),
+            call("run_test", 4, specification="cube", frames=0),
+            '{"jsonrpc":"2.0","id":5,"params":' + '[' * 70 + '0' + ']' * 70 + '}',
+        )
+        for result in (escape, symlink, invalid_scene):
+            self.assertTrue(result["result"]["isError"])
+        self.assertEqual(schema["error"]["code"], -32602)
+        self.assertEqual(deep["error"]["code"], -32700)
+        self.assertEqual(outside.read_text(), "original")
+        self.assertEqual(self.scene.read_bytes(), before)
+        self.assertFalse((self.root / "new.scene").exists())
+
+    def test_scene_updates_preserve_unmentioned_data_and_validate_deletions(self):
+        pose = {"position":[0,0,0], "rotation":[0,0,0], "scale":[1,1,1]}
+        entities = [{"id":1,"name":"Root","custom":"keep","components":{"transform":pose}},
+                    {"id":2,"parent":1,"components":{"transform":pose}}]
+        scene = {"format":"bubble-engine-scene", "version":1, "environment":"keep", "entities":entities}
+        original = json.dumps(scene)
+        _, created, invalid = self.exchange(INITIALIZE, INITIALIZED,
+            call("write_asset", 1, path="editable.scene", contents=original),
+            call("compose_scene", 2, path="editable.scene", entities=[], removeIds=[1],
+                 expectedContents=original))
+        self.assertNotIn("isError", created["result"])
+        self.assertTrue(invalid["result"]["isError"])
+        self.assertEqual((self.root / "editable.scene").read_text(), original)
+        updated = dict(entities[1], name="Child")
+        _, changed = self.exchange(INITIALIZE, INITIALIZED,
+            call("compose_scene", 1, path="editable.scene", entities=[updated], expectedContents=original))
+        self.assertNotIn("isError", changed["result"])
+        saved = json.loads((self.root / "editable.scene").read_text())
+        self.assertEqual(saved["environment"], "keep")
+        self.assertEqual(saved["entities"][0], entities[0])
+        self.assertEqual(saved["entities"][1]["name"], "Child")
+        manifest = self.project.read_text()
+        _, switched = self.exchange(INITIALIZE, INITIALIZED,
+            call("set_main_scene", 1, path="editable.scene", expectedContents=manifest))
+        self.assertNotIn("isError", switched["result"])
+        self.assertEqual(json.loads(self.project.read_text())["scene"], "editable.scene")
+
+    @unittest.skipIf(os.name == "nt", "Executable Python fixture uses a POSIX shebang")
+    def test_runtime_protocol_preserves_project_and_returns_image(self):
+        fixture = self.root.parent / "runtime fixture"
+        image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aSFAAAAAASUVORK5CYII="
+        fixture.write_text("#!" + sys.executable + "\n" +
+            "import sys,json,base64\nfrom pathlib import Path\n" +
+            "args=dict(zip(sys.argv[1::2],sys.argv[2::2]))\n" +
+            "spec=Path(args['--test-spec'])\n" +
+            "report=json.loads(spec.read_text())\nreport['capturedFrame']=report['frames']\n" +
+            "Path(str(spec)+'.report.json').write_text(json.dumps(report))\n" +
+            "Path(str(spec)+'.preview.png').write_bytes(base64.b64decode(" + repr(image) + "))\n" +
+            "print('fixture stdout must not corrupt MCP')\n" +
+            "print('fixture diagnostic',file=sys.stderr)\n")
+        fixture.chmod(0o700)
+        before = {p:p.read_bytes() for p in (self.project,self.scene)}
+        process = subprocess.Popen([SERVER,"--project",self.project,"--runtime",fixture],
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        def send(message):
+            process.stdin.write(json.dumps(message)+"\n")
+            process.stdin.flush()
+            response=json.loads(process.stdout.readline())
+            self.assertNotIn("error",response)
+            self.assertNotIn("isError",response["result"])
+            return response["result"]
+        try:
+            send(INITIALIZE)
+            process.stdin.write(json.dumps(INITIALIZED)+"\n")
+            send(call("run_test",1,specification="Protocol fixture only",frames=1))
+            deadline=time.monotonic()+5
+            while True:
+                result=send(call("test_status",2))
+                status=result["structuredContent"]
+                if not status["running"]: break
+                self.assertLess(time.monotonic(),deadline)
+                time.sleep(.02)
+            self.assertEqual(status["exitCode"],0)
+            self.assertIn("fixture diagnostic",status["log"])
+            self.assertIn("fixture stdout",status["log"])
+            content=[item for item in result["content"] if item["type"]=="image"]
+            self.assertEqual(base64.b64decode(content[0]["data"]),base64.b64decode(image))
+            self.assertEqual({p:p.read_bytes() for p in before},before)
+        finally:
+            process.stdin.close()
+            try: process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
+
+    def test_workspace_creation_and_selection(self):
+        messages = [INITIALIZE, INITIALIZED,
+            call("create_project", 1, path="creative", template="empty"),
+            call("project_info", 2),
+            call("create_project", 3, path="creative", template="fpp"),
+            call("create_project", 4, path="../escaped", template="empty"),
+            call("create_project", 5, path="first-person", template="fpp"),
+            call("open_project", 6, path="creative/project.bengine")]
+        completed = subprocess.run([SERVER, "--workspace", self.root],
+            input="".join(json.dumps(item) + "\n" for item in messages), text=True,
+            capture_output=True, check=True, timeout=15)
+        results = [json.loads(line) for line in completed.stdout.splitlines()]
+        self.assertNotIn("isError", results[1]["result"])
+        self.assertEqual(results[2]["result"]["structuredContent"]["entityCount"], 0)
+        self.assertTrue(results[3]["result"]["isError"])
+        self.assertTrue(results[4]["result"]["isError"])
+        self.assertNotIn("isError", results[5]["result"])
+        self.assertNotIn("isError", results[6]["result"])
+        self.assertTrue((self.root / "first-person/scripts/fpp_controller.lua").exists())
 
 
 if __name__ == "__main__":

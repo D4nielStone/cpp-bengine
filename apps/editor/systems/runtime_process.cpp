@@ -151,6 +151,11 @@ bool runtime_process::start(
     const std::filesystem::path& project,
     std::string& error
 ) {
+    return start(executable, project, error, {});
+}
+
+bool runtime_process::start(const std::filesystem::path& executable,
+    const std::filesystem::path& project, std::string& error, const runtime_launch_options& options) {
     error.clear();
     if (running(error)) {
         error = "The game runtime is already running.";
@@ -159,14 +164,17 @@ bool runtime_process::start(
     if (!error.empty())
         return false;
 
+    m_preserve_project = options.preserve_project;
+    m_exit_code = -1;
     m_project_file = project;
-    m_log_file = project.string() + ".lua-log";
+    m_log_file = (options.test_spec.empty() ? project.string() : options.test_spec.string()) + ".lua-log";
     m_log_offset = 0;
     m_is_paused = false;
 
 #ifdef _WIN32
     std::wstring command = L"\"" + executable.wstring() +
         L"\" --project \"" + project.wstring() + L"\" --script-log \"" + m_log_file.wstring() + L"\"";
+    if (!options.test_spec.empty()) command += L" --test-spec \"" + options.test_spec.wstring() + L"\"";
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
     PROCESS_INFORMATION process_info{};
@@ -218,7 +226,18 @@ bool runtime_process::start(
 
     if (child == 0) {
         close(exec_status[0]);
-        execl(
+        if (!options.test_spec.empty()) {
+            const int output = open((options.test_spec.string() + ".log").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+            if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0) {
+                const int failure = errno;
+                if (write(exec_status[1], &failure, sizeof(failure)) != sizeof(failure)) _exit(127);
+                _exit(127);
+            }
+            close(output);
+            execl(executable.c_str(), executable.c_str(), "--project", project.c_str(),
+                "--script-log", m_log_file.c_str(), "--test-spec", options.test_spec.c_str(),
+                static_cast<char*>(nullptr));
+        } else execl(
             executable.c_str(),
             executable.c_str(),
             "--project",
@@ -228,7 +247,7 @@ bool runtime_process::start(
             static_cast<char*>(nullptr)
         );
         const int exec_error = errno;
-        (void)write(exec_status[1], &exec_error, sizeof(exec_error));
+        if (write(exec_status[1], &exec_error, sizeof(exec_error)) != sizeof(exec_error)) _exit(127);
         _exit(127);
     }
 
@@ -279,6 +298,9 @@ bool runtime_process::running(std::string& error) {
         return true;
     }
 
+    DWORD exit_status{};
+    GetExitCodeProcess(static_cast<HANDLE>(m_process_handle), &exit_status);
+    m_exit_code = static_cast<int>(exit_status);
     CloseHandle(static_cast<HANDLE>(m_process_handle));
     m_process_handle = nullptr;
 #else
@@ -301,6 +323,7 @@ bool runtime_process::running(std::string& error) {
     if (result < 0)
         return true;
 
+    m_exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
     m_process_id = -1;
 #endif
     m_is_paused = false;
@@ -395,6 +418,11 @@ void runtime_process::collect_script_logs() {
 
 void runtime_process::cleanup_project_file() {
     collect_script_logs();
+    if (m_preserve_project) {
+        m_project_file.clear();
+        m_log_file.clear();
+        return;
+    }
     std::error_code log_error;
     if (!m_log_file.empty()) std::filesystem::remove(m_log_file, log_error);
     m_log_file.clear();

@@ -1,3 +1,5 @@
+#include "systems/rig_entities.hpp"
+#include <filesystem>
 #include "systems/render_system.hpp"
 
 #include <chrono>
@@ -141,6 +143,7 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
 render_system::~render_system() {
     // Systems may outlive the window during application shutdown.
     if (glad_glGetString && glGetString(GL_VERSION)) {
+        if (m_post_color) glDeleteTextures(1, &m_post_color);
         if (m_occlusion_depth) glDeleteTextures(1, &m_occlusion_depth);
         if (m_occlusion_vao) glDeleteVertexArrays(1, &m_occlusion_vao);
         for (auto* map : {&m_directional_shadow, &m_spot_shadow}) {
@@ -187,6 +190,49 @@ bool render_system::prepare_depth_map(depth_map& map, int width, int height) {
     map.width = complete ? width : 0;
     map.height = complete ? height : 0;
     return complete;
+}
+
+void render_system::apply_camera_shader(const camera& view) {
+    if (view.config.post_processing.fragment_shader.empty()) return;
+    const auto path = (std::filesystem::path(view.skybox_asset_root) / view.config.post_processing.fragment_shader).string();
+    shader program("ambient_occlusion.vert", path.c_str());
+    if (!program.ID) return;
+    GLint viewport[4], previous_program, vao, active, texture, read_fb, draw_fb, unpack;
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    if (viewport[2] <= 0 || viewport[3] <= 0) return;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack);
+    glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    if (!m_post_color) glGenTextures(1, &m_post_color);
+    glBindTexture(GL_TEXTURE_2D, m_post_color);
+    if (m_post_width != viewport[2] || m_post_height != viewport[3]) {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, viewport[2], viewport[3], 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        m_post_width = viewport[2]; m_post_height = viewport[3];
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fb);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport[0], viewport[1], viewport[2], viewport[3]);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fb);
+    const GLenum states[]{GL_DEPTH_TEST, GL_CULL_FACE, GL_STENCIL_TEST, GL_BLEND};
+    bool enabled[4];
+    for (int i = 0; i < 4; ++i) { enabled[i] = glIsEnabled(states[i]); glDisable(states[i]); }
+    if (!m_occlusion_vao) glGenVertexArrays(1, &m_occlusion_vao);
+    glBindVertexArray(m_occlusion_vao);
+    program.use(); program.setInt("sceneColor", 0);
+    program.setVec2("viewportSize", float(viewport[2]), float(viewport[3]));
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    for (int i = 0; i < 4; ++i) if (enabled[i]) glEnable(states[i]);
+    glUseProgram(previous_program); glBindVertexArray(vao);
+    glBindTexture(GL_TEXTURE_2D, texture); glActiveTexture(active);
 }
 
 void render_system::apply_camera_occlusion(const camera& view) {
@@ -341,6 +387,8 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         m_last_render_time_ms = 0.0;
         return;
     }
+
+    synchronize_rig_entities(*reg);
 
     directional_light global_direction_light{
         {-0.2f, -1.0f, -0.3f},
@@ -633,6 +681,19 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             for (auto& mesh : model.meshes) {
                 if (!mesh.isLoaded()) mesh.load();
                 const auto& material = mesh.material_configuration();
+                if (!material.fragment_shader.empty()) {
+                    binding.reset(); bound_material = nullptr;
+                    commons::shader custom(material.vertex_shader.empty() ? "pbr.vert" : material.vertex_shader.c_str(), material.fragment_shader.c_str());
+                    if (custom.ID) {
+                        set_camera_uniforms(custom, receive_shadows);
+                        custom.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
+                        mesh.draw(custom);
+                        continue;
+                    }
+                    set_camera_uniforms(shader, receive_shadows);
+                    shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
+                }
+
                 const bool can_batch = standard_shader && !mesh.isOverlayed() && mesh.instances().empty();
                 if (can_batch && bound_material && bound_program == shader.ID &&
                     material.same_configuration(*bound_material)) {
@@ -668,6 +729,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             glActiveTexture(active_texture);
         }
         apply_camera_occlusion(*camera_component);
+        apply_camera_shader(*camera_component);
     };
     if (explicit_view) draw_camera(explicit_view);
     else reg->cada<camera>([&](const std::uint32_t entity) {

@@ -12,6 +12,7 @@
 #include <os/os.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <functional>
@@ -33,6 +34,7 @@ private:
     bgui::vec3 m_desired_position{};
     bgui::vec3 m_last_applied_position{}, m_last_applied_rotation{};
     std::function<float()> m_clock;
+    std::array<bool, 12> m_navigation_keys{};
     bool m_manual_orbit{false};
     bool m_primary_drag_enabled{true};
 
@@ -300,6 +302,43 @@ public:
             (camera_transform->get_position() != m_last_applied_position ||
              camera_transform->get_rotation() != m_last_applied_rotation))
             m_orbit_initialized = false;
+
+        using key = bgui::input_key;
+        constexpr std::array navigation_keys{key::keypad_one, key::keypad_three, key::keypad_seven,
+            key::keypad_five, key::keypad_four, key::keypad_six, key::keypad_eight,
+            key::keypad_two, key::keypad_nine, key::keypad_add, key::keypad_subtract, key::keypad_decimal};
+        const bool keyboard_available = mouse_over_viewport && !gizmo_active &&
+            !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus()) && !visual_script_has_keyboard_focus();
+        const bool control = bgui::get_pressed(key::left_control) || bgui::get_pressed(key::right_control);
+        for (std::size_t i = 0; i < navigation_keys.size(); ++i) {
+            const bool down = bgui::get_pressed(navigation_keys[i]);
+            const bool pressed = down && !m_navigation_keys[i];
+            m_navigation_keys[i] = down;
+            if (!pressed || !keyboard_available || (control && i >= 9)) continue;
+            if (!m_orbit_initialized) initialize_orbit(camera_transform);
+            if (!is_orbital()) m_manual_orbit = true;
+            switch (i) {
+            case 0: m_pitch = 0; m_yaw = control ? 90.f : -90.f; break;
+            case 1: m_pitch = 0; m_yaw = control ? 0.f : 180.f; break;
+            case 2: m_pitch = control ? 89.9f : -89.9f; m_yaw = -90.f; break;
+            case 3: m_camera->config.flag_orth = !m_camera->config.flag_orth; break;
+            case 4: m_yaw -= 15.f; break;
+            case 5: m_yaw += 15.f; break;
+            case 6: m_pitch = std::min(89.9f, m_pitch + 15.f); break;
+            case 7: m_pitch = std::max(-89.9f, m_pitch - 15.f); break;
+            case 8: m_yaw += 180.f; m_pitch = -m_pitch; break;
+            case 9: set_orbit_distance(m_orbit_distance * .8f);
+                if (m_camera->config.flag_orth) m_camera->config.scale = std::max(.01f, m_camera->config.scale * .8f); break;
+            case 10: set_orbit_distance(m_orbit_distance * 1.25f);
+                if (m_camera->config.flag_orth) m_camera->config.scale = std::min(10000.f, m_camera->config.scale * 1.25f); break;
+            case 11: if (m_orbit_target) m_orbit_center = m_orbit_target->get_world_position(); break;
+            }
+            camera_transform->set_position(m_orbit_center - get_forward() * m_orbit_distance);
+            camera_transform->set_rotation({m_pitch, m_yaw, 0.f});
+            m_last_applied_position = camera_transform->get_position();
+            m_last_applied_rotation = camera_transform->get_rotation();
+            m_desired_position = m_last_applied_position;
+        }
 
         const float scroll_y = mouse_over_viewport ? bgui::get_context().m_scroll_delta_y : 0.f;
         const float scroll_x = mouse_over_viewport ? bgui::get_context().m_scroll_delta_x : 0.f;

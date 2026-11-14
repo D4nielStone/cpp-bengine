@@ -65,9 +65,10 @@ void model_editor_view::create_rig_joint(bool child) {
     if (commit_rig_definition(std::move(next))) m_active_joint = std::move(id);
 }
 void model_editor_view::build_rig_controls() {
+    if (!auxiliary_attached(m_rig_window)) return;
     auto source = m_source_renderer.lock();
     if (!source || !source->m_modelo || m_model.meshes.empty() || !m_model_entity) return;
-    auto& section = m_mesh_controls->add<bgui::tree>(tr("Rig e pose"), .26f, m_rig_section_expanded);
+    auto& section = m_rig_controls->add<bgui::tree>(tr("Rig e pose"), .30f, m_rig_section_expanded);
     section.add_class("model-rig-section");
     auto& content = section.children();
     content.style.layout.padding = {6,3,6,3};
@@ -76,14 +77,14 @@ void model_editor_view::build_rig_controls() {
     const bool native = is_native_model(m_source_path);
     const auto& joints = native ? m_model.rig.joints : source->m_modelo->rig_joints();
     if (native) {
-        auto& add = content.add<bgui::button>(tr(joints.empty() ? "Criar rig" : "Adicionar osso raiz"), .25f,
+        auto& add = content.add<bgui::button>(tr(joints.empty() ? "Criar rig" : "Adicionar osso raiz"), .30f,
             [this] { create_rig_joint(false); });
         add.set_tooltip(tr("Adicionar osso raiz"), tr("Cria um osso independente na origem do modelo. Ajuste o repouso e vincule os vértices antes de animar."));
         add.set_enable(!m_context->is_playing && !m_context->locked_entities.contains(*m_model_entity));
     }
     if (joints.empty()) {
         content.add<bgui::text>(tr(native ? "Crie os ossos, ajuste a hierarquia e vincule a malha ao rig." :
-            "Este modelo não possui nós ou ossos editáveis. Importe uma cópia .bmodel para criar um rig."), .24f);
+            "Este modelo não possui nós ou ossos editáveis. Importe uma cópia .bmodel para criar um rig."), .30f);
         return;
     }
     if (std::none_of(joints.begin(), joints.end(), [&](const auto& joint) { return joint.id == m_active_joint; }))
@@ -95,7 +96,7 @@ void model_editor_view::build_rig_controls() {
         if (joint.id == m_active_joint) index = ids.size();
         names.push_back(joint.name); ids.push_back(joint.id);
     }
-    auto& chooser = content.add<bgui::combo_box>(names, .25f, index);
+    auto& chooser = content.add<bgui::combo_box>(names, .30f, index);
     chooser.add_class("model-rig-joints");
     chooser.style.layout.require_height(bgui::mode::pixel, 24.f);
     chooser.set_on_change([this, ids](std::size_t selected, const std::string&) {
@@ -104,10 +105,10 @@ void model_editor_view::build_rig_controls() {
         m_material_revision = std::numeric_limits<std::size_t>::max();
         mark_preview_dirty();
     });
-    content.add<bgui::button>(tr("Mostrar / ocultar esqueleto"), .24f, [this] {
+    content.add<bgui::button>(tr("Mostrar / ocultar esqueleto"), .30f, [this] {
         m_show_skeleton = !m_show_skeleton; mark_preview_dirty();
     });
-    if (native) content.add<bgui::button>(tr(m_rig_edit_rest ? "Editar pose" : "Editar repouso e pesos"), .25f, [this] {
+    if (native) content.add<bgui::button>(tr(m_rig_edit_rest ? "Editar pose" : "Editar repouso e pesos"), .30f, [this] {
         if (!m_rig_edit_rest || !m_dirty) {
             finish_weight_stroke(true);
             m_weight_paint = false;
@@ -123,12 +124,12 @@ void model_editor_view::build_rig_controls() {
         } else set_status(tr("Salve o .bmodel antes de editar ou gravar a pose dos ossos."));
     });
     if (m_context->is_playing || m_context->locked_entities.contains(*m_model_entity)) {
-        content.add<bgui::text>(tr("Pare a reprodução e desbloqueie a entidade para editar o rig."), .24f);
+        content.add<bgui::text>(tr("Pare a reprodução e desbloqueie a entidade para editar o rig."), .30f);
         return;
     }
     const auto id = m_active_joint;
     if (native && m_rig_edit_rest) {
-        auto& name = content.add<bgui::field>(tr("Nome do osso"), selected->name, .25f,
+        auto& name = content.add<bgui::field>(tr("Nome do osso"), selected->name, .30f,
             [this, id](const std::string& text) {
                 auto next = m_model;
                 if (auto* joint = find_joint(next.rig, id)) { joint->name = text; commit_rig_definition(std::move(next)); }
@@ -140,7 +141,7 @@ void model_editor_view::build_rig_controls() {
             if (joint.id == selected->parent) parent_index = parent_ids.size();
             parents.push_back(joint.name); parent_ids.push_back(joint.id);
         }
-        auto& parent = content.add<bgui::combo_box>(parents, .25f, parent_index);
+        auto& parent = content.add<bgui::combo_box>(parents, .30f, parent_index);
         parent.add_class("model-rig-parent");
         parent.set_tooltip(tr("Pai do osso"), tr("Define a hierarquia do rig. A transformação de repouso é relativa a este pai; ciclos são rejeitados."));
         parent.set_on_change([this, id, parent_ids](std::size_t index, const std::string&) {
@@ -154,11 +155,11 @@ void model_editor_view::build_rig_controls() {
         });
         for (auto [label, member] : {std::pair{"Posição de repouso", &commons::rig_transform::position},
             {"Rotação de repouso", &commons::rig_transform::rotation}, {"Escala de repouso", &commons::rig_transform::scale}}) {
-            content.add<bgui::text>(tr(label), .24f);
+            content.add<bgui::text>(tr(label), .30f);
             auto& row = content.add<bgui::linear>(bgui::orientation::horizontal);
             configure_row(row); row.style.layout.padding = {0};
             for (int axis = 0; axis < 3; ++axis) {
-                auto& field = row.add<bgui::field>(std::string(1, "XYZ"[axis]), format_value((selected->rest.*member)[axis]), .25f,
+                auto& field = row.add<bgui::field>(std::string(1, "XYZ"[axis]), format_value((selected->rest.*member)[axis]), .30f,
                     [this, id, member, axis](const std::string& text) {
                         float value{};
                         const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
@@ -172,8 +173,8 @@ void model_editor_view::build_rig_controls() {
                 field.get_label().style.layout.require_width(bgui::mode::pixel, 12.f);
             }
         }
-        content.add<bgui::button>(tr("Adicionar osso filho"), .25f, [this] { create_rig_joint(true); });
-        content.add<bgui::button>(tr("Excluir osso"), .25f, [this, id] {
+        content.add<bgui::button>(tr("Adicionar osso filho"), .30f, [this] { create_rig_joint(true); });
+        content.add<bgui::button>(tr("Excluir osso"), .30f, [this, id] {
             auto next = m_model;
             if (std::any_of(next.rig.joints.begin(), next.rig.joints.end(), [&](const auto& joint) { return joint.parent == id; })) {
                 set_status(tr("Reatribua ou remova os ossos filhos antes de excluir este osso.")); return;
@@ -186,12 +187,12 @@ void model_editor_view::build_rig_controls() {
             }
             commit_rig_definition(std::move(next));
         });
-        auto& bind = content.add<bgui::button>(tr("Vincular automaticamente"), .25f, [this] {
+        auto& bind = content.add<bgui::button>(tr("Vincular automaticamente"), .30f, [this] {
             auto next = m_model; std::string error;
             if (bind_model_rig(next, error)) commit_rig_definition(std::move(next)); else set_status(error);
         });
         bind.set_tooltip(tr("Vincular malha ao rig"), tr("Distribui pesos normalizados entre até quatro ossos próximos de cada vértice. Depois ajuste a seleção manualmente."));
-        auto& weight = content.add<bgui::field>(tr("Peso da seleção"), format_value(m_rig_weight), .25f,
+        auto& weight = content.add<bgui::field>(tr("Peso da seleção"), format_value(m_rig_weight), .30f,
             [this](const std::string& text) {
                 float value{}; const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
                 if (parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() && std::isfinite(value) && value >= 0 && value <= 1)
@@ -199,13 +200,13 @@ void model_editor_view::build_rig_controls() {
                 else set_status(tr("O peso deve estar entre zero e um."));
             });
         configure_property_field(weight);
-        content.add<bgui::button>(tr("Aplicar peso aos vértices selecionados"), .25f, [this, id] {
+        content.add<bgui::button>(tr("Aplicar peso aos vértices selecionados"), .30f, [this, id] {
             auto next = m_model; std::string error;
             if (set_rig_vertex_weight(next, m_active_mesh, m_selected_vertices, id, m_rig_weight, error))
                 commit_rig_definition(std::move(next));
             else set_status(error);
         });
-        auto& paint = content.add<bgui::button>(tr(m_weight_paint ? "Sair do Weight Paint" : "Weight Paint"), .25f, [this] {
+        auto& paint = content.add<bgui::button>(tr(m_weight_paint ? "Sair do Weight Paint" : "Weight Paint"), .30f, [this] {
             if (!rig_editable()) return;
             m_weight_paint = !m_weight_paint;
             m_selection_start.reset();
@@ -217,7 +218,7 @@ void model_editor_view::build_rig_controls() {
         for (auto [label, setting, maximum] : {
             std::tuple{"Raio do pincel (px)", &m_weight_radius, 500.f},
             std::tuple{"Força do pincel", &m_weight_strength, 1.f}}) {
-            auto& field = content.add<bgui::field>(tr(label), format_value(*setting), .25f,
+            auto& field = content.add<bgui::field>(tr(label), format_value(*setting), .30f,
                 [this, setting, maximum](const std::string& text) {
                     float value{}; const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
                     if (parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() &&
@@ -226,10 +227,10 @@ void model_editor_view::build_rig_controls() {
                 });
             configure_property_field(field);
         }
-        if (m_weight_paint) content.add<bgui::text>(tr("Arraste para pintar o peso da seleção. Azul = 0; vermelho = 1.\nA pintura atravessa a malha ativa. Esc cancela; Ctrl+Z desfaz a pincelada."), .24f);
-        content.add<bgui::text>(tr("Repouso não deforma a malha.\nUse o modo Vértices para ajustar pesos.\nSalve o .bmodel antes de gravar a pose."), .24f);
+        if (m_weight_paint) content.add<bgui::text>(tr("Arraste para pintar o peso da seleção. Azul = 0; vermelho = 1.\nA pintura atravessa a malha ativa. Esc cancela; Ctrl+Z desfaz a pincelada."), .30f);
+        content.add<bgui::text>(tr("Repouso não deforma a malha.\nUse o modo Vértices para ajustar pesos.\nSalve o .bmodel antes de gravar a pose."), .30f);
     } else {
-        if (native && m_dirty) { content.add<bgui::text>(tr("Salve o .bmodel antes de gravar a pose."), .24f); return; }
+        if (native && m_dirty) { content.add<bgui::text>(tr("Salve o .bmodel antes de gravar a pose."), .30f); return; }
         const auto registry = m_context->registry;
         const auto entity = *m_model_entity;
         const auto owner = std::weak_ptr<commons::renderer>(source);
@@ -252,7 +253,7 @@ void model_editor_view::build_rig_controls() {
                 }
             });
         }
-        content.add<bgui::text>(tr("Ative Gravar no painel Animação.\nAltere a pose deste osso para criar chaves.\nO clipe .banim move ossos sem mover a entidade."), .24f);
+        content.add<bgui::text>(tr("Ative Gravar no painel Animação.\nAltere a pose deste osso para criar chaves.\nO clipe .banim move ossos sem mover a entidade."), .30f);
     }
 }
 void model_editor_view::finish_weight_stroke(bool cancel) {
@@ -313,12 +314,28 @@ void model_editor_view::draw_weight_paint(bgui::vec2i mouse, bgui::vec2i previou
     const auto clip = draw.get_clip_rect(); const bool clipped = draw.has_clip_rect();
     draw.set_clip_rect(clipped ? bgui::intersect_rect(clip, rect) : rect);
     const auto& mesh = m_model.meshes[m_active_mesh];
-    for (std::size_t vertex = 0; vertex < mesh.vertices.size(); ++vertex) {
-        if (std::abs(m_projected_depths[m_active_mesh][vertex].z) > 1.f) continue;
-        const float weight = mesh.skin.empty() ? 0.f : rig_vertex_weight(mesh.skin[vertex], m_active_joint);
-        draw.set_color({weight, 1 - std::abs(2 * weight - 1), 1 - weight, 1.f});
-        const auto p = screen(vertex);
-        draw.add_rect_filled(p - bgui::vec2{3,3}, p + bgui::vec2{3,3});
+    struct triangle { std::array<std::size_t, 3> vertices; float depth; };
+    std::vector<triangle> triangles;
+    for (const auto& face : mesh.faces) for (std::size_t i = 1; i + 1 < face.size(); ++i) {
+        const std::array<std::size_t, 3> vertices{face[0], face[i], face[i+1]};
+        float depth = 0;
+        bool visible = true;
+        for (auto vertex : vertices) {
+            const float z = m_projected_depths[m_active_mesh][vertex].z;
+            visible = visible && std::abs(z) <= 1.f;
+            depth += z;
+        }
+        if (visible) triangles.push_back({vertices, depth});
+    }
+    std::stable_sort(triangles.begin(), triangles.end(), [](const auto& a, const auto& b) { return a.depth > b.depth; });
+    const auto paint_clip = draw.get_clip_rect();
+    for (const auto& triangle : triangles) {
+        std::vector<bgui::draw_vertex> vertices;
+        for (auto vertex : triangle.vertices) {
+            const float weight = mesh.skin.empty() ? 0.f : rig_vertex_weight(mesh.skin[vertex], m_active_joint);
+            vertices.push_back({screen(vertex), rig_weight_color(weight)});
+        }
+        draw_weight_triangle(draw, std::move(vertices), paint_clip);
     }
     if (over) {
         draw.set_color({1,1,1,1});

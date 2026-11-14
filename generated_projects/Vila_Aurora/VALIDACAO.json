@@ -1,0 +1,11 @@
+{
+  "entities": 283,
+  "houses": 16,
+  "models": 7,
+  "native_asset_loaders": "passed",
+  "controller_with_real_bindings_and_simulated_input": "passed",
+  "graphics": "unverified: GLFW display unavailable",
+  "physics_in_game": "unverified",
+  "editor_camera_id_conflict": "fixed: terrain moved from 1 to 284",
+  "id_remap_preservation": "283 entities retained; all other components and scripts unchanged; all parents valid"
+}

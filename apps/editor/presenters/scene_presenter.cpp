@@ -14,6 +14,9 @@
 #include "scene_navigation.hpp"
 #include "ui/hud_view.hpp"
 #include "viewport_sync.hpp"
+#include "prefab_drag_preview.hpp"
+#include "rig_overlay.hpp"
+#include "systems/rig_entities.hpp"
 
 #include <stdexcept>
 
@@ -45,13 +48,42 @@ public:
         // input hit target so hit testing can consume input without hiding the
         // owning window from viewport_input_state.
         receives_input(true);
-        style.visual.visible = false;
+        m_camera_movement.set_primary_drag_enabled(false);
+        m_entity_picking.set_rectangle_selection_enabled(true);
         m_camera_movement.setup(m_registry);
         m_entity_picking.setup(m_registry);
     }
 
+    bool supports_render_cache() const override { return false; }
+
+    void get_requires(bgui::draw_data*) override {
+        m_entity_picking.draw_selection_rectangle();
+        m_prefab_preview.draw(*m_camera, m_image, *m_context);
+        if (m_context->is_playing) return;
+        auto& draw = bgui::get_draw_list();
+        const auto color = draw.get_color();
+        const auto clip = draw.get_clip_rect(); const bool clipped = draw.has_clip_rect();
+        const auto rect = m_image.processed_rect();
+        draw.set_clip_rect(clipped ? bgui::intersect_rect(clip, rect) : rect);
+        const auto matrix = m_camera->projMatriz * m_camera->viewMatrix;
+        m_registry->cada<commons::transform>([&](uint32_t id) {
+            const auto bone = m_registry->get<commons::transform>(id);
+            if (bone->rig_joint_id.empty() || m_context->hidden_entities.contains(id) ||
+                !commons::rig_entity_renderer(*bone)) return;
+            const auto parent = m_registry->get<commons::transform>(bone->parent_id);
+            const auto tip = bone->get_world_position();
+            const auto origin = parent && !parent->rig_joint_id.empty() ? parent->get_world_position() : tip;
+            draw_rig_segment(draw, matrix, rect, {origin.x, origin.y, origin.z}, {tip.x, tip.y, tip.z},
+                m_context->selected_entities.contains(id) || m_context->selected_entity == id);
+        });
+        draw.set_color(color);
+        if (clipped) draw.set_clip_rect(clip); else draw.clear_clip_rect();
+    }
+
     void on_update() override {
         m_viewport_sync.update(m_registry);
+        const auto rect = m_image.processed_rect();
+        set_final_rect(rect.x, rect.y, rect.z, rect.w);
         const bool toggle = bgui::get_pressed(bgui::input_key::o);
         if (toggle && !m_toggle_down && mouse_over_viewport(&m_image) &&
             !viewport_input_blocked_by_modal() &&
@@ -67,6 +99,14 @@ public:
         auto selected = m_context->selected_entity &&
             m_context->selected_entity != m_context->editor_camera_entity
             ? m_context->registry->get<commons::transform>(*m_context->selected_entity) : nullptr;
+        const bool frame = bgui::get_pressed(bgui::input_key::keypad_decimal);
+        if (frame && !m_frame_down && selected && mouse_over_viewport(&m_image) &&
+            !viewport_input_blocked_by_modal() && !dynamic_cast<bgui::inputbox*>(bgui::get_keyboard_focus())) {
+            auto renderer = m_registry->get<commons::renderer>(selected->my_object);
+            m_context->orbital_view = true;
+            m_camera_movement.focus_orbit_target(selected, selected_orbit_distance(*selected, renderer.get(), m_camera->config.fov));
+        }
+        m_frame_down = frame;
         if (m_context->orbital_view && selected) {
             if (!m_camera_movement.is_orbital() || selected != m_selected_orbit) {
                 auto renderer = m_context->registry->get<commons::renderer>(selected->my_object);
@@ -79,13 +119,15 @@ public:
             m_camera_movement.set_orbital(m_context->orbital_view);
             m_selected_orbit.reset();
         }
+        m_camera_movement.set_primary_drag_enabled(viewport_camera_modifier());
         m_camera_movement.update(m_registry);
         m_entity_picking.update(m_registry);
     }
 
 private:
+    prefab_drag_preview m_prefab_preview;
     std::shared_ptr<commons::ecs> m_registry;
-    bool m_toggle_down{false};
+    bool m_toggle_down{false}, m_frame_down{false};
     camera_viewport m_viewport;
     viewport_sync_system m_viewport_sync;
     camera_movement_system m_camera_movement;

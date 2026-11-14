@@ -163,7 +163,7 @@ inline void open_api_reference() {
     auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
     auto content = bgui::panel_content(modal.content());
     content.label(tr("API Reference"), .48f);
-    auto& search = content.add<bgui::inputbox>("", tr("Search documentation"), .34f);
+    auto& search = content.add<bgui::inputbox>("", tr("Search documentation"), .30f);
 
     std::vector<markdown_document> documents;
     std::string load_error;
@@ -183,7 +183,7 @@ inline void open_api_reference() {
     auto filters = content.row();
     filters.native().set_scrollable(true);
     filters.native().style.layout.require_height(bgui::mode::pixel, 36);
-    auto& category = filters.add<bgui::combo_box>(category_options, .32f);
+    auto& category = filters.add<bgui::combo_box>(category_options, .30f);
     category.style.layout.require_width(bgui::mode::stretch);
 
     auto& viewport = content.add<api_reference_body>();
@@ -215,13 +215,13 @@ inline void open_api_reference() {
             article.remove(article.get_elements()[bgui::layer::base].back().get());
 
         if (!load_error.empty()) {
-            auto& error = article.add<bgui::text>(load_error, .28f);
+            auto& error = article.add<bgui::text>(load_error, .30f);
             error.set_wrap(true);
             return;
         }
         if (selected >= state->size()) {
             auto& message = article.add<bgui::text>(
-                state->empty() ? tr("No Markdown files found.") : tr("No matching Markdown files."), .28f);
+                state->empty() ? tr("No Markdown files found.") : tr("No matching Markdown files."), .30f);
             message.set_wrap(true);
             return;
         }
@@ -263,12 +263,12 @@ inline void open_api_reference() {
             const auto& document = (*state)[selected];
             if (document.category != current_category) {
                 current_category = document.category;
-                auto& heading = index.add<bgui::text>(category_label(current_category), .32f);
+                auto& heading = index.add<bgui::text>(category_label(current_category), .30f);
                 heading.add_class("api-category");
                 heading.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
             }
             const auto& label = document.title;
-            auto& button = index.add<bgui::button>(label, .32f,
+            auto& button = index.add<bgui::button>(label, .30f,
                 [show_document, selected] { show_document(selected); });
             button.id = "api-document-" + std::to_string(selected);
             button.add_class("api-document");

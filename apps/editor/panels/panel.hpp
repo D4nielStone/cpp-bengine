@@ -126,7 +126,7 @@ public:
         configure_property_row(row);
         row.style.layout.require_height(bgui::mode::pixel, 22.f);
         row.style.layout.margin = bgui::vec4i{0, 1, 0, 1};
-        auto& name = row.add<bgui::text>(label, 0.27f);
+        auto& name = row.add<bgui::text>(label, .30f);
         configure_property_label(name);
         auto& values = row.add<bgui::linear>(bgui::orientation::horizontal);
         values.add_class("editor-property-row");
@@ -137,14 +137,14 @@ public:
 
         constexpr const char* axes[]{"X", "Y", "Z"};
         for (std::size_t axis = 0; axis < 3; ++axis) {
-            auto& axis_label = values.add<bgui::text>(axes[axis], 0.27f);
+            auto& axis_label = values.add<bgui::text>(axes[axis], .30f);
             axis_label.add_class("editor-property-label");
             axis_label.style.layout.require_width(bgui::mode::pixel, 12.f);
 
             auto& input = values.add<bgui::inputbox>(
                 format_value(value[axis]),
                 "",
-                0.27f,
+                .30f,
                 [this, on_change, get_value, axis, label](
                     const std::string& buffer
                 ) {
@@ -199,7 +199,7 @@ public:
         auto& field = parent.add<bgui::field>(
             label,
             format_value(value),
-            0.27f,
+            .30f,
             [this, on_change, get_value, label, record_history](const std::string& buffer) {
                 float parsed{};
                 const auto result = std::from_chars(

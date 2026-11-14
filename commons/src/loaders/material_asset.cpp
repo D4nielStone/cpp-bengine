@@ -148,6 +148,8 @@ std::string encode_material(const material& source, const std::filesystem::path&
     bool publish_textures) {
     rapidjson::Document doc(rapidjson::kObjectType); auto& a=doc.GetAllocator();
     doc.AddMember("format","bengine-material",a); doc.AddMember("version",1,a);
+    doc.AddMember("vertex_shader", string(path_string(source.vertex_shader, directory), a), a);
+    doc.AddMember("fragment_shader", string(path_string(source.fragment_shader, directory), a), a);
     value uniforms(rapidjson::kObjectType);
     std::map<std::string,uniform> ordered(source.uniforms.begin(),source.uniforms.end());
     for (const auto& [name,u] : ordered) {
@@ -254,6 +256,11 @@ bool load_material_asset(const std::filesystem::path& path, material& result, st
         require(doc["version"].GetInt() == 1);
         require(doc.HasMember("uniforms") && doc["uniforms"].IsObject() && doc.HasMember("textures") && doc["textures"].IsObject());
         material loaded;
+        for (auto [key, target] : {std::pair{"vertex_shader", &loaded.vertex_shader}, std::pair{"fragment_shader", &loaded.fragment_shader}}) {
+            if (!doc.HasMember(key)) continue;
+            require(valid_string(doc[key]));
+            if (doc[key].GetStringLength()) *target = (path.parent_path() / doc[key].GetString()).lexically_normal().string();
+        }
         for (auto it=doc["uniforms"].MemberBegin();it!=doc["uniforms"].MemberEnd();++it) {
             const auto& entry=it->value; require(valid_string(it->name) && entry.IsObject() && entry.HasMember("type") && entry["type"].IsInt() && entry.HasMember("value"));
             const auto& data=entry["value"];float n[16]{};uniform u;
@@ -313,6 +320,8 @@ bool material_asset_dependencies(const std::filesystem::path& path, std::vector<
         (void)name;
         if (!texture.embedded && !texture.path.empty()) loaded.emplace_back(texture.path);
     }
+    if (!value.vertex_shader.empty()) loaded.emplace_back(value.vertex_shader);
+    if (!value.fragment_shader.empty()) loaded.emplace_back(value.fragment_shader);
     result = std::move(loaded);
     return true;
 }

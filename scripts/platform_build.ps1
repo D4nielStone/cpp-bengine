@@ -19,6 +19,7 @@ if (-not $Workspace) {
 New-Item -ItemType Directory -Force $Workspace | Out-Null
 New-Item -ItemType Directory -Force (Split-Path -Parent $ProgressFile) | Out-Null
 if ($Target -eq "linux") {
+    if ($env:BENGINE_PORTABLE -eq "1") { throw "Use the Linux release to export Linux games without external tools." }
     # Keep all compilation and packaging in the default Linux distribution.
     $wsl = Get-Command "wsl.exe" -ErrorAction Stop
     $kernel = & $wsl.Source --exec uname -r 2>&1
@@ -86,6 +87,7 @@ if ($RuntimeTemplate) {
         & $Packager template-check $shipped $key windows $Format
         if ($LASTEXITCODE -eq 0) { $template = $shipped }
         else {
+            if ($env:BENGINE_PORTABLE -eq "1") { throw "This portable release includes folder export for its own platform only. No compatible bundled template was found." }
             Write-Output "No compatible precompiled template; building it once."
             $runtimeRoot = "$Workspace/runtime-$Format-$key"
             & "$PSScriptRoot/compile_runtime.ps1" -Target windows -RepositoryRoot $RepositoryRoot -BuildDirectory $runtimeRoot -ProgressFile $ProgressFile -PackagingStep -Format $Format

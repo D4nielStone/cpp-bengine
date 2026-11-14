@@ -1,5 +1,6 @@
 #include "components/transform.hpp"
 #include "core/ecs.hpp"
+#include "systems/rig_entities.hpp"
 
 #include <cmath>
 #include <unordered_set>
@@ -24,11 +25,19 @@ transform& transform::operator=(const transform& tr) {
 	this->rotation = tr.get_rotation();
 	this->scale = tr.get_scale();
 	this->parent_id = tr.parent_id;
+    rig_joint_id = tr.rig_joint_id;
+    rig_last_pose = tr.rig_last_pose;
+    rig_pose_initialized = tr.rig_pose_initialized;
 	*this->target = tr.get_target();
 	this->up = tr.get_up();
 	return *this;
 }
 bool transform::analyze(const rapidjson::Value& value) {
+    rig_pose_initialized = false;
+    if (value.HasMember("rig_joint")) {
+        if (!value["rig_joint"].IsString()) return false;
+        rig_joint_id.assign(value["rig_joint"].GetString(), value["rig_joint"].GetStringLength());
+    } else rig_joint_id.clear();
 	if(value.HasMember("position"))
     {
         auto pos = value["position"].GetArray();
@@ -48,6 +57,7 @@ bool transform::analyze(const rapidjson::Value& value) {
 };
 
 bool transform::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator) const {
+    if (!rig_joint_id.empty()) value.AddMember("rig_joint", rapidjson::Value(rig_joint_id.c_str(), allocator), allocator);
     // posição Vetor 3
     rapidjson::Value pos(rapidjson::kArrayType);
     pos.PushBack(position.x, allocator);
@@ -90,7 +100,9 @@ glm::mat4 world_matrix(
     const transform& value,
     std::unordered_set<uint32_t>& visited
 ) {
-    const auto local = local_matrix(value);
+    auto local = local_matrix(value);
+    if (!value.rig_joint_id.empty())
+        local = rig_entity_rest_matrix(value) * rig_entity_matrix({value.position, value.rotation, value.scale});
     const auto registry = value.reg.lock();
     if (!value.parent_id || !registry ||
         !visited.insert(value.my_object).second)
@@ -193,7 +205,7 @@ void transform::set_world_position(const bgui::vec3& value) {
         position = value;
         return;
     }
-    const auto parent_matrix = parent->get_world_model_matrix();
+    const auto parent_matrix = parent->get_world_model_matrix() * rig_entity_rest_matrix(*this);
     if (std::abs(glm::determinant(parent_matrix)) < 1e-8f)
         return;
     const auto local = glm::inverse(parent_matrix) *
@@ -222,9 +234,13 @@ void transform::set_world_rotation(const bgui::vec3& value) {
         rotation = value;
         return;
     }
-    const auto parent_rotation = parent->get_world_rotation();
-    const auto local_rotation = glm::inverse(rotation_quaternion(parent_rotation)) *
-        rotation_quaternion(value);
+    bgui::vec3 parent_position{}, parent_rotation{}, parent_scale{};
+    if (!decompose_transform(parent->get_world_model_matrix() * rig_entity_rest_matrix(*this),
+        parent_position, parent_rotation, parent_scale)) return;
+    const auto local_rotation = glm::inverse(rig_joint_id.empty() ? rotation_quaternion(parent_rotation) :
+        glm::quat(glm::radians(glm::vec3(parent_rotation.x, parent_rotation.y, parent_rotation.z)))) *
+        (rig_joint_id.empty() ? rotation_quaternion(value) :
+            glm::quat(glm::radians(glm::vec3(value.x, value.y, value.z))));
     const auto euler = glm::degrees(glm::eulerAngles(local_rotation));
     rotation = {euler.x, euler.y, euler.z};
 }
@@ -232,6 +248,7 @@ void transform::set_world_rotation(const bgui::vec3& value) {
 bool transform::set_parent(const uint32_t new_parent, const bool preserve_world) {
     if (new_parent == parent_id)
         return true;
+    if (!rig_joint_id.empty()) return false;
     if (new_parent == my_object)
         return false;
 

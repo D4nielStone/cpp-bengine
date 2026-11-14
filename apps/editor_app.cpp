@@ -1,3 +1,5 @@
+#include "editor/systems/prefab_asset.hpp"
+#include "editor/core/editor_features.hpp"
 #include "editor/core/distribution_paths.hpp"
 #include "editor/systems/scene_loading_modal.hpp"
 #include "editor/systems/runtime_scene_preview.hpp"
@@ -131,6 +133,21 @@ project_choice show_project_manager(
     auto& title = header.add<bgui::text>("Bubble Engine " BUBBLE_VERSION_COMPLETA_STR, 0.68f);
     title.style.layout.set_margin(0, 3);
     header.add<editor::ui::release_indicator>(release_check);
+    header.add<bgui::button>("Configurações", .30f, [] {
+        auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
+        auto& content = modal.content();
+        auto& enabled = content.add<bgui::checkbox>("Ativar programação por blocos", .30f,
+            editor::ui::visual_scripting_enabled());
+        auto& status = content.add<bgui::text>("", .30f);
+        content.add<bgui::button>("Aplicar", .30f, [&enabled, &status, &modal] {
+            try {
+                editor::ui::save_visual_scripting_enabled(enabled.checked());
+                modal.set_enable(false);
+            } catch (const std::exception& error) { status.set_buffer(error.what()); }
+        });
+        modal.set_confirmation_text("Fechar");
+    });
+
 
     if (allow_return) header.add<bgui::button>("Voltar ao editor", .30f, [&] {
         choice.resume = true; window.close();
@@ -477,8 +494,27 @@ public:
             if (m_context->is_playing || editor::ui::viewport_input_blocked_by_modal())
                 return;
             try {
+                auto hierarchy_target = m_editor->managed_entity_at(mouse_position);
+                if (!hierarchy_target) hierarchy_target = m_entities->entity_at(mouse_position);
+                const bool over_scene = m_scene->is_open() && editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position);
+                if (asset.extension() == ".bobject") {
+                    if (!over_scene && !hierarchy_target) return;
+                    if (hierarchy_target && m_context->locked_entities.contains(*hierarchy_target))
+                        throw std::runtime_error("A entidade de destino está bloqueada.");
+                    const auto position = over_scene ? editor::ui::scene_drop_position(*m_camera, m_scene->image(), mouse_position) : std::nullopt;
+                    std::string error;
+                    if (!editor::ui::instantiate_prefab(m_context, asset, error)) throw std::runtime_error(error);
+                    if (m_context->selected_entity) {
+                        auto transform = m_context->registry->get<commons::transform>(*m_context->selected_entity);
+                        if (position) transform->set_position(*position);
+                        else if (hierarchy_target) transform->set_parent(*hierarchy_target, false);
+                    }
+                    m_entities->refresh(); m_components->refresh();
+                    return;
+                }
                 if (editor::ui::is_lua_script(asset)) {
-                    auto target = m_entities->entity_at(mouse_position);
+                    auto target = m_editor->managed_entity_at(mouse_position);
+                    if (!target) target = m_entities->entity_at(mouse_position);
                     if (!target && m_scene->is_open() &&
                         editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position))
                         target = m_scene->entity_at(mouse_position);
@@ -492,7 +528,7 @@ public:
                         } else if (m_files) {
                             m_files->set_asset_status(error);
                         }
-                    } else if (!m_components->drop_asset(asset, mouse_position) && m_files) {
+                    } else if (!m_components->drop_asset(asset, mouse_position) && !m_editor->drop_managed_asset(asset, mouse_position) && m_files) {
                         m_files->set_asset_status(
                             "Solte o script sobre um objeto na cena ou na lista de entidades."
                         );
@@ -515,14 +551,14 @@ public:
                     return;
                 }
                 if ((m_model_editor && m_model_editor->drop_asset(asset, mouse_position)) ||
-                    m_components->drop_asset(asset, mouse_position) ||
-                    !editor::ui::files_view::supports_model(asset) || !m_scene->is_open() ||
-                    !editor::ui::viewport_contains_drop(&m_scene->image(), mouse_position))
+                    m_components->drop_asset(asset, mouse_position) || m_editor->drop_managed_asset(asset, mouse_position) ||
+                    !editor::ui::files_view::supports_model(asset) || (!over_scene && !hierarchy_target))
                     return;
 
-                const auto position = editor::ui::scene_drop_position(
-                    *m_camera, m_scene->image(), mouse_position
-                );
+                if (hierarchy_target && m_context->locked_entities.contains(*hierarchy_target))
+                    throw std::runtime_error("A entidade de destino está bloqueada.");
+                const auto position = over_scene ? editor::ui::scene_drop_position(
+                    *m_camera, m_scene->image(), mouse_position) : std::optional<bgui::vec3>{{0,0,0}};
                 if (!position)
                     return;
                 const auto native = editor::ui::is_native_model(asset) ? asset :
@@ -538,6 +574,7 @@ public:
                 auto entity = m_context->registry->create();
                 m_context->registry->add<commons::renderer>(entity, model.release());
                 m_context->registry->get<commons::transform>(entity.id)->set_position(*position);
+                if (!over_scene && hierarchy_target) m_context->registry->get<commons::transform>(entity.id)->set_parent(*hierarchy_target, false);
                 m_context->entity_names[entity.id] = asset.stem().string();
                 m_context->record_entity_creation(entity.id);
                 m_context->selected_entity = entity.id;
@@ -737,6 +774,7 @@ public:
             bgui::linear* manager = nullptr;
             const auto choice = show_project_manager(m_window, manager, m_release_check, true, m_project_path);
             m_root->set_enable(true);
+            m_editor->refresh_feature_settings();
             m_window.set_close_request_callback([this] { m_editor->confirm_exit(); });
             if (choice.path.empty() && !choice.resume) break;
             if (!choice.path.empty()) m_editor->open_project(choice.create

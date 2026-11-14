@@ -1,3 +1,4 @@
+#include "editor_feature_test_support.hpp"
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include <gtest/gtest.h>
@@ -16,6 +17,7 @@ template<class T,class F>T* find(bgui::element& root,F accept) {
 }
 class SceneWorkflowTest:public testing::Test {
 protected:
+    scoped_editor_features features{true};
     std::unique_ptr<bgui::scoped_interface> ui;
     std::filesystem::path root=std::filesystem::temp_directory_path()/("bengine-block-ui-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     void SetUp() override {

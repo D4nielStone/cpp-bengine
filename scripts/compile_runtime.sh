@@ -1,6 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
+if [ "${BENGINE_PORTABLE:-}" = 1 ]; then
+    printf 'The portable release uses a precompiled runtime. Choose folder export for this platform.\n' >&2
+    exit 6
+fi
+
 target=${1:?target must be linux or windows}
 repository_root=${2:?repository root is required}
 build_root=${3:?build directory is required}

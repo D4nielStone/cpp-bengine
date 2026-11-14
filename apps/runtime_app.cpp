@@ -29,9 +29,14 @@
 #include <utility>
 
 #include "runtime/game_bootstrap.hpp"
+#include "runtime/test_capture.hpp"
 #include "editor/systems/scene_loading_modal.hpp"
 #include "editor/systems/runtime_scene_preview.hpp"
 #include <chrono>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
+#include <cstdlib>
 
 namespace {
 
@@ -58,10 +63,10 @@ class runtime_viewport_sync_system final : public commons::system {
 public:
     runtime_viewport_sync_system(
         std::shared_ptr<commons::camera>& camera,
-        bgui::image& image
+        bgui::image& image,
+        int width = 0, int height = 0
     )
-        : m_camera(camera),
-          m_image(&image) {}
+        : m_camera(camera), m_image(&image), m_width(width), m_height(height) {}
 
     void setup(const std::shared_ptr<commons::ecs>&) override {
         if (m_camera && !m_camera->flag_fb)
@@ -81,17 +86,18 @@ public:
         if (!m_camera || !m_image)
             return;
 
-        const int width = m_image->processed_width();
-        const int height = m_image->processed_height();
+        const int width = m_width ? m_width : m_image->processed_width();
+        const int height = m_height ? m_height : m_image->processed_height();
         if (width <= 0 || height <= 0)
             return;
 
-        if (m_camera->viewportFBO.x == width &&
+        if (m_camera->flag_fb && m_camera->viewportFBO.x == width &&
             m_camera->viewportFBO.y == height && m_texture == m_camera->framebuffer_texture()) {
             return;
         }
 
         m_camera->viewport({width, height});
+        if (!m_camera->flag_fb) m_camera->createFB();
         m_texture = m_camera->framebuffer_texture();
         m_image->set_external_texture(
             m_camera->framebuffer_texture(),
@@ -106,6 +112,7 @@ private:
     std::shared_ptr<commons::camera>& m_camera;
     bgui::image* m_image;
     unsigned int m_texture{};
+    int m_width{}, m_height{};
 };
 
 class runtime_profiler_text final : public bgui::text {
@@ -177,16 +184,39 @@ struct runtime_collision_overlay final : commons::system {
 }
 
 int main(const int argc, char** argv) {
-    std::string project_path;
-    if ((argc == 3 || argc == 5) && std::string(argv[1]) == "--project" &&
-        (argc == 3 || std::string(argv[3]) == "--script-log")) {
-        project_path = argv[2];
-        if (argc == 5) commons::script_log::instance().set_output_file(argv[4]);
-    } else if (argc != 1) {
-        std::cerr << "Usage: runtime_app [--project <project-file> [--script-log <log-file>]]\n";
-        return 2;
+    std::string project_path, script_log_path, test_spec_path;
+    for (int i = 1; i < argc; i += 2) {
+        if (i + 1 >= argc) return 2;
+        const std::string option = argv[i];
+        if (option == "--project" && project_path.empty()) project_path = argv[i + 1];
+        else if (option == "--script-log" && script_log_path.empty()) script_log_path = argv[i + 1];
+        else if (option == "--test-spec" && test_spec_path.empty()) test_spec_path = argv[i + 1];
+        else return 2;
     }
+    if (argc != 1 && project_path.empty()) return 2;
+    Bubble::runtime_test_spec test_spec;
+    bool test_failed = false;
+    if (!test_spec_path.empty()) {
+        try { test_spec.load(std::filesystem::absolute(test_spec_path)); }
+        catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
+        const auto log = test_spec.path.string() + ".log";
+        if (!std::freopen(log.c_str(), "a", stdout) || !std::freopen(log.c_str(), "a", stderr)) return 2;
+#ifdef _WIN32
+        if (!std::freopen("NUL", "r", stdin)) return 2;
+#else
+        if (!std::freopen("/dev/null", "r", stdin)) return 2;
+#endif
+    }
+    if (!script_log_path.empty()) commons::script_log::instance().set_output_file(script_log_path);
 
+    std::jthread watchdog;
+    if (!test_spec_path.empty()) watchdog = std::jthread([timeout = test_spec.timeout](std::stop_token stop) {
+        std::mutex mutex;
+        std::unique_lock lock(mutex);
+        std::condition_variable_any wake;
+        wake.wait_for(lock, stop, std::chrono::seconds(timeout), [] { return false; });
+        if (!stop.stop_requested()) std::_Exit(124);
+    });
     bool diagnostics = true;
     try {
         const auto executable = game_bootstrap::executable_path(argv[0]);
@@ -204,6 +234,7 @@ int main(const int argc, char** argv) {
         return 1;
     }
 
+    try {
     commons::window window("Bubble Engine - Runtime");
     auto registry = window.get_ecs();
     auto ui = window.add<commons::ui_system>();
@@ -281,7 +312,9 @@ int main(const int argc, char** argv) {
     );
     root.add<commons::hud_view, bgui::layer::overlay>(registry, game_camera, game_view,
         std::function<bool()>{}, [&game_camera] { return game_camera; });
-    window.add<runtime_viewport_sync_system>(game_camera, game_view);
+    window.add<runtime_viewport_sync_system>(game_camera, game_view,
+        static_cast<int>(test_spec.width), static_cast<int>(test_spec.height));
+    if (!test_spec_path.empty()) window.resize(test_spec.width, test_spec.height);
     auto physics_system = std::make_shared<commons::physics_system>();
     physics_system->set_gravity({gravity[0], gravity[1], gravity[2]});
     auto scripts = std::make_shared<commons::code_system>(physics_system);
@@ -292,7 +325,7 @@ int main(const int argc, char** argv) {
     );
     std::string scene_project = project_path;
     auto initial_scene = project->active_scene();
-    if (argc == 5 && !bgui::resource_files::embedded()) {
+    if (!script_log_path.empty() && !bgui::resource_files::embedded()) {
         rapidjson::Document snapshot;
         const auto contents = bgui::resource_files::text(project_path);
         snapshot.Parse(contents.data(), contents.size());
@@ -348,7 +381,7 @@ int main(const int argc, char** argv) {
     window.add(scripts);
     window.add(physics_system);
     window.add(sound);
-    if (argc == 5) window.add<runtime_preview_publisher>(project_path + ".preview");
+    if (!script_log_path.empty() && test_spec_path.empty()) window.add<runtime_preview_publisher>(project_path + ".preview");
     window.add<commons::animation_system>([&window] { return window.delta_time(); });
     window.add(render_system);
     if (diagnostics) window.add<runtime_collision_overlay>();
@@ -356,8 +389,13 @@ int main(const int argc, char** argv) {
         std::cerr << "[runtime] Could not create the game camera framebuffer.\n";
         return 1;
     }
+    if (!test_spec_path.empty()) window.add<Bubble::runtime_test_capture>(window, game_camera, test_spec, test_failed);
     window.loop();
 
     if (registry->scenes) registry->scenes->load = {};
-    return 0;
+    return test_failed ? 1 : 0;
+    } catch (const std::exception& error) {
+        std::cerr << "[runtime] " << error.what() << '\n';
+        return 1;
+    }
 }

@@ -40,16 +40,16 @@ inline void configure_project_context_menu(context_action_button& button,
             }},
             {"Apagar pasta do disco...", [project, active, removed, report_error, alive]() {
                 auto& confirmation = bgui::get_layout().add<project_delete_confirmation, bgui::layer::overlay>(alive);
-                confirmation.add<bgui::text>(tr("Apagar definitivamente a pasta do projeto?"), .34f);
-                confirmation.add<bgui::text>(project.parent_path().string(), .28f);
-                confirmation.add<bgui::text>(tr("Todos os arquivos da pasta serão apagados. Esta ação não pode ser desfeita."), .28f);
+                confirmation.add<bgui::text>(tr("Apagar definitivamente a pasta do projeto?"), .30f);
+                confirmation.add<bgui::text>(project.parent_path().string(), .30f);
+                confirmation.add<bgui::text>(tr("Todos os arquivos da pasta serão apagados. Esta ação não pode ser desfeita."), .30f);
                 confirmation.set_confirmation_text(tr("Apagar pasta definitivamente"));
                 confirmation.set_on_confirm([project, active, removed, report_error, alive]() {
                     if (alive.expired()) return;
                     try { erase_project(project, active()); forget_project(editor::distribution::user_path("editor-recent-projects.cfg"), project); removed(); }
                     catch (const std::exception& e) { report_error(e.what()); }
                 });
-                confirmation.add<bgui::button>(tr("Cancelar"), .3f, [surface = &confirmation]() {
+                confirmation.add<bgui::button>(tr("Cancelar"), .30f, [surface = &confirmation]() {
                     bgui::add_function([surface]() { bgui::get_layout().remove(surface); });
                 });
             }}

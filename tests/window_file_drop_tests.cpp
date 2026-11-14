@@ -279,3 +279,30 @@ TEST(WindowLifetimeTest, RecreatesEngineAndUiShadersAfterContextShutdown) {
         EXPECT_TRUE(commons::shaders.empty());
     }
 }
+
+TEST(WindowFileDropTest, KeypadNavigationAliasesRequireTextFocusAndSurviveNumLockRelease) {
+    if (!test_support::supports_opengl33()) GTEST_SKIP() << "No display for GLFW input verification";
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    commons::window window("Keypad input test", 100, 100);
+    auto* native = glfwGetCurrentContext();
+    auto& input = bgui::get_layout().add<bgui::inputbox>("abc\ndef", "", .30f, nullptr, bgui::input_mode::multiline);
+    bgui::focus_keyboard(input);
+    auto& io = bgui::get_context();
+    io.m_input_map.clear();
+    bgui::glfw_key_callback(native, GLFW_KEY_KP_7, 0, GLFW_PRESS, 0);
+    EXPECT_EQ(io.m_input_map[bgui::input_key::home], bgui::input_action::press);
+    input.on_update();
+    EXPECT_EQ(input.get_cursor_position(), 4u);
+    bgui::glfw_key_callback(native, GLFW_KEY_KP_7, 0, GLFW_RELEASE, GLFW_MOD_NUM_LOCK);
+    EXPECT_EQ(io.m_input_map[bgui::input_key::home], bgui::input_action::release);
+    io.m_input_map.clear();
+    bgui::glfw_key_callback(native, GLFW_KEY_KP_9, 0, GLFW_PRESS, GLFW_MOD_NUM_LOCK);
+    EXPECT_EQ(io.m_input_map[bgui::input_key::page_up], bgui::input_action::none);
+    bgui::glfw_key_callback(native, GLFW_KEY_KP_9, 0, GLFW_RELEASE, GLFW_MOD_NUM_LOCK);
+    io.m_input_map.clear();
+    bgui::get_layout().remove(&input);
+    bgui::glfw_key_callback(native, GLFW_KEY_KP_DECIMAL, 0, GLFW_PRESS, 0);
+    EXPECT_EQ(io.m_input_map[bgui::input_key::delete_key], bgui::input_action::none);
+    EXPECT_EQ(io.m_input_map[bgui::input_key::keypad_decimal], bgui::input_action::press);
+    bgui::glfw_key_callback(native, GLFW_KEY_KP_DECIMAL, 0, GLFW_RELEASE, 0);
+}

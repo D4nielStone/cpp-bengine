@@ -309,3 +309,10 @@ add_executable(scene_workflow_tests scene_workflow_tests.cpp)
 target_include_directories(scene_workflow_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels ${CMAKE_SOURCE_DIR}/apps/editor/systems)
 target_link_libraries(scene_workflow_tests PRIVATE GTest::gtest_main editor_services project_persistence)
 gtest_discover_tests(scene_workflow_tests)
+
+if(Python3_Interpreter_FOUND AND TARGET bengine_mcp AND TARGET runtime_app)
+    add_test(NAME mcp_runtime_capture
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mcp_runtime_smoke.py
+            $<TARGET_FILE:bengine_mcp> $<TARGET_FILE:runtime_app>)
+    set_tests_properties(mcp_runtime_capture PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+endif()

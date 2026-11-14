@@ -1,3 +1,4 @@
+#include "systems/rig_entities.hpp"
 #pragma once
 
 #include "components/camera.hpp"
@@ -11,6 +12,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -33,6 +35,8 @@ public:
           m_context(std::move(context)),
           m_input_state(std::move(input_state)) {}
 
+    void set_rectangle_selection_enabled(bool enabled) { m_rectangle_enabled = enabled; }
+
     void setup(const std::shared_ptr<commons::ecs>&) override {
         m_left_was_down = bgui::get_pressed(bgui::input_key::mouse_left);
     }
@@ -46,23 +50,87 @@ public:
         const bool released = !left_down && m_left_was_down;
         m_left_was_down = left_down;
         if (viewport_input_blocked_by_modal() || bgui::get_pressed(bgui::input_key::mouse_right) ||
-            (m_input_state && m_input_state->gizmo_active)) {
+            (m_input_state && m_input_state->gizmo_active) ||
+            (m_rectangle_enabled && ((viewport_camera_modifier() && m_box_drag) ||
+                bgui::get_pressed(bgui::input_key::escape) || m_context->is_playing))) {
             m_pending_pick.reset();
+            m_box_drag = false;
             return;
         }
-        if (just_pressed && mouse_over_viewport(m_image))
+        if (just_pressed && mouse_over_viewport(m_image)) {
             m_pending_pick = bgui::get_mouse_position();
+            m_extend = bgui::get_pressed(bgui::input_key::left_shift) ||
+                bgui::get_pressed(bgui::input_key::right_shift) ||
+                bgui::get_pressed(bgui::input_key::left_control) ||
+                bgui::get_pressed(bgui::input_key::right_control);
+            m_box_drag = false;
+        }
         if (m_pending_pick) {
             const auto delta = bgui::get_mouse_position() - *m_pending_pick;
             const float threshold = 4.f * bgui::get_global_scale();
-            if (float(delta.x) * delta.x + float(delta.y) * delta.y > threshold * threshold)
-                m_pending_pick.reset();
+            if (float(delta.x) * delta.x + float(delta.y) * delta.y > threshold * threshold) {
+                if (m_rectangle_enabled && !viewport_camera_modifier()) m_box_drag = true;
+                else m_pending_pick.reset();
+            }
         }
         if (released && m_pending_pick) {
-            if (mouse_over_viewport(m_image))
-                m_context->select_entity(pick_at(*m_pending_pick), bgui::get_pressed(bgui::input_key::left_control));
+            if (m_box_drag)
+                select_rectangle(*m_pending_pick, bgui::get_mouse_position(), m_extend);
+            else if (mouse_over_viewport(m_image))
+                m_context->select_entity(pick_at(*m_pending_pick), m_extend);
             m_pending_pick.reset();
+            m_box_drag = false;
         }
+    }
+
+    void draw_selection_rectangle() const {
+        if (!m_pending_pick || !m_box_drag || !m_image ||
+            viewport_input_blocked_by_modal() || (m_input_state && m_input_state->gizmo_active)) return;
+        const auto start = *m_pending_pick, end = bgui::get_mouse_position();
+        auto& draw = bgui::get_draw_list();
+        const auto color = draw.get_color();
+        const auto clip = draw.get_clip_rect();
+        const bool clipped = draw.has_clip_rect();
+        const auto rect = m_image->processed_rect();
+        draw.set_clip_rect(clipped ? bgui::intersect_rect(clip, rect) : rect);
+        const bgui::vec2 low{float(std::min(start.x, end.x)), float(std::min(start.y, end.y))};
+        const bgui::vec2 high{float(std::max(start.x, end.x)), float(std::max(start.y, end.y))};
+        draw.set_color({.50f, .50f, .50f, .18f});
+        draw.add_rect_filled(low, high);
+        draw.set_color({.65f, .65f, .65f, 1.f});
+        draw.add_rect(low, high);
+        draw.set_color(color);
+        if (clipped) draw.set_clip_rect(clip);
+        else draw.clear_clip_rect();
+    }
+
+    void select_rectangle(bgui::vec2i start, bgui::vec2i end, bool extend) {
+        const auto registry = m_context ? m_context->registry : nullptr;
+        if (!m_camera || !m_image || !registry) return;
+        const auto rect = m_image->processed_rect();
+        if (rect.z <= 0 || rect.w <= 0) return;
+        const auto size = m_camera->viewport_size();
+        if (size.x <= 0 || size.y <= 0) return;
+        const int left = std::max(rect.x, std::min(start.x, end.x));
+        const int right = std::min(rect.x + rect.z, std::max(start.x, end.x));
+        const int top = std::max(rect.y, std::min(start.y, end.y));
+        const int bottom = std::min(rect.y + rect.w, std::max(start.y, end.y));
+        if (!extend) m_context->select_entity(std::nullopt);
+        else m_context->synchronize_selection();
+        registry->cada<commons::transform>([&](std::uint32_t entity) {
+            if (entity == m_camera->my_object || m_context->editor_camera_entity == entity ||
+                m_context->hidden_entities.contains(entity) || m_context->locked_entities.contains(entity)) return;
+            const auto transform = registry->get<commons::transform>(entity);
+            const auto renderer = registry->get<commons::renderer>(entity);
+            if (!transform || (renderer && !renderer->visible)) return;
+            const auto projected = m_camera->world_to_screen(transform->get_world_position());
+            if (!projected || projected->z < 0.f || projected->z > 1.f) return;
+            const float x = rect.x + projected->x * rect.z / size.x;
+            const float y = rect.y + projected->y * rect.w / size.y;
+            if (x >= left && x <= right && y >= top && y <= bottom &&
+                !m_context->selected_entities.contains(entity))
+                m_context->select_entity(entity, true);
+        });
     }
 
     std::optional<editor_context::entity_id> pick_at(const bgui::vec2i& mouse) const {
@@ -147,6 +215,29 @@ public:
             }
         );
 
+        float closest_bone = 10.f * bgui::get_global_scale();
+        registry->cada<commons::transform>([&](uint32_t id) {
+            const auto bone = registry->get<commons::transform>(id);
+            if (bone->rig_joint_id.empty() || !commons::rig_entity_renderer(*bone) ||
+                m_context->is_playing || m_context->hidden_entities.contains(id) || m_context->locked_entities.contains(id)) return;
+            const auto tip = bone->get_world_position();
+            const auto parent = registry->get<commons::transform>(bone->parent_id);
+            const auto start = parent && !parent->rig_joint_id.empty() ? parent->get_world_position() : tip;
+            const auto matrix = m_camera->projMatriz * m_camera->viewMatrix;
+            const auto project = [&](const bgui::vec3& v) -> std::optional<glm::vec2> {
+                const auto p = matrix * glm::vec4(v.x, v.y, v.z, 1);
+                if (p.w <= 1.e-5f || std::abs(p.z) > p.w) return {};
+                return glm::vec2{x + (p.x / p.w * .5f + .5f) * width, y + (.5f - p.y / p.w * .5f) * height};
+            };
+            const auto a = project(start), b = project(tip);
+            if (!a || !b) return;
+            const auto segment = *b - *a;
+            const glm::vec2 point{mouse.x, mouse.y};
+            const float length = glm::dot(segment, segment);
+            const float t = length > 0 ? std::clamp(glm::dot(point - *a, segment) / length, 0.f, 1.f) : 0;
+            const float distance = glm::length(point - (*a + segment * t));
+            if (distance < closest_bone) { closest_bone = distance; hit_entity = id; }
+        });
         return hit_entity;
     }
 
@@ -196,6 +287,9 @@ private:
     std::shared_ptr<viewport_input_state> m_input_state;
     std::optional<bgui::vec2i> m_pending_pick;
     bool m_left_was_down{false};
+    bool m_rectangle_enabled{false};
+    bool m_box_drag{false};
+    bool m_extend{false};
 };
 
 }

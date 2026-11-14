@@ -1,3 +1,4 @@
+#include <thread>
 #include <glad.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -1522,4 +1523,46 @@ TEST_F(EditorRenderTest, ConsecutiveEntitiesReuseMaterialUniformsUntilConfigurat
     EXPECT_EQ(rendering.last_rendered_entity_count(), 3u);
     EXPECT_EQ(probe.uploads(), 2);
     EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+}
+
+TEST_F(EditorRenderTest, CustomShaderFailurePreservesLastValidProgram) {
+    const auto folder = std::filesystem::temp_directory_path() / ("bengine-glsl-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directory(folder);
+    const auto vertex = folder / "custom.vert", fragment = folder / "custom.frag";
+    std::ofstream(vertex) << "#version 330 core\nvoid main(){gl_Position=vec4(0,0,0,1);}";
+    std::ofstream(fragment) << "#version 330 core\nout vec4 color;void main(){color=vec4(1);}";
+    commons::shader shader(vertex.string().c_str(), fragment.string().c_str());
+    ASSERT_NE(shader.ID, 0u);
+    const auto valid = shader.ID;
+    std::ofstream(fragment) << "#version 330 core\ninvalid glsl";
+    std::this_thread::sleep_for(std::chrono::milliseconds(510));
+    shader.compilar(vertex.string().c_str(), fragment.string().c_str());
+    EXPECT_EQ(shader.ID, valid);
+    shader.use();
+    GLint active; glGetIntegerv(GL_CURRENT_PROGRAM, &active);
+    EXPECT_EQ(static_cast<unsigned>(active), valid);
+    std::filesystem::remove_all(folder);
+}
+
+TEST_F(EditorRenderTest, CameraFragmentPostProcessingWritesPixelsAndSurvivesResize) {
+    const auto fragment = std::filesystem::temp_directory_path() / ("bengine-post-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".frag");
+    std::ofstream(fragment) << "#version 330 core\nout vec4 color;void main(){color=vec4(0,1,0,1);}";
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create(); registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->config.post_processing.fragment_shader = fragment.string();
+    camera->viewport({32,32}); camera->createFB();
+    commons::render_system renderer;
+    for (const int size : {32,48}) {
+        camera->request_framebuffer_size({size,size});
+        renderer.update(registry);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, camera->fbo);
+        unsigned char pixel[4]{};
+        glReadPixels(size/2,size/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+        EXPECT_EQ(pixel[0], 0); EXPECT_EQ(pixel[1], 255); EXPECT_EQ(pixel[2], 0);
+        EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+    }
+    std::filesystem::remove(fragment);
 }

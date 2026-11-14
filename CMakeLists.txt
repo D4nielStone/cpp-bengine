@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
     BubbleEngine
-    VERSION 0.1.4
+    VERSION 0.1.5
     LANGUAGES C CXX
 )
 
@@ -62,4 +62,10 @@ if(BENGINE_DISTRIBUTION_BUILD AND UNIX AND NOT APPLE)
             target_link_options(${application} PRIVATE "LINKER:--disable-new-dtags")
         endif()
     endforeach()
+endif()
+
+if(BENGINE_DISTRIBUTION_BUILD AND MSVC)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    file(WRITE "${CMAKE_BINARY_DIR}/msvc-runtime-libraries.txt" "${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}")
 endif()

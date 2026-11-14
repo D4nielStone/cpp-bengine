@@ -5,6 +5,11 @@
 
 namespace editor::ui {
 
+struct runtime_launch_options {
+    bool preserve_project{false};
+    std::filesystem::path test_spec;
+};
+
 class runtime_process final {
 public:
     runtime_process() = default;
@@ -19,6 +24,9 @@ public:
         const std::filesystem::path& project,
         std::string& error
     );
+    bool start(const std::filesystem::path& executable, const std::filesystem::path& project,
+        std::string& error, const runtime_launch_options& options);
+    int exit_code() const noexcept { return m_exit_code; }
     bool running(std::string& error);
     void collect_script_logs();
     bool set_paused(bool paused, std::string& error);
@@ -32,6 +40,8 @@ private:
     std::filesystem::path m_log_file;
     std::uintmax_t m_log_offset{0};
     bool m_is_paused{false};
+    bool m_preserve_project{false};
+    int m_exit_code{-1};
 #ifdef _WIN32
     void* m_process_handle{nullptr};
 #else
