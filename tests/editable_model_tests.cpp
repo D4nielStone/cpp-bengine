@@ -78,11 +78,11 @@ TEST_F(EditableModelTest, LoopCutSplitsQuadAndRejectsUnsupportedTopology) {
     EXPECT_NE(error.find("quadriláteras"), std::string::npos);
 }
 
-TEST_F(EditableModelTest, StockCubeCutsFourFacesAcrossTextureSeamsInEitherDirection) {
+TEST_F(EditableModelTest, UvSeamedCubeCutsFourFacesAcrossTextureSeamsInEitherDirection) {
     commons::editable_model_data cube;
     std::string error;
     ASSERT_TRUE(commons::load_editable_model(
-        std::filesystem::path(COMMONS_MODEL_ASSET_DIR) / "primitive-cube.bmodel", cube, error)) << error;
+        std::filesystem::path(__FILE__).parent_path() / "fixtures/uv-seamed-cube.bmodel", cube, error)) << error;
     for (unsigned int direction : {0u, 1u}) {
         auto mesh = cube.meshes.front();
         ASSERT_EQ(mesh.faces.size(), 6u);

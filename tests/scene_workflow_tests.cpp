@@ -344,6 +344,7 @@ TEST_F(SceneWorkflowTest, GeneralFppOpensAsNestedBlocksWithoutOpaqueScript) {
 }
 
 TEST_F(SceneWorkflowTest, RightClickInBlocksCreatesAppliesAndRemovesScripts) {
+    bgui::get_context().m_size={2400,1600};
     auto context=std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
     context->project_root=root;
     const auto object=context->registry->create(); context->registry->entity_names[object.id]="Player";
@@ -365,6 +366,8 @@ TEST_F(SceneWorkflowTest, RightClickInBlocksCreatesAppliesAndRemovesScripts) {
         auto& input=field->get_inputbox();
         auto& io=bgui::get_context();
         io.m_mouse_position={input.processed_x()+5,input.processed_y()+5};
+        bgui::on_update();
+        ASSERT_EQ(bgui::get_mouse_target(), &input);
         io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;bgui::on_update();
         io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;bgui::on_update();bgui::on_update();
         io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;bgui::on_update();
