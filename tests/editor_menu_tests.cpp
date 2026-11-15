@@ -741,7 +741,7 @@ TEST(ModelEditorLayout, PlacesIconToolsOverPreviewAndKeepsPrimitivesInSidebar) {
     EXPECT_LE(extrude->processed_x() + extrude->processed_width(), image->processed_x() + image->processed_width());
     for (const auto* label : {"Objeto", "Faces", "Vértices", "Arestas", "Sólido", "Material", "Render"}) {
         auto* button = find<bgui::button>(dock, [label](auto& item) {
-            return item.get_label().get_buffer() == editor::ui::tr(label);
+            return item.get_tooltip() == editor::ui::tr(label);
         });
         ASSERT_NE(button, nullptr) << label;
         EXPECT_GE(button->processed_y(), image->processed_y());
@@ -772,7 +772,7 @@ TEST(ModelEditorLayout, PlacesIconToolsOverPreviewAndKeepsPrimitivesInSidebar) {
         bgui::on_update();
         bgui::on_update();
         for (const auto* label : {"Objeto", "Faces", "Vértices", "Arestas", "Sólido", "Material", "Render"}) {
-            auto* button = find<bgui::button>(dock, [label](auto& item) { return item.get_label().get_buffer() == editor::ui::tr(label); });
+            auto* button = find<bgui::button>(dock, [label](auto& item) { return item.get_tooltip() == editor::ui::tr(label); });
             ASSERT_NE(button, nullptr);
             EXPECT_GE(button->processed_x(), image->processed_x());
             EXPECT_GE(button->processed_y(), image->processed_y());
