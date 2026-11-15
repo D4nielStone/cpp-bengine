@@ -1,3 +1,4 @@
+#include <ranges>
 #include "creative_service.hpp"
 #include "project_snapshot.hpp"
 #include "editor/systems/project_creation_system.hpp"
@@ -53,7 +54,7 @@ void validate_json(const Value& value, unsigned depth = 64) {
     if (!depth) throw std::runtime_error("JSON nesting exceeds 64 levels.");
     if (value.IsObject()) {
         std::set<std::string> names;
-        for (const auto& member : value.GetObject()) {
+        for (const auto& member : std::ranges::subrange(value.MemberBegin(), value.MemberEnd())) {
             if (!names.insert(text(member.name)).second) throw std::runtime_error("Duplicate JSON key.");
             validate_json(member.value, depth - 1);
         }
@@ -80,7 +81,7 @@ unsigned number(const Value& args, const char* name, unsigned fallback, unsigned
     return value.GetUint();
 }
 void references(const Value& value, const fs::path& root) {
-    if (value.IsObject()) for (const auto& member : value.GetObject()) {
+    if (value.IsObject()) for (const auto& member : std::ranges::subrange(value.MemberBegin(), value.MemberEnd())) {
         const auto key = text(member.name);
         if ((key == "model" || key == "file" || key == "clip" || key == "material" || key == "directory") && member.value.IsString()) {
             const auto name = text(member.value);

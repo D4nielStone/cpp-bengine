@@ -1,3 +1,4 @@
+#include <ranges>
 #include "project_snapshot.hpp"
 
 #include <fstream>
@@ -16,7 +17,7 @@ bool within_depth_limit(const rapidjson::Value& value, unsigned depth) {
     if (depth == 0)
         return false;
     if (value.IsObject()) {
-        for (const auto& member : value.GetObject())
+        for (const auto& member : std::ranges::subrange(value.MemberBegin(), value.MemberEnd()))
             if (!within_depth_limit(member.value, depth - 1))
                 return false;
     } else if (value.IsArray()) {

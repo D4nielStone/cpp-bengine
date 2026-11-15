@@ -1,3 +1,4 @@
+#include <ranges>
 #include "engine_version.hpp"
 #include "project_snapshot.hpp"
 #include "creative_service.hpp"
@@ -93,7 +94,7 @@ Value inspect_project(const fs::path& path, std::string_view tool, unsigned argu
             for (const auto key : {"id", "name", "parent", "hidden", "locked"})
                 copy_field(summary, entity, key, memory);
             Value types(rapidjson::kArrayType);
-            for (const auto& component : entity["components"].GetObject())
+            for (const auto& component : std::ranges::subrange(entity["components"].MemberBegin(), entity["components"].MemberEnd()))
                 types.PushBack(Value(component.name, memory), memory);
             summary.AddMember("componentTypes", types, memory);
             page.PushBack(summary, memory);
