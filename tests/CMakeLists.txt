@@ -120,7 +120,7 @@ gtest_discover_tests(ui_scale_tests)
 
 add_executable(editable_model_tests editable_model_tests.cpp model_rig_tests.cpp)
 target_include_directories(editable_model_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
 target_link_libraries(editable_model_tests PRIVATE GTest::gtest_main project_persistence)

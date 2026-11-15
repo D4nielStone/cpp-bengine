@@ -76,7 +76,9 @@ private:
             if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("strings") || !doc["strings"].IsObject())
                 throw std::runtime_error("Invalid language catalog");
             std::map<std::string, std::string> candidate;
-            for (const auto& entry : doc["strings"].GetObject()) {
+            const auto& strings = doc["strings"];
+            for (auto it = strings.MemberBegin(); it != strings.MemberEnd(); ++it) {
+                const auto& entry = *it;
                 if (!entry.value.IsString()) throw std::runtime_error("Invalid translation value");
                 candidate.emplace(entry.name.GetString(), entry.value.GetString());
             }
