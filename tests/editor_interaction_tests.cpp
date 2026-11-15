@@ -1611,6 +1611,7 @@ TEST_F(EditorInteractionTest, KeypadViewsAndProjectionDoNotRepeatWhileHeld) {
     movement.setup(registry);
     auto& io = bgui::get_context();
     io.m_mouse_position = {image.processed_x()+30, image.processed_y()+30};
+    bgui::on_update();
     io.m_input_map[bgui::input_key::keypad_one] = bgui::input_action::press;
     movement.update(registry);
     EXPECT_FLOAT_EQ(transform->get_rotation().y, -90.f);

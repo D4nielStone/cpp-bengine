@@ -209,14 +209,24 @@ int main(const int argc, char** argv) {
     }
     if (!script_log_path.empty()) commons::script_log::instance().set_output_file(script_log_path);
 
-    std::jthread watchdog;
-    if (!test_spec_path.empty()) watchdog = std::jthread([timeout = test_spec.timeout](std::stop_token stop) {
+    struct capture_watchdog {
         std::mutex mutex;
-        std::unique_lock lock(mutex);
-        std::condition_variable_any wake;
-        wake.wait_for(lock, stop, std::chrono::seconds(timeout), [] { return false; });
-        if (!stop.stop_requested()) std::_Exit(124);
-    });
+        std::condition_variable wake;
+        bool stopped = false;
+        std::thread worker;
+        capture_watchdog(bool enabled, unsigned timeout) {
+            if (enabled) worker = std::thread([this, timeout] {
+                std::unique_lock lock(mutex);
+                if (!wake.wait_for(lock, std::chrono::seconds(timeout), [this] { return stopped; }))
+                    std::_Exit(124);
+            });
+        }
+        ~capture_watchdog() {
+            { std::lock_guard lock(mutex); stopped = true; }
+            wake.notify_one();
+            if (worker.joinable()) worker.join();
+        }
+    } watchdog(!test_spec_path.empty(), test_spec.timeout);
     bool diagnostics = true;
     try {
         const auto executable = game_bootstrap::executable_path(argv[0]);

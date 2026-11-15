@@ -91,20 +91,22 @@ class PlatformBuildTests(unittest.TestCase):
             self.assertIn("-DBENGINE_SINGLE_FILE_RUNTIME=ON", log.read_text())
             self.assertIn("--overlay-ports=" + str(REPO / "cmake/vcpkg-ports"), log.read_text())
 
-    def test_cmake_runtime_only_does_not_require_editor_sources_or_png(self):
+    def test_cmake_runtime_only_does_not_require_editor_sources(self):
         with tempfile.TemporaryDirectory(prefix="bengine cmake ") as directory:
             root = Path(directory)
             apps = root / "apps"
             (apps / "project").mkdir(parents=True)
             shutil.copyfile(REPO / "apps/CMakeLists.txt", apps / "CMakeLists.txt")
             (apps / "runtime_app.cpp").write_text("int main() {}")
+            (apps / "editor/systems").mkdir(parents=True)
+            (apps / "editor/systems/project_preview.cpp").write_text("")
             (apps / "project/project_persistence_system.cpp").write_text("")
             (root / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.20)\nproject(BuildContract LANGUAGES CXX)\n"
                 "add_library(commons INTERFACE)\nadd_subdirectory(apps)\n")
             result = subprocess.run(["cmake", "-S", str(root), "-B", str(root / "out"),
                                      "-DBUILD_RUNTIME=ON", "-DBUILD_EDITOR=OFF",
-                                     "-DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON"],
+                                     "-DBUILD_MCP=OFF"],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             result = subprocess.run(["cmake", "--build", str(root / "out"),

@@ -359,15 +359,15 @@ TEST_F(SceneWorkflowTest, RightClickInBlocksCreatesAppliesAndRemovesScripts) {
     const auto menu=[&] {
         auto* field=find<bgui::field>(dock,[](auto& f){return f.get_label().get_buffer()=="Mensagem";});
         ASSERT_TRUE(field);
+        auto* blocks=find<bgui::window>(dock,[](auto& w){return w.get_title().get_buffer()=="Script em blocos";});
+        ASSERT_TRUE(blocks);
+        dock.focus_window(blocks); bgui::on_update();
         auto& input=field->get_inputbox();
         auto& io=bgui::get_context();
         io.m_mouse_position={input.processed_x()+5,input.processed_y()+5};
         io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;bgui::on_update();
         io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::press;bgui::on_update();bgui::on_update();
         io.m_input_map[bgui::input_key::mouse_right]=bgui::input_action::release;bgui::on_update();
-        std::cerr << "input " << input.processed_x() << "," << input.processed_y() << " " << input.processed_width() << "x" << input.processed_height() << " target ";
-        for(auto* e=bgui::get_mouse_target();e;e=e->get_parent()) std::cerr << e->type << ":" << e->processed_x() << "," << e->processed_y() << " ";
-        std::cerr << "\n";
     };
     const auto click=[&](const std::string& label) {
         auto* button=find<bgui::button>(bgui::get_layout(),[&](auto& b){return b.get_label().get_buffer()==label;});
@@ -385,7 +385,10 @@ TEST_F(SceneWorkflowTest, RightClickInBlocksCreatesAppliesAndRemovesScripts) {
     EXPECT_TRUE(context->undo());
     menu();click("Novo script Lua...");
     auto* name=find<bgui::inputbox>(bgui::get_layout(),[](auto& b){return b.has_class("new-script-name");});
-    ASSERT_TRUE(name);name->set_buffer("GeneralFpp");click(editor::ui::tr("Criar"));
+    ASSERT_TRUE(name);name->set_buffer("GeneralFpp");
+    auto* preset=find<bgui::combo_box>(bgui::get_layout(),[](auto& b){return b.has_class("new-script-template");});
+    ASSERT_TRUE(preset);preset->set_selected_index(static_cast<std::size_t>(editor::ui::lua_script_preset::fpp_controller));
+    click(editor::ui::tr("Criar"));
     EXPECT_TRUE(std::filesystem::is_regular_file(root/"GeneralFpp.lua"));
     EXPECT_NE(files.script_source(root/"GeneralFpp.lua").find("properties.player"),std::string::npos);
     auto* row=find<editor::ui::context_action_button>(dock,[](auto& b){return b.get_label().get_buffer()=="GeneralFpp.lua";});

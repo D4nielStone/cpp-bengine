@@ -13,7 +13,7 @@ Build a 3D scene, edit its meshes and run the game from one native editor. Bubbl
 
 ## Run the editor
 
-Download the **portable ZIP** for your operating system from [Releases](https://github.com/D4nielStone/cpp-bengine/releases). Extract it and open **BubbleEngine.exe** on Windows or **BubbleEngine** on Linux. Portable packages introduced in v1.5 include the engine assets and runtime. See the [portable release guide](docs/PORTABLE_RELEASE.md) for system requirements and export limits.
+Download the **portable ZIP** for your operating system from [Releases](https://github.com/D4nielStone/cpp-bengine/releases). Extract it and open **BubbleEngine.exe** on Windows or **BubbleEngine** on Linux. Portable packages introduced in v0.1.5 include the engine assets and runtime. See the [portable release guide](docs/PORTABLE_RELEASE.md) for system requirements and export limits.
 
 Choose **New Project**, start with the empty or first-person template, then press **Play** to run the scene. To compile the engine yourself, see [Building](#building).
 

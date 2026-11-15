@@ -6,7 +6,7 @@
 
 namespace editor::ui {
 
-enum class lua_script_preset { fpp_controller };
+enum class lua_script_preset { empty, fpp_controller };
 
 struct lua_script_template {
     std::string_view name;
