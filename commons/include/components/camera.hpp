@@ -5,12 +5,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 #include "commons_namespace.hpp"
 #include "component.hpp"
 #include "transform.hpp"
 #include "util/skybox.hpp"
 #include "util/color.hpp"
 #include "util/ray.hpp"
+#include "util/material.hpp"
 
 namespace COMMONS_NS {
     enum class ambient_occlusion_mode { off = 0, ssao = 1, hbao = 2, gtao = 3 };
@@ -22,6 +24,8 @@ namespace COMMONS_NS {
         float radius{0.75f};
         float strength{1.f};
         std::string fragment_shader;
+        material parameters;
+        std::vector<std::string> fragment_shaders;
 
         bool valid() const;
     };

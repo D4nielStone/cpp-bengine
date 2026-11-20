@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
     BubbleEngine
-    VERSION 1.5.0
+    VERSION 0.1.5
     LANGUAGES C CXX
 )
 
@@ -12,7 +12,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(MSVC)
-    add_compile_options(/utf-8)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>")
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/bigobj>")
 endif()
 
 option(BENGINE_DISTRIBUTION_BUILD "Build relocatable release binaries for the installer" OFF)

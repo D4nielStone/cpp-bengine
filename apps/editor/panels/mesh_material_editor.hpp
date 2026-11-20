@@ -2,6 +2,7 @@
 #include "../core/localization.hpp"
 
 #include "panel.hpp"
+#include "shader_uniform_editor.hpp"
 #include "editor_context.hpp"
 #include "components/renderer.hpp"
 #include "util/pbr_material.hpp"
@@ -61,10 +62,14 @@ void build_material_properties(panel& owner, bgui::linear& content,
                 const auto path = value.empty() ? std::filesystem::path{} : (context->project_root / value).lexically_normal();
                 if (!path.empty() && !std::filesystem::is_regular_file(path)) { status("Arquivo GLSL não encontrado."); return; }
                 (vertex ? next.vertex_shader : next.fragment_shader) = path.string();
-                binding.commit(next);
+                if (binding.commit(next)) context->events.publish(editor_event::assets);
             });
         input.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
     }
+
+    build_shader_uniform_editor(content, material.vertex_shader.empty() ? "pbr.vert" : material.vertex_shader,
+        material.fragment_shader, [binding] { return binding.read(); },
+        [binding](const commons::material& next) { return binding.commit(next); }, status);
 
     const auto albedo = material.getUniforme("material.albedo");
     commons::color color{1.f, 1.f, 1.f, 1.f};

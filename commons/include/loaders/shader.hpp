@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include "glad.h"
 #include <string>
 #include <fstream>
@@ -16,6 +17,7 @@ namespace COMMONS_NS {
         shader_exception(const char* msg);
         virtual const char* what() const noexcept override;
     private:
+        friend class mesh;
         std::string msg_;
     };
 
@@ -39,6 +41,9 @@ namespace COMMONS_NS {
         shader(const char* vertexPath, const char* fragmentPath);
         // use/activate the shader
         void use();
+        struct uniform_info { std::string name, type; int size; };
+        std::vector<uniform_info> active_uniforms();
+        void reset_uniforms();
         // utility uniform functions
         void compilar(const char* vertexPath, const char* fragmentPath);
         void setBool (const std::string& name, const bool& value) const;
@@ -54,6 +59,7 @@ namespace COMMONS_NS {
         bool checkCompileErrors(unsigned int shader, const std::string& type);
         bool checkLinkErrors(unsigned int shader);
     private:
+        friend class mesh;
         int uniform_location(const std::string& name) const;
     };
     inline std::unordered_map<std::string, unsigned int> shaders;

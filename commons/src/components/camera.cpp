@@ -1,3 +1,4 @@
+#include "loaders/material_asset.hpp"
 #include "glad.h"
 #include "debugging/debug.hpp"
 #include "components/camera.hpp"
@@ -80,6 +81,9 @@ camera::camera(const bool orth)
 }
 
 bool camera_post_processing::valid() const {
+    if (fragment_shaders.size() > 8 || fragment_shader.size() > 4096 || fragment_shader.find('\0') != std::string::npos) return false;
+    for (const auto& path : fragment_shaders)
+        if (path.empty() || path.size()>4096 || path.find('\0')!=std::string::npos) return false;
     return occlusion >= ambient_occlusion_mode::off && occlusion <= ambient_occlusion_mode::gtao &&
         std::isfinite(radius) && radius >= min_radius && radius <= max_radius &&
         std::isfinite(strength) && strength >= 0.f && strength <= 1.f;
@@ -101,8 +105,16 @@ bool camera::analyze(const rapidjson::Value& value)
             post["radius"].GetFloat(), post["strength"].GetFloat()};
         if (post.HasMember("fragment_shader")) {
             if (!post["fragment_shader"].IsString()) return false;
-            next.post_processing.fragment_shader = post["fragment_shader"].GetString();
+            next.post_processing.fragment_shader.assign(post["fragment_shader"].GetString(),post["fragment_shader"].GetStringLength());
         }
+        if (post.HasMember("fragment_shaders")) {
+            if (!post["fragment_shaders"].IsArray() || post["fragment_shaders"].Size()>8) return false;
+            for (const auto& path : post["fragment_shaders"].GetArray()) {
+                if (!path.IsString()) return false;
+                next.post_processing.fragment_shaders.emplace_back(path.GetString(),path.GetStringLength());
+            }
+        }
+        if (post.HasMember("uniforms") && !analyze_uniforms(post["uniforms"], next.post_processing.parameters)) return false;
         if (!next.post_processing.valid()) return false;
     }
     next.use_skybox = false;
@@ -343,6 +355,13 @@ bool camera::serialize(rapidjson::Value& value, rapidjson::Document::AllocatorTy
     post.AddMember("radius", config.post_processing.radius, allocator);
     post.AddMember("strength", config.post_processing.strength, allocator);
     post.AddMember("fragment_shader", rapidjson::Value(config.post_processing.fragment_shader.c_str(), allocator), allocator);
+    rapidjson::Value passes(rapidjson::kArrayType);
+    for (const auto& path : config.post_processing.fragment_shaders)
+        passes.PushBack(rapidjson::Value(path.c_str(),static_cast<rapidjson::SizeType>(path.size()),allocator),allocator);
+    post.AddMember("fragment_shaders",passes,allocator);
+    try {
+        post.AddMember("uniforms", serialize_uniforms(config.post_processing.parameters, allocator), allocator);
+    } catch (const std::exception&) { return false; }
     value.AddMember("post_processing", post, allocator);
 
     // fov

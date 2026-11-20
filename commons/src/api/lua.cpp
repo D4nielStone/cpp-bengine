@@ -10,11 +10,17 @@
 #include "components/sound_player.hpp"
 #include "core/ecs.hpp"
 #include "components/hud.hpp"
+#include "components/code.hpp"
 #include "systems/physics_system.hpp"
 #include "components/animation.hpp"
 #include "components/pathfinder.hpp"
 
 #include <cmath>
+#include <limits>
+#include <filesystem>
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -32,6 +38,152 @@ void setNamespaces(sol::state& lua) {
 
 namespace commons::api {
 namespace {
+void validate_name(const std::string& name) {
+    if (name.empty() || name.find('\0') != std::string::npos)
+        throw std::invalid_argument("Names must be nonempty and contain no NUL bytes.");
+}
+
+bool lua_integer(const sol::object& value) {
+    auto* state = value.lua_state();
+    value.push();
+    const bool integer = lua_isinteger(state, -1);
+    lua_pop(state, 1);
+    return integer;
+}
+
+rapidjson::Value copy_global(const sol::object& value, rapidjson::Document::AllocatorType& a,
+    unsigned depth, unsigned& remaining) {
+    if (remaining == 0 || depth > 32) throw std::invalid_argument("Global value is too large or cyclic.");
+    --remaining;
+    // Nested table iterators retain Lua stack slots across C++ recursion.
+    if (!lua_checkstack(value.lua_state(), 8)) throw std::runtime_error("Cannot grow the Lua value stack.");
+    rapidjson::Value out;
+    switch (value.get_type()) {
+    case sol::type::boolean: out.SetBool(value.as<bool>()); break;
+    case sol::type::number: {
+        const auto n = value.as<double>();
+        if (!std::isfinite(n)) throw std::invalid_argument("Global numbers must be finite.");
+        if (lua_integer(value)) out.SetInt64(value.as<lua_Integer>());
+        else out.SetDouble(n);
+        break;
+    }
+    case sol::type::string: {
+        const auto text = value.as<std::string>();
+        out.SetString(text.data(), text.size(), a); break;
+    }
+    case sol::type::table:
+        out.SetArray();
+        for (const auto& [key, entry] : value.as<sol::table>()) {
+            if (key.get_type() != sol::type::string &&
+                !(key.get_type() == sol::type::number && lua_integer(key)))
+                throw std::invalid_argument("Global table keys must be strings or integers.");
+            rapidjson::Value pair(rapidjson::kArrayType);
+            pair.PushBack(copy_global(key, a, depth + 1, remaining), a);
+            pair.PushBack(copy_global(entry, a, depth + 1, remaining), a);
+            out.PushBack(pair, a);
+        }
+        break;
+    default: throw std::invalid_argument("Globals accept booleans, numbers, strings and value tables.");
+    }
+    return out;
+}
+
+sol::object restore_global(const rapidjson::Value& value, sol::state_view lua) {
+    if (!lua_checkstack(lua.lua_state(), 8)) throw std::runtime_error("Cannot grow the Lua value stack.");
+    if (value.IsBool()) return sol::make_object(lua, value.GetBool());
+    if (value.IsInt64()) return sol::make_object(lua, value.GetInt64());
+    if (value.IsNumber()) return sol::make_object(lua, value.GetDouble());
+    if (value.IsString()) return sol::make_object(lua, std::string(value.GetString(), value.GetStringLength()));
+    auto table = lua.create_table();
+    for (const auto& pair : value.GetArray())
+        table[restore_global(pair[0], lua)] = restore_global(pair[1], lua);
+    return sol::make_object(lua, table);
+}
+
+uniform read_lua_uniform(const std::string& type, const sol::object& value) {
+    if (type == "bool" && value.get_type() == sol::type::boolean) return uniform(value.as<bool>());
+    if (type == "int" && value.get_type() == sol::type::number && lua_integer(value) &&
+        value.as<lua_Integer>() >= std::numeric_limits<int>::min() &&
+        value.as<lua_Integer>() <= std::numeric_limits<int>::max()) return uniform(value.as<int>());
+    auto number = [](const sol::object& v) {
+        if (v.get_type() != sol::type::number) throw std::invalid_argument("Expected a uniform number.");
+        const double n = v.as<double>();
+        if (!std::isfinite(n) || std::abs(n) > std::numeric_limits<float>::max())
+            throw std::invalid_argument("Uniform numbers must be finite floats.");
+        return static_cast<float>(n);
+    };
+    if (type == "float") return uniform(number(value));
+    const unsigned count = type == "vec2" ? 2 : type == "vec3" ? 3 : type == "vec4" ? 4 : type == "mat4" ? 16 : 0;
+    if (!count || value.get_type() != sol::type::table) throw std::invalid_argument("Invalid uniform type or value.");
+    auto table = value.as<sol::table>();
+    if (table.size() != count) throw std::invalid_argument("Wrong uniform vector/matrix size.");
+    float n[16]{};
+    for (unsigned i = 0; i < count; ++i) n[i] = number(table.get<sol::object>(i + 1));
+    if (count == 2) return uniform(bgui::vec2{n[0], n[1]});
+    if (count == 3) return uniform(bgui::vec3{n[0], n[1], n[2]});
+    if (count == 4) return uniform(bgui::vec4{n[0], n[1], n[2], n[3]});
+    return uniform(glm::make_mat4(n));
+}
+
+template<class T> void require_live(T& component) {
+    auto owner = component.reg.lock();
+    if (!owner || owner->template get<T>(component.my_object).get() != &component)
+        throw std::runtime_error("Component is no longer attached to a live entity.");
+}
+
+mesh& script_mesh(renderer& value, unsigned index) {
+    require_live(value);
+    if (!value.m_modelo || index == 0 || index > value.m_modelo->meshes.size())
+        throw std::out_of_range("Material mesh index is out of range (indices start at 1).");
+    return value.m_modelo->meshes[index - 1];
+}
+
+std::string script_shader_path(const std::string& path, sol::this_state state) {
+    if (path.empty()) return {};
+    validate_name(path);
+    const auto root = sol::state_view(state).registry()["bengine.asset_root"].get_or(std::string{});
+    return (std::filesystem::path(root) / path).lexically_normal().string();
+}
+
+void register_globals(sol::state& lua, const std::weak_ptr<ecs>& registry) {
+    auto globals = lua.create_named_table("Globals");
+    globals.set_function("Set", [registry](const std::string& name, sol::object value) {
+        validate_name(name);
+        auto owner = registry.lock();
+        if (!owner) throw std::runtime_error("The script scene is no longer available.");
+        if (value == sol::nil) { owner->script_globals.erase(name); return; }
+        rapidjson::Document document;
+        unsigned remaining = 10000;
+        auto copy = copy_global(value, document.GetAllocator(), 0, remaining);
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        copy.Accept(writer);
+        owner->script_globals[name] = std::string(buffer.GetString(), buffer.GetSize());
+    });
+    globals.set_function("Get", [registry](const std::string& name, sol::this_state state) -> sol::object {
+        validate_name(name);
+        sol::state_view view(state);
+        auto owner = registry.lock();
+        if (!owner) return sol::make_object(view, sol::nil);
+        const auto found = owner->script_globals.find(name);
+        if (found == owner->script_globals.end()) return sol::make_object(view, sol::nil);
+        rapidjson::Document document;
+        document.Parse(found->second.data(), found->second.size());
+        return restore_global(document, view);
+    });
+    globals.set_function("Has", [registry](const std::string& name) {
+        validate_name(name);
+        auto owner = registry.lock();
+        return owner && owner->script_globals.contains(name);
+    });
+    globals.set_function("Remove", [registry](const std::string& name) {
+        validate_name(name);
+        auto owner = registry.lock();
+        return owner && owner->script_globals.erase(name) != 0;
+    });
+    globals.set_function("Clear", [registry]() { if (auto owner = registry.lock()) owner->script_globals.clear(); });
+}
+
 std::shared_ptr<scene_control> script_scenes(sol::this_state state) {
     const auto owner = sol::state_view(state).registry()["bengine.scene_registry"].get<std::weak_ptr<ecs>>().lock();
     return owner ? owner->scenes : nullptr;
@@ -169,15 +321,42 @@ void register_types(sol::state& lua) {
         "height", &hud_element::height, "scale", &hud_element::scale,
         "visible", &hud_element::visible, "position", &hud_element::position,
         "absolute", &hud_element::absolute,
+        "relative", &hud_element::relative,
+        "id", &hud_element::id, "callback", &hud_element::callback,
+        "font", &hud_element::font, "image", &hud_element::image, "shader", &hud_element::shader,
+        "opacity", &hud_element::opacity,
+        "padding", &hud_element::padding, "margin", &hud_element::margin,
+        "alignment", &hud_element::alignment,
+        "borderSize", &hud_element::border_size, "borderRadius", &hud_element::border_radius,
+        "color", sol::property([](const hud_element& e) { return color{e.color.r,e.color.g,e.color.b,e.color.a}; },
+            [](hud_element& e,const color& c) { e.color={c.r,c.g,c.b,c.a}; }),
+        "background", sol::property([](const hud_element& e) { return color{e.background.r,e.background.g,e.background.b,e.background.a}; },
+            [](hud_element& e,const color& c) { e.background={c.r,c.g,c.b,c.a}; }),
+        "hoverColor", sol::property([](const hud_element& e) { return color{e.hover_color.r,e.hover_color.g,e.hover_color.b,e.hover_color.a}; },
+            [](hud_element& e,const color& c) { e.hover_color={c.r,c.g,c.b,c.a}; }),
+        "pressedColor", sol::property([](const hud_element& e) { return color{e.pressed_color.r,e.pressed_color.g,e.pressed_color.b,e.pressed_color.a}; },
+            [](hud_element& e,const color& c) { e.pressed_color={c.r,c.g,c.b,c.a}; }),
+        "borderColor", sol::property([](const hud_element& e) { return color{e.border_color.r,e.border_color.g,e.border_color.b,e.border_color.a}; },
+            [](hud_element& e,const color& c) { e.border_color={c.r,c.g,c.b,c.a}; }),
+
         "SetScreenPosition", &hud_element::set_screen_position,
         "ConsumeClick", &hud_element::consume_click);
     lua.new_usertype<hud>("HUD", sol::no_constructor,
-        "enabled", &hud::enabled, "Add", &hud::add,
+        "enabled", &hud::enabled, "Add", sol::overload(
+            [](hud& h,const std::string& kind,const std::string& text) { return h.add(kind,text); },
+            &hud::add,
+            [](hud& h,const std::string& kind,const std::string& text,const std::string& parent) {
+                const auto node=h.find(parent);
+                if(!node) throw std::invalid_argument("HUD parent ID not found");
+                const auto it=std::find(h.elements.begin(),h.elements.end(),node);
+                return h.add(kind,text,int(it-h.elements.begin()));
+            }),
         "count", sol::property([](const hud& h) { return h.elements.size(); }),
-        "Get", [](const hud& h, int index) -> std::shared_ptr<hud_element> {
+        "Find", &hud::find,
+        "Get", sol::overload([](const hud& h, int index) -> std::shared_ptr<hud_element> {
             return index >= 0 && static_cast<size_t>(index) < h.elements.size()
                 ? h.elements[index] : nullptr;
-        });
+        }, &hud::find));
     lua.new_usertype<transform>("Transform", sol::no_constructor,
         "position", sol::property(&transform::get_world_position, &transform::set_world_position),
         "localPosition", sol::property(&transform::get_position, &transform::set_position),
@@ -196,7 +375,28 @@ void register_types(sol::state& lua) {
         "Rotate", &transform::rotate);
     lua.new_usertype<renderer>("Renderer", sol::no_constructor,
         "enabled", &renderer::visible, "visible", &renderer::visible,
-        "castShadows", &renderer::cast_shadows, "receiveShadows", &renderer::receive_shadows);
+        "castShadows", &renderer::cast_shadows, "receiveShadows", &renderer::receive_shadows,
+        "SetShader", [](renderer& value, unsigned index, const std::string& vertex, const std::string& fragment, sol::this_state state) {
+            auto& mesh = script_mesh(value, index);
+            auto material = mesh.getMaterial();
+            material.vertex_shader = script_shader_path(vertex, state);
+            material.fragment_shader = script_shader_path(fragment, state);
+            mesh.setMaterial(material);
+        },
+        "SetUniform", [](renderer& value, unsigned index, const std::string& name, const std::string& type, sol::object data) {
+            validate_name(name);
+            auto& mesh = script_mesh(value, index);
+            auto material = mesh.getMaterial();
+            material.set_uniform(name, read_lua_uniform(type, data));
+            mesh.setMaterial(material);
+        },
+        "RemoveUniform", [](renderer& value, unsigned index, const std::string& name) {
+            auto& mesh = script_mesh(value, index);
+            auto material = mesh.getMaterial();
+            const bool removed = material.uniforms.erase(name) != 0;
+            mesh.setMaterial(material);
+            return removed;
+        });
     lua.new_usertype<physics>("Rigidbody", sol::no_constructor,
         "mass", sol::property([](const physics& p) { return p.m_massa; }, &physics::setMass),
         "friction", sol::property([](const physics& p) { return p.friction; }, &physics::setFriccao),
@@ -209,6 +409,41 @@ void register_types(sol::state& lua) {
         sol::constructors<color(), color(const float&, const float&, const float&, const float&)>(),
         "r", &color::r, "g", &color::g, "b", &color::b, "a", &color::a);
     lua.new_usertype<camera>("Camera", sol::no_constructor,
+        "postProcessShader", sol::property([](camera& value) {
+            require_live(value); return value.config.post_processing.fragment_shader;
+        }, [](camera& value, const std::string& path) {
+            require_live(value);
+            if (!path.empty()) validate_name(path);
+            value.config.post_processing.fragment_shader = path;
+        }),
+        "postProcessPasses", sol::property([](camera& value) {
+            require_live(value);
+            return sol::as_table(std::vector<std::string>(value.config.post_processing.fragment_shaders));
+        }, [](camera& value, const sol::table& paths) {
+            require_live(value);
+            std::size_t count=0;
+            for (const auto& pair : paths) {
+                if (!lua_integer(pair.first) || pair.first.as<double>()<1 || pair.first.as<double>()>8 ||
+                    pair.second.get_type()!=sol::type::string) throw std::invalid_argument("Expected an ordered array of up to 8 shader paths.");
+                ++count;
+            }
+            std::vector<std::string> next;
+            for (std::size_t i=1;i<=count;++i) {
+                const auto entry=paths.raw_get<sol::object>(i);
+                if (entry.get_type()!=sol::type::string) throw std::invalid_argument("Shader arrays cannot have holes.");
+                auto path=entry.as<std::string>();validate_name(path);
+                if (path.size()>4096) throw std::invalid_argument("Shader path is too long.");
+                next.push_back(std::move(path));
+            }
+            value.config.post_processing.fragment_shaders=std::move(next);
+        }),
+        "SetUniform", [](camera& value, const std::string& name, const std::string& type, sol::object data) {
+            require_live(value); validate_name(name);
+            value.config.post_processing.parameters.set_uniform(name, read_lua_uniform(type, data));
+        },
+        "RemoveUniform", [](camera& value, const std::string& name) {
+            require_live(value); return value.config.post_processing.parameters.uniforms.erase(name) != 0;
+        },
         "viewportWidth", sol::property([](const camera& value) { return value.viewport_size().x; }),
         "viewportHeight", sol::property([](const camera& value) { return value.viewport_size().y; }),
         "traceRay", trace_camera_ray,
@@ -280,7 +515,12 @@ void register_types(sol::state& lua) {
         "pitch", &sound_player::pitch,
         "radius", &sound_player::radius,
         "looping", &sound_player::looping,
-        "playOnAwake", &sound_player::play_on_awake);
+        "playOnAwake", &sound_player::play_on_awake,
+        "Play", &sound_player::play,
+        "Pause", &sound_player::pause,
+        "Resume", &sound_player::resume,
+        "Stop", &sound_player::stop,
+        "isPlaying", sol::property(&sound_player::is_playing));
     lua.new_usertype<pathfinder>("Pathfinder", sol::no_constructor,
         "Configure", &pathfinder::configure, "FindPath", &pathfinder::find_path, "Clear", &pathfinder::clear,
         "GetPath", [](const pathfinder& p) { return sol::as_table(p.path()); });
@@ -314,7 +554,9 @@ void register_types(sol::state& lua) {
                 entity ent; ent.id = object.id;
                 owner->add<hud>(ent);
             }
-            return owner->get<hud>(object.id);
+            auto h=owner->get<hud>(object.id);
+            if(auto script=owner->get<code>(object.id)) h->asset_root=script->asset_root;
+            return h;
         },
         "GetComponent", [](const game_object& object, const std::string& name, sol::this_state state) -> sol::object {
             auto owner = object.registry.lock();
@@ -344,6 +586,22 @@ void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32
 void setUpApi(sol::state& lua, const std::shared_ptr<ecs>& registry, std::uint32_t id,
     const std::weak_ptr<physics_system>& physics_world) {
     register_types(lua);
+    register_globals(lua, registry);
+    auto shader_api = lua.create_named_table("Shader");
+    shader_api.set_function("GetUniforms", [](const std::string& vertex, const std::string& fragment, sol::this_state state) {
+        if (!glad_glCreateProgram || !glGetString(GL_VERSION))
+            throw std::runtime_error("Shader.GetUniforms requires an active graphics context.");
+        shader program(script_shader_path(vertex, state).c_str(), script_shader_path(fragment, state).c_str());
+        if (!program.ID) throw std::runtime_error("Could not compile shader program.");
+        sol::state_view view(state);
+        auto entries = view.create_table();
+        for (const auto& uniform : program.active_uniforms()) {
+            auto entry = view.create_table();
+            entry["name"] = uniform.name; entry["type"] = uniform.type; entry["size"] = uniform.size;
+            entries.add(entry);
+        }
+        return entries;
+    });
     lua.registry()["bengine.physics_world"] = physics_world;
     lua.set_function("Destroy", [](const std::shared_ptr<physics>& body) {
         if (body) {

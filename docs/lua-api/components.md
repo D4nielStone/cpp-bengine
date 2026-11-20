@@ -105,9 +105,16 @@ não registra membros para alterar resolução de sombra.
 `SoundListener` expõe `enabled`, leitura/escrita.
 
 `SoundPlayer` expõe os campos leitura/escrita `clip`, `volume`, `pitch`,
-`radius`, `looping` e `playOnAwake`. Esses campos editam a configuração do
-componente. A API atualmente não registra `Play`, `Stop`, pausa, nem controle
-de reprodução por script.
+`radius`, `looping` e `playOnAwake`. Esses campos editam a configuração do componente. `Play()` reinicia o clipe,
+`Pause()` preserva o cursor, `Resume()` continua (ou inicia se não houver voz),
+e `Stop()` libera a voz. Retornam `false` para componentes removidos; Play/Resume
+exigem clip não vazio. A última solicitação antes da atualização de áudio prevalece.
+`isPlaying` é somente leitura e reflete a última atualização do backend; uma
+solicitação aceita não garante que arquivo/dispositivo estejam disponíveis.
+Controles explícitos substituem playOnAwake até o componente ser recriado.
+Trocar clip recria a voz; um one-shot concluído só reinicia com Play. Estado de
+reprodução não é salvo nem copiado. Não há seek nem múltiplas vozes por componente.
+Veja [controle espacial de áudio](examples/spatial_audio.lua).
 
 ## `Animation`
 
@@ -122,3 +129,11 @@ Veja [Animação: prévia, controle Lua e blending](../ANIMATION.md#controle-lua
 para contratos de transição, exemplos e comportamento de canais discretos.
 
 - [Gerenciamento de cenas e Pathfinder para inimigos](./scenes-and-navigation.md)
+
+## Shaders personalizados
+
+`Renderer:SetShader(malha, vertex, fragment)`, `SetUniform(malha, nome, tipo, valor)`
+e `RemoveUniform(malha, nome)` editam materiais com índice de malha começando em 1.
+`Camera.postProcessShader` seleciona o filtro, `Camera:SetUniform(nome, tipo, valor)`
+e `RemoveUniform(nome)` controlam seus parâmetros. Consulte os
+[tipos aceitos e uniforms reservados](globals-and-shaders.md).

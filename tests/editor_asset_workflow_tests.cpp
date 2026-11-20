@@ -1256,3 +1256,28 @@ TEST_F(EditorAssetWorkflowTest, PrefabPreviewUsesChildGeometryWithoutChangingThe
     EXPECT_FALSE(preview.load(folder / "missing.bobject", folder, error));
     EXPECT_TRUE(preview.triangles().empty());
 }
+
+TEST_F(EditorAssetWorkflowTest, MovingHudAssetsUpdatesLiveAndSavedReferences) {
+    std::filesystem::create_directory(folder/"destination");
+    std::ofstream(folder/"game.ttf")<<"font placeholder";
+    std::ofstream(folder/"pulse.frag")<<"shader placeholder";
+    write_test_png(folder/"icon.png");
+    std::ofstream(folder/"hud.scene")<<R"({"image":"icon.png","components":{"hud":{"elements":[{"kind":"image","parent":-1,"font":"game.ttf","image":"icon.png","shader":"pulse.frag"}]}}})";
+    auto registry=std::make_shared<commons::ecs>();
+    auto context=std::make_shared<editor::ui::editor_context>(registry);
+    context->project_root=folder;
+    auto entity=registry->create(); registry->add<commons::hud>(entity);
+    auto e=registry->get<commons::hud>(entity.id)->add("image","");
+    e->font="game.ttf"; e->image="icon.png"; e->shader="pulse.frag";
+    editor::ui::files_view files(folder);
+    files.set_file_moved_callback([context](const auto& from,const auto& to){editor::ui::relocate_scene_asset(context,from,to);});
+    for(const auto name:{"game.ttf","icon.png","pulse.frag"}) files.move_file(folder/name,folder/"destination");
+    EXPECT_EQ(e->font,"destination/game.ttf"); EXPECT_EQ(e->image,"destination/icon.png"); EXPECT_EQ(e->shader,"destination/pulse.frag");
+    rapidjson::Document scene; scene.Parse(editor::ui::project_files::read(folder/"hud.scene").c_str());
+    ASSERT_FALSE(scene.HasParseError());
+    const auto& saved=scene["components"]["hud"]["elements"][0];
+    EXPECT_STREQ(saved["font"].GetString(),"destination/game.ttf");
+    EXPECT_STREQ(saved["image"].GetString(),"destination/icon.png");
+    EXPECT_STREQ(saved["shader"].GetString(),"destination/pulse.frag");
+    EXPECT_STREQ(scene["image"].GetString(),"icon.png");
+}

@@ -896,3 +896,194 @@ Added regression coverage in `TextEditor.PageNavigationExtendsSelectionAndRespec
   KeypadViewsAndProjectionDoNotRepeatWhileHeld failed on camera rotation and
   orthographic toggling, separate from dock rendering. Desktop rendering remains
   to be checked interactively.
+
+## Fog, edição de texto e docking — 2026-11-16
+
+- Confirmado no BGUI original por três regressões executáveis: flutuar uma tab
+  desfazia o grupo inteiro; os controles de três pontos ficavam acima das
+  janelas flutuantes; uma divisão vertical dentro do dock superior mantinha o
+  espaço de conteúdo ao recolher. Os três testes falharam contra `dock.cpp` do
+  HEAD original, ligado aos mesmos testes novos sem alterar a árvore de fontes.
+- A sincronização agora retira apenas as tabs flutuantes, promove a âncora do
+  grupo restante e preserva sua posição, peso e conexões de divisão. Controles
+  de overflow ficam na camada das tabs, abaixo de qualquer janela flutuante.
+- Divisões verticais reservam apenas os cabeçalhos recolhidos e devolvem o
+  restante aos vizinhos. A última tentativa de recolher todos os grupos da
+  mesma região, quando há vários, mantém o último grupo expandido. Colunas
+  laterais totalmente recolhidas preservam espaço para as tabs compactas.
+- Janelas mantêm uma geometria flutuante independente; a primeira retirada usa
+  480 × 360 unidades de interface. Não há mudança do formato do workspace.
+- O editor de documentos usa a barra horizontal do `linear` para linhas sem
+  wrap, acompanha o cursor nos dois sentidos e oferece wrap no menu Exibir,
+  aplicado aos documentos já abertos e aos próximos na sessão. Métricas,
+  renderização e navegação usam a mesma largura de quebra do campo.
+- Tabs laterais recebem cantos de raio 6 e indicador ativo recuado; tabs
+  centrais mantêm seu estilo. Comparação renderizada por OpenGL com os widgets
+  BGUI em `out/stabilization-ui/evidence/dock-tabs-comparison.png`.
+- Fog mantém os uniforms e dados de câmera existentes, suaviza a entrada,
+  converge para a cor configurada no limite máximo e mistura essa cor em
+  espaço linear antes da correção gamma. Densidade zero mantém a iluminação.
+- Validação inicial: teste de pixels
+  `EditorRenderTest.FogConvergesToDisplayColorAndZeroDensityPreservesLighting`
+  compilado isoladamente e executado com contexto OpenGL real: passou, sem
+  skip. A compilação integrada `bash scripts/build.sh out/stabilization-ui
+  --test` foi interrompida por erros preexistentes nas alterações locais de
+  `commons/src/systems/animation_system.cpp` (namespace não fechado e chamadas
+  ambíguas de `sample_animation`/`animation_target`). Essas alterações foram
+  preservadas. Resultados finais dos alvos independentes registrados abaixo.
+- Validação final: `cmake --build out/stabilization-ui --parallel 2 --target
+  all_tests text_editor_tests gl3_tests` passou. `ctest --test-dir
+  out/stabilization-ui -R 'Tests$|TextEditor\.' --output-on-failure` passou:
+  27/27 entradas CTest, incluindo os 39 casos de docking. O teste de retirada da
+  âncora também verifica que o divisor continua redimensionando após a promoção.
+- `editor_ui.cpp` e `editor_document_tests.cpp` compilaram como objetos pelos
+  respectivos `build.make` da configuração Release. Os três testes de
+  `EditorDocuments` passaram, incluindo propagação do wrap e preservação do
+  buffer. Para executar documentos e o teste de fog apesar do bloqueio da
+  compilação completa, foram usadas bibliotecas do engine já disponíveis em
+  `out`; os testes de documentos foram ligados ao BGUI novo desta validação.
+  Isso não substitui uma compilação limpa completa do engine.
+- A comparação visual foi inspecionada após renderização real dos widgets,
+  alternando apenas o raio dos cantos para comparação controlada. Não houve
+  validação manual de arrastar/dockar na aplicação completa nem em Windows.
+  `git diff --check` passou no engine e no submódulo.
+
+## Leitor Markdown: imagens, tabelas, código e links (2026-11-16)
+
+- O leitor anterior criava somente textos, removia a marcação de código e
+  convertia links em rótulos sem ação. O leitor compartilhado pelo painel de
+  arquivos e pela referência da API agora interpreta imagens locais com cantos
+  arredondados e proporção preservada, tabelas, citações, código literal e links
+  diretos ou por referência. Caminhos são relativos ao documento aberto.
+- A quebra de texto comum da BGUI usava 500 pixels lógicos. O teste
+  `Markdown.TextWrappingFollowsPanelWidth` verifica a adaptação entre 80 e 320
+  pixels. A BGUI ganhou `text::set_wrap_width(std::optional<float>)`, com valor
+  em pixels lógicos e `nullopt` para a política anterior. Métricas, desenho e
+  hit testing usam a mesma largura; os demais consumidores mantêm o padrão.
+- A abertura externa reutiliza o mecanismo de desktop do verificador de
+  versões, sem shell, para HTTP/HTTPS/mailto. A navegação é adiada e copia as
+  ações necessárias antes de remover a árvore do documento; há teste de
+  destruição do widget antes da execução da ação.
+- Validação: configuração limpa em `out/markdown-config-check`; compilação de
+  `markdown_tests`, `all_tests` da BGUI e dos objetos `editor_ui.cpp` e
+  `release_check.cpp` do editor. Os 12 casos `Markdown.*` passaram, incluindo
+  decodificação de PNG local com espaços no caminho, referências, cercas de
+  código, UTF-8, redimensionamento e remoção dos widgets. Os 21 grupos CTest da
+  BGUI passaram. `git diff --check` passou no engine e no submódulo.
+- Limite da validação integrada: `bash scripts/build.sh out --test` foi
+  executado, mas a compilação parou em alterações preexistentes de
+  `commons/src/systems/animation_system.cpp`, com chamada ambígua a
+  `animation_target` e fechamento de namespace ausente. A suíte completa do
+  engine não foi executada. Não houve verificação visual manual do leitor nem
+  compilação Windows. Imagens remotas e saltos para âncoras na mesma página
+  permanecem fora do leitor; links com fragmento para outro arquivo abrem seu
+  início. Exemplos e limites estão em `docs/MARKDOWN_READER.md`.
+
+## HUD: hierarquia, aparência e recursos do projeto (2026-11-16)
+
+- Evidência: `hud::add` limitava pais a linhas/colunas, e `hud_view` posicionava
+  todos os widgets livres a partir do viewport. A BGUI já oferece ownership,
+  layout, fontes e imagens; a integração agora compõe widgets BGUI em nós de
+  HUD, permitindo filhos em textos, botões e imagens sem outro roteador de input.
+- Novos widgets usam layout livre (`absolute=true`, `relative=true`) com tamanho
+  inicial 160 × 40; `absolute=false` mantém composição em fluxo. Cenas sem
+  `relative` mantêm a referência
+  anterior. `SetScreenPosition` continua em pixels do viewport. A árvore ordenada
+  rejeita pais futuros/ciclos, e o parser valida os novos campos antes do commit.
+- Cores, bordas, opacidade herdada, fontes TTF/OTF, imagens e fragmentos GLSL são
+  persistidos; o inspetor, Lua, conclusão, referência e catálogo visual os expõem.
+  `Find(id)`/`Get(id)` evitam índices nos scripts. Empty/FPP foram inspecionados:
+  seus templates não criam HUD e não precisam de migração.
+- BGUI: a fila FreeType resolve arquivos do projeto e registra erros de fontes
+  sem interromper o loop ou shutdown. O backend OpenGL compila fragmentos de
+  arquivo com o contrato BGUI, usa fallback em erro e libera programas no shutdown
+  do contexto. A tonalidade de imagens HUD usa um shader separado para preservar
+  imagens existentes da BGUI. O fundo arredondado agora independe de borda
+  opaca: o flag `bordered` antes era sobrescrito pela transparência da borda;
+  há regressão OpenGL para cantos arredondados sem borda. Vulkan não implementa
+  esse contrato de fragmentos.
+- Cobertura adicionada: lookup Lua, persistência/validação atômica, hierarquia
+  com qualquer pai, posição herdada, visibilidade/opacidade, catálogo visual,
+  conclusão, carregamento FreeType, tonalidade e fragmentos OpenGL com fallback.
+- Validação integrada em andamento; os resultados e limites serão registrados
+  após a compilação e execução dos testes.
+
+### Shared Lua values and GLSL uniform parameters (2026-11-16)
+
+- Independent Lua states share scene-owned value snapshots through
+  `Globals.Set/Get/Has/Remove/Clear`. New script-system runs clear the store;
+  removed writers do not invalidate values. Functions, userdata, non-finite
+  numbers, cycles and excessive nesting/size are rejected atomically. Recursive
+  conversion explicitly reserves Lua stack capacity before traversing tables.
+- Material and camera scripts expose typed uniforms using the existing material
+  representation. Shader reflection reports linked, addressable uniforms;
+  Inspector fields reuse native widgets and existing edit/history bindings.
+  Camera parameters persist in the optional `post_processing.uniforms` member;
+  old scenes and the existing `.bmat` representation remain supported.
+- Custom draws restore GLSL initial values before applying camera/material
+  overrides, including array elements, so removed parameters and shared programs
+  do not leak previous values. Post-processing uploads parameters independently
+  of PBR defaults. Shader default caches follow program reload/unload lifetimes.
+- Updated the Lua guide, examples, completion, visual command catalog/argument
+  fields and generated script templates. Sampler allocation, UBO/SSBO and GLSL
+  types beyond the existing float/int/bool, vec2/3/4 and mat4 value representation
+  remain outside this API; the guide documents these limits explicitly.
+- Focused runtime verification: all three new Lua API regressions passed. A
+  Valgrind run of the two Globals regressions reported zero errors and zero
+  definitely/indirectly/possibly lost bytes. A separate command/argument check
+  passed for all twelve new visual commands.
+
+
+## 2026-11-17 — generic audio transport, GLSL authoring and greenhouse scene
+
+Added reusable SoundPlayer Play/Pause/Resume/Stop and read-only isPlaying bindings,
+completion, visual commands, documentation and template hints. Transient transport
+is not serialized or copied; removed/replaced owners reject controls. The existing
+spatial backend owns voices. Added optional reusable LDR bloom/color-grade and
+emissive shaders using existing material/camera uniform controls. MCP write_asset
+now accepts confined, conflict-checked .vert/.frag source; GPU compilation remains
+in the editor/runtime. Existing tools and HTTP transport were preserved.
+
+Validation on the pre-existing dirty working tree:
+
+- Clean CMake configuration in out/cryo-config-check succeeded. It emitted the
+  existing FetchContent CMP0135 developer warning; no C++ compiler warnings were
+  recorded in the final build.
+- BENGINE_BUILD_JOBS=1 scripts/build.sh out --test built all targets successfully.
+  CTest returned failure: 663 cases, 13 failed and 3 skipped (647 passed).
+  All 13 failed names were already present in the initial 658-case baseline;
+  no new failed names remain. Existing project work was not reset or staged.
+- The five added cases passed: SoundSystem.TransportControlsVoiceAndRejectsRemovedOwner,
+  LuaApi.SoundTransportRejectsDetachedComponentsAndDoesNotSerializeRuntimeState,
+  LuaCompletion.OffersSoundTransportAndPlaybackStatus,
+  VisualLua.AudioTransportCommandsKeepEditableReceiver, and
+  EditorRenderTest.ReusableBloomGradePreservesNeutralColorAndExposesControls.
+  Updated completion membership and catalog recognition tests also passed.
+- mcp_http and mcp_server passed, including GLSL writes, conflict/path/NUL checks.
+  The project shader also round-tripped through the actual MCP unchanged.
+- Actual runtime captures were rendered and visually reviewed at 1280x720.
+  Scene checks verified all 14 original IDs retained, flower record unchanged,
+  95 final entities, and supplied audio hashes. Gameplay startup logs and the
+  real audio backend transport test succeeded; manual audio mixing and complete
+  interactive traversal were not certified.
+
+The pre-existing failing cases are:
+- EditorInteractionTest.KeypadViewsAndProjectionDoNotRepeatWhileHeld
+- EditableModelTest.StockCubeCutsFourFacesAcrossTextureSeamsInEitherDirection
+- EditorMenuTest.SidebarCentersButtonsAndIconsAtDifferentScales
+- EditorSceneManagement.CreatesOpensAndDeletesScenesThroughTheWorkspace
+- EditorAppearanceNative.RendersCompactInspectorTabsAndCenteredModeGlyphs
+- LuaCompletion.OffersCameraAndHierarchyMethods
+- WindowFileDropTest.EngineTextureUploadsDecodedJpegPixels
+- ModelImportGpuTest.LoadsEmbeddedGlbTextureAndAnimatesThroughExistingRenderer
+- AnimationTest.HudChannelsFollowStableIdsWhenElementsAreReordered
+- LocalizationTest.MarkdownRendererDisplaysDiscoveredDocument
+- VisualLua.CatalogInsertionRejectsInvalidDestinationsWithoutChangingDocument
+- SceneWorkflowTest.RightClickInBlocksCreatesAppliesAndRemovesScripts
+- platform_build_scripts
+
+Scene-specific assets remain in the user's game project, outside reusable engine
+code. See docs/GREENHOUSE_SCENE.md for implemented approximations, capture method,
+remaining effects and remote connection limits. Full baseline/final logs and the
+failure comparison are retained in that project's
+captures/before-cryo-20261117/validation directory. No BGUI sources were changed.

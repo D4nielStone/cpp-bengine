@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "os/window.hpp"
 #include "file_drop_bridge.hpp"
 #include "loaders/shader.hpp"
@@ -49,9 +50,10 @@ namespace {
     }
 
     void apply_editor_theme_overrides(bgui::theme& theme) {
-        const auto override_path =
-            std::filesystem::path(COMMONS_ASSET_DIR) /
-            "themes/editor-dark.theme";
+        const auto theme_file = "themes/editor-dark.theme";
+        auto override_path = std::filesystem::path("assets") / theme_file;
+        if (!bgui::resource_files::exists(override_path))
+            override_path = std::filesystem::path(COMMONS_ASSET_DIR) / theme_file;
         if (!bgui::resource_files::exists(override_path))
             throw std::runtime_error(
                 "[ui] Could not find editor theme overrides: " +
@@ -162,6 +164,8 @@ void window::refresh() {
         if (m_file_drop_callback) m_file_drop_callback(drop.paths, drop.x, drop.y);
 
     m_time.calculateDT();
+    Bubble::profiler::instance().next_frame(delta_time());
+    BUBBLE_PROFILE("Window systems", "CPU");
 
     for (const auto& instance : m_systems) {
         if (instance) {

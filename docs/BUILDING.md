@@ -60,15 +60,19 @@ Exported games hide profiling and collision debug overlays in both formats;
 the development runtime retains them. Packaging discourages casual editing but
 is not encryption or protection against a determined person extracting assets.
 
-Exports first reuse a compatible precompiled runtime template. The editor ships
-its host packager beside its executables. Templates are keyed by runtime sources,
-platform and format, and cached outside the output folder. If none matches, the
-runtime is compiled once and cached for subsequent projects. Supply an optional
-**Runtime template** folder in the dialog to require a specific template; an
-incompatible template fails instead of silently rebuilding. Distribute templates
-under `export_templates/<linux|windows>/<folder|single>/<key>/` beside the engine
-sources, or set `BENGINE_EXPORT_TEMPLATES`; override the writable cache with
-`BENGINE_TEMPLATE_CACHE`.
+The editor build and release include the host packager and a precompiled
+runtime template for folder export on the host OS. Export tries the bundled
+template first, then the local cache. A folder entered in **Runtime template**
+takes precedence and must match the engine, platform and format. If no
+compatible template is available, export reports which platform and format
+are missing.
+
+Distribute templates under
+`export_templates/<linux|windows>/<folder|single>/<key>/` beside the engine
+sources or the packager, or set `BENGINE_EXPORT_TEMPLATES` to a template root.
+`BENGINE_TEMPLATE_CACHE` overrides the writable cache. Source builds can
+explicitly set `BENGINE_EXPORT_ALLOW_BUILD=1` to compile and cache a missing
+template. The toolchain requirements below apply to that opt-in.
 
 For single-file CLI exports, append workspace, format, optional template and host
 packager arguments to the shell command, for example:
@@ -78,8 +82,10 @@ sh scripts/platform_build.sh linux "$PWD" /path/to/export /tmp/game.progress /pa
 ```
 
 PowerShell accepts `-Format single`, `-RuntimeTemplate` and `-Packager`.
-`BENGINE_PACKAGER` can also select the precompiled host packager. Without one,
-the CLI builds that small tool first (including its zlib dependency).
+`BENGINE_PACKAGER` can also select the precompiled host packager. With the
+source-build opt-in, the CLI can build the packager when its path is omitted.
+When exporting Linux from Windows, set `BENGINE_WSL_PACKAGER` to the Linux
+packager path as seen from WSL2.
 
 CMake files, object files, dependency downloads, logs and progress stay in the
 build cache, outside the output directory. The editor reports the log path.
@@ -95,7 +101,7 @@ resource references; dynamically constructed external paths cannot be inferred
 by the exporter. Non-text model formats should be imported with relative/embedded
 dependencies before export.
 
-| Host | Linux x64 target | Windows x64 target |
+| Host for optional template compilation | Linux x64 target | Windows x64 target |
 |---|---|---|
 | Linux x64 | Native host compiler and installed libraries | Zig/MinGW cross compilation with vcpkg |
 | Windows x64 | Native Linux build inside the default WSL2 distribution | Native MSVC (Visual Studio 2022 C++ tools) and vcpkg; no WSL required |
@@ -130,13 +136,12 @@ Windows game both on Windows and from Linux. The remote workflow must run to
 validate those platforms. Linux packages require a compatible glibc system and
 the host's graphics drivers/OpenGL stack; this is a folder export, not an AppImage.
 
-For command-line game export (compilation intermediates stay in the cache):
+For command-line export with a precompiled runtime:
 ```sh
-sh scripts/platform_build.sh linux "$PWD" /path/to/export /tmp/game-build.progress /path/to/project.bengine
-sh scripts/platform_build.sh windows "$PWD" /path/to/export /tmp/game-build.progress /path/to/project.bengine
+BENGINE_PACKAGER="$PWD/out/apps/game_packager" sh scripts/platform_build.sh linux "$PWD" /path/to/export /tmp/game-build.progress /path/to/project.bengine
 ```
 ```powershell
-./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory C:/Games/Export -ProgressFile "$env:TEMP/game-build.progress" -ProjectFile C:/Projects/MyGame/project.bengine
+./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory C:/Games/Export -ProgressFile "$env:TEMP/game-build.progress" -ProjectFile C:/Projects/MyGame/project.bengine -Packager "$PWD/out/apps/Release/game_packager.exe"
 ```
 The `compile_runtime.*` helpers are internal compilation steps, not game exports.
 

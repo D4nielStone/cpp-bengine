@@ -3,6 +3,7 @@
 #include <bgui.hpp>
 #include <elem/window.hpp>
 #include <array>
+#include <string_view>
 
 namespace editor::ui {
 // BGUI persists titles as identities. Use the legacy titles only while reading
@@ -26,7 +27,7 @@ private:
                 if (auto* window = dynamic_cast<bgui::window*>(child.get())) {
                     const auto title = window->get_title().get_buffer();
                     for (const auto* key : keys) {
-                        if (title == tr(key)) {
+                        if (title == tr(key) || (std::string_view(key) == "Editor Diagnostics" && title == tr("Profiler"))) {
                             m_titles.emplace_back(window, title);
                             window->set_title(key);
                             break;

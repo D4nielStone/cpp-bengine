@@ -11,6 +11,8 @@ file(GLOB COMMONS_SOURCES
 )
 
 add_library(commons STATIC ${COMMONS_SOURCES})
+option(BENGINE_PROFILING "Enable bounded Bubble profiler instrumentation" ON)
+target_compile_definitions(commons PUBLIC BENGINE_PROFILING=$<BOOL:${BENGINE_PROFILING}>)
 
 option(
     COMMONS_USE_RELATIVE_ASSET_PATHS

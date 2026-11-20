@@ -119,6 +119,55 @@ class PortableTests(unittest.TestCase):
 
 
 class UpdateTests(unittest.TestCase):
+    def test_native_install_trials_update_in_user_state_and_preserves_project_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / 'installed'
+            installed.mkdir()
+            (installed / 'release.json').write_text('{"engine_version": "1.2.3"}')
+            state = root / 'user' / 'engine'
+            process = mock.Mock()
+            process.wait.return_value = 0
+
+            def download(current, staging, report):
+                self.assertEqual(current, '1.2.3')
+                candidate = staging / 'release'
+                candidate.mkdir()
+                return candidate
+
+            with mock.patch.object(updater, 'download', side_effect=download), \
+                 mock.patch.object(updater, 'try_update', return_value=process) as trial:
+                self.assertEqual(updater.run(installed, ['--project', 'relative/project.bengine'], state), 0)
+            candidate, trial_state, arguments, ready, active = trial.call_args.args
+            self.assertEqual(trial_state, state)
+            self.assertEqual(arguments, ['--project', str(Path.cwd() / 'relative/project.bengine')])
+            self.assertEqual(candidate.parent, state / '.engine-updates')
+            self.assertEqual(active.parent, state / '.engine-updates')
+            self.assertEqual(ready.parents[1], active.parent)
+            self.assertEqual(list(installed.iterdir()), [installed / 'release.json'])
+
+    def test_native_install_prefers_newer_system_package_to_cached_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / 'installed'
+            installed.mkdir()
+            (installed / 'release.json').write_text('{"engine_version": "1.2.4"}')
+            state = root / 'user'
+            updates = state / '.engine-updates'
+            cached = updates / ('version-' + 'a' * 32)
+            cached.mkdir(parents=True)
+            (cached / ('editor_app' + updater.SUFFIX)).touch()
+            (updates / 'active').write_text(cached.name)
+            for cached_version, expected in (('1.2.3', installed), ('1.2.4', installed), ('1.2.5', cached)):
+                with self.subTest(cached_version=cached_version), \
+                     mock.patch.object(updater, 'download', return_value=None) as download, \
+                     mock.patch.object(updater, 'launch') as launch:
+                    (cached / 'release.json').write_text('{"engine_version": "' + cached_version + '"}')
+                    updater.run(installed, [], state)
+                    download.assert_called_once()
+                    self.assertEqual(download.call_args.args[0], cached_version if expected == cached else '1.2.4')
+                    launch.assert_called_once_with(expected, state, [])
+
     def test_trial_changes_active_version_only_after_readiness(self):
         for ready_to_commit in (False, True):
             with self.subTest(ready=ready_to_commit), tempfile.TemporaryDirectory() as directory:

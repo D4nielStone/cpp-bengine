@@ -17,12 +17,14 @@ class hud_view final : public bgui::linear {
     std::vector<binding> m_bindings;
     std::vector<std::shared_ptr<hud_element>> m_nodes;
     std::vector<int> m_parents;
+    std::vector<std::shared_ptr<hud>> m_owners;
+    std::vector<float> m_opacity;
 public:
     hud_view(std::shared_ptr<ecs> registry, std::shared_ptr<camera> view_camera,
              bgui::element& viewport, std::function<bool()> active = {},
              std::function<std::shared_ptr<camera>()> camera_provider = {});
     bgui::vec4i element_rect(const std::shared_ptr<hud_element>& e) const {
-        for (const auto& b : m_bindings) if (b.data == e) return b.widget->processed_rect();
+        for (const auto& b : m_bindings) if (b.data == e) return b.widget->is_enabled() ? b.widget->processed_rect() : bgui::vec4i{0};
         return {0,0,0,0};
     }
     bool clips_children() const override { return true; }

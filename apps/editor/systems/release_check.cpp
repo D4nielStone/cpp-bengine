@@ -1,4 +1,5 @@
 #include "release_check.hpp"
+#include "desktop_link.hpp"
 #include <curl/curl.h>
 #include <memory>
 #include <cerrno>
@@ -98,20 +99,6 @@ std::string check_latest_release() {
     return release_status(body);
 }
 void open_engine_releases() {
-    constexpr const char* url = "https://github.com/D4nielStone/cpp-bengine/releases/latest";
-#ifdef _WIN32
-    ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
-#else
-    // Double fork lets the desktop opener outlive the editor without a zombie.
-    const auto child = fork();
-    if (child == 0) {
-        if (fork() == 0) {
-            execlp("xdg-open", "xdg-open", url, static_cast<char*>(nullptr));
-            _exit(127);
-        }
-        _exit(0);
-    }
-    if (child > 0) while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
-#endif
+    open_desktop_link("https://github.com/D4nielStone/cpp-bengine/releases/latest");
 }
 }

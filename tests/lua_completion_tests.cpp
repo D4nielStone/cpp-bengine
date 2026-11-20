@@ -129,7 +129,7 @@ TEST(LuaCompletion, OffersSoundPlayerAndListenerProperties) {
     const auto player = complete_lua(player_source, player_source.size());
     ASSERT_TRUE(player);
     EXPECT_EQ(player->members, (std::vector<std::string>{
-        "clip", "looping", "pitch", "playOnAwake", "radius", "volume"
+        "Pause", "Play", "Resume", "Stop", "clip", "isPlaying", "looping", "pitch", "playOnAwake", "radius", "volume"
     }));
 
     const std::string listener_source =
@@ -262,4 +262,32 @@ TEST(LuaCompletion, TextEditingClipboardDeleteAndBothRedoShortcuts) {
     io.m_input_map[bgui::input_key::left_shift]=bgui::input_action::press;
     io.m_input_map[bgui::input_key::z]=bgui::input_action::press;input.on_update();
     EXPECT_TRUE(input.get_buffer().empty());
+}
+
+TEST(LuaCompletion, HudIdLookupAndAppearanceFields) {
+    for(const std::string suffix:{"font","image","shader","opacity","relative","color","background","callback","borderSize"}) {
+        const std::string source="local h = gameObject:AddHUD()\nlocal e = h:Find('health')\ne."+suffix;
+        auto result=complete_lua(source,source.size());
+        ASSERT_TRUE(result)<<suffix;
+        EXPECT_NE(std::find(result->members.begin(),result->members.end(),suffix),result->members.end());
+    }
+}
+
+TEST(LuaCompletion, GlobalsAndMaterialAndPostProcessUniforms) {
+    for (const std::string source : {"Globals.Se", "Shader.GetU", "local r = gameObject:GetComponent('Renderer')\nr:SetU",
+        "local c = gameObject:GetComponent('Camera')\nc:SetU", "local c = gameObject:GetComponent('Camera')\nc.postP"}) {
+        const auto result = complete_lua(source, source.size());
+        ASSERT_TRUE(result) << source;
+        EXPECT_FALSE(result->members.empty()) << source;
+    }
+}
+
+TEST(LuaCompletion, OffersSoundTransportAndPlaybackStatus) {
+    for (const auto& [prefix, expected] : std::vector<std::pair<std::string, std::string>>{
+        {"Pl", "Play"}, {"Pa", "Pause"}, {"Re", "Resume"}, {"St", "Stop"}, {"is", "isPlaying"}}) {
+        const std::string source = "local audio = gameObject:GetComponent(\"SoundPlayer\")\naudio." + prefix;
+        auto result = complete_lua(source, source.size());
+        ASSERT_TRUE(result);
+        EXPECT_EQ(result->members, (std::vector<std::string>{expected}));
+    }
 }

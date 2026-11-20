@@ -4,6 +4,7 @@
 #include "components/code.hpp"
 #include "components/renderer.hpp"
 #include "components/camera.hpp"
+#include "components/hud.hpp"
 
 namespace editor::ui {
 inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
@@ -41,7 +42,15 @@ inline void relocate_scene_asset(const std::shared_ptr<editor_context>& context,
         };
         relocate(camera->config.skybox_image);
         relocate(camera->config.post_processing.fragment_shader);
+        for (auto& pass : camera->config.post_processing.fragment_shaders) relocate(pass);
         for (auto& face : camera->skybox_faces) relocate(face);
+    });
+    context->registry->cada<commons::hud>([&](auto id) {
+        const auto h=context->registry->get<commons::hud>(id);
+        for(const auto& e:h->elements) for(auto* value:{&e->font,&e->image,&e->shader}) {
+            if(!value->empty() && absolute(*value)==from)
+                *value=std::filesystem::path(*value).is_absolute() ? to.string() : to.lexically_relative(root).generic_string();
+        }
     });
     context->registry->cada<commons::renderer>([&](auto id) {
         const auto renderer = context->registry->get<commons::renderer>(id);

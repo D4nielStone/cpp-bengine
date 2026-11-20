@@ -61,7 +61,7 @@ TEST(Pathfinder, LuaRoutingAndDetachedReferences) {
         assert(not SceneManager.LoadScene("assets/next.scene"))
         assert(not SceneManager.IsLoading())
     )",sol::script_pass_on_error);
-    ASSERT_TRUE(result.valid()) << sol::error(result).what();
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     registry->scenes=std::make_shared<commons::scene_control>();
     registry->scenes->active="assets/main.scene";
     std::string requested;
@@ -71,7 +71,7 @@ TEST(Pathfinder, LuaRoutingAndDetachedReferences) {
         assert(SceneManager.ReloadScene())
         assert(SceneManager.LoadScene("assets/next.scene"))
     )",sol::script_pass_on_error);
-    ASSERT_TRUE(result.valid()) << sol::error(result).what();
+    ASSERT_TRUE(result.valid()) << result.get<sol::error>().what();
     EXPECT_EQ(requested,"assets/next.scene");
 }
 TEST(SceneManagement, RuntimeSwitchPreservesManifestAndRejectsInvalidScene) {

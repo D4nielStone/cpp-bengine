@@ -91,20 +91,21 @@ class PlatformBuildTests(unittest.TestCase):
             self.assertIn("-DBENGINE_SINGLE_FILE_RUNTIME=ON", log.read_text())
             self.assertIn("--overlay-ports=" + str(REPO / "cmake/vcpkg-ports"), log.read_text())
 
-    def test_cmake_runtime_only_does_not_require_editor_sources_or_png(self):
+    def test_cmake_runtime_only_does_not_require_editor_sources(self):
         with tempfile.TemporaryDirectory(prefix="bengine cmake ") as directory:
             root = Path(directory)
             apps = root / "apps"
             (apps / "project").mkdir(parents=True)
+            (apps / "editor/systems").mkdir(parents=True)
             shutil.copyfile(REPO / "apps/CMakeLists.txt", apps / "CMakeLists.txt")
             (apps / "runtime_app.cpp").write_text("int main() {}")
             (apps / "project/project_persistence_system.cpp").write_text("")
+            (apps / "editor/systems/project_preview.cpp").write_text("")
             (root / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.20)\nproject(BuildContract LANGUAGES CXX)\n"
                 "add_library(commons INTERFACE)\nadd_subdirectory(apps)\n")
             result = subprocess.run(["cmake", "-S", str(root), "-B", str(root / "out"),
-                                     "-DBUILD_RUNTIME=ON", "-DBUILD_EDITOR=OFF",
-                                     "-DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON"],
+                                     "-DBUILD_RUNTIME=ON", "-DBUILD_EDITOR=OFF", "-DBUILD_MCP=OFF"],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             result = subprocess.run(["cmake", "--build", str(root / "out"),
@@ -113,7 +114,7 @@ class PlatformBuildTests(unittest.TestCase):
             # With both applications disabled, even runtime sources are optional.
             (apps / "runtime_app.cpp").unlink()
             result = subprocess.run(["cmake", "-S", str(root), "-B", str(root / "disabled"),
-                                     "-DBUILD_RUNTIME=OFF", "-DBUILD_EDITOR=OFF"],
+                                     "-DBUILD_RUNTIME=OFF", "-DBUILD_EDITOR=OFF", "-DBUILD_MCP=OFF"],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -150,11 +151,19 @@ class PlatformBuildTests(unittest.TestCase):
             progress = root / "progress"
             workspace = root / "workspace"
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-                       GAME_TEST_CMAKE=real_cmake, GAME_TEST_REPO=str(REPO), BENGINE_TEMPLATE_CACHE=str(root / "templates"), GAME_TEST_COUNT=str(root / "runtime-count"))
+                       GAME_TEST_CMAKE=real_cmake, GAME_TEST_REPO=str(REPO),
+                       BENGINE_TEMPLATE_CACHE=str(root / "templates"), GAME_TEST_COUNT=str(root / "runtime-count"),
+                       BENGINE_EXPORT_ALLOW_BUILD="0")
+            export = ["sh", str(REPO / "scripts/platform_build.sh"), "linux", str(REPO)]
+            result = subprocess.run(export + [str(output), str(progress), str(project / "project.bengine"),
+                                              str(workspace)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 6, result.stdout + result.stderr)
+            self.assertFalse(output.exists())
+            self.assertFalse((root / "runtime-count").exists())
             result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"), "linux",
                                      str(REPO), str(output), str(progress),
                                      str(project / "project.bengine"), str(workspace)],
-                                    env=env, capture_output=True, text=True)
+                                    env=dict(env, BENGINE_EXPORT_ALLOW_BUILD="1"), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             game = output / "linux"
             self.assertTrue((game / "game.json").is_file())
@@ -173,16 +182,24 @@ class PlatformBuildTests(unittest.TestCase):
             other_output.mkdir()
             metadata = other_output / ".directory"
             metadata.write_text("[Dolphin]\nViewMode=1\n")
-            result = subprocess.run(["sh", str(REPO / "scripts/platform_build.sh"), "linux",
-                str(REPO), str(other_output), str(progress), str(other_project / "project.bengine"),
+            bundled = root / "bundled"
+            shutil.copytree(root / "templates", bundled)
+            result = subprocess.run(export + [str(other_output), str(progress), str(other_project / "project.bengine"),
                 str(root / "second workspace"), "folder", "", str(workspace / "packager/game_packager")],
-                env=env, capture_output=True, text=True)
+                env=dict(env, BENGINE_EXPORT_TEMPLATES=str(bundled)), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("Using precompiled runtime template", result.stdout)
+            self.assertIn(f"Using precompiled runtime template: {bundled}", result.stdout)
             self.assertEqual((root / "runtime-count").read_text().count("runtime configure"), 1)
             self.assertTrue((other_output / "linux/game.json").is_file())
             self.assertEqual(metadata.read_text(), "[Dolphin]\nViewMode=1\n")
             self.assertEqual({p.name for p in other_output.iterdir()}, {"linux", ".directory"})
+            missing = subprocess.run(export + [str(other_output), str(progress), str(other_project / "project.bengine"),
+                str(root / "second workspace"), "single", "", str(workspace / "packager/game_packager")],
+                env=env, capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 6, missing.stdout + missing.stderr)
+            self.assertIn("No compatible precompiled runtime for linux/single", missing.stderr)
+            self.assertTrue(progress.read_text().startswith("0|No compatible precompiled runtime for linux/single"))
+            self.assertEqual((root / "runtime-count").read_text().count("runtime configure"), 1)
 
     def powershell(self):
         pwsh = shutil.which("pwsh")
@@ -276,7 +293,8 @@ class PlatformBuildTests(unittest.TestCase):
             (release / "runtime_app.pdb").write_text("debug")
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                        VCPKG_ROOT=str(commands), BENGINE_TEMPLATE_CACHE=str(root / "templates"),
-                       BUILD_TEST_LOG=str(host_log), LOCALAPPDATA=str(root / "localappdata"))
+                       BUILD_TEST_LOG=str(host_log), LOCALAPPDATA=str(root / "localappdata"),
+                       BENGINE_EXPORT_ALLOW_BUILD="1")
             result = subprocess.run([pwsh, "-NoLogo", "-NoProfile", "-File",
                 str(REPO / "scripts/platform_build.ps1"), "-Target", "windows",
                 "-RepositoryRoot", str(REPO), "-BuildDirectory", str(output),

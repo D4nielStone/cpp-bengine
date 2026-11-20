@@ -1,4 +1,8 @@
+#include <ranges>
 #include "creative_service.hpp"
+#include "editor_connection.hpp"
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include "project_snapshot.hpp"
 #include "editor/systems/project_creation_system.hpp"
 #include "project/project_file_transaction.hpp"
@@ -53,11 +57,17 @@ void validate_json(const Value& value, unsigned depth = 64) {
     if (!depth) throw std::runtime_error("JSON nesting exceeds 64 levels.");
     if (value.IsObject()) {
         std::set<std::string> names;
-        for (const auto& member : value.GetObject()) {
+        for (const auto& member : std::ranges::subrange(value.MemberBegin(), value.MemberEnd())) {
             if (!names.insert(text(member.name)).second) throw std::runtime_error("Duplicate JSON key.");
             validate_json(member.value, depth - 1);
         }
     } else if (value.IsArray()) for (const auto& child : value.GetArray()) validate_json(child, depth - 1);
+}
+std::string compact(const Value& value) {
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer writer(buffer);
+    value.Accept(writer);
+    return {buffer.GetString(), buffer.GetSize()};
 }
 Document parse(const std::string& bytes) {
     Document doc;
@@ -80,20 +90,45 @@ unsigned number(const Value& args, const char* name, unsigned fallback, unsigned
     return value.GetUint();
 }
 void references(const Value& value, const fs::path& root) {
-    if (value.IsObject()) for (const auto& member : value.GetObject()) {
+    if (value.IsObject()) for (const auto& member : std::ranges::subrange(value.MemberBegin(), value.MemberEnd())) {
         const auto key = text(member.name);
         if ((key == "model" || key == "file" || key == "clip" || key == "material" || key == "directory") && member.value.IsString()) {
             const auto name = text(member.value);
             if (!name.empty()) confined(root, name);
         }
+        if (key == "fragment_shaders" && member.value.IsArray())
+            for (const auto& shader : member.value.GetArray()) if (shader.IsString() && shader.GetStringLength()) confined(root,text(shader));
         references(member.value, root);
     }
     else if (value.IsArray()) for (const auto& item : value.GetArray()) references(item, root);
 }
 }
 
-creative_service::creative_service(fs::path project, fs::path workspace, fs::path runtime)
-    : m_project(std::move(project)), m_workspace(std::move(workspace)), m_runtime(std::move(runtime)) {}
+creative_service::creative_service(fs::path project, fs::path workspace, fs::path runtime, unsigned port)
+    : m_project(std::move(project)), m_workspace(std::move(workspace)), m_runtime(std::move(runtime)),
+      m_editor_port(port) {}
+
+Document creative_service::live_request(std::string_view action, const Value* data) {
+    if (!connected()) throw std::runtime_error("Connect with --editor-port first.");
+    Document request(rapidjson::kObjectType);
+    auto& memory = request.GetAllocator();
+    if (data) request.CopyFrom(*data, memory);
+    request.AddMember("token", str(editor_token(), memory), memory);
+    request.AddMember("action", str(std::string(action), memory), memory);
+    request.AddMember("project", str(m_project.string(), memory), memory);
+    auto result = parse(call_editor(m_editor_port, compact(request)));
+    if (result.HasMember("error")) throw std::runtime_error(text(result["error"]));
+    return result;
+}
+
+Document creative_service::live_snapshot() {
+    auto snapshot = live_request("snapshot");
+    const fs::path active = text(field(snapshot, "project"));
+    if (active.extension() != ".bengine" || (!m_workspace.empty() && !inside(active, m_workspace)))
+        throw std::runtime_error("The editor project is outside the configured workspace.");
+    m_project = active;
+    return snapshot;
+}
 fs::path creative_service::path(const std::string& relative) const {
     if (m_project.empty()) throw std::runtime_error("Create or open a project first.");
     return confined(m_project.parent_path(), relative);
@@ -102,6 +137,16 @@ void creative_service::write(const fs::path& target, const std::string& contents
     std::string process_error;
     if (m_process.running(process_error)) throw std::runtime_error("Stop the active test before editing assets.");
     if (!process_error.empty()) throw std::runtime_error(process_error);
+    if (connected()) {
+        Document payload(rapidjson::kObjectType);
+        auto& memory = payload.GetAllocator();
+        payload.AddMember("path", str(target.lexically_relative(m_project.parent_path()).generic_string(), memory), memory);
+        payload.AddMember("contents", str(contents, memory), memory);
+        if (args.HasMember("expectedContents"))
+            payload.AddMember("expectedContents", Value(args["expectedContents"], memory), memory);
+        live_request("write_asset", &payload);
+        return;
+    }
     if (fs::exists(files::journal_path(target)))
         throw std::runtime_error("Pending save transaction; recover in the editor before editing.");
     if (fs::exists(target)) {
@@ -117,17 +162,40 @@ fs::path creative_service::capture() const { return m_test.empty() ? fs::path{} 
 
 Value creative_service::call(std::string_view name, const Value& args, Allocator& a) {
     Value result(rapidjson::kObjectType);
+    Document live;
+    const bool needs_live = connected() && name != "test_status" && name != "stop_test" && name != "authoring_guide";
+    if (needs_live) live = live_snapshot();
+    const auto is_active = [&](const fs::path& target) {
+        return needs_live && target == (m_project.parent_path() / text(live["manifest"]["scene"])).lexically_normal();
+    };
+    const auto replace_live = [&](const Value& scene) {
+        if (!field(args, "expectedContents").IsString() ||
+            text(args["expectedContents"]) != compact(live["scene"]))
+            throw std::runtime_error("The live scene changed or expectedContents is missing. Read it again and retry.");
+        Document payload(rapidjson::kObjectType);
+        auto& memory = payload.GetAllocator();
+        payload.AddMember("expected", Value(live["scene"], memory), memory);
+        payload.AddMember("scene", Value(scene, memory), memory);
+        payload.AddMember("path", Value(live["manifest"]["scene"], memory), memory);
+        live_request("replace_scene", &payload);
+    };
+    if (name == "save_live_project" || name == "undo_live_edit" || name == "redo_live_edit") {
+        auto response = live_request(name == "save_live_project" ? "save" : name == "undo_live_edit" ? "undo" : "redo");
+        return Value(response, a);
+    }
     if (name == "authoring_guide") {
         auto guide = parse(R"json({
             "workflow":["create_project or open_project", "create_model / write_asset", "read_file then compose_scene", "set_main_scene", "run_test then poll test_status and review PNG against specification"],
             "editing":"Saved files only. Close editor or reload after MCP changes. Existing file edits require exact expectedContents. Lua scripts execute only in runtime tests.",
-            "entityExample":{"id":1,"name":"Animated cube","components":{"transform":{"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]},"renderer":{"model":"assets/models/cube.bmodel","materials":[{"albedo":[0.2,0.5,1,1]}]},"animation":{"clip":"assets/animations/spin.banim","autoplay":true,"speed":1},"code":{"directory":"scripts/example.lua"}}},
-            "cameraExample":{"id":2,"name":"Camera","components":{"transform":{"position":[0,1,5],"rotation":[0,-90,0],"scale":[1,1,1]},"camera":{}}},
+            "entityExample":{"id":2,"name":"Animated cube","components":{"transform":{"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]},"renderer":{"model":"assets/models/cube.bmodel","materials":[{"albedo":[0.2,0.5,1,1]}]},"animation":{"clip":"assets/animations/spin.banim","autoplay":true,"speed":1},"code":{"directory":"scripts/example.lua"}}},
+            "cameraExample":{"id":3,"name":"Camera","components":{"transform":{"position":[0,1,5],"rotation":[0,-90,0],"scale":[1,1,1]},"camera":{}}},
             "animationExample":{"format":"bubble-animation-clip","version":1,"duration":2,"loop":true,"tracks":[{"component":8,"property":"rotation.y","stepped":false,"keys":[[0,0],[2,360]]}]},
             "modelExample":{"format":"bengine-model","version":1,"meshes":[{"vertices":[[-0.5,0,-0.5,0,0],[0.5,0,-0.5,1,0],[0.5,0,0.5,1,1],[-0.5,0,0.5,0,1]],"faces":[[0,3,2,1]]}]},
             "scriptExample":"function setup()\n    Debug.Log(\"Scene ready\")\nend\n\nfunction update()\nend\n",
             "capture":"Camera framebuffer only; HUD excluded. width/height 64..2048, frames 1..3600. Real-time simulation, not deterministic. Reports do not automatically verify visual expectations. Artifacts persist in the project captures directory. PNG is also returned as MCP image content."
         })json");
+        if (connected())
+            guide["workflow"][0].SetString("Open a project in the connected editor");
         return Value(guide, a);
     } else if (name == "create_model") {
         if (path(text(field(args, "path"))).extension() != ".bmodel") throw std::runtime_error("Expected .bmodel path.");
@@ -142,7 +210,8 @@ Value creative_service::call(std::string_view name, const Value& args, Allocator
     } else if (name == "compose_scene") {
         const auto target = path(text(field(args, "path")));
         if (target.extension() != ".scene" && target.extension() != ".world") throw std::runtime_error("Expected scene path.");
-        auto scene = fs::exists(target) ? parse(read(target)) :
+        const bool active = is_active(target);
+        auto scene = active ? parse(compact(live["scene"])) : fs::exists(target) ? parse(read(target)) :
             parse(R"({"format":"bubble-engine-scene","version":1,"entities":[]})");
         validate_scene(scene);
         auto& memory = scene.GetAllocator();
@@ -166,10 +235,13 @@ Value creative_service::call(std::string_view name, const Value& args, Allocator
         }
         validate_json(scene);
         validate_scene(scene);
-        references(scene, m_project.parent_path());
-        write(target, files::encode(scene), args);
+        references(args["entities"], m_project.parent_path());
+        if (active) replace_live(scene);
+        else write(target, files::encode(scene), args);
+        result.AddMember("live", active, a);
         result.AddMember("entityCount", entities.Size(), a);
     } else if (name == "create_project" || name == "open_project") {
+        if (connected()) throw std::runtime_error("Select the active project in the editor.");
         if (m_workspace.empty()) throw std::runtime_error("Start MCP with --workspace to create or switch projects.");
         std::string error;
         if (m_process.running(error)) throw std::runtime_error("Stop the current test before switching projects.");
@@ -204,7 +276,9 @@ Value creative_service::call(std::string_view name, const Value& args, Allocator
         if (end < names.size()) result.AddMember("nextOffset", static_cast<unsigned>(end), a);
     } else if (name == "read_file") {
         const auto target = path(text(field(args, "path")));
-        const auto bytes = read(target);
+        const bool active = is_active(target);
+        const auto bytes = active ? compact(live["scene"]) :
+            needs_live && target == m_project ? compact(live["manifest"]) : read(target);
         if (bytes.size() > 400000 || bytes.find('\0') != std::string::npos)
             throw std::runtime_error("read_file supports text files up to 400000 bytes.");
         result.AddMember("contents", str(bytes, a), a);
@@ -220,6 +294,9 @@ Value creative_service::call(std::string_view name, const Value& args, Allocator
             std::string error = status ? lua_tostring(state, -1) : "";
             lua_close(state);
             if (status) throw std::runtime_error(error);
+        } else if (ext == ".vert" || ext == ".frag") {
+            // No GL context in authoring: the runtime/editor compiles the source.
+            if (bytes.empty()) throw std::runtime_error("Shader source must not be empty.");
         } else {
             auto doc = parse(bytes);
             references(doc, m_project.parent_path());
@@ -235,17 +312,29 @@ Value creative_service::call(std::string_view name, const Value& args, Allocator
                 files::stage({staged, bytes}); files::replace(staged);
                 commons::editable_model_data model;
                 if (!commons::load_editable_model(staged, model, error)) throw std::runtime_error(error);
-            } else throw std::runtime_error("Supported editable assets: .lua, .scene, .world, .banim, .bmodel.");
+            } else throw std::runtime_error("Supported editable assets: .lua, .vert, .frag, .scene, .world, .banim, .bmodel.");
         }
-        write(target, bytes, args);
+        if (is_active(target)) replace_live(parse(bytes));
+        else write(target, bytes, args);
         result.AddMember("path", str(target.string(), a), a);
     } else if (name == "set_main_scene") {
         const auto scene = path(text(field(args, "path")));
-        validate_scene(parse(read(scene)));
-        auto project = parse(read(m_project));
-        project.RemoveMember("scene");
-        project.AddMember("scene", str(scene.lexically_relative(m_project.parent_path()).generic_string(), project.GetAllocator()), project.GetAllocator());
-        write(m_project, files::encode(project), args);
+        if (connected()) {
+            if (!field(args, "expectedContents").IsString() ||
+                text(args["expectedContents"]) != compact(live["manifest"]))
+                throw std::runtime_error("The live project changed or expectedContents is missing. Read it again and retry.");
+            Document payload(rapidjson::kObjectType);
+            auto& memory = payload.GetAllocator();
+            payload.AddMember("expected", Value(live["manifest"], memory), memory);
+            payload.AddMember("path", Value(args["path"], memory), memory);
+            live_request("switch_scene", &payload);
+        } else {
+            validate_scene(parse(read(scene)));
+            auto project = parse(read(m_project));
+            project.RemoveMember("scene");
+            project.AddMember("scene", str(scene.lexically_relative(m_project.parent_path()).generic_string(), project.GetAllocator()), project.GetAllocator());
+            write(m_project, files::encode(project), args);
+        }
         result.AddMember("scene", str(scene.string(), a), a);
     } else if (name == "run_test") {
         if (m_runtime.empty()) throw std::runtime_error("Configure a trusted runtime executable with --runtime.");

@@ -102,14 +102,16 @@ public:
                         const auto source = std::static_pointer_cast<commons::renderer>(component);
                         auto geometry = source->m_modelo ? std::shared_ptr<commons::model>(source->m_modelo->clone()) : nullptr;
                         value.components.push_back([geometry, visible = source->visible, cast = source->cast_shadows,
-                            receive = source->receive_shadows](commons::ecs& ecs, commons::entity entity) {
+                            receive = source->receive_shadows, padding = source->bounds_padding,
+                            local = source->local_instances, particles = source->particle_layer](commons::ecs& ecs, commons::entity entity) {
                             auto copy = geometry ? geometry->clone() : nullptr;
                             if (copy && glad_glGetString && glGetString(GL_VERSION))
                                 for (auto& mesh : copy->meshes) mesh.load();
                             ecs.add<commons::renderer>(entity, copy.get());
                             copy.release();
                             auto renderer = ecs.get<commons::renderer>(entity.id);
-                            renderer->visible = visible; renderer->cast_shadows = cast; renderer->receive_shadows = receive;
+                            renderer->visible = visible; renderer->cast_shadows = cast; renderer->receive_shadows = receive; renderer->bounds_padding = padding;
+                            renderer->local_instances = local; renderer->particle_layer = particles;
                         });
                         break;
                     }

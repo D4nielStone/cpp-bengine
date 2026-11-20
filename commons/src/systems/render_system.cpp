@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/rig_entities.hpp"
 #include <filesystem>
 #include "systems/render_system.hpp"
@@ -102,6 +103,36 @@ bool sphere_in_frustum(const glm::vec3& center, float radius, const std::array<f
 }
 
 std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer_component, const transform& transform_component) {
+    bool instanced = false;
+    if (renderer_component.m_modelo)
+        for (const auto& mesh : renderer_component.m_modelo->meshes) instanced |= !mesh.instances().empty();
+    if (instanced) {
+        glm::vec3 low{std::numeric_limits<float>::infinity()}, high{-std::numeric_limits<float>::infinity()};
+        const auto parent = transform_component.get_world_model_matrix();
+        for (const auto& mesh : renderer_component.m_modelo->meshes) {
+            if (mesh.vertices().empty()) continue;
+            glm::vec3 a{std::numeric_limits<float>::infinity()}, b{-std::numeric_limits<float>::infinity()};
+            for (const auto& vertex : mesh.vertices()) {
+                const glm::vec3 p{vertex.position.x,vertex.position.y,vertex.position.z};
+                a=glm::min(a,p); b=glm::max(b,p);
+            }
+            const auto midpoint = (a + b) * 0.5f;
+            const auto half = (b - a) * 0.5f;
+            const auto extend = [&](const glm::mat4& matrix) {
+                const auto center = glm::vec3(matrix * glm::vec4(midpoint, 1.f));
+                const auto extent = glm::abs(glm::vec3(matrix[0])) * half.x +
+                    glm::abs(glm::vec3(matrix[1])) * half.y + glm::abs(glm::vec3(matrix[2])) * half.z;
+                low = glm::min(low, center - extent);
+                high = glm::max(high, center + extent);
+            };
+            if (mesh.instances().empty()) extend(parent);
+            else for (const auto& instance : mesh.instances()) {
+                const auto pose = instance.get_world_model_matrix();
+                extend(renderer_component.local_instances ? parent * pose : pose);
+            }
+        }
+        if (std::isfinite(low.x)) return {(low+high)*.5f,glm::length(high-low)*.5f};
+    }
     glm::vec3 minimum{std::numeric_limits<float>::infinity()};
     glm::vec3 maximum{-std::numeric_limits<float>::infinity()};
     bool has_vertices = false;
@@ -143,9 +174,12 @@ std::pair<glm::vec3, float> model_bounds_in_world_space(const renderer& renderer
 render_system::~render_system() {
     // Systems may outlive the window during application shutdown.
     if (glad_glGetString && glGetString(GL_VERSION)) {
-        if (m_post_color) glDeleteTextures(1, &m_post_color);
-        if (m_occlusion_depth) glDeleteTextures(1, &m_occlusion_depth);
-        if (m_occlusion_vao) glDeleteVertexArrays(1, &m_occlusion_vao);
+        for (const auto& buffers : m_camera_buffers) {
+            const GLuint textures[] = {buffers.depth, buffers.mask, buffers.color};
+            glDeleteTextures(3, textures);
+            if (buffers.mask_fbo) glDeleteFramebuffers(1, &buffers.mask_fbo);
+        }
+        if (m_fullscreen_vao) glDeleteVertexArrays(1, &m_fullscreen_vao);
         for (auto* map : {&m_directional_shadow, &m_spot_shadow}) {
             if (map->texture) glDeleteTextures(1, &map->texture);
             if (map->fbo) glDeleteFramebuffers(1, &map->fbo);
@@ -192,101 +226,171 @@ bool render_system::prepare_depth_map(depth_map& map, int width, int height) {
     return complete;
 }
 
-void render_system::apply_camera_shader(const camera& view) {
-    if (view.config.post_processing.fragment_shader.empty()) return;
-    const auto path = (std::filesystem::path(view.skybox_asset_root) / view.config.post_processing.fragment_shader).string();
-    shader program("ambient_occlusion.vert", path.c_str());
-    if (!program.ID) return;
-    GLint viewport[4], previous_program, vao, active, texture, read_fb, draw_fb, unpack;
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    if (viewport[2] <= 0 || viewport[3] <= 0) return;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
-    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack);
-    glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
-    if (!m_post_color) glGenTextures(1, &m_post_color);
-    glBindTexture(GL_TEXTURE_2D, m_post_color);
-    if (m_post_width != viewport[2] || m_post_height != viewport[3]) {
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, viewport[2], viewport[3], 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        m_post_width = viewport[2]; m_post_height = viewport[3];
+render_system::camera_buffers& render_system::buffers_for_view(int width, int height) {
+    auto found = std::ranges::find_if(m_camera_buffers, [&](const auto& buffers) {
+        return buffers.width == width && buffers.height == height;
+    });
+    if (found == m_camera_buffers.end()) {
+        found = std::ranges::min_element(m_camera_buffers, {}, &camera_buffers::last_use);
+        found->width = width;
+        found->height = height;
     }
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fb);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport[0], viewport[1], viewport[2], viewport[3]);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fb);
-    const GLenum states[]{GL_DEPTH_TEST, GL_CULL_FACE, GL_STENCIL_TEST, GL_BLEND};
-    bool enabled[4];
-    for (int i = 0; i < 4; ++i) { enabled[i] = glIsEnabled(states[i]); glDisable(states[i]); }
-    if (!m_occlusion_vao) glGenVertexArrays(1, &m_occlusion_vao);
-    glBindVertexArray(m_occlusion_vao);
-    program.use(); program.setInt("sceneColor", 0);
-    program.setVec2("viewportSize", float(viewport[2]), float(viewport[3]));
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    for (int i = 0; i < 4; ++i) if (enabled[i]) glEnable(states[i]);
-    glUseProgram(previous_program); glBindVertexArray(vao);
-    glBindTexture(GL_TEXTURE_2D, texture); glActiveTexture(active);
+    found->last_use = ++m_camera_buffer_use;
+    return *found;
 }
 
-void render_system::apply_camera_occlusion(const camera& view) {
-    const auto& settings = view.config.post_processing;
-    if (!settings.valid() || settings.occlusion == ambient_occlusion_mode::off || settings.strength == 0.f)
-        return;
+void render_system::apply_camera_shader(const camera& view, const glm::mat4& world_to_view,
+    const directional_light& light, const glm::mat4& light_space, bool shadows, bool has_depth,
+    camera_buffers& buffers) {
+    if (!view.config.post_processing.valid()) return;
+    const auto apply_pass = [&](const std::string& fragment) {
+        if (fragment.empty()) return;
+        const auto path = (std::filesystem::path(view.skybox_asset_root) / fragment).string();
+        shader program("ambient_occlusion.vert", path.c_str());
+        if (!program.ID) return;
+        GLint viewport[4], previous_program, vao, active, texture, read_fb, draw_fb, unpack;
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        if (viewport[2] <= 0 || viewport[3] <= 0) return;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack);
+        glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+        if (!buffers.color) glGenTextures(1, &buffers.color);
+        glBindTexture(GL_TEXTURE_2D, buffers.color);
+        if (buffers.color_width != viewport[2] || buffers.color_height != viewport[3]) {
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, viewport[2], viewport[3], 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            buffers.color_width = viewport[2]; buffers.color_height = viewport[3];
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fb);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport[0], viewport[1], viewport[2], viewport[3]);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fb);
+        const GLenum states[]{GL_DEPTH_TEST, GL_CULL_FACE, GL_STENCIL_TEST, GL_BLEND};
+        bool enabled[4];
+        for (int i = 0; i < 4; ++i) { enabled[i] = glIsEnabled(states[i]); glDisable(states[i]); }
+        if (!m_fullscreen_vao) glGenVertexArrays(1, &m_fullscreen_vao);
+        glBindVertexArray(m_fullscreen_vao);
+        program.reset_uniforms();
+        view.config.post_processing.parameters.apply_uniforms(program);
+        program.setFloat("engineTime",std::chrono::duration<float>(std::chrono::steady_clock::now()-m_shader_time_start).count());
+        glActiveTexture(GL_TEXTURE1);
+        GLint depth_binding;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &depth_binding);
+        glBindTexture(GL_TEXTURE_2D, has_depth ? buffers.depth : 0);
+        program.setInt("sceneColor", 0);
+        program.setInt("sceneDepth", 1);
+        program.setInt("directionalShadowMap", 15);
+        program.setBool("hasSceneDepth", has_depth);
+        program.setBool("hasDirectionalShadow", shadows);
+        program.setMat4("inverseViewProjection", glm::value_ptr(glm::inverse(view.projMatriz * world_to_view)));
+        program.setMat4("viewProjection", glm::value_ptr(view.projMatriz * world_to_view));
+        program.setMat4("directionalLightSpace", glm::value_ptr(light_space));
+        program.setVec3("sunDirection", light.direction);
+        program.setVec3("sunColor", light.color);
+        program.setFloat("sunIntensity", light.intensity);
+        program.setVec2("viewportSize", float(viewport[2]), float(viewport[3]));
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        for (int i = 0; i < 4; ++i) if (enabled[i]) glEnable(states[i]);
+        glUseProgram(previous_program); glBindVertexArray(vao);
+        glBindTexture(GL_TEXTURE_2D, depth_binding); glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture); glActiveTexture(active);
+    };
+    apply_pass(view.config.post_processing.fragment_shader);
+    for (const auto& fragment : view.config.post_processing.fragment_shaders) apply_pass(fragment);
+}
 
-    GLint viewport[4], draw_fb, read_fb;
+bool render_system::capture_camera_depth(camera_buffers& buffers) {
+    GLint viewport[4], draw_fb, read_fb, depth_bits = 0, maximum, active, texture, unpack;
     glGetIntegerv(GL_VIEWPORT, viewport);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
-    GLint max_texture_size, depth_bits;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximum);
     glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, draw_fb ? GL_DEPTH_ATTACHMENT : GL_DEPTH,
         GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depth_bits);
     const int width = viewport[2], height = viewport[3];
-    if (depth_bits == 0 || width <= 0 || height <= 0 || width > max_texture_size || height > max_texture_size)
+    if (depth_bits == 0 || width <= 0 || height <= 0 || width > maximum || height > maximum)
+        return false;
+
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack);
+    if (!buffers.depth) glGenTextures(1, &buffers.depth);
+    glBindTexture(GL_TEXTURE_2D, buffers.depth);
+    if (width != buffers.depth_width || height != buffers.depth_height) {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
+            GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &buffers.depth_width);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &buffers.depth_height);
+    }
+    const bool allocated = width == buffers.depth_width && height == buffers.depth_height;
+    if (allocated) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fb);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport[0], viewport[1], width, height);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fb);
+    }
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glActiveTexture(active);
+    return allocated;
+}
+
+void render_system::apply_camera_occlusion(const camera& view, camera_buffers& buffers) {
+    const auto& settings = view.config.post_processing;
+    if (!settings.valid() || settings.occlusion == ambient_occlusion_mode::off || settings.strength == 0.f)
         return;
-
     shader program("ambient_occlusion.vert", "ambient_occlusion.frag");
-    if (!program.ID) return;
+    shader composite("ambient_occlusion.vert", "ambient_occlusion_composite.frag");
+    if (!program.ID || !composite.ID) return;
 
-    GLint previous_program, vao, active_texture, texture;
+    GLint viewport[4], draw_fb, previous_program, vao, active_texture, texture, mask_binding, unpack;
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
     glGetIntegerv(GL_CURRENT_PROGRAM, &previous_program);
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
-    glActiveTexture(GL_TEXTURE0);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
-    if (!m_occlusion_depth) glGenTextures(1, &m_occlusion_depth);
-    glBindTexture(GL_TEXTURE_2D, m_occlusion_depth);
-    // Retain enough storage for the largest view so cameras of different sizes can share it.
-    if (width > m_occlusion_width || height > m_occlusion_height) {
-        GLint unpack_buffer;
-        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer);
+    glActiveTexture(GL_TEXTURE1);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &mask_binding);
+    if (!buffers.mask) glGenTextures(1, &buffers.mask);
+    glBindTexture(GL_TEXTURE_2D, buffers.mask);
+    const int width = viewport[2], height = viewport[3];
+    if (width != buffers.mask_width || height != buffers.mask_height) {
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
-            std::max(width, m_occlusion_width), std::max(height, m_occlusion_height), 0,
-            GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack_buffer);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, width, height, 0, GL_RED, GL_FLOAT, nullptr);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &m_occlusion_width);
-        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &m_occlusion_height);
-        if (width > m_occlusion_width || height > m_occlusion_height) {
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glActiveTexture(active_texture);
-            return;
-        }
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &buffers.mask_width);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &buffers.mask_height);
     }
-    // Sample the actual scene depth, including custom shaders and animated geometry.
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fb);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, viewport[0], viewport[1], width, height);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fb);
-
+    if (!buffers.mask_fbo) glGenFramebuffers(1, &buffers.mask_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, buffers.mask_fbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, buffers.mask, 0);
+    if (buffers.mask_width != width || buffers.mask_height != height ||
+        glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fb);
+        glBindTexture(GL_TEXTURE_2D, mask_binding);
+        glActiveTexture(active_texture);
+        return;
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    glBindTexture(GL_TEXTURE_2D, buffers.depth);
     const bool depth = glIsEnabled(GL_DEPTH_TEST);
     const bool cull = glIsEnabled(GL_CULL_FACE);
     const bool stencil = glIsEnabled(GL_STENCIL_TEST);
@@ -301,21 +405,37 @@ void render_system::apply_camera_occlusion(const camera& view) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_STENCIL_TEST);
-    glEnable(GL_BLEND);
-    glBlendEquation(GL_FUNC_ADD);
-    glBlendFuncSeparate(GL_ZERO, GL_SRC_COLOR, GL_ZERO, GL_ONE);
+    const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glViewport(0, 0, width, height);
 
-    if (!m_occlusion_vao) glGenVertexArrays(1, &m_occlusion_vao);
-    glBindVertexArray(m_occlusion_vao);
+    if (!m_fullscreen_vao) glGenVertexArrays(1, &m_fullscreen_vao);
+    glBindVertexArray(m_fullscreen_vao);
     program.use();
     program.setInt("sceneDepth", 0);
     program.setVec2("viewportSize", static_cast<float>(width), static_cast<float>(height));
     program.setInt("mode", static_cast<int>(settings.occlusion));
     program.setFloat("radius", settings.radius);
-    program.setFloat("strength", settings.strength);
     program.setMat4("projection", glm::value_ptr(view.projMatriz));
     const auto inverse = glm::inverse(view.projMatriz);
     program.setMat4("inverseProjection", glm::value_ptr(inverse));
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fb);
+    glViewport(viewport[0], viewport[1], width, height);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, buffers.mask);
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFuncSeparate(GL_ZERO, GL_SRC_COLOR, GL_ZERO, GL_ONE);
+    composite.use();
+    composite.setInt("sceneDepth", 0);
+    composite.setInt("occlusionMask", 1);
+    composite.setFloat("radius", settings.radius);
+    composite.setFloat("strength", settings.strength);
+    composite.setMat4("inverseProjection", glm::value_ptr(inverse));
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     glBlendEquationSeparate(equation_rgb, equation_alpha);
@@ -326,6 +446,8 @@ void render_system::apply_camera_occlusion(const camera& view) {
     if (stencil) glEnable(GL_STENCIL_TEST);
     glUseProgram(previous_program);
     glBindVertexArray(vao);
+    glBindTexture(GL_TEXTURE_2D, mask_binding);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
     glActiveTexture(active_texture);
 }
@@ -379,6 +501,8 @@ void render_system::render_view(const std::shared_ptr<ecs>& reg, camera& view,
 void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_view,
     std::uint32_t replacement_entity, const std::shared_ptr<renderer>& replacement,
     const std::shared_ptr<transform>& replacement_transform) {
+    BUBBLE_PROFILE("Render", "Render");
+    Bubble::gpu_scope gpu_profile(m_profile_gpu);
     const auto start_time = std::chrono::steady_clock::now();
     m_last_camera_count = 0;
     m_last_rendered_entity_count = 0;
@@ -442,6 +566,8 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
 
     const auto draw_depth = [&](const depth_map& map, const glm::mat4& matrix, int x, int y,
                                 int width, int height, const std::vector<renderable>& geometry) {
+        BUBBLE_PROFILE("Shadows", "Render");
+        Bubble::gpu_scope gpu_shadows(m_profile_shadows);
         GLint framebuffer, viewport[4], depth_function, scissor_box[4], vertex_array, array_buffer, program;
         GLboolean depth_mask;
         const bool depth_test = glIsEnabled(GL_DEPTH_TEST);
@@ -470,19 +596,30 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
         depth_shader.setMat4("lightSpaceMatrix", glm::value_ptr(matrix));
         for (const auto& [renderer, transform] : geometry) {
             if (!renderer || !transform || !renderer->visible || !renderer->m_modelo ||
-                !available_models.at(renderer->m_modelo) || !renderer->cast_shadows) continue;
+                !available_models.at(renderer->m_modelo) || !renderer->cast_shadows || renderer->particle_layer) continue;
+            const auto model_matrix = transform->get_model_matrix();
+            const auto* instance_parent = renderer->local_instances ? &model_matrix : nullptr;
             for (auto& mesh : renderer->m_modelo->meshes) {
                 if (mesh.isOverlayed()) continue;
                 if (!mesh.isLoaded()) mesh.load();
-                const auto& instances = mesh.instances();
-                auto draw = [&](const glm::mat4& matrix) {
-                    depth_shader.setMat4("model", glm::value_ptr(matrix));
-                    glBindVertexArray(mesh.getVertexArray());
-                    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices().size()), GL_UNSIGNED_INT, nullptr);
-                };
-                if (instances.empty()) draw(transform->get_model_matrix());
-                else for (const auto& instance : instances)
-                    draw(instance.get_world_model_matrix());
+                const auto& material = mesh.material_configuration();
+                if (std::filesystem::path(material.vertex_shader).filename() == "vegetation_wind.vert") {
+                    shader wind(material.vertex_shader.c_str(), "shadow.frag");
+                    if (wind.ID) {
+                        wind.reset_uniforms();
+                        const glm::mat4 identity{1.f};
+                        wind.setMat4("view", glm::value_ptr(identity));
+                        wind.setMat4("projection", glm::value_ptr(matrix));
+                        wind.setMat4("model", glm::value_ptr(transform->get_model_matrix()));
+                        wind.setFloat("engineTime", std::chrono::duration<float>(start_time - m_shader_time_start).count());
+                        material.apply_uniforms(wind);
+                        mesh.draw_instances(wind, instance_parent);
+                        continue;
+                    }
+                }
+                depth_shader.use();
+                depth_shader.setMat4("model", glm::value_ptr(transform->get_model_matrix()));
+                mesh.draw_instances(depth_shader, instance_parent);
             }
         }
         glBindVertexArray(vertex_array);
@@ -601,7 +738,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
                 continue;
 
             const auto [world_center, world_radius] = model_bounds_in_world_space(*render_component, *transform_component);
-            if (!sphere_in_frustum(world_center, world_radius, frustum))
+            if (!sphere_in_frustum(world_center, world_radius + render_component->bounds_padding, frustum))
                 continue;
 
             visible_geometry.emplace_back(render_component, transform_component);
@@ -618,6 +755,7 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             shader.setMat4("view", glm::value_ptr(view));
             shader.setMat4("projection", glm::value_ptr(projection));
             shader.setVec3("viewPos", camera_component->position);
+            shader.setFloat("engineTime",std::chrono::duration<float>(start_time-m_shader_time_start).count());
             shader.setBool("fogEnabled", camera_component->config.fog_enabled);
             shader.setVec3("fogColor", {camera_component->config.fog_color.r,
                 camera_component->config.fog_color.g, camera_component->config.fog_color.b});
@@ -664,59 +802,129 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
 
         };
 
-        std::optional<material_binding> binding;
-        const material* bound_material = nullptr;
-        GLuint bound_program = 0;
-        bool bound_receives_shadows = false;
-        for (const auto& [render_component, transform_component] : visible_geometry) {
-            auto& model = *render_component->m_modelo;
-            auto& shader = model.getShader();
-            const bool receive_shadows = render_component->receive_shadows;
-            if (!bound_material || bound_program != shader.ID || bound_receives_shadows != receive_shadows)
-                set_camera_uniforms(shader, receive_shadows);
-            bound_receives_shadows = receive_shadows;
-            shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
-            model.advance_animation();
-            const bool standard_shader = shader.vert == "pbr.vert" && shader.frag == "pbr.frag";
-            for (auto& mesh : model.meshes) {
-                if (!mesh.isLoaded()) mesh.load();
-                const auto& material = mesh.material_configuration();
-                if (!material.fragment_shader.empty()) {
-                    binding.reset(); bound_material = nullptr;
-                    commons::shader custom(material.vertex_shader.empty() ? "pbr.vert" : material.vertex_shader.c_str(), material.fragment_shader.c_str());
-                    if (custom.ID) {
-                        set_camera_uniforms(custom, receive_shadows);
-                        custom.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
-                        mesh.draw(custom);
+        const auto draw_geometry = [&](bool particles, bool has_depth) {
+            BUBBLE_PROFILE("Geometry and lighting", "Render");
+            Bubble::gpu_scope gpu_geometry(m_profile_geometry);
+            std::optional<material_binding> binding;
+            const material* bound_material = nullptr;
+            GLuint bound_program = 0;
+            bool bound_receives_shadows = false;
+            for (const auto& [render_component, transform_component] : visible_geometry) {
+                if (render_component->particle_layer != particles) continue;
+                const auto model_matrix = transform_component->get_model_matrix();
+                const auto* instance_parent = render_component->local_instances ? &model_matrix : nullptr;
+                auto& model = *render_component->m_modelo;
+                auto& shader = model.getShader();
+                const bool receive_shadows = render_component->receive_shadows;
+                if (!bound_material || bound_program != shader.ID || bound_receives_shadows != receive_shadows)
+                    set_camera_uniforms(shader, receive_shadows);
+                bound_receives_shadows = receive_shadows;
+                shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
+                { BUBBLE_PROFILE("Skeleton update", "Animation"); model.advance_animation(); }
+                const bool standard_shader = shader.vert == "pbr.vert" && shader.frag == "pbr.frag";
+                for (auto& mesh : model.meshes) {
+                    if (!mesh.isLoaded()) mesh.load();
+                    const auto& material = mesh.material_configuration();
+                    if (!material.fragment_shader.empty()) {
+                        binding.reset(); bound_material = nullptr;
+                        commons::shader custom(material.vertex_shader.empty() ? "pbr.vert" : material.vertex_shader.c_str(), material.fragment_shader.c_str());
+                        if (custom.ID) {
+                            custom.reset_uniforms();
+                            set_camera_uniforms(custom, receive_shadows);
+                            custom.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
+                            if (particles) {
+                                GLint viewport[4];
+                                glGetIntegerv(GL_VIEWPORT, viewport);
+                                custom.setInt("sceneDepth", 13);
+                                custom.setBool("hasSceneDepth", has_depth);
+                                custom.setVec2("viewportOrigin", viewport[0], viewport[1]);
+                                custom.setMat4("inverseProjection", glm::value_ptr(glm::inverse(projection)));
+                            }
+                            mesh.draw(custom, instance_parent);
+                            continue;
+                        }
+                        set_camera_uniforms(shader, receive_shadows);
+                        shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
+                    }
+
+                    const bool can_batch = standard_shader && !mesh.isOverlayed() && mesh.instances().empty();
+                    if (can_batch && bound_material && bound_program == shader.ID &&
+                        material.same_configuration(*bound_material)) {
+                        mesh.draw_geometry();
                         continue;
                     }
-                    set_camera_uniforms(shader, receive_shadows);
-                    shader.setMat4("model", glm::value_ptr(transform_component->get_model_matrix()));
-                }
 
-                const bool can_batch = standard_shader && !mesh.isOverlayed() && mesh.instances().empty();
-                if (can_batch && bound_material && bound_program == shader.ID &&
-                    material.same_configuration(*bound_material)) {
-                    mesh.draw_geometry();
-                    continue;
+                    binding.reset();
+                    bound_material = nullptr;
+                    // Only reuse material uniforms that cannot override camera or object state.
+                    if (can_batch && batchable_material(material)) {
+                        binding.emplace(material, shader);
+                        shader.setBool("instance", false);
+                        bound_material = &material;
+                        bound_program = shader.ID;
+                        mesh.draw_geometry();
+                    } else {
+                        mesh.draw(shader, instance_parent);
+                    }
                 }
-
-                binding.reset();
-                bound_material = nullptr;
-                // Only reuse material uniforms that cannot override camera or object state.
-                if (can_batch && batchable_material(material)) {
-                    binding.emplace(material, shader);
-                    shader.setBool("instance", false);
-                    bound_material = &material;
-                    bound_program = shader.ID;
-                    mesh.draw_geometry();
-                } else {
-                    mesh.draw(shader);
-                }
+                ++m_last_rendered_entity_count;
             }
-            ++m_last_rendered_entity_count;
+        };
+        draw_geometry(false, false);
+        const bool has_particles = std::ranges::any_of(visible_geometry, [](const auto& item) {
+            return item.first->particle_layer;
+        });
+
+        const auto& post = camera_component->config.post_processing;
+        const bool has_post_shader = !post.fragment_shader.empty() || !post.fragment_shaders.empty();
+        const bool has_occlusion = post.occlusion != ambient_occlusion_mode::off && post.strength > 0.f;
+        camera_buffers* buffers = nullptr;
+        if (has_particles || has_occlusion || has_post_shader) {
+            GLint viewport[4];
+            glGetIntegerv(GL_VIEWPORT, viewport);
+            buffers = &buffers_for_view(viewport[2], viewport[3]);
         }
-        binding.reset();
+        const bool has_depth = buffers && capture_camera_depth(*buffers);
+        if (has_depth && has_occlusion) {
+            BUBBLE_PROFILE("SSAO/HBAO", "Render");
+            Bubble::gpu_scope gpu_ao(m_profile_ao);
+            apply_camera_occlusion(*camera_component, *buffers);
+        }
+        if (has_particles) {
+            GLint active, texture, src_rgb, dst_rgb, src_alpha, dst_alpha, equation_rgb, equation_alpha;
+            GLboolean depth_mask;
+            const bool blend = glIsEnabled(GL_BLEND);
+            glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_mask);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+            glGetIntegerv(GL_BLEND_SRC_RGB, &src_rgb);
+            glGetIntegerv(GL_BLEND_DST_RGB, &dst_rgb);
+            glGetIntegerv(GL_BLEND_SRC_ALPHA, &src_alpha);
+            glGetIntegerv(GL_BLEND_DST_ALPHA, &dst_alpha);
+            glGetIntegerv(GL_BLEND_EQUATION_RGB, &equation_rgb);
+            glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &equation_alpha);
+            glActiveTexture(GL_TEXTURE13);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+            glBindTexture(GL_TEXTURE_2D, has_depth ? buffers->depth : 0);
+            glActiveTexture(active);
+            glDepthMask(GL_FALSE);
+            glEnable(GL_BLEND);
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE);
+            draw_geometry(true, has_depth);
+            glDepthMask(depth_mask);
+            glBlendEquationSeparate(equation_rgb, equation_alpha);
+            glBlendFuncSeparate(src_rgb, dst_rgb, src_alpha, dst_alpha);
+            if (!blend) glDisable(GL_BLEND);
+            glActiveTexture(GL_TEXTURE13);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glActiveTexture(active);
+        }
+        if (has_post_shader)
+        {
+            BUBBLE_PROFILE("Post processing", "Render");
+            Bubble::gpu_scope gpu_post(m_profile_post);
+            apply_camera_shader(*camera_component, view, direction_light, light_space, shadows, has_depth, *buffers);
+        }
 
         if (has_spot_shadows) {
             glActiveTexture(GL_TEXTURE14);
@@ -728,8 +936,6 @@ void render_system::render(const std::shared_ptr<ecs>& reg, camera* explicit_vie
             glBindTexture(GL_TEXTURE_2D, shadow_binding);
             glActiveTexture(active_texture);
         }
-        apply_camera_occlusion(*camera_component);
-        apply_camera_shader(*camera_component);
     };
     if (explicit_view) draw_camera(explicit_view);
     else reg->cada<camera>([&](const std::uint32_t entity) {

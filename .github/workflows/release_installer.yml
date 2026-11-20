@@ -33,7 +33,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential xvfb xauth python3-tk liblua5.3-dev libglm-dev libglfw3-dev libassimp-dev libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev zlib1g-dev libcurl4-openssl-dev
+          sudo apt-get install -y cmake build-essential xvfb xauth dpkg rpm cpio python3-tk liblua5.3-dev libglm-dev libglfw3-dev libassimp-dev libbullet-dev libfreetype6-dev libpng-dev libjpeg-dev zlib1g-dev libcurl4-openssl-dev
       - name: Check out supported Windows dependencies
         if: runner.os == 'Windows'
         uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
           python -m PyInstaller --onefile --name engine_updater --distpath updater-dist tools/release/updater.py
       - name: Package Linux engine
         if: runner.os == 'Linux'
-        run: python tools/release/package.py --portable --build release-build --output release --updater updater-dist/engine_updater --version "$GITHUB_REF_NAME"
+        run: python tools/release/package.py --portable --native-linux --build release-build --output release --updater updater-dist/engine_updater --version "$GITHUB_REF_NAME"
       - name: Package Windows engine
         if: runner.os == 'Windows'
         shell: pwsh
@@ -140,9 +140,25 @@ jobs:
       - name: Smoke test portable Linux editor without external tools
         if: runner.os == 'Linux'
         run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tools/release/smoke.py release
-      - name: Smoke test portable Windows editor without external tools
+      - name: Smoke test portable Windows editor with software OpenGL
         if: runner.os == 'Windows'
-        run: python tools/release/smoke.py release
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "mesa3d-25.2.8-release-msvc.7z"
+          $driver = Join-Path $env:RUNNER_TEMP "bubble-engine-mesa"
+          curl.exe --fail --location --retry 3 --output $archive "https://github.com/pal1000/mesa-dist-win/releases/download/25.2.8/mesa3d-25.2.8-release-msvc.7z"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -ne "e47cfe0be35f0c40c3d488c0e965d10656154ed55cfdfe4f4d79d4395672dc02") {
+            throw "Mesa software OpenGL archive checksum mismatch."
+          }
+          & "$env:ProgramFiles/7-Zip/7z.exe" x $archive "-o$driver" x64/opengl32.dll x64/libgallium_wgl.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:BENGINE_SMOKE_OPENGL = Join-Path $driver "x64"
+          $env:GALLIUM_DRIVER = "llvmpipe"
+          python tools/release/smoke.py release
+      - name: Smoke test native Linux packages and precompiled export
+        if: runner.os == 'Linux'
+        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tools/release/smoke.py release --native-linux
       - uses: actions/upload-artifact@v4
         with:
           name: engine-${{ runner.os }}
@@ -168,10 +184,10 @@ jobs:
         run: |
           mkdir release
           find release-artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
-          (cd release && sha256sum *.zip > SHA256SUMS)
+          (cd release && sha256sum *.zip *.deb *.rpm > SHA256SUMS)
           printf '![Bubble Engine preview](https://raw.githubusercontent.com/%s/%s/preview.jpg)\n\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > release/CHANGELOG.md
           gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body >> release/CHANGELOG.md
-          printf '\n## Download portátil\n\nBaixe o arquivo `*-portable.zip`, extraia e abra `BubbleEngine` (Linux) ou `BubbleEngine.exe` (Windows). Assets e bibliotecas estão incluídos. Exportação sem compilador: pasta, na plataforma da release.\n' >> release/CHANGELOG.md
+          printf '\n## Downloads\n\nNo Linux x86_64, instale o pacote `.deb` com APT ou o `.rpm` com DNF e abra Bubble Engine pelo menu. Para uso portátil, extraia o `*-portable.zip` e abra `BubbleEngine` no Linux ou `BubbleEngine.exe` no Windows. A exportação em pasta para a plataforma da release usa o runtime incluído.\n' >> release/CHANGELOG.md
           notes_path="docs/RELEASE_${GITHUB_REF_NAME}.md"
           if [ -f "$notes_path" ]; then
             printf '\n' >> release/CHANGELOG.md

@@ -150,37 +150,7 @@ std::string encode_material(const material& source, const std::filesystem::path&
     doc.AddMember("format","bengine-material",a); doc.AddMember("version",1,a);
     doc.AddMember("vertex_shader", string(path_string(source.vertex_shader, directory), a), a);
     doc.AddMember("fragment_shader", string(path_string(source.fragment_shader, directory), a), a);
-    value uniforms(rapidjson::kObjectType);
-    std::map<std::string,uniform> ordered(source.uniforms.begin(),source.uniforms.end());
-    for (const auto& [name,u] : ordered) {
-        if (name=="instance" || name.starts_with("transformacoes[")) continue;
-        value entry(rapidjson::kObjectType), data;
-        auto type=u.m_type;
-        int tag=static_cast<int>(type);
-        if (tag>=static_cast<int>(uniform::type::Float_ptr)) tag-=static_cast<int>(uniform::type::Float_ptr);
-        float v[16]{}; unsigned count=0;
-        switch (type) {
-        case uniform::type::Float: v[0]=u.valor.f; count=1; break;
-        case uniform::type::Float_ptr: require(u.ponteiro.f_ptr); v[0]=*u.ponteiro.f_ptr; count=1; break;
-        case uniform::type::Int: data.SetInt(u.valor.i); break;
-        case uniform::type::Int_ptr: require(u.ponteiro.i_ptr); data.SetInt(*u.ponteiro.i_ptr); break;
-        case uniform::type::Bool: data.SetBool(u.valor.b); break;
-        case uniform::type::Bool_ptr: require(u.ponteiro.b_ptr); data.SetBool(*u.ponteiro.b_ptr); break;
-        case uniform::type::Vet2: v[0]=u.valor.vec2.x;v[1]=u.valor.vec2.y;count=2;break;
-        case uniform::type::Vet2_ptr: require(u.ponteiro.vec2_ptr);v[0]=u.ponteiro.vec2_ptr->x;v[1]=u.ponteiro.vec2_ptr->y;count=2;break;
-        case uniform::type::Vet3: for(int i=0;i<3;++i)v[i]=u.valor.vec3[i];count=3;break;
-        case uniform::type::Vet3_ptr: require(u.ponteiro.vec3_ptr);for(int i=0;i<3;++i)v[i]=(*u.ponteiro.vec3_ptr)[i];count=3;break;
-        case uniform::type::Vet4: for(int i=0;i<4;++i)v[i]=u.valor.vec4[i];count=4;break;
-        case uniform::type::Vet4_ptr: require(u.ponteiro.vec4_ptr);for(int i=0;i<4;++i)v[i]=(*u.ponteiro.vec4_ptr)[i];count=4;break;
-        case uniform::type::Cor: v[0]=u.valor.color_value.r;v[1]=u.valor.color_value.g;v[2]=u.valor.color_value.b;v[3]=u.valor.color_value.a;count=4;break;
-        case uniform::type::Cor_ptr: require(u.ponteiro.color_ptr);v[0]=u.ponteiro.color_ptr->r;v[1]=u.ponteiro.color_ptr->g;v[2]=u.ponteiro.color_ptr->b;v[3]=u.ponteiro.color_ptr->a;count=4;break;
-        case uniform::type::Mat4: std::copy_n(glm::value_ptr(u.valor.mat4),16,v);count=16;break;
-        case uniform::type::Mat4_ptr: require(u.ponteiro.mat4_ptr);std::copy_n(glm::value_ptr(*u.ponteiro.mat4_ptr),16,v);count=16;break;
-        }
-        if (count) data=numbers(v,count,a);
-        entry.AddMember("type",tag,a); entry.AddMember("value",data,a);
-        uniforms.AddMember(string(name,a),entry,a);
-    }
+    auto uniforms = serialize_uniforms(source, a, true);
     doc.AddMember("uniforms",uniforms,a);
     value textures(rapidjson::kObjectType);
     std::map<std::string,texture> maps(source.textures.begin(),source.textures.end());
@@ -224,6 +194,66 @@ std::string encode_material(const material& source, const std::filesystem::path&
 }
 }
 
+rapidjson::Value serialize_uniforms(const material& source, rapidjson::Document::AllocatorType& a, bool skip_runtime) {
+    value uniforms(rapidjson::kObjectType);
+    std::map<std::string,uniform> ordered(source.uniforms.begin(),source.uniforms.end());
+    for (const auto& [name,u] : ordered) {
+        if (skip_runtime && (name=="instance" || name.starts_with("transformacoes["))) continue;
+        value entry(rapidjson::kObjectType), data;
+        auto type=u.m_type;
+        int tag=static_cast<int>(type);
+        if (tag>=static_cast<int>(uniform::type::Float_ptr)) tag-=static_cast<int>(uniform::type::Float_ptr);
+        float v[16]{}; unsigned count=0;
+        switch (type) {
+        case uniform::type::Float: v[0]=u.valor.f; count=1; break;
+        case uniform::type::Float_ptr: require(u.ponteiro.f_ptr); v[0]=*u.ponteiro.f_ptr; count=1; break;
+        case uniform::type::Int: data.SetInt(u.valor.i); break;
+        case uniform::type::Int_ptr: require(u.ponteiro.i_ptr); data.SetInt(*u.ponteiro.i_ptr); break;
+        case uniform::type::Bool: data.SetBool(u.valor.b); break;
+        case uniform::type::Bool_ptr: require(u.ponteiro.b_ptr); data.SetBool(*u.ponteiro.b_ptr); break;
+        case uniform::type::Vet2: v[0]=u.valor.vec2.x;v[1]=u.valor.vec2.y;count=2;break;
+        case uniform::type::Vet2_ptr: require(u.ponteiro.vec2_ptr);v[0]=u.ponteiro.vec2_ptr->x;v[1]=u.ponteiro.vec2_ptr->y;count=2;break;
+        case uniform::type::Vet3: for(int i=0;i<3;++i)v[i]=u.valor.vec3[i];count=3;break;
+        case uniform::type::Vet3_ptr: require(u.ponteiro.vec3_ptr);for(int i=0;i<3;++i)v[i]=(*u.ponteiro.vec3_ptr)[i];count=3;break;
+        case uniform::type::Vet4: for(int i=0;i<4;++i)v[i]=u.valor.vec4[i];count=4;break;
+        case uniform::type::Vet4_ptr: require(u.ponteiro.vec4_ptr);for(int i=0;i<4;++i)v[i]=(*u.ponteiro.vec4_ptr)[i];count=4;break;
+        case uniform::type::Cor: v[0]=u.valor.color_value.r;v[1]=u.valor.color_value.g;v[2]=u.valor.color_value.b;v[3]=u.valor.color_value.a;count=4;break;
+        case uniform::type::Cor_ptr: require(u.ponteiro.color_ptr);v[0]=u.ponteiro.color_ptr->r;v[1]=u.ponteiro.color_ptr->g;v[2]=u.ponteiro.color_ptr->b;v[3]=u.ponteiro.color_ptr->a;count=4;break;
+        case uniform::type::Mat4: std::copy_n(glm::value_ptr(u.valor.mat4),16,v);count=16;break;
+        case uniform::type::Mat4_ptr: require(u.ponteiro.mat4_ptr);std::copy_n(glm::value_ptr(*u.ponteiro.mat4_ptr),16,v);count=16;break;
+        }
+        if (count) data=numbers(v,count,a);
+        entry.AddMember("type",tag,a); entry.AddMember("value",data,a);
+        uniforms.AddMember(string(name,a),entry,a);
+    }
+    return uniforms;
+}
+
+bool analyze_uniforms(const rapidjson::Value& entries, material& result) {
+    try {
+        require(entries.IsObject());
+        material loaded;
+        for (auto it=entries.MemberBegin();it!=entries.MemberEnd();++it) {
+            const auto& entry=it->value; require(valid_string(it->name) && entry.IsObject() && entry.HasMember("type") && entry["type"].IsInt() && entry.HasMember("value"));
+            const auto& data=entry["value"];float n[16]{};uniform u;
+            switch (entry["type"].GetInt()) {
+            case 0: read_numbers(data,1,n);u=uniform(n[0]);break;
+            case 1: require(data.IsInt());u=uniform(data.GetInt());break;
+            case 2: require(data.IsBool());u=uniform(data.GetBool());break;
+            case 3: read_numbers(data,2,n);u=uniform(bgui::vec2{n[0],n[1]});break;
+            case 4: read_numbers(data,3,n);u=uniform(bgui::vec3{n[0],n[1],n[2]});break;
+            case 5: read_numbers(data,4,n);u=uniform(bgui::vec4{n[0],n[1],n[2],n[3]});break;
+            case 6: read_numbers(data,4,n);u=uniform(color{n[0],n[1],n[2],n[3]});break;
+            case 7: read_numbers(data,16,n);u=uniform(glm::make_mat4(n));break;
+            default: require(false);
+            }
+            loaded.set_uniform(it->name.GetString(),u);
+        }
+        result.uniforms = std::move(loaded.uniforms);
+        return true;
+    } catch (const std::exception&) { return false; }
+}
+
 std::string encode_material_asset(const material& source, const std::filesystem::path& directory) {
     return encode_material(source, directory, false);
 }
@@ -261,22 +291,7 @@ bool load_material_asset(const std::filesystem::path& path, material& result, st
             require(valid_string(doc[key]));
             if (doc[key].GetStringLength()) *target = (path.parent_path() / doc[key].GetString()).lexically_normal().string();
         }
-        for (auto it=doc["uniforms"].MemberBegin();it!=doc["uniforms"].MemberEnd();++it) {
-            const auto& entry=it->value; require(valid_string(it->name) && entry.IsObject() && entry.HasMember("type") && entry["type"].IsInt() && entry.HasMember("value"));
-            const auto& data=entry["value"];float n[16]{};uniform u;
-            switch (entry["type"].GetInt()) {
-            case 0: read_numbers(data,1,n);u=uniform(n[0]);break;
-            case 1: require(data.IsInt());u=uniform(data.GetInt());break;
-            case 2: require(data.IsBool());u=uniform(data.GetBool());break;
-            case 3: read_numbers(data,2,n);u=uniform(bgui::vec2{n[0],n[1]});break;
-            case 4: read_numbers(data,3,n);u=uniform(bgui::vec3{n[0],n[1],n[2]});break;
-            case 5: read_numbers(data,4,n);u=uniform(bgui::vec4{n[0],n[1],n[2],n[3]});break;
-            case 6: read_numbers(data,4,n);u=uniform(color{n[0],n[1],n[2],n[3]});break;
-            case 7: read_numbers(data,16,n);u=uniform(glm::make_mat4(n));break;
-            default: require(false);
-            }
-            loaded.set_uniform(it->name.GetString(),u);
-        }
+        if (!analyze_uniforms(doc["uniforms"], loaded)) throw std::runtime_error("Invalid uniforms.");
         for (auto it=doc["textures"].MemberBegin();it!=doc["textures"].MemberEnd();++it) {
             const auto& entry=it->value;require(valid_string(it->name) && entry.IsObject() && entry.HasMember("path") && valid_string(entry["path"]) && entry.HasMember("filtering") && entry["filtering"].IsInt());
             const int filtering=entry["filtering"].GetInt();require(filtering>=0 && filtering<=2);

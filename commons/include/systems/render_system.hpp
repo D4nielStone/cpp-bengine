@@ -1,14 +1,19 @@
 #pragma once
 #include "system.hpp"
+#include "profiling/gpu_timer.hpp"
 #include <memory>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <utility>
+#include <chrono>
+#include <array>
+#include <glm/glm.hpp>
 
 namespace COMMONS_NS {
     class camera;
     class renderer;
+    struct directional_light;
     class transform;
   /**
    * @brief Classe responsável por gerenciar o sistema de renderização do jogo.
@@ -57,13 +62,28 @@ namespace COMMONS_NS {
         int width{0}, height{0};
       };
       depth_map m_directional_shadow, m_spot_shadow;
-      unsigned int m_occlusion_depth{0}, m_occlusion_vao{0};
-      int m_occlusion_width{0}, m_occlusion_height{0};
-      void apply_camera_occlusion(const camera& view);
-      unsigned int m_post_color{0};
-      int m_post_width{0}, m_post_height{0};
-      void apply_camera_shader(const camera& view);
+      std::chrono::steady_clock::time_point m_shader_time_start{std::chrono::steady_clock::now()};
+      struct camera_buffers {
+        unsigned int depth{}, mask{}, mask_fbo{}, color{};
+        int width{}, height{};
+        int depth_width{}, depth_height{}, mask_width{}, mask_height{}, color_width{}, color_height{};
+        std::uint64_t last_use{};
+      };
+      std::array<camera_buffers, 3> m_camera_buffers{};
+      std::uint64_t m_camera_buffer_use{};
+      unsigned int m_fullscreen_vao{};
+      camera_buffers& buffers_for_view(int width, int height);
+      bool capture_camera_depth(camera_buffers& buffers);
+      void apply_camera_occlusion(const camera& view, camera_buffers& buffers);
+      void apply_camera_shader(const camera& camera, const glm::mat4& view,
+          const directional_light& light, const glm::mat4& light_space, bool shadows,
+          bool has_depth, camera_buffers& buffers);
       bool prepare_depth_map(depth_map& map, int width, int height);
+      Bubble::gpu_timer m_profile_gpu;
+      Bubble::gpu_timer m_profile_geometry{"Geometry and lighting"};
+      Bubble::gpu_timer m_profile_shadows{"Shadows"};
+      Bubble::gpu_timer m_profile_ao{"SSAO/HBAO"};
+      Bubble::gpu_timer m_profile_post{"Post processing"};
       double m_last_render_time_ms{0.0};
       std::size_t m_last_camera_count{0};
       std::size_t m_last_rendered_entity_count{0};

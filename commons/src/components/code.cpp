@@ -357,6 +357,7 @@ void code::setup(const std::weak_ptr<physics_system>& physics_world) {
     );
     bubble["transform"] = transform_api;
 
+    estado_lua.registry()["bengine.asset_root"] = asset_root;
     api::setUpApi(estado_lua, reg.lock(), my_object, physics_world);
     std::string property_error;
     if (!load_properties(property_error)) throw sol::error(property_error);

@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #pragma once
 
 #include "loaders/editable_model.hpp"
@@ -23,6 +24,7 @@ inline bool import_editable_model(
     std::string& error,
     const commons::model_import_options* settings = nullptr
 ) {
+    BUBBLE_PROFILE("Asset import", "Editor");
     error.clear();
     const auto options = settings ? *settings : commons::read_model_import_options(path);
     Assimp::Importer importer;

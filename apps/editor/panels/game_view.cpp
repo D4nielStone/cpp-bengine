@@ -214,8 +214,8 @@ public:
             context_actions actions;
             const auto id = state->camera_entity;
             const auto camera = std::weak_ptr<commons::camera>(state->camera);
-            for (const std::string kind : {"text", "button", "row", "column"}) {
-                actions.emplace_back("Add " + kind, [ctx, kind, mouse, r, id, camera] {
+            for (const std::string kind : {"text", "button", "image", "row", "column"}) {
+                actions.emplace_back("Add " + kind, [ctx, kind, mouse, r, id, camera, parent_bounds=view.element_rect(e)] {
                     const auto owner = camera.lock();
                     if (ctx->is_playing || !owner || ctx->registry->get<commons::camera>(id) != owner)
                         return;
@@ -226,12 +226,17 @@ public:
                         hud = ctx->registry->get<commons::hud>(id);
                     }
                     if (hud->elements.size() >= 1024) return;
-                    auto widget = hud->add(kind, kind == "button" ? "Button" : kind == "text" ? "Text" : "");
+                    hud->asset_root=ctx->project_root.string();
+                    auto selected=ctx->selected_hud_widget.lock();
+                    const auto parent_it=std::find(hud->elements.begin(),hud->elements.end(),selected);
+                    const int parent=parent_it==hud->elements.end() ? -1 : int(parent_it-hud->elements.begin());
+                    auto widget = hud->add(kind, kind == "button" ? "Button" : kind == "text" ? "Text" : "",parent);
                     widget->absolute = true;
                     widget->width = 160;
                     widget->height = 40;
                     const float unit = bgui::get_global_scale();
-                    widget->position = {(mouse.x-r.x)/unit, (mouse.y-r.y)/unit, 0};
+                    const auto origin=parent>=0 ? parent_bounds : r;
+                    widget->position = {(mouse.x-origin.x)/unit, (mouse.y-origin.y)/unit, 0};
                     ctx->record_action([hud, widget] { std::erase(hud->elements, widget); }, [hud, widget] {
                         if (hud->elements.size() < 1024 && std::none_of(hud->elements.begin(), hud->elements.end(),
                             [&](const auto& element) { return element->id == widget->id; }))
@@ -253,8 +258,12 @@ public:
                 const float dx=(mouse.x-start.x)/unit, dy=(mouse.y-start.y)/unit;
                 moved=moved || dx!=0 || dy!=0;
                 if(moved) {
-                    float x=before.absolute ? before.position.x : (drag_bounds.x-r.x)/unit;
-                    float y=before.absolute ? before.position.y : (drag_bounds.y-r.y)/unit;
+                    auto origin=r;
+                    if(before.relative && before.parent>=0 && ctx->selected_entity) {
+                        if(auto h=ctx->registry->get<commons::hud>(*ctx->selected_entity); h && size_t(before.parent)<h->elements.size()) origin=view.element_rect(h->elements[before.parent]);
+                    }
+                    float x=before.absolute ? before.position.x : (drag_bounds.x-origin.x)/unit;
+                    float y=before.absolute ? before.position.y : (drag_bounds.y-origin.y)/unit;
                     const float width=before.absolute ? before.width : drag_bounds.z/unit;
                     const float height=before.absolute ? before.height : drag_bounds.w/unit;
                     widget->absolute=true;

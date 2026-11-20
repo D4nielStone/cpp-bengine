@@ -9,6 +9,8 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(commons_tests
     commons_tests.cpp
+    sound_system_tests.cpp
+    renderer_instance_tests.cpp
 )
 
 target_link_libraries(commons_tests
@@ -120,7 +122,7 @@ gtest_discover_tests(ui_scale_tests)
 
 add_executable(editable_model_tests editable_model_tests.cpp model_rig_tests.cpp)
 target_include_directories(editable_model_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/apps/editor/core
+    ${CMAKE_SOURCE_DIR}/apps/editor
     ${CMAKE_SOURCE_DIR}/apps/editor/systems
 )
 target_link_libraries(editable_model_tests PRIVATE GTest::gtest_main project_persistence)
@@ -212,12 +214,17 @@ gtest_discover_tests(model_import_tests)
 # Shell/PowerShell orchestration contracts; no graphics context required.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME scene_export COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scene_export_tests.py)
     add_test(NAME benchmark_reports
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_report_tests.py)
     add_test(NAME release_packaging
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/release_tests.py)
 endif()
 if(Python3_Interpreter_FOUND AND TARGET bengine_mcp)
+    add_test(NAME mcp_http
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mcp_http_tests.py
+            $<TARGET_FILE:bengine_mcp>)
+    set_tests_properties(mcp_http PROPERTIES TIMEOUT 90)
     add_test(NAME mcp_server
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mcp_server_tests.py
             $<TARGET_FILE:bengine_mcp>)
@@ -317,3 +324,29 @@ if(Python3_Interpreter_FOUND AND TARGET bengine_mcp AND TARGET runtime_app)
             $<TARGET_FILE:bengine_mcp> $<TARGET_FILE:runtime_app>)
     set_tests_properties(mcp_runtime_capture PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
 endif()
+
+if(Python3_Interpreter_FOUND AND TARGET bengine_mcp AND TARGET editor_app)
+    add_test(NAME mcp_live_editor
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mcp_live_editor_smoke.py
+            $<TARGET_FILE:bengine_mcp> $<TARGET_FILE:editor_app> "${CMAKE_PROJECT_VERSION}")
+    set_tests_properties(mcp_live_editor PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 65)
+endif()
+
+add_executable(markdown_tests markdown_tests.cpp)
+target_include_directories(markdown_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/panels)
+target_link_libraries(markdown_tests PRIVATE GTest::gtest_main bgui)
+if(WIN32)
+    target_link_libraries(markdown_tests PRIVATE shell32)
+    target_link_libraries(editor_document_tests PRIVATE shell32)
+    target_link_libraries(editor_asset_workflow_tests PRIVATE shell32)
+    target_link_libraries(scene_workflow_tests PRIVATE shell32)
+    target_link_libraries(localization_tests PRIVATE shell32)
+endif()
+gtest_discover_tests(markdown_tests)
+
+add_executable(profiler_tests profiler_tests.cpp)
+target_link_libraries(profiler_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(profiler_tests)
+add_executable(profiler_gpu_tests profiler_gpu_tests.cpp)
+target_link_libraries(profiler_gpu_tests PRIVATE GTest::gtest_main commons)
+gtest_discover_tests(profiler_gpu_tests)

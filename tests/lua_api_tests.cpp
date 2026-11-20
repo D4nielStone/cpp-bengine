@@ -1041,12 +1041,15 @@ TEST(Hud, WidgetsReflectDataAndDisappearAfterEntityRemoval) {
     view.on_update();
     auto& children=view.get_elements()[bgui::layer::base];
     ASSERT_EQ(children.size(),2u);
-    auto* widget=dynamic_cast<bgui::text*>(children[0].get());
+    auto* widget=dynamic_cast<bgui::text*>(children[0]->as_layout()->get_elements()[bgui::layer::base][0].get());
     ASSERT_NE(widget,nullptr);
     label->text="after";
+    label->alignment=1;
     view.on_update();
+    EXPECT_EQ(widget->style.layout.align->x,bgui::alignment::center);
+    EXPECT_EQ(widget->style.layout.align->y,bgui::alignment::center);
     EXPECT_EQ(widget->get_buffer(),"after");
-    auto* action=dynamic_cast<bgui::button*>(children[1].get());
+    auto* action=dynamic_cast<bgui::button*>(children[1]->as_layout()->get_elements()[bgui::layer::base][0].get());
     ASSERT_NE(action,nullptr);
     action->on_pressed();
     action->on_released();
@@ -1166,6 +1169,7 @@ TEST(LuaApi, NewCamerasExposeNeutralGrayWithoutOverridingSavedColors) {
     lua.open_libraries(sol::lib::base, sol::lib::math);
     commons::api::setClasses(lua);
     commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
     commons::api::setUpApi(lua, registry, entity.id);
     auto result = lua.safe_script(R"(
         local camera = gameObject:GetComponent("Camera")
@@ -1184,4 +1188,245 @@ TEST(LuaApi, NewCamerasExposeNeutralGrayWithoutOverridingSavedColors) {
     EXPECT_NEAR(restored.config.sky_solid_color.r, .2f, 1.f/255);
     EXPECT_NEAR(restored.config.sky_solid_color.g, .3f, 1.f/255);
     EXPECT_NEAR(restored.config.sky_solid_color.b, .4f, 1.f/255);
+}
+
+TEST(Hud, RelativeHierarchyStylesAndLuaLookupRoundTrip) {
+    auto registry=std::make_shared<commons::ecs>();
+    auto entity=registry->create();
+    sol::state lua; lua.open_libraries(sol::lib::base);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"]=lua.create_table();
+    commons::api::setUpApi(lua,registry,entity.id);
+    ASSERT_NO_THROW(lua.script(R"(
+        h=gameObject:AddHUD()
+        root=h:Add("button","Inventory")
+        root.id="inventory"; root.absolute=true; root.position=Vector3(40,50,0)
+        root.width=300; root.height=180; root.opacity=0.5
+        child=h:Add("text","Item","inventory")
+        child.id="item"; child.absolute=true; child.position=Vector3(10,20,0)
+        child.width=80; child.height=30; child.opacity=0.5
+        child.color=Color(0.2,0.4,0.6,0.8)
+        child.font="fonts/game.ttf"; child.shader="shaders/glow.frag"
+        child.background=Color(0.1,0.2,0.3,1)
+        child.hoverColor=Color(0.2,0.3,0.4,1)
+        child.pressedColor=Color(0.3,0.4,0.5,1)
+        child.borderColor=Color(1,1,1,1); child.borderSize=2; child.borderRadius=4
+        child.callback="clicked"; child.padding=2; child.margin=1; child.alignment=1
+        image=h:Add("image","",1); image.image="textures/icon.png"
+        assert(child.relative and image.relative and image.absolute)
+        assert(image.width==160 and image.height==40)
+        assert(h:Find("item")==child and h:Get("item")==child)
+        assert(h:Find("missing")==nil)
+        assert(child.color.a>0.79 and child.opacity==0.5)
+        assert(not pcall(function() h:Add("text","","missing") end))
+    )"));
+    auto h=registry->get<commons::hud>(entity.id);
+    rapidjson::Document doc;
+    ASSERT_TRUE(h->serialize(doc,doc.GetAllocator()));
+    commons::hud restored;
+    ASSERT_TRUE(restored.analyze(doc));
+    ASSERT_EQ(restored.elements.size(),3u);
+    auto child=restored.find("item"); ASSERT_TRUE(child);
+    EXPECT_EQ(child->parent,0); EXPECT_TRUE(child->relative);
+    EXPECT_EQ(child->font,"fonts/game.ttf"); EXPECT_EQ(child->shader,"shaders/glow.frag");
+    EXPECT_EQ(child->opacity,.5f); EXPECT_EQ(child->border_size,2.f);
+    EXPECT_EQ(restored.elements[2]->image,"textures/icon.png");
+    for(auto key:{"opacity","border_size","border_radius"}) {
+        auto& field=doc["elements"][1][key]; const float old=field.GetFloat();
+        field.SetFloat(-1.f); EXPECT_FALSE(restored.analyze(doc));
+        EXPECT_EQ(restored.find("item"),child); field.SetFloat(old);
+    }
+    doc["elements"][1]["background"][0].SetFloat(2.f);
+    EXPECT_FALSE(restored.analyze(doc));
+}
+
+TEST(Hud, RelativeChildrenMoveWithAnyParentAndInheritVisibilityOpacity) {
+    bgui::scoped_interface ui;
+    auto registry=std::make_shared<commons::ecs>();
+    auto entity=registry->create(); registry->add<commons::hud>(entity);
+    auto h=registry->get<commons::hud>(entity.id);
+    auto parent=h->add("text","Parent");
+    auto child=h->add("button","Child",0);
+    auto nested=h->add("image","",1);
+    for(auto& e:h->elements) {e->absolute=true;e->width=160;e->height=40;}
+    parent->position={20,30,0}; child->position={5,7,0}; nested->position={2,3,0};
+    parent->opacity=.5f; child->opacity=.5f;
+    parent->background={1.f,0.f,0.f,.5f}; parent->border_radius=8.f;
+    bgui::element viewport; viewport.set_final_rect(40,50,640,480);
+    commons::hud_view view(registry,nullptr,viewport); view.on_update();
+    const float unit=bgui::get_global_scale();
+    auto a=view.element_rect(parent),b=view.element_rect(child),c=view.element_rect(nested);
+    EXPECT_EQ(b.x,a.x+int(5*unit)); EXPECT_EQ(b.y,a.y+int(7*unit));
+    EXPECT_EQ(c.x,b.x+int(2*unit)); EXPECT_EQ(c.y,b.y+int(3*unit));
+    parent->position.x+=10; view.on_update();
+    EXPECT_EQ(view.element_rect(child).x,b.x+int(10*unit));
+    auto& root=*view.get_elements()[bgui::layer::base][0];
+    EXPECT_FLOAT_EQ(root.style.visual.background.normal->a,.25f);
+    EXPECT_FLOAT_EQ(*root.style.visual.border_radius,8.f);
+    auto& children=root.as_layout()->get_elements()[bgui::layer::base];
+    auto& child_node=*children[1];
+    auto& button=*child_node.as_layout()->get_elements()[bgui::layer::base][0];
+    EXPECT_FLOAT_EQ(button.style.visual.text.normal->a,.25f);
+    parent->visible=false; view.on_update(); EXPECT_FALSE(child_node.is_enabled());
+    parent->visible=true; view.on_update(); EXPECT_TRUE(child_node.is_enabled());
+    ASSERT_TRUE(child->set_screen_position({12*unit,13*unit,0}));
+    view.on_update();
+    EXPECT_FALSE(child->relative);
+    EXPECT_EQ(view.element_rect(child).x,40+int(12*unit));
+    EXPECT_EQ(view.element_rect(child).y,50+int(13*unit));
+}
+
+TEST(LuaApi, GlobalsShareValueSnapshotsAcrossIndependentStatesAndRejectUnsafeValues) {
+    auto registry = std::make_shared<commons::ecs>();
+    sol::state writer, reader;
+    for (auto* lua : {&writer, &reader}) {
+        lua->open_libraries(sol::lib::base);
+        commons::api::setNamespaces(*lua);
+        (*lua)["bubble"]["input"] = lua->create_table();
+        commons::api::setUpApi(*lua, registry, 0);
+    }
+    ASSERT_TRUE(writer.safe_script(R"(
+        local data = {points = 12, nested = {[2] = "two"}, fraction = 1.25, flag = true}
+        Globals.Set("game", data)
+        data.points = 999
+        Globals.Set("large", 9223372036854775807)
+        Globals.Set("false", false)
+        local deep, current = {}, nil
+        current = deep
+        for i = 1, 24 do current.next = {}; current = current.next end
+        current.value = "deep"
+        Globals.Set("deep", deep)
+    )", sol::script_pass_on_error).valid());
+    ASSERT_TRUE(reader.safe_script(R"(
+        assert(Globals.Has("game"))
+        local data = Globals.Get("game")
+        assert(data.points == 12 and data.nested[2] == "two" and data.flag)
+        assert(data.fraction == 1.25)
+        assert(Globals.Get("large") == 9223372036854775807)
+        assert(Globals.Has("false") and Globals.Get("false") == false)
+        local deep = Globals.Get("deep")
+        for i = 1, 24 do deep = deep.next end
+        assert(deep.value == "deep")
+        data.points = 10
+        assert(Globals.Get("game").points == 12)
+        Globals.Set("game", data)
+    )", sol::script_pass_on_error).valid());
+    EXPECT_EQ(writer.safe_script("assert(Globals.Get('game').points == 10)", sol::script_pass_on_error).valid(), true);
+    for (const auto* source : {"Globals.Set('game', function() end)", "local t = {}; t.self = t; Globals.Set('game', t)",
+        "Globals.Set('game', {[1.5] = true})", "Globals.Set('game', 0/0)", "Globals.Set('', true)"})
+        EXPECT_FALSE(writer.safe_script(source, sol::script_pass_on_error).valid()) << source;
+    ASSERT_TRUE(reader.safe_script("assert(Globals.Get('game').points == 10)", sol::script_pass_on_error).valid());
+    auto other = std::make_shared<commons::ecs>();
+    sol::state isolated;
+    isolated.open_libraries(sol::lib::base);
+    commons::api::setNamespaces(isolated);
+    isolated["bubble"]["input"] = isolated.create_table();
+    commons::api::setUpApi(isolated, other, 0);
+    EXPECT_TRUE(isolated.safe_script("assert(Globals.Get('game') == nil)", sol::script_pass_on_error).valid());
+    EXPECT_TRUE(reader.safe_script("Globals.Set('game', nil); assert(not Globals.Has('game')); assert(not Globals.Remove('missing'))", sol::script_pass_on_error).valid());
+    EXPECT_TRUE(writer.safe_script("Globals.Clear(); assert(not Globals.Has('large'))", sol::script_pass_on_error).valid());
+    registry.reset();
+    EXPECT_TRUE(writer.safe_script("assert(Globals.Get('large') == nil)", sol::script_pass_on_error).valid());
+    EXPECT_FALSE(writer.safe_script("Globals.Set('orphan', true)", sol::script_pass_on_error).valid());
+}
+
+TEST(LuaApi, GlobalsAreResetBeforeStartingScriptsAndRemainAvailableAfterWriterDeletion) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    const auto path = std::filesystem::temp_directory_path() /
+        ("bengine-globals-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".lua");
+    { std::ofstream script(path); script << "function setup() assert(not Globals.Has('old')); Globals.Set('shared', 42) end"; }
+    registry->add<commons::code>(entity, path.string());
+    registry->script_globals["old"] = "true";
+    commons::code_system system;
+    system.setup(registry);
+    ASSERT_TRUE(registry->script_globals.contains("shared"));
+    registry->remove(entity.id);
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, 0);
+    EXPECT_TRUE(lua.safe_script("assert(Globals.Get('shared') == 42)", sol::script_pass_on_error).valid());
+    system.setup(registry);
+    EXPECT_TRUE(registry->script_globals.empty());
+    std::filesystem::remove(path);
+}
+
+TEST(LuaApi, ShaderUniformsAreTypedCopiedAndRejectDetachedComponents) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    registry->add<commons::renderer>(entity);
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    renderer->m_modelo = new commons::model();
+    renderer->m_modelo->meshes.emplace_back();
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+    ASSERT_TRUE(lua.safe_script(R"(
+        camera = gameObject:GetComponent("Camera")
+        renderer = gameObject:GetComponent("Renderer")
+        camera.postProcessShader = "shaders/post.frag"
+        camera:SetUniform("exposure", "float", 1.5)
+        camera:SetUniform("enabled", "bool", true)
+        camera:SetUniform("mode", "int", 2)
+        camera:SetUniform("offset", "vec2", {1, 2})
+        camera:SetUniform("tint", "vec3", {0.1, 0.2, 0.3})
+        local color = {1, 0.5, 0.25, 1}
+        renderer:SetUniform(1, "tint", "vec4", color)
+        color[1] = 0
+        renderer:SetUniform(1, "matrix", "mat4", {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1})
+        renderer:SetShader(1, "", "shaders/material.frag")
+    )", sol::script_pass_on_error).valid());
+    const auto camera = registry->get<commons::camera>(entity.id);
+    EXPECT_FLOAT_EQ(camera->config.post_processing.parameters.getUniforme("exposure").valor.f, 1.5f);
+    EXPECT_EQ(renderer->m_modelo->meshes[0].getMaterial().fragment_shader, "shaders/material.frag");
+    EXPECT_FLOAT_EQ(renderer->m_modelo->meshes[0].getMaterial().getUniforme("tint").valor.vec4.x, 1.f);
+    for (const auto* source : {"camera:SetUniform('exposure', 'float', 0/0)", "camera:SetUniform('exposure', 'float', '1')",
+        "camera:SetUniform('mode', 'int', 1.5)", "camera:SetUniform('mode', 'int', 4294967295)",
+        "camera:SetUniform('offset', 'vec2', {1})", "camera:SetUniform('offset', 'bogus', 1)",
+        "renderer:SetUniform(0, 'x', 'float', 1)", "renderer:SetUniform(2, 'x', 'float', 1)"})
+        EXPECT_FALSE(lua.safe_script(source, sol::script_pass_on_error).valid()) << source;
+    EXPECT_FLOAT_EQ(camera->config.post_processing.parameters.getUniforme("exposure").valor.f, 1.5f);
+    EXPECT_TRUE(lua.safe_script("assert(camera:RemoveUniform('mode')); assert(renderer:RemoveUniform(1, 'matrix'))", sol::script_pass_on_error).valid());
+    registry->remove<commons::camera>(entity.id);
+    registry->remove<commons::renderer>(entity.id);
+    EXPECT_FALSE(lua.safe_script("camera:SetUniform('exposure', 'float', 3)", sol::script_pass_on_error).valid());
+    EXPECT_FALSE(lua.safe_script("renderer:SetShader(1, '', '')", sol::script_pass_on_error).valid());
+}
+
+TEST(LuaApi, SoundTransportRejectsDetachedComponentsAndDoesNotSerializeRuntimeState) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::sound_player>(entity);
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, entity.id);
+    ASSERT_TRUE(lua.safe_script(R"(
+        audio = gameObject:GetComponent("SoundPlayer")
+        assert(audio:Play() == false)
+        audio.clip = "audio/test.mp3"
+        assert(audio:Play() and audio:Pause() and audio:Resume() and audio:Stop())
+        assert(audio.isPlaying == false)
+        assert(audio:Play())
+    )").valid());
+    auto player = registry->get<commons::sound_player>(entity.id);
+    EXPECT_EQ(player->playback_request(), commons::sound_player::transport::playing);
+    EXPECT_EQ(player->restart_revision(), 2u);
+    commons::sound_player copy(*player);
+    EXPECT_EQ(copy.playback_request(), commons::sound_player::transport::automatic);
+    EXPECT_EQ(copy.restart_revision(), 0u);
+    rapidjson::Document saved(rapidjson::kObjectType);
+    ASSERT_TRUE(player->serialize(saved, saved.GetAllocator()));
+    EXPECT_FALSE(saved.HasMember("isPlaying"));
+    registry->remove<commons::sound_player>(entity.id);
+    ASSERT_TRUE(lua.safe_script(R"(
+        assert(not audio:Play() and not audio:Pause() and not audio:Resume() and not audio:Stop())
+        assert(not audio.isPlaying)
+    )").valid());
 }

@@ -253,3 +253,6 @@ visual.border.focused = 0.60, 0.60, 0.60, 1.0
 
 [type.progressbar]
 visual.border.normal = 0.48, 0.48, 0.48, 1.0
+
+[class.dock-tab-side]
+visual.border.radius = 6

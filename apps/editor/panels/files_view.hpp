@@ -63,6 +63,13 @@ enum class files_view_filter {
 
 class files_view final : public panel {
 public:
+    bool line_wrap_enabled() const { return m_line_wrap; }
+    void set_line_wrap(bool enabled) {
+        m_line_wrap = enabled;
+        for (auto& [path, doc] : m_documents)
+            if (doc.editor) doc.editor->set_wrap(enabled);
+    }
+
     using drop_callback =
         std::function<void(const std::filesystem::path&, const bgui::vec2i&)>;
 
@@ -505,6 +512,7 @@ public:
     }
 
 private:
+    bool m_line_wrap{false};
     class frame_layout final : public bgui::linear {
     public:
         using bgui::linear::linear;
@@ -716,6 +724,10 @@ private:
         activate_document(path);
     }
 
+    /**
+     * @brief Activates a document by its path.
+     * @param path The path of the document to activate.
+     */
     void activate_document(const std::filesystem::path& path) {
         const auto found = m_documents.find(path);
         if (found == m_documents.end()) return;
@@ -757,7 +769,7 @@ private:
             doc.editor->style.layout.require_mode(bgui::mode::match_parent, bgui::mode::match_parent);
             doc.editor->style.layout.padding = bgui::vec4i{0};
             doc.editor->get_label().style.layout.margin = bgui::vec4i{0};
-            doc.editor->set_wrap(false);
+            doc.editor->set_wrap(m_line_wrap);
             doc.editor->set_editor_guides_enabled(false);
             doc.editor->set_line_numbers_enabled(true);
             doc.editor->set_scrollable(true);
@@ -795,7 +807,11 @@ private:
     }
 
     void render_markdown(document& doc) {
-        m_active_content = editor::ui::render_markdown(*m_document_body, doc.buffer);
+        m_active_content = editor::ui::render_markdown(*m_document_body, doc.buffer,
+            {doc.path.parent_path(), [this](const auto& path) {
+                std::error_code error;
+                if (std::filesystem::is_regular_file(path, error)) open_document(path);
+            }});
     }
 
     void update_document_editor() {
@@ -1357,7 +1373,7 @@ private:
         auto& modal = bgui::get_layout().add<bgui::modal, bgui::layer::overlay>();
         m_new_asset_modal = &modal;
         auto& name = modal.content().add<bgui::inputbox>("effect.frag", "Arquivo .frag", .30f);
-        auto& preset = modal.content().add<bgui::combo_box>(std::vector<std::string>{"Material", "Pós-processamento"}, .30f);
+        auto& preset = modal.content().add<bgui::combo_box>(std::vector<std::string>{"Material", "Pós-processamento", "Texto da HUD"}, .30f);
         const auto root = m_project_root, directory = m_current_directory;
         modal.set_confirmation_text("Criar");
         modal.set_on_confirm([this, root, directory, &name, &preset] {
@@ -1370,7 +1386,9 @@ private:
                     throw std::runtime_error("Use um nome de arquivo com extensão .frag.");
                 const auto path = directory / filename;
                 if (std::filesystem::exists(path)) throw std::runtime_error("O arquivo já existe.");
-                const std::string source = preset.get_selected_index() == 0
+                const std::string source = preset.get_selected_index() == 2
+                    ? "in vec2 TexCoord;\nout vec4 FragColor;\nuniform sampler2D tex;\nuniform float hudTime;\nvoid main() { float coverage = texture(tex, TexCoord).r; float pulse = 0.65 + 0.35 * sin(hudTime * 3.0); FragColor = vec4(text_color.rgb * pulse, text_color.a * coverage); }\n"
+                    : preset.get_selected_index() == 0
                     ? "#version 330 core\nout vec4 FragColor;\nvoid main() { FragColor = vec4(0.8, 0.4, 0.2, 1.0); }\n"
                     : "#version 330 core\nin vec2 uv;\nout vec4 FragColor;\nuniform sampler2D sceneColor;\nuniform vec2 viewportSize;\nvoid main() { FragColor = texture(sceneColor, uv); }\n";
                 project_files::stage({path, source}); project_files::replace(path);

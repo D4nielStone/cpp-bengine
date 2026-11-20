@@ -47,16 +47,16 @@ bool hud_element::set_screen_position(const bgui::vec3& pixel) {
     const bgui::vec3 layout_position{pixel.x / unit, pixel.y / unit, 0.f};
     if (!std::isfinite(layout_position.x) || !std::isfinite(layout_position.y)) return false;
     absolute = true;
+    relative = false;
     position = layout_position;
     return true;
 }
 
 std::shared_ptr<hud_element> hud::add(const std::string& kind, const std::string& text, int parent) {
-    if (elements.size() >= 1024 || (kind != "column" && kind != "row" && kind != "text" && kind != "button"))
+    if (elements.size() >= 1024 || (kind != "column" && kind != "row" && kind != "text" && kind != "button" && kind != "image"))
         throw std::invalid_argument("Invalid HUD element type or limit exceeded");
-    if (parent < -1 || parent >= static_cast<int>(elements.size()) ||
-        (parent >= 0 && elements[parent]->kind != "row" && elements[parent]->kind != "column"))
-        throw std::invalid_argument("HUD parent must be an existing row or column index");
+    if (parent < -1 || parent >= static_cast<int>(elements.size()))
+        throw std::invalid_argument("HUD parent must be an existing earlier element index");
     auto value = std::make_shared<hud_element>();
     value->kind = kind; value->text = text; value->parent = parent;
     for (unsigned n = 1;; ++n) {
@@ -65,6 +65,10 @@ std::shared_ptr<hud_element> hud::add(const std::string& kind, const std::string
     }
     elements.push_back(value);
     return value;
+}
+std::shared_ptr<hud_element> hud::find(const std::string& id) const {
+    for (const auto& e : elements) if (e->id == id) return e;
+    return nullptr;
 }
 bool hud::serialize(rapidjson::Value& out, rapidjson::Document::AllocatorType& a) const {
     out.SetObject(); out.AddMember("enabled", enabled, a);
@@ -76,6 +80,16 @@ bool hud::serialize(rapidjson::Value& out, rapidjson::Document::AllocatorType& a
         v.AddMember("id", rapidjson::Value(e->id.c_str(), a), a);
         v.AddMember("callback", rapidjson::Value(e->callback.c_str(), a), a);
         v.AddMember("absolute", e->absolute, a);
+        v.AddMember("relative", e->relative, a);
+        for (auto [key, value] : {std::pair{"font", &e->font}, {"image", &e->image}, {"shader", &e->shader}})
+            v.AddMember(rapidjson::Value(key,a), rapidjson::Value(value->data(),static_cast<rapidjson::SizeType>(value->size()),a),a);
+        for (auto [key, value] : {std::pair{"opacity", e->opacity}, {"border_size",e->border_size}, {"border_radius",e->border_radius}})
+            v.AddMember(rapidjson::StringRef(key),value,a);
+        for (auto [key, value] : {std::pair{"background", &e->background}, {"hover_color",&e->hover_color}, {"pressed_color",&e->pressed_color}, {"border_color",&e->border_color}}) {
+            rapidjson::Value c(rapidjson::kArrayType);
+            for(int i=0;i<4;++i) c.PushBack((*value)[i],a);
+            v.AddMember(rapidjson::Value(key,a),c,a);
+        }
         v.AddMember("padding", e->padding, a); v.AddMember("margin", e->margin, a);
         v.AddMember("alignment", e->alignment, a);
         rapidjson::Value color(rapidjson::kArrayType);
@@ -114,6 +128,27 @@ bool hud::analyze(const rapidjson::Value& v) {
         const bool old_world_text = kind == "text3d";
         try {
             auto e = pending.add(old_world_text ? "text" : kind, item["text"].GetString(), item["parent"].GetInt());
+            e->absolute = false;
+            e->relative = false; // Scenes without this field retain viewport coordinates.
+            for (auto [key, field] : {std::pair{"font", &e->font}, {"image", &e->image}, {"shader", &e->shader}}) {
+                if (item.HasMember(key)) {
+                    if(!item[key].IsString()) return false;
+                    field->assign(item[key].GetString(),item[key].GetStringLength());
+                    if(field->find('\0')!=std::string::npos) return false;
+                }
+            }
+            if (item.HasMember("relative")) { if(!item["relative"].IsBool()) return false; e->relative=item["relative"].GetBool(); }
+            for (auto [key, field] : {std::pair{"opacity", &e->opacity}, {"border_size",&e->border_size}, {"border_radius",&e->border_radius}}) {
+                if(item.HasMember(key)) {
+                    if(!item[key].IsNumber() || !std::isfinite(item[key].GetFloat()) || item[key].GetFloat()<0 || item[key].GetFloat()>(std::string(key)=="opacity" ? 1.f : 10000.f)) return false;
+                    *field=item[key].GetFloat();
+                }
+            }
+            for (auto [key, field] : {std::pair{"background", &e->background}, {"hover_color",&e->hover_color}, {"pressed_color",&e->pressed_color}, {"border_color",&e->border_color}}) {
+                if(!item.HasMember(key)) continue;
+                const auto& c=item[key]; if(!c.IsArray() || c.Size()!=4) return false;
+                for(int i=0;i<4;++i) { if(!c[i].IsNumber() || !std::isfinite(c[i].GetFloat()) || c[i].GetFloat()<0 || c[i].GetFloat()>1) return false; (*field)[i]=c[i].GetFloat(); }
+            }
             if (item.HasMember("id")) {
                 if (!item["id"].IsString() || item["id"].GetStringLength()==0) return false;
                 e->id=item["id"].GetString();

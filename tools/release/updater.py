@@ -153,25 +153,36 @@ def try_update(candidate, installation, arguments, ready, active):
     return None
 
 
-def selected(pointer, updates):
+def selected(pointer, updates, installed_version=None):
     if pointer.is_file():
         name = pointer.read_text(encoding='ascii')
         if re.fullmatch(r'version-[0-9a-f]{32}', name):
             candidate = updates / name
             if (candidate / ('editor_app' + SUFFIX)).is_file():
+                if installed_version is not None:
+                    try:
+                        manifest = json.loads((candidate / 'release.json').read_text())
+                        if version(manifest['engine_version']) <= installed_version:
+                            return None
+                    except (OSError, ValueError, KeyError, TypeError):
+                        return None
                 return candidate
     return None
 
 
-def run(installation, arguments):
+def run(installation, arguments, user_state=None):
     if len(arguments) == 2 and arguments[0] == '--project':
-        arguments = ['--project', str(installation / arguments[1])]
-    updates = installation / '.engine-updates'
+        project_root = Path.cwd() if user_state is not None else installation
+        arguments = ['--project', str(project_root / arguments[1])]
+    state = user_state if user_state is not None else installation
+    installed_version = (version(json.loads((installation / 'release.json').read_text())['engine_version'])
+                         if user_state is not None else None)
+    updates = state / '.engine-updates'
     try:
-        updates.mkdir(exist_ok=True)
+        updates.mkdir(parents=user_state is not None, exist_ok=True)
     except OSError as error:
         print(f'Update unavailable: {error}', file=sys.stderr)
-        return launch(installation, installation, arguments).wait()
+        return launch(installation, state, arguments).wait()
     def report(message):
         print(message, flush=True)
         try:
@@ -181,9 +192,9 @@ def run(installation, arguments):
 
     active = updates / 'active'
     with installation_lock(updates / 'lock'):
-        current = selected(active, updates) or installation
+        current = selected(active, updates, installed_version) or installation
         pending = updates / 'pending'
-        candidate = selected(pending, updates)
+        candidate = selected(pending, updates, installed_version)
         try:
             with tempfile.TemporaryDirectory(dir=updates) as directory:
                 staging = Path(directory)
@@ -198,7 +209,7 @@ def run(installation, arguments):
                         extracted.rename(candidate)
                 if candidate is not None and candidate != current:
                     report('Starting updated editor...')
-                    process = try_update(candidate, installation, arguments, staging / 'ready', active)
+                    process = try_update(candidate, state, arguments, staging / 'ready', active)
                     if process is not None:
                         report('Engine updated.')
                         return process.wait()
@@ -208,7 +219,7 @@ def run(installation, arguments):
         except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as error:
             print(f'Update unavailable: {error}', file=sys.stderr)
             report('Update check unavailable.')
-        return launch(current, installation, arguments).wait()
+        return launch(current, state, arguments).wait()
 
 
 if __name__ == '__main__':
@@ -216,7 +227,9 @@ if __name__ == '__main__':
         if WINDOWS and getattr(sys, 'frozen', False):
             import ctypes
             ctypes.windll.kernel32.SetDllDirectoryW(None)
-        sys.exit(run(Path(sys.executable).resolve().parent, sys.argv[1:]))
+        native_state = os.environ.get('BENGINE_NATIVE_STATE')
+        sys.exit(run(Path(sys.executable).resolve().parent, sys.argv[1:],
+                     Path(native_state).resolve() if native_state else None))
     except OSError as error:
         print(f'Cannot open Bubble Engine: {error}', file=sys.stderr)
         sys.exit(1)

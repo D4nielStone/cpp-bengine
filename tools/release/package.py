@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform as host_platform
 import re
 import shutil
 import subprocess
@@ -24,12 +25,46 @@ def validate_version(tag):
     return match[1]
 
 
-def package(build, output, tag, library_dir=None, updater=None, portable=False):
+def write_checksum(artifact, checksum):
+    digest = hashlib.sha256()
+    with artifact.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    checksum.write_text(f'{digest.hexdigest()}  {artifact.name}\n')
+
+
+def linux_packages(stage, output, name, version, work):
+    root = work / 'linux-packages'
+    payload = root / 'usr/lib/bubble-engine'
+    shutil.copytree(stage, payload, symlinks=True)
+    launcher = root / 'usr/bin/bubble-engine'
+    launcher.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / 'tools/release/linux_launcher.sh', launcher)
+    launcher.chmod(0o755)
+    desktop = root / 'usr/share/applications/bubble-engine.desktop'
+    desktop.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / 'tools/release/bubble-engine.desktop', desktop)
+    icon = root / 'usr/share/icons/hicolor/256x256/apps/bubble-engine.png'
+    icon.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / 'tools/release/bubble-engine.png', icon)
+    for generator in ('DEB', 'RPM'):
+        subprocess.run(['cpack', '--config', str(ROOT / 'tools/release/LinuxPackages.cmake'),
+                        '-G', generator, '-B', str(work / 'cpack'), '-D', f'CPACK_PACKAGE_VERSION={version}',
+                        '-D', f'CPACK_PACKAGE_FILE_NAME={name}',
+                        '-D', f'CPACK_INSTALLED_DIRECTORIES={root};/'], check=True)
+        artifact = output / f'{name}.{generator.lower()}'
+        shutil.move(work / 'cpack' / artifact.name, artifact)
+        write_checksum(artifact, artifact.with_suffix(artifact.suffix + '.sha256'))
+
+
+def package(build, output, tag, library_dir=None, updater=None, portable=False, native_linux=False):
     version = validate_version(tag)
     cache = (build / 'CMakeCache.txt').read_text()
     if not re.search(r'^BENGINE_DISTRIBUTION_BUILD:BOOL=ON$', cache, re.MULTILINE):
         raise ValueError('Release packaging requires BENGINE_DISTRIBUTION_BUILD=ON')
     windows = sys.platform == 'win32'
+    if native_linux and (sys.platform != 'linux' or host_platform.machine() != 'x86_64'):
+        raise ValueError('Native Linux packages require a Linux x86_64 build host')
     platform = 'windows-x64' if windows else 'linux-x64'
     name = f'bubble-engine-{tag}-{platform}'
     output.mkdir(parents=True, exist_ok=True)
@@ -89,6 +124,8 @@ def package(build, output, tag, library_dir=None, updater=None, portable=False):
         shutil.copy2(ROOT / 'LICENSE', stage / 'LICENSE')
         (stage / 'release.json').write_text(json.dumps({'engine_version': version, 'platform': platform}, indent=2))
         shutil.copy2(updater, stage / ('engine_updater' + suffix))
+        if native_linux:
+            linux_packages(stage, output, name, version, Path(work))
         if windows:
             (stage / 'BubbleEngine.cmd').write_text('@echo off\n"%~dp0engine_updater.exe" %*\n')
         else:
@@ -105,10 +142,11 @@ def package(build, output, tag, library_dir=None, updater=None, portable=False):
                     if path.is_file():
                         bundle.write(path, Path('engine') / path.relative_to(stage))
             portable_dist = Path(work) / 'portable'
+            icon = ['--icon', str(ROOT / 'tools/release/bubble-engine.ico')] if windows else []
             subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                             '--onefile', '--name', 'BubbleEngine', '--hidden-import', 'tkinter.filedialog',
                             '--distpath', str(portable_dist), '--workpath', str(Path(work) / 'pyinstaller'),
-                            '--specpath', work, '--add-data', str(payload) + ':.',
+                            '--specpath', work, '--add-data', str(payload) + ':.', *icon,
                             str(ROOT / 'tools/release/portable.py')], check=True)
             portable_binary = portable_dist / ('BubbleEngine' + suffix)
             subprocess.run([str(portable_binary), '--verify-package'], cwd=work,
@@ -116,15 +154,13 @@ def package(build, output, tag, library_dir=None, updater=None, portable=False):
             portable_archive = output / (name + '-portable.zip')
             with zipfile.ZipFile(portable_archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
                 bundle.write(portable_binary, portable_binary.name)
-            digest = hashlib.sha256(portable_archive.read_bytes()).hexdigest()
-            (output / (portable_archive.stem + '.sha256')).write_text(f'{digest}  {portable_archive.name}\n')
+            write_checksum(portable_archive, output / (portable_archive.stem + '.sha256'))
         archive = output / (name + '.zip')
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
             for path in sorted(stage.rglob('*')):
                 if path.is_file():
                     bundle.write(path, path.relative_to(stage.parent))
-        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        (output / (name + '.sha256')).write_text(f'{digest}  {archive.name}\n')
+        write_checksum(archive, output / (name + '.sha256'))
 
 
 def main():
@@ -136,12 +172,13 @@ def main():
     parser.add_argument('--library-dir', type=Path)
     parser.add_argument('--updater', type=Path)
     parser.add_argument('--portable', action='store_true')
+    parser.add_argument('--native-linux', action='store_true', help='also build Linux DEB and RPM packages')
     args = parser.parse_args()
     validate_version(args.version)
     if not args.validate_only:
         if args.updater is None:
             parser.error('--updater is required for packaging')
-        package(args.build, args.output, args.version, args.library_dir, args.updater, args.portable)
+        package(args.build, args.output, args.version, args.library_dir, args.updater, args.portable, args.native_linux)
 
 
 if __name__ == '__main__':

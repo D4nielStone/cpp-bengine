@@ -336,6 +336,10 @@ editor_ui::editor_ui(
     menu_bar.add_menu(
         tr("View"), 0.3f,
         [this, ui_persistence_ptr = &ui_persistence](bgui::context_menu& menu) {
+            menu.add_button(std::string(m_files && m_files->line_wrap_enabled() ? "[x] " : "[ ] ") +
+                tr("Wrap Lines"), [this]() {
+                    if (m_files) m_files->set_line_wrap(!m_files->line_wrap_enabled());
+                });
             menu.add_button(tr("Editor Camera..."), [this]() { open_editor_camera_modal(); });
             menu.add_button(tr("Show/Hide Colliders    F3"), [this]() {
                 if (m_commands)
@@ -692,7 +696,7 @@ void editor_ui::create_build_modal() {
         "Single executable (compressed assets, read directly without extraction)", .30f, m_single_executable);
     m_single_executable_checkbox = &compact;
     compact.set_on_change([this](bool value) { if (!m_build_running) m_single_executable = value; });
-    m_build_modal->content().add<bgui::text>("Precompiled runtime template (optional; empty = automatic)", 0.25f);
+    m_build_modal->content().add<bgui::text>("Precompiled runtime template (optional; empty uses the bundled template first)", 0.25f);
     auto& runtime_template = panel::add_input(m_build_modal->content(), m_runtime_template.string(), "Template folder...", .30f);
     m_runtime_template_input = &runtime_template;
     runtime_template.m_enter_func = [this](const std::string& value) { if (!m_build_running) m_runtime_template = value; };
@@ -727,13 +731,13 @@ void editor_ui::create_build_modal() {
     add_target(
         "linux",
         "Linux x64",
-        "Requires Linux OpenGL/GLFW/X11 development packages; Windows hosts use WSL2.",
+        "Linux folder export uses the bundled runtime on Linux.",
         build_target::linux
     );
     add_target(
         "windows",
         "Windows x64",
-        "Windows: native MSVC and vcpkg. Linux: Zig/MinGW cross build (see README).",
+        "Windows folder export uses the bundled runtime on Windows.",
         build_target::windows
     );
     m_build_status = &m_build_modal->content().add<bgui::text>(
@@ -912,27 +916,25 @@ void editor_ui::update_build_process() {
             if (m_single_executable_checkbox) m_single_executable_checkbox->set_enable(true);
     if (m_build_directory_browse_button)
         m_build_directory_browse_button->set_enable(true);
-    const bool succeeded = m_build_process->exit_code() == 0;
+    const auto exit_code = m_build_process->exit_code();
+    const bool succeeded = exit_code == 0;
     std::string final_status;
     const float final_progress = m_build_process->progress(final_status);
     if (succeeded && m_build_progress)
         m_build_progress->set_value(final_progress);
+    const auto failure = exit_code == 6 && final_progress == 0.f && !final_status.empty()
+        ? final_status
+        : "Build failed (exit code " + std::to_string(exit_code) + ")";
     if (m_build_status)
         m_build_status->set_buffer(
-            succeeded
-                ? final_status
-                : "Build failed (exit code " +
-                    std::to_string(m_build_process->exit_code()) +
-                    "). Output: " + m_build_process->log_path().string()
+            succeeded ? final_status : failure
         );
     report_result(
         "Building platform target",
         succeeded,
         succeeded
             ? std::string{}
-            : "Platform build process exited with code " +
-                std::to_string(m_build_process->exit_code()) +
-                ". Build output: " + m_build_process->log_path().string()
+            : failure + "\nBuild output: " + m_build_process->log_path().string()
     );
 }
 
@@ -1646,7 +1648,7 @@ void editor_ui::apply_layout(bool wide) {
             window.area = bgui::dock_area::left;
         else if (window.title == tr("Arquivos") || window.title == tr("Debug") || window.title == tr("Animação"))
             window.area = bgui::dock_area::bottom;
-        else if (window.title == tr("Inspector") || window.title == tr("Editor Diagnostics"))
+        else if (window.title == tr("Inspector") || window.title == tr("Profiler"))
             window.area = bgui::dock_area::right;
         else {
             window.area = bgui::dock_area::center;
@@ -1655,7 +1657,7 @@ void editor_ui::apply_layout(bool wide) {
     }
     configuration.tab_groups.push_back({tr("Arquivos"), tr("Arquivos"), {tr("Arquivos"), tr("Debug"), tr("Animação")}});
     configuration.tab_groups.push_back({tr("Scene"), tr("Scene"), {tr("Scene"), tr("Game")}});
-    configuration.tab_groups.push_back({tr("Inspector"), tr("Inspector"), {tr("Inspector"), tr("Editor Diagnostics")}});
+    configuration.tab_groups.push_back({tr("Inspector"), tr("Inspector"), {tr("Inspector"), tr("Profiler")}});
     if (documents.size() > 1)
         configuration.tab_groups.push_back({documents.front(), documents.front(), documents});
     m_dock.apply_configuration(configuration);
@@ -1783,6 +1785,11 @@ std::filesystem::path editor_ui::project_root() const {
     return std::filesystem::absolute(m_project_path).lexically_normal().parent_path();
 }
 
+/**
+    @brief Sets up scene management for the editor.
+    @param files The files view to manage scenes.
+    @param scene_loaded The callback to invoke when a scene is loaded.
+*/
 void editor_ui::setup_scene_management(files_view& files, std::function<void()> scene_loaded) {
     m_files = &files;
     m_scene_loaded = std::move(scene_loaded);

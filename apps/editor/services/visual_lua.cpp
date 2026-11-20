@@ -331,13 +331,37 @@ call_shape shape(const std::string& source) {
         key=":"+t[open-1].text;
         fields.push_back({"Alvo",t[first].begin,t[open-2].begin,false});
     } else for(std::size_t i=first;i<open;++i) key+=t[i].text;
+    if (key == ":Play" || key == ":Pause" || key == ":Stop") {
+        for (std::size_t i=first; i+3<open; ++i) {
+            if (t[i].text == "GetComponent" && t[i+1].text == "(" && t[i+2].literal &&
+                (t[i+2].text == "\"SoundPlayer\"" || t[i+2].text == "'SoundPlayer'")) {
+                key += "/SoundPlayer";
+                break;
+            }
+        }
+    }
     auto args=arguments(t,open+1,t.size()-1);
+    if (key == ":SetUniform" || key == ":RemoveUniform") key += "/" + std::to_string(args.size());
     fields.insert(fields.end(),args.begin(),args.end());
     return {key,fields};
 }
 }
 const std::vector<command>& commands() {
     static const std::vector<command> catalog{
+        {"Globais", "Definir global", "Globals.Set(\"pontos\", 0)", {"Nome", "Valor"}},
+        {"Globais", "Ler global", "local valor = Globals.Get(\"pontos\")", {"Nome"}},
+        {"Globais", "Existe global", "local existe = Globals.Has(\"pontos\")", {"Nome"}},
+        {"Globais", "Remover global", "local removida = Globals.Remove(\"pontos\")", {"Nome"}},
+        {"Globais", "Limpar globais", "Globals.Clear()", {}},
+        {"Shaders", "Consultar uniforms", "local uniforms = Shader.GetUniforms(\"pbr.vert\", \"pbr.frag\")", {"Vertex shader", "Fragment shader"}},
+        {"Shaders", "Shader do material", "gameObject:GetComponent(\"Renderer\"):SetShader(1, \"\", \"shaders/material.frag\")", {"Malha", "Vertex shader", "Fragment shader"}},
+        {"Shaders", "Uniform do material", "gameObject:GetComponent(\"Renderer\"):SetUniform(1, \"intensity\", \"float\", 1)", {"Malha", "Uniform", "Tipo", "Valor"}},
+        {"Shaders", "Remover uniform do material", "local removido = gameObject:GetComponent(\"Renderer\"):RemoveUniform(1, \"intensity\")", {"Malha", "Uniform"}},
+        {"Shaders", "Pilha de efeitos da câmera", "gameObject:GetComponent(\"Camera\").postProcessPasses = {\"shaders/ps1.frag\"}", {"Passes em ordem"}},
+        {"Shaders", "Ler pilha de efeitos", "local passes = gameObject:GetComponent(\"Camera\").postProcessPasses", {}},
+        {"Shaders", "Shader da câmera", "gameObject:GetComponent(\"Camera\").postProcessShader = \"shaders/post.frag\"", {"Fragment shader"}},
+        {"Shaders", "Uniform da câmera", "gameObject:GetComponent(\"Camera\"):SetUniform(\"intensity\", \"float\", 1)", {"Uniform", "Tipo", "Valor"}},
+        {"Shaders", "Remover uniform da câmera", "local removido = gameObject:GetComponent(\"Camera\"):RemoveUniform(\"intensity\")", {"Uniform"}},
         {"Objeto", "Mover", "gameObject.transform:Translate(Vector3(0, 0, 0))", {}},
         {"Objeto", "Girar", "gameObject.transform:Rotate(Vector3(0, 0, 0))", {}},
         {"Objeto", "Encontrar objeto", "local objeto = GameObject.Find(\"Objeto\")", {"Nome ou ID"}},
@@ -367,8 +391,9 @@ const std::vector<command>& commands() {
         {"Animação", "Ir ao instante", "local resultado = gameObject:GetComponent(\"Animation\"):Seek(0)", {"Segundos"}},
         {"Animação", "Velocidade de animação", "local resultado = gameObject:GetComponent(\"Animation\"):SetSpeed(1)", {"Multiplicador"}},
         {"Animação", "Transição de animação", "local resultado = gameObject:GetComponent(\"Animation\"):CrossFade(\"\", 0.3)", {"Arquivo .banim", "Duração"}},
-        {"Interface", "Adicionar elemento", "local elemento = gameObject:GetComponent(\"HUD\"):Add(\"text\", \"Texto\", -1)", {"Tipo", "Texto", "Índice do pai (-1 para raiz)"}},
+        {"Interface", "Adicionar elemento", "local elemento = gameObject:GetComponent(\"HUD\"):Add(\"text\", \"Texto\", -1)", {"Tipo", "Texto", "Pai: ID ou índice (-1 para raiz)"}},
         {"Interface", "Obter elemento", "local elemento = gameObject:GetComponent(\"HUD\"):Get(0)", {"Índice"}},
+        {"Interface", "Buscar elemento por ID", "local elemento = gameObject:GetComponent(\"HUD\"):Find(\"widget_1\")", {"ID"}},
         {"Interface", "Posicionar elemento", "elemento:SetScreenPosition(Vector3(0, 0, 0))", {}},
         {"Interface", "Consumir clique", "local clicou = elemento:ConsumeClick()", {}},
         {"Entrada", "Tecla pressionada", "local resultado = Input.GetKey(\"W\")", {"Tecla"}},
@@ -504,6 +529,11 @@ const std::vector<command>& commands() {
         {"Propriedades", "Definir SpotLight.shadowStrength", "gameObject:GetComponent(\"SpotLight\").shadowStrength = 1", {"Valor"}},
         {"Propriedades", "Ler SoundListener.enabled", "local valor = gameObject:GetComponent(\"SoundListener\").enabled", {}},
         {"Propriedades", "Definir SoundListener.enabled", "gameObject:GetComponent(\"SoundListener\").enabled = true", {"Valor"}},
+        {"Áudio", "Reproduzir som", "gameObject:GetComponent(\"SoundPlayer\"):Play()", {}},
+        {"Áudio", "Pausar som", "gameObject:GetComponent(\"SoundPlayer\"):Pause()", {}},
+        {"Áudio", "Retomar som", "gameObject:GetComponent(\"SoundPlayer\"):Resume()", {}},
+        {"Áudio", "Parar som", "gameObject:GetComponent(\"SoundPlayer\"):Stop()", {}},
+        {"Propriedades", "Ler SoundPlayer.isPlaying", "local valor = gameObject:GetComponent(\"SoundPlayer\").isPlaying", {}},
         {"Propriedades", "Ler SoundPlayer.clip", "local valor = gameObject:GetComponent(\"SoundPlayer\").clip", {}},
         {"Propriedades", "Definir SoundPlayer.clip", "gameObject:GetComponent(\"SoundPlayer\").clip = \"\"", {"Valor"}},
         {"Propriedades", "Ler SoundPlayer.volume", "local valor = gameObject:GetComponent(\"SoundPlayer\").volume", {}},
@@ -524,6 +554,40 @@ const std::vector<command>& commands() {
         {"Propriedades", "Ler HUD.count", "local valor = gameObject:GetComponent(\"HUD\").count", {}},
         {"Propriedades", "Ler HUD.enabled", "local valor = gameObject:GetComponent(\"HUD\").enabled", {}},
         {"Propriedades", "Definir HUD.enabled", "gameObject:GetComponent(\"HUD\").enabled = true", {"Valor"}},
+        {"Propriedades", "Ler HudElement.id", "local valor = elemento.id", {}},
+        {"Propriedades", "Definir HudElement.id", "elemento.id = \"\"", {"Valor"}},
+        {"Propriedades", "Ler HudElement.callback", "local valor = elemento.callback", {}},
+        {"Propriedades", "Definir HudElement.callback", "elemento.callback = \"\"", {"Valor"}},
+        {"Propriedades", "Ler HudElement.font", "local valor = elemento.font", {}},
+        {"Propriedades", "Definir HudElement.font", "elemento.font = \"\"", {"Valor"}},
+        {"Propriedades", "Ler HudElement.image", "local valor = elemento.image", {}},
+        {"Propriedades", "Definir HudElement.image", "elemento.image = \"\"", {"Valor"}},
+        {"Propriedades", "Ler HudElement.shader", "local valor = elemento.shader", {}},
+        {"Propriedades", "Definir HudElement.shader", "elemento.shader = \"\"", {"Valor"}},
+        {"Propriedades", "Ler HudElement.relative", "local valor = elemento.relative", {}},
+        {"Propriedades", "Definir HudElement.relative", "elemento.relative = true", {"Valor"}},
+        {"Propriedades", "Ler HudElement.opacity", "local valor = elemento.opacity", {}},
+        {"Propriedades", "Definir HudElement.opacity", "elemento.opacity = 1", {"Valor"}},
+        {"Propriedades", "Ler HudElement.padding", "local valor = elemento.padding", {}},
+        {"Propriedades", "Definir HudElement.padding", "elemento.padding = 0", {"Valor"}},
+        {"Propriedades", "Ler HudElement.margin", "local valor = elemento.margin", {}},
+        {"Propriedades", "Definir HudElement.margin", "elemento.margin = 0", {"Valor"}},
+        {"Propriedades", "Ler HudElement.alignment", "local valor = elemento.alignment", {}},
+        {"Propriedades", "Definir HudElement.alignment", "elemento.alignment = 0", {"Valor"}},
+        {"Propriedades", "Ler HudElement.borderSize", "local valor = elemento.borderSize", {}},
+        {"Propriedades", "Definir HudElement.borderSize", "elemento.borderSize = 0", {"Valor"}},
+        {"Propriedades", "Ler HudElement.borderRadius", "local valor = elemento.borderRadius", {}},
+        {"Propriedades", "Definir HudElement.borderRadius", "elemento.borderRadius = 0", {"Valor"}},
+        {"Propriedades", "Ler HudElement.color", "local valor = elemento.color", {}},
+        {"Propriedades", "Definir HudElement.color", "elemento.color = Color(1, 1, 1, 1)", {"Valor"}},
+        {"Propriedades", "Ler HudElement.background", "local valor = elemento.background", {}},
+        {"Propriedades", "Definir HudElement.background", "elemento.background = Color(0, 0, 0, 0)", {"Valor"}},
+        {"Propriedades", "Ler HudElement.hoverColor", "local valor = elemento.hoverColor", {}},
+        {"Propriedades", "Definir HudElement.hoverColor", "elemento.hoverColor = Color(0, 0, 0, 0)", {"Valor"}},
+        {"Propriedades", "Ler HudElement.pressedColor", "local valor = elemento.pressedColor", {}},
+        {"Propriedades", "Definir HudElement.pressedColor", "elemento.pressedColor = Color(0, 0, 0, 0)", {"Valor"}},
+        {"Propriedades", "Ler HudElement.borderColor", "local valor = elemento.borderColor", {}},
+        {"Propriedades", "Definir HudElement.borderColor", "elemento.borderColor = Color(0, 0, 0, 0)", {"Valor"}},
         {"Propriedades", "Ler HudElement.text", "local valor = elemento.text", {}},
         {"Propriedades", "Definir HudElement.text", "elemento.text = \"\"", {"Valor"}},
         {"Propriedades", "Ler HudElement.width", "local valor = elemento.width", {}},

@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #pragma once
 
 #include <algorithm>
@@ -147,6 +148,7 @@ inline std::filesystem::path find_identical_asset(const std::filesystem::path& s
 inline std::filesystem::path import_asset(const std::filesystem::path& requested,
     const std::filesystem::path& project, bool model, const std::filesystem::path& destination_folder = {},
     bool another_copy = false, const commons::model_import_options* options = nullptr) {
+    BUBBLE_PROFILE("Asset import", "Editor");
     namespace fs = std::filesystem;
     const auto source = fs::canonical(requested);
     const auto root = fs::canonical(project);

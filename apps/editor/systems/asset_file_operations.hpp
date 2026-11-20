@@ -44,8 +44,11 @@ inline bool rewrite_paths(rapidjson::Value& value, rapidjson::Document::Allocato
             const std::string_view key(it->name.GetString(), it->name.GetStringLength());
             const bool image_value = key == "value" && value.HasMember("type") &&
                 value["type"].IsString() && std::string_view(value["type"].GetString()) == "image";
-            const bool is_path = image_value || path_value || key == "scene" || key == "model" ||
-                key == "directory" || key == "scripts" || key == "maps" || key == "file" || key == "material" || key == "path" || key == "vertex_shader" || key == "fragment_shader";
+            const bool hud_asset = (key=="font" || key=="image" || key=="shader") &&
+                value.HasMember("kind") && value["kind"].IsString() &&
+                value.HasMember("parent") && value["parent"].IsInt();
+            const bool is_path = hud_asset || image_value || path_value || key == "scene" || key == "model" ||
+                key == "directory" || key == "scripts" || key == "maps" || key == "file" || key == "material" || key == "path" || key == "vertex_shader" || key == "fragment_shader" || key == "fragment_shaders";
             changed |= rewrite_paths(it->value, allocator, root, from, to, is_path);
         }
     } else if (value.IsArray()) {

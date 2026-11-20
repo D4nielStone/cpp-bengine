@@ -65,6 +65,25 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(all(response["jsonrpc"] == "2.0" for response in responses))
         return responses
 
+    def test_compose_preserves_untouched_legacy_asset_paths(self):
+        for entity in self.entities:
+            entity["components"]["transform"].update(rotation=[0, 0, 0], scale=[1, 1, 1])
+        self.entities[0]["components"]["renderer"] = {"model": "/legacy/engine/cube.bmodel"}
+        self.write(self.scene, self.scene_data())
+        before = self.scene.read_text()
+        addition = {"id": 102, "components": {"transform": {"position": [0, 0, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]}}}
+        _, result = self.exchange(INITIALIZE, INITIALIZED, call("compose_scene", 1,
+            path=self.scene.name, entities=[addition], expectedContents=before))
+        self.assertNotIn("isError", result["result"])
+        saved = json.loads(self.scene.read_text())
+        self.assertEqual(saved["entities"][:101], self.entities)
+        changed = dict(addition, components={"renderer": {"model": "/outside/model.bmodel"}})
+        contents = self.scene.read_text()
+        _, rejected = self.exchange(INITIALIZE, INITIALIZED, call("compose_scene", 2,
+            path=self.scene.name, entities=[changed], expectedContents=contents))
+        self.assertTrue(rejected["result"]["isError"])
+        self.assertEqual(self.scene.read_text(), contents)
+
     def test_handshake_and_discovery(self):
         before, hello, waiting, catalog, ping = self.exchange(
             request("tools/list", 1), INITIALIZE, request("tools/list", 2),
@@ -139,6 +158,25 @@ class McpServerTests(unittest.TestCase):
         self.assertTrue(result["result"]["isError"])
 
 
+    def test_shader_sources_use_confined_conflict_checked_asset_writes(self):
+        source = "#version 330 core\nout vec4 color; void main(){color=vec4(1); }"
+        _, created, vertex, stale, changed, empty, nul, outside, readback = self.exchange(
+            INITIALIZE, INITIALIZED,
+            call("write_asset", 1, path="shaders/post.frag", contents=source),
+            call("write_asset", 2, path="shaders/post.vert", contents=source),
+            call("write_asset", 3, path="shaders/post.frag", contents=source, expectedContents="stale"),
+            call("write_asset", 4, path="shaders/post.frag", contents=source + "\n", expectedContents=source),
+            call("write_asset", 5, path="shaders/empty.frag", contents=""),
+            call("write_asset", 6, path="shaders/nul.frag", contents="x\0y"),
+            call("write_asset", 7, path="../outside.frag", contents=source),
+            call("read_file", 8, path="shaders/post.frag"),
+        )
+        for result in (created, vertex, changed, readback):
+            self.assertNotIn("isError", result["result"])
+        for result in (stale, empty, nul, outside):
+            self.assertTrue(result["result"]["isError"])
+        self.assertEqual(readback["result"]["structuredContent"]["contents"], source + "\n")
+
     def test_asset_writes_validate_syntax_and_detect_conflicts(self):
         _, bad, created, conflict, changed, readback = self.exchange(
             INITIALIZE, INITIALIZED,
@@ -158,6 +196,9 @@ class McpServerTests(unittest.TestCase):
     def test_authoring_examples_and_native_assets(self):
         _, response = self.exchange(INITIALIZE, INITIALIZED, call("authoring_guide", 1))
         guide = response["result"]["structuredContent"]
+        self.assertGreater(guide["entityExample"]["id"], 1)
+        self.assertGreater(guide["cameraExample"]["id"], 1)
+        self.assertNotEqual(guide["entityExample"]["id"], guide["cameraExample"]["id"])
         _, model, clip, script, scene = self.exchange(
             INITIALIZE, INITIALIZED,
             call("create_model", 1, path="assets/cube.bmodel", shape="cube"),

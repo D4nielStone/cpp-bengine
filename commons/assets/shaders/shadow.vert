@@ -2,4 +2,9 @@
 layout(location = 0) in vec3 aPos;
 uniform mat4 model;
 uniform mat4 lightSpaceMatrix;
-void main() { gl_Position = lightSpaceMatrix * model * vec4(aPos, 1.0); }
+uniform bool instance;
+uniform mat4 transformacoes[128];
+void main() {
+    mat4 pose = instance ? transformacoes[gl_InstanceID] : model;
+    gl_Position = lightSpaceMatrix * pose * vec4(aPos, 1.0);
+}

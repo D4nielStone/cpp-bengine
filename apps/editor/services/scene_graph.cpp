@@ -1,3 +1,4 @@
+#include <ranges>
 #include "scene_graph.hpp"
 #include "visual_lua.hpp"
 #include "scene_files.hpp"
@@ -44,7 +45,7 @@ scene_graph read_scene_graph(const fs::path& requested,
                         else graph.diagnostics.push_back("Script indisponível ou externo: "+reference.string());
                     }
                 } else if(v.IsArray()) { for(const auto& item:v.GetArray()) self(self,item); }
-                else if(v.IsObject()) { for(const auto& item:v.GetObject()) {
+                else if(v.IsObject()) { for(const auto& item:std::ranges::subrange(v.MemberBegin(), v.MemberEnd())) {
                     const std::string key(item.name.GetString(),item.name.GetStringLength());
                     if(key=="directory" || key=="scripts") self(self,item.value);
                 } }

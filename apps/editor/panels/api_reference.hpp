@@ -210,7 +210,8 @@ inline void open_api_reference() {
     for (std::size_t i = 0; i < documents.size(); ++i)
         if (documents[i].path == "lua-api/README.md") *selected_document = i;
     auto state = std::make_shared<std::vector<markdown_document>>(std::move(documents));
-    auto show_document = [state, &article, &identity, &index, selected_document, load_error](std::size_t selected) {
+    auto navigate = std::make_shared<std::function<void(std::size_t)>>();
+    auto show_document = [navigation = std::weak_ptr(navigate), state, &article, &identity, &index, selected_document, load_error](std::size_t selected) {
         while (!article.get_elements()[bgui::layer::base].empty())
             article.remove(article.get_elements()[bgui::layer::base].back().get());
 
@@ -236,10 +237,19 @@ inline void open_api_reference() {
             }
         }
         article.reset_scroll();
-        render_markdown(article, (*state)[selected].contents);
+        const auto root = api_reference_documentation_root();
+        render_markdown(article, (*state)[selected].contents,
+            {(root / (*state)[selected].path).parent_path(), [navigation, state, root](const auto& path) {
+                for (std::size_t i = 0; i < state->size(); ++i)
+                    if ((root / (*state)[i].path).lexically_normal() == path.lexically_normal()) {
+                        if (auto action = navigation.lock()) (*action)(i);
+                        break;
+                    }
+            }});
     };
 
-    auto refresh = [state, &search, &category, &index, show_document, selected_document, &identity, categories, category_label, load_error] {
+    *navigate = show_document;
+    auto refresh = [navigate, state, &search, &category, &index, show_document, selected_document, &identity, categories, category_label, load_error] {
         while (!index.get_elements()[bgui::layer::base].empty())
             index.remove(index.get_elements()[bgui::layer::base].back().get());
 

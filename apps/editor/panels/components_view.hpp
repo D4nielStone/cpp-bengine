@@ -3,6 +3,11 @@
 #include "components/pathfinder.hpp"
 #pragma once
 
+#include <charconv>
+#include <map>
+#include <tuple>
+#include "shader_uniform_editor.hpp"
+
 #include "editor_api.hpp"
 #include "../systems/editable_model_import.hpp"
 
@@ -439,6 +444,7 @@ private:
             add_animation(id, animation);
 
         if (auto h = registry->get<commons::hud>(id)) {
+            h->asset_root=m_context->project_root.string();
             auto& section = add_section("HUD", true,
                 [this, id]() { remove_component<commons::hud>(id); });
             add_toggle(section.children(), "Enabled", h, &commons::hud::enabled);
@@ -460,6 +466,23 @@ private:
                 };
                 string_field("Widget ID",&commons::hud_element::id);
                 string_field("Title",&commons::hud_element::text);
+                string_field(tr("Font (.ttf / .otf)"),&commons::hud_element::font);
+                if(e->kind=="image" || e->kind=="button") string_field(tr("Image"),&commons::hud_element::image);
+                string_field(tr("Fragment shader"),&commons::hud_element::shader);
+                auto toggle=[&](const std::string& title,bool commons::hud_element::*member) {
+                    content.add<bgui::text>(tr(title),.30f);
+                    auto& input=content.add<bgui::combo_box>(std::vector<std::string>{tr("No"),tr("Yes")},.30f,size_t(e.get()->*member));
+                    input.set_tooltip(title);
+                    input.set_on_change([this,e,member](size_t n,const std::string&){const auto old=e.get()->*member;const bool next=n!=0;e.get()->*member=next;m_context->record_action([e,member,old]{e.get()->*member=old;},[e,member,next]{e.get()->*member=next;});});
+                };
+                toggle("Free positioning",&commons::hud_element::absolute);
+                toggle("Relative to parent",&commons::hud_element::relative);
+                content.add<bgui::text>(tr("Parent"),.30f);
+                std::vector<std::string> parents{tr("Viewport")};
+                const auto index=std::find(h->elements.begin(),h->elements.end(),e)-h->elements.begin();
+                for(size_t i=0;i<size_t(index);++i) parents.push_back(h->elements[i]->id);
+                auto& parent=content.add<bgui::combo_box>(parents,.30f,size_t(e->parent+1));
+                parent.set_on_change([this,e](size_t n,const std::string&){const auto old=e->parent;const int next=int(n)-1;e->parent=next;m_context->record_action([e,old]{e->parent=old;},[e,next]{e->parent=next;});});
                 if(e->kind=="button") string_field("Lua callback",&commons::hud_element::callback);
                 auto number=[&](const std::string& label,float commons::hud_element::* member) {
                     add_float(content,label,e.get()->*member,[e,member]{return e.get()->*member;},[e,member](float n){e.get()->*member=std::clamp(n,0.f,10000.f);});
@@ -469,6 +492,14 @@ private:
                 number("Height", &commons::hud_element::height);
                 number("Padding", &commons::hud_element::padding);
                 number("Margin", &commons::hud_element::margin);
+                add_float(content,"Opacity",e->opacity,[e]{return e->opacity;},[e](float n){e->opacity=std::clamp(n,0.f,1.f);});
+                number("Border size", &commons::hud_element::border_size);
+                number("Border radius", &commons::hud_element::border_radius);
+                for(auto [title,member] : {std::pair{"Background",&commons::hud_element::background},{"Hover color",&commons::hud_element::hover_color},{"Pressed color",&commons::hud_element::pressed_color},{"Border color",&commons::hud_element::border_color}}) {
+                    content.add<bgui::text>(tr(title),.30f);
+                    auto& picker=panel::add_color(content,e.get()->*member);
+                    picker.set_on_change([this,e,member](const bgui::color& n){const auto old=e.get()->*member;e.get()->*member=n;m_context->record_action([e,member,old]{e.get()->*member=old;},[e,member,n]{e.get()->*member=n;});});
+                }
                 add_vec_field(content,"Position",e->position,[e]{return e->position;},[e](size_t axis,float n){e->position[axis]=n;});
                 auto& color=panel::add_color(content,e->color);
                 color.set_on_change([this,e](const bgui::color& n){auto old=e->color;e->color=n;m_context->record_action([e,old]{e->color=old;},[e,n]{e->color=n;});});
@@ -963,6 +994,11 @@ private:
         );
         add_toggle(section.children(), "Cast Shadows", renderer, &commons::renderer::cast_shadows);
         add_toggle(section.children(), "Receive Shadows", renderer, &commons::renderer::receive_shadows);
+        add_toggle(section.children(), tr("Local Instances"), renderer, &commons::renderer::local_instances);
+        add_toggle(section.children(), tr("Additive Particles"), renderer, &commons::renderer::particle_layer);
+        add_float(section.children(), "Shader Bounds Padding", renderer->bounds_padding,
+            [renderer]{return renderer->bounds_padding;},
+            [renderer](float value){if(std::isfinite(value)) renderer->bounds_padding=std::clamp(value,0.f,10000.f);});
         auto& model_field = panel::add_field(section.children(),
             "Model", renderer->m_modelo ? renderer->m_modelo->get_source_path() : "", .30f);
         configure_property_field(model_field);
@@ -985,6 +1021,9 @@ private:
                 next->visible = renderer->visible;
                 next->cast_shadows = renderer->cast_shadows;
                 next->receive_shadows = renderer->receive_shadows;
+                next->bounds_padding = renderer->bounds_padding;
+                next->local_instances = renderer->local_instances;
+                next->particle_layer = renderer->particle_layer;
                 auto apply = [registry, id](const auto& component) {
                     registry->entities[id][commons::renderer::mask] = component;
                 };
@@ -1005,9 +1044,159 @@ private:
             return;
         for (std::size_t index = 0; index < renderer->m_modelo->meshes.size(); ++index) {
             auto& group = section.children().add<bgui::tree>("Malha " + std::to_string(index + 1), .30f, true);
+            add_mesh_instances(group.children(), id, renderer, index);
             build_mesh_material_editor(*this, group.children(), m_context, renderer, index,
                 [this](auto* element, auto assign) { m_asset_targets.push_back({element, std::move(assign)}); },
                 [this](std::string message) { if (m_edit_status) m_edit_status->set_buffer(std::move(message)); });
+        }
+    }
+
+    std::map<std::pair<entity_id, std::size_t>, std::size_t> m_instance_selection;
+
+    void add_mesh_instances(bgui::linear& content, entity_id id,
+        const std::shared_ptr<commons::renderer>& renderer, std::size_t mesh_index) {
+        const auto model = renderer->m_modelo;
+        auto& mesh = model->meshes[mesh_index];
+        const auto count = mesh.instances().size();
+        const auto key = std::pair{id, mesh_index};
+        const auto selected = m_instance_selection.find(key);
+        const bool editing = selected != m_instance_selection.end();
+        const auto index = count && editing ? std::min(selected->second, count - 1) : 0;
+        auto& group = content.add<bgui::tree>(
+            tr("Instances") + " (" + std::to_string(count) + ")", .30f, editing).children();
+        const std::weak_ptr<editor_context> context = m_context;
+        const auto current = [context, renderer, id, model, mesh_index]() -> commons::mesh* {
+            const auto live = context.lock();
+            if (!live || live->is_playing || live->locked_entities.contains(id) ||
+                live->registry->get<commons::renderer>(id) != renderer || renderer->m_modelo != model ||
+                mesh_index >= model->meshes.size()) return nullptr;
+            return &model->meshes[mesh_index];
+        };
+        const auto replace = [this, current](auto change) {
+            auto* target = current();
+            if (!target) return;
+            auto before = target->getInstances();
+            auto after = target->getInstances();
+            if (!change(after)) return;
+            target->setInstances(after);
+            m_context->record_action(
+                [current, before = std::move(before)] { if (auto* live = current()) live->setInstances(before); },
+                [current, after = std::move(after)] { if (auto* live = current()) live->setInstances(after); });
+            m_refresh_requested = true;
+        };
+        const auto select = [this, key](std::size_t next) {
+            m_instance_selection[key] = next;
+            m_refresh_requested = true;
+        };
+        const auto button = [mesh_index](bgui::linear& row, const char* label, const char* action, auto callback) {
+            auto& item = row.add<bgui::button>(tr(label), .30f, callback);
+            item.id = std::string("instance-") + action + "-" + std::to_string(mesh_index);
+            item.add_class("editor-input");
+            item.style.layout.require_mode(bgui::mode::wrap_content, bgui::mode::pixel);
+            item.style.layout.require_height(bgui::mode::pixel, 22.f);
+        };
+        const auto insert_pose = [](std::vector<commons::transform>& poses, std::size_t index) -> commons::transform& {
+            // Transform owns its target. Assign into constructed values before swapping vector storage.
+            std::vector<commons::transform> resized(poses.size() + 1);
+            for (std::size_t i = 0; i < poses.size(); ++i) {
+                auto& destination = resized[i < index ? i : i + 1];
+                destination = poses[i];
+                destination.reg = poses[i].reg;
+                destination.my_object = poses[i].my_object;
+                destination.m_usar_target = poses[i].m_usar_target;
+            }
+            poses.swap(resized);
+            return poses[index];
+        };
+        const auto has_capacity = [this, model] {
+            std::size_t total{};
+            for (const auto& item : model->meshes) total += item.instances().size();
+            if (total < 100000) return true;
+            if (m_edit_status) m_edit_status->set_buffer(tr("Instance limit reached"));
+            return false;
+        };
+        if (count) {
+            auto& navigation = group.add<bgui::linear>(bgui::orientation::horizontal);
+            configure_property_row(navigation);
+            if (count > 1) button(navigation, "Previous", "previous", [select, index, count] {
+                select(index == 0 ? count - 1 : index - 1);
+            });
+            auto& field = panel::add_field(navigation, tr("Instance") + " / " + std::to_string(count),
+                std::to_string(index + 1), .30f);
+            configure_property_field(field);
+            field.style.layout.require_width(bgui::mode::stretch);
+            auto& input = field.get_inputbox();
+            input.id = "instance-index-" + std::to_string(mesh_index);
+            input.m_enter_func = [this, select, count](const std::string& text) {
+                std::size_t number{};
+                const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), number);
+                if (error == std::errc{} && end == text.data() + text.size() && number > 0 && number <= count)
+                    select(number - 1);
+                else if (m_edit_status) m_edit_status->set_buffer(tr("Invalid instance number"));
+            };
+            if (count > 1) button(navigation, "Next", "next", [select, index, count] {
+                select((index + 1) % count);
+            });
+        }
+        auto& actions = group.add<bgui::linear>(bgui::orientation::horizontal);
+        configure_property_row(actions);
+        button(actions, "Add Instance", "add", [this, select, replace, insert_pose, has_capacity, renderer, id] {
+            replace([&](auto& instances) {
+                if (!has_capacity()) return false;
+                auto& pose = insert_pose(instances, instances.size());
+                if (!renderer->local_instances) {
+                    const auto origin = m_context->registry->get<commons::transform>(id);
+                    if (origin) {
+                        pose.set_position(origin->get_world_position());
+                        pose.set_rotation(origin->get_world_rotation());
+                        const auto world = origin->get_world_model_matrix();
+                        glm::vec3 scale, translation, skew;
+                        glm::vec4 perspective;
+                        glm::quat rotation;
+                        if (glm::decompose(world, scale, rotation, translation, skew, perspective))
+                            pose.set_scale({scale.x, scale.y, scale.z});
+                    }
+                }
+                select(instances.size() - 1);
+                return true;
+            });
+        });
+        if (!count) return;
+        button(actions, "Duplicate Instance", "duplicate", [select, replace, insert_pose, has_capacity, index] {
+            replace([&](auto& instances) {
+                if (index >= instances.size() || !has_capacity()) return false;
+                auto& copy = insert_pose(instances, index + 1);
+                copy = instances[index];
+                select(index + 1);
+                return true;
+            });
+        });
+        button(actions, "Remove Instance", "remove", [select, replace, index] {
+            replace([&](auto& instances) {
+                if (index >= instances.size()) return false;
+                instances.erase(instances.begin() + index);
+                select(index == instances.size() && index > 0 ? index - 1 : index);
+                return true;
+            });
+        });
+        for (const auto& [name, get, set] : {
+                std::tuple{"Position", &commons::transform::get_position, &commons::transform::set_position},
+                std::tuple{"Rotation", &commons::transform::get_rotation, &commons::transform::set_rotation},
+                std::tuple{"Scale", &commons::transform::get_scale, &commons::transform::set_scale}}) {
+            const auto read = [current, index, get] {
+                const auto* live = current();
+                return live && index < live->instances().size() ? (live->instances()[index].*get)() : bgui::vec3{};
+            };
+            add_vec_field(group, name, (mesh.instances()[index].*get)(), read,
+                [current, index, get, set](std::size_t axis, float value) {
+                    auto* live = current();
+                    if (!live || index >= live->instances().size() || !std::isfinite(value)) return;
+                    auto instances = live->getInstances();
+                    auto vector = (instances[index].*get)();
+                    vector[axis] = value;
+                    (instances[index].*set)(vector);
+                    live->setInstances(std::move(instances));
+                });
         }
     }
 
@@ -1285,8 +1474,69 @@ private:
                 m_context->record_action(
                     [camera, previous] { camera->config.post_processing.fragment_shader = previous; },
                     [camera, value] { camera->config.post_processing.fragment_shader = value; });
+                refresh();
             });
         fragment.style.layout.require_mode(bgui::mode::match_parent, bgui::mode::wrap_content);
+        std::string stack_text;
+        for (const auto& pass : camera->config.post_processing.fragment_shaders) {
+            if (!stack_text.empty()) stack_text += "; ";
+            stack_text += pass;
+        }
+        post.add<bgui::text>("Passes adicionais em ordem (separados por ;)", .30f);
+        auto& stack = post.add<bgui::inputbox>(stack_text, "shaders/ps1.frag; shaders/fade.frag", .30f,
+            [this,camera](const std::string& text) {
+                if (m_context->is_playing || m_context->registry->get<commons::camera>(camera->my_object)!=camera) return;
+                std::vector<std::string> next;
+                std::size_t begin=0;
+                while (begin<text.size()) {
+                    const auto end=text.find(';',begin);
+                    auto path=text.substr(begin,end==std::string::npos?end:end-begin);
+                    const auto first=path.find_first_not_of(" \t\r\n");
+                    if (first!=std::string::npos) next.push_back(path.substr(first,path.find_last_not_of(" \t\r\n")-first+1));
+                    if (end==std::string::npos) break;
+                    begin=end+1;
+                }
+                auto candidate=camera->config.post_processing;candidate.fragment_shaders=next;
+                if (!candidate.valid()) return;
+                const auto previous=camera->config.post_processing.fragment_shaders;
+                camera->config.post_processing.fragment_shaders=next;
+                camera->skybox_asset_root=m_context->project_root.string();
+                m_context->record_action(
+                    [camera,previous]{camera->config.post_processing.fragment_shaders=previous;},
+                    [camera,next]{camera->config.post_processing.fragment_shaders=next;});
+                refresh();
+            });
+        stack.style.layout.require_mode(bgui::mode::match_parent,bgui::mode::wrap_content);
+        auto& uniform_status = post.add<bgui::text>("", .30f);
+        uniform_status.set_enable(false);
+        const auto uniform_context = std::weak_ptr<editor_context>(m_context);
+        const auto live_camera = [uniform_context, camera] {
+            const auto context = uniform_context.lock();
+            return context && !context->is_playing && context->registry &&
+                context->registry->get<commons::camera>(camera->my_object) == camera;
+        };
+        const auto edit_uniforms = [&](const std::string& fragment_path) {
+        build_shader_uniform_editor(post, "ambient_occlusion.vert",
+            fragment_path.empty() ? std::string{} : (m_context->project_root / fragment_path).string(),
+            [camera] { return camera->config.post_processing.parameters; },
+            [uniform_context, camera, live_camera](const commons::material& next) {
+                if (!live_camera()) return false;
+                const auto previous = camera->config.post_processing.parameters;
+                camera->config.post_processing.parameters = next;
+                uniform_context.lock()->record_action(
+                    [camera, previous, live_camera] { if (live_camera()) camera->config.post_processing.parameters = previous; },
+                    [camera, next, live_camera] { if (live_camera()) camera->config.post_processing.parameters = next; });
+                return true;
+            }, [&uniform_status](std::string message) {
+                uniform_status.set_enable(!message.empty());
+                uniform_status.set_buffer(std::move(message));
+            });
+        };
+        edit_uniforms(camera->config.post_processing.fragment_shader);
+        for (const auto& pass : camera->config.post_processing.fragment_shaders) {
+            post.add<bgui::text>(pass,.28f);
+            edit_uniforms(pass);
+        }
         post.add<bgui::text>(tr("Ambient Occlusion"), .30f);
         auto& mode = post.add<bgui::combo_box>(std::vector<std::string>{"Off", "SSAO", "HBAO", "GTAO"},
             .30f, static_cast<std::size_t>(camera->config.post_processing.occlusion));
@@ -1330,7 +1580,7 @@ private:
     }
 
     template<class Content, class Component>
-    void add_toggle(Content& content, const char* label,
+    void add_toggle(Content& content, const std::string& label,
         std::shared_ptr<Component> component, bool Component::*field) {
         auto& checkbox = panel::add_checkbox(content, label, .30f, component.get()->*field);
         checkbox.set_on_change([this, component, field](bool enabled) {

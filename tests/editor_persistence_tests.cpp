@@ -68,6 +68,44 @@ void remove_project_files(const std::filesystem::path& project_path) {
     std::filesystem::remove(project_path, ignored);
 }
 
+TEST(ProjectPersistenceTest, ReloadsSceneInstancesAndRendererFlags) {
+    const auto folder = temporary_project_path().replace_extension();
+    std::filesystem::create_directory(folder);
+    struct cleanup {
+        std::filesystem::path folder;
+        ~cleanup() { std::filesystem::remove_all(folder); }
+    } remove{folder};
+    const auto model = folder / "triangle.bmodel";
+    std::ofstream(model) << R"({"format":"bengine-model","version":1,"meshes":[
+        {"vertices":[[0,0,0,0,0],[1,0,0,1,0],[0,1,0,0,1]],"faces":[[0,1,2]]}]})";
+    auto registry = std::make_shared<commons::ecs>();
+    auto editor_camera = registry->create();
+    registry->add<commons::camera>(editor_camera);
+    auto entity = registry->create();
+    registry->add<commons::renderer>(entity, model.string().c_str());
+    auto source = registry->get<commons::renderer>(entity.id);
+    ASSERT_EQ(source->m_modelo->meshes.size(), 1u);
+    source->local_instances = true;
+    source->particle_layer = true;
+    source->bounds_padding = 1.25f;
+    std::vector<commons::transform> instances(2);
+    instances[1].set_position({1, 2, 3});
+    source->m_modelo->meshes[0].setInstances(std::move(instances));
+
+    editor::ui::project_persistence_system persistence(registry, editor_camera.id);
+    const auto project = (folder / "project.bengine").string();
+    std::string error;
+    ASSERT_TRUE(persistence.save(project, error)) << error;
+    ASSERT_TRUE(persistence.load(project, error)) << error;
+    const auto restored = registry->get<commons::renderer>(entity.id);
+    ASSERT_TRUE(restored);
+    EXPECT_TRUE(restored->local_instances);
+    EXPECT_TRUE(restored->particle_layer);
+    EXPECT_FLOAT_EQ(restored->bounds_padding, 1.25f);
+    ASSERT_EQ(restored->m_modelo->meshes[0].instances().size(), 2u);
+    EXPECT_EQ(restored->m_modelo->meshes[0].instances()[1].get_position(), (bgui::vec3{1, 2, 3}));
+}
+
 TEST(ProjectPersistenceTest, KeepsEditorCameraOutOfSceneAndRoundTripsSceneCameras) {
     auto registry = std::make_shared<commons::ecs>();
     auto editor_camera_entity = registry->create(17);
@@ -1134,13 +1172,25 @@ TEST(ProjectPersistenceTest, RoundTripsHudWithMigratedWorldLabel) {
     EXPECT_FALSE(h->elements[2]->absolute);
     ASSERT_TRUE(h->elements[2]->set_screen_position({45, 60, 0}));
     const auto layout_position = h->elements[2]->position;
+    h->elements[2]->font="assets/game.ttf";
+    h->elements[2]->shader="assets/pulse.frag";
+    h->elements[2]->opacity=.6f;
+    auto image=h->add("image","",2); image->image="assets/icon.png";
+    image->absolute=true; image->position={5,7,0};
     editor::ui::project_persistence_system persistence(registry, editor_camera.id);
     const auto path = temporary_project_path(); std::string error;
     ASSERT_TRUE(persistence.save(path.string(), error)) << error;
     ASSERT_TRUE(persistence.load(path.string(), error)) << error;
     auto restored = registry->get<commons::hud>(106);
     ASSERT_NE(restored,nullptr);
-    ASSERT_EQ(restored->elements.size(),3u);
+    ASSERT_EQ(restored->elements.size(),4u);
+    EXPECT_EQ(restored->asset_root,path.parent_path().string());
+    EXPECT_EQ(restored->elements[2]->font,"assets/game.ttf");
+    EXPECT_EQ(restored->elements[2]->shader,"assets/pulse.frag");
+    EXPECT_FLOAT_EQ(restored->elements[2]->opacity,.6f);
+    EXPECT_EQ(restored->elements[3]->parent,2);
+    EXPECT_TRUE(restored->elements[3]->relative);
+    EXPECT_EQ(restored->elements[3]->image,"assets/icon.png");
     EXPECT_EQ(restored->elements[1]->text,"Continue");
     EXPECT_EQ(restored->elements[1]->parent,0);
     const auto& label = restored->elements[2];

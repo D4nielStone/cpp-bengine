@@ -26,6 +26,8 @@ namespace COMMONS_NS {
 	    }
 
 	    std::shared_ptr<scene_control> scenes;
+        // Value snapshots shared by independent Lua states; never retain Lua references.
+        std::unordered_map<std::string, std::string> script_globals;
 
         std::unordered_set<uint32_t> live_entities;
 	    /// Armazena mask da entity associada

@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/ui_system.hpp"
 
 #include <glad.h>
@@ -5,6 +6,7 @@
 #include <bgui_backend_freetype.hpp>
 #include <bgui_backend_gl3.hpp>
 #include <bgui_backend_glfw.hpp>
+#include <os/resource_files.hpp>
 
 #include "debugging/debug.hpp"
 
@@ -21,9 +23,10 @@ void ui_system::setup(const std::shared_ptr<ecs>&)
     bgui::set_font_antialiasing(true);
     bgui::set_up_freetype();
     constexpr const char* interface_font = "Hack Nerd Font";
-    const auto interface_font_path =
-        std::filesystem::path(COMMONS_ASSET_DIR) /
-        "fonts/HackNerdFont-Regular.ttf";
+    const auto font_file = "fonts/HackNerdFont-Regular.ttf";
+    auto interface_font_path = std::filesystem::path("assets") / font_file;
+    if (!bgui::resource_files::exists(interface_font_path))
+        interface_font_path = std::filesystem::path(COMMONS_ASSET_DIR) / font_file;
     bgui::ft_load_font(
         interface_font,
         interface_font_path.string(),
@@ -39,12 +42,12 @@ void ui_system::setup(const std::shared_ptr<ecs>&)
         bgui::load_font_queue();
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        bgui::on_update();
+        { BUBBLE_PROFILE("BGUI update and layout", "Editor"); bgui::on_update(); }
 
         const GLboolean framebuffer_srgb_enabled = glIsEnabled(GL_FRAMEBUFFER_SRGB);
         glDisable(GL_FRAMEBUFFER_SRGB);
         bgui::gl3_clear();
-        bgui::gl3_render(bgui::get_draw_data());
+        { BUBBLE_PROFILE("BGUI render submission", "Editor"); bgui::gl3_render(bgui::get_draw_data()); }
         if (framebuffer_srgb_enabled)
             glEnable(GL_FRAMEBUFFER_SRGB);
     };

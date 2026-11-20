@@ -13,7 +13,10 @@ que a contém. A implementação de referência está em
 4. [Input, Time, Debug e saída de console](./input-time-debug.md)
 5. [Propriedades Lua no Inspector](./script-properties.md)
 6. [Compatibilidade, carregamento de recursos e limites](./compatibility.md)
-7. [HUD e textos que acompanham pontos da cena](../HUD.md)
+7. [HUD modular, fontes, imagens e shaders](../HUD.md) — [exemplo Lua](examples/modular_hud.lua)
+
+8. [Variáveis compartilhadas e uniforms GLSL](./globals-and-shaders.md)
+9. [Efeitos visuais com GLSL e Lua](./visual-effects.md)
 
 ## Índice rápido da API
 
@@ -24,6 +27,8 @@ que a contém. A implementação de referência está em
 | Componentes | `Transform`, `Renderer`, `Rigidbody`, `Camera`, `DirectionalLight`, `PointLight`, `SpotLight`, `SoundListener`, `SoundPlayer`, `HUD`, `Animation`, `Pathfinder` |
 | Entrada e tempo | `Input.GetKey`, `Input.GetAxis`, `Input.GetMouseDelta`, `Input.SetMouseCaptured`, `Time.deltaTime`, `Time.time` |
 | Cenas | `SceneManager.LoadScene`, `ReloadScene`, `GetActiveScene`, `IsLoading`, `GetLastError` |
+| Dados compartilhados | `Globals.Set`, `Get`, `Has`, `Remove`, `Clear` |
+| Shaders | `Shader.GetUniforms`, `Renderer:SetShader`, `SetUniform`, `RemoveUniform`, `Camera.postProcessShader`, `Camera:SetUniform`, `RemoveUniform` |
 | Diagnóstico | `Debug.Log`, `print` |
 | Compatibilidade | `bubble.log`, `bubble.input`, `bubble.entity`, `bubble.transform`, `bubble.meuID`, `bubble.delta_time` |
 
@@ -35,3 +40,5 @@ genéricos de entidades/componentes, nem operações de
 reprodução/controle de áudio. A lista não presume APIs comuns em outras engines.
 
 - [Gerenciamento de cenas e Pathfinder para inimigos](./scenes-and-navigation.md)
+
+Exemplo: [áudio espacial com reprodução por código](examples/spatial_audio.lua).

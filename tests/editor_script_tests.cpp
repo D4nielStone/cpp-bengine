@@ -42,9 +42,13 @@ TEST_F(EditorScriptTest, CreatesTemplateWithoutOverwritingOrEscapingFolder) {
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(preserved), {}), original);
 }
 
-TEST_F(EditorScriptTest, OffersOnlyTheGeneralFppTemplate) {
-    ASSERT_EQ(editor::ui::lua_script_templates.size(), 1u);
-    EXPECT_EQ(editor::ui::lua_script_templates[0].name, "Controle FPP (jogador e câmera)");
+TEST_F(EditorScriptTest, OffersBlankAndGeneralFppTemplatesWithMatchingPresets) {
+    ASSERT_EQ(editor::ui::lua_script_templates.size(), 2u);
+    EXPECT_EQ(editor::ui::script_template(editor::ui::lua_script_preset::blank).name, "Arquivo em branco");
+    const auto& fpp = editor::ui::script_template(editor::ui::lua_script_preset::fpp_controller);
+    EXPECT_EQ(fpp.name, "Controle FPP (jogador e câmera)");
+    EXPECT_NE(fpp.source.find("properties.player"), std::string_view::npos);
+    EXPECT_EQ(editor::ui::script_template(editor::ui::lua_script_preset::blank).source.find("properties.player"), std::string_view::npos);
 }
 
 TEST_F(EditorScriptTest, FppControllerUsesSelectedCameraYawAndMovesTheSelectedPlayer) {

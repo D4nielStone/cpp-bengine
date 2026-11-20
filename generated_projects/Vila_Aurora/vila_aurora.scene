@@ -18874,10 +18874,12 @@
                 },
                 "camera": {
                     "post_processing": {
-                        "occlusion": 0,
+                        "occlusion": 3,
                         "radius": 0.75,
                         "strength": 1.0,
-                        "fragment_shader": ""
+                        "fragment_shader": "",
+                        "fragment_shaders": [],
+                        "uniforms": {}
                     },
                     "fov": 60.0,
                     "zfar": 150.0,

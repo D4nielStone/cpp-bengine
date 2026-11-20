@@ -45,7 +45,9 @@ namespace COMMONS_NS {
         ~mesh();
      private:
         friend class render_system;
-        void draw_geometry() const;
+        void draw_instances(shader& shader, const glm::mat4* instance_parent = nullptr) const;
+        void draw(shader& shader, const glm::mat4* instance_parent);
+        void draw_geometry(std::size_t instance_count = 0) const;
         bool                        m_overlayed { false },
                                     m_loaded { false };
         std::vector<transform>      m_instances;

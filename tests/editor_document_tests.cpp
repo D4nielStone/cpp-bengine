@@ -59,11 +59,23 @@ TEST(EditorDocuments, DockTabsPreserveBuffersAndSaveWithShortcut) {
         first->get_context().processed_y() + first->get_context().processed_height());
     EXPECT_EQ(editor->get_label().computed_style.layout.margin, bgui::vec4i{0});
 
+    EXPECT_FALSE(files.line_wrap_enabled());
+    EXPECT_FALSE(editor->is_wrap_enabled());
+    files.set_line_wrap(true);
+    EXPECT_TRUE(editor->is_wrap_enabled());
     editor->set_buffer("changed");
     editor->set_focused(true);
     files.update();
     EXPECT_EQ(first->get_title().get_buffer(), "first.lua*");
     open("second.txt");
+    auto* second_window = find<bgui::window>(dock, [](auto& value) { return value.get_title().get_buffer() == "second.txt"; });
+    ASSERT_NE(second_window, nullptr);
+    auto* second_editor = find<bgui::inputbox>(*second_window, [](auto&) { return true; });
+    ASSERT_NE(second_editor, nullptr);
+    EXPECT_TRUE(second_editor->is_wrap_enabled());
+    files.set_line_wrap(false);
+    EXPECT_FALSE(editor->is_wrap_enabled());
+    EXPECT_FALSE(second_editor->is_wrap_enabled());
     EXPECT_EQ(editor->get_buffer(), "changed");
     open("first.lua");
     dock.on_update();

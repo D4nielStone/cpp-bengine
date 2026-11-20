@@ -36,6 +36,47 @@ through tool arguments. On Windows use `.exe` paths and JSON-escaped backslashes
 The server now links the engine's existing authoring and validation code; it needs
 its normal installed dependencies, but authoring does not create an OpenGL context.
 
+## Live editor connection
+
+Start the editor and configure the MCP client with the same random credential.
+The editor binds to IPv4 loopback only when `BENGINE_EDITOR_MCP_PORT` and a
+valid `BENGINE_EDITOR_MCP_TOKEN` are set.
+
+```sh
+export BENGINE_EDITOR_MCP_PORT=8766
+export BENGINE_EDITOR_MCP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+/path/to/build/apps/editor_app --project "/path/to/game/project.bengine"
+```
+
+Configure the MCP client to start the following command and pass it the same
+`BENGINE_EDITOR_MCP_TOKEN` environment value.
+
+```sh
+/path/to/build/apps/bengine_mcp --editor-port 8766 --workspace /path/to/games
+```
+
+The workspace limit is optional. The connection follows the project selected
+in that editor. Start another editor with a distinct port for a separate session.
+The port carries a local editor protocol. MCP clients still speak stdio to
+`bengine_mcp` or HTTP through the existing adapter.
+
+`project_info`, `list_entities`, `get_entity` and `read_file` show unsaved
+changes to the active scene. Read its current contents before calling
+`compose_scene` or `write_asset` on it. The editor validates each change
+against that version on its own thread and records one undo action. Locked
+entities and the editor camera are protected. With no play session active,
+`undo_live_edit`, `redo_live_edit` and `save_live_project` use the editor's
+history and save flow. Scene switching observes the unsaved-change guard.
+
+Asset writes use the editor's file transaction and check the current disk
+contents. Existing custom shaders refresh through the shader loader. Assets
+already instantiated in the scene, including native meshes and animation
+clips, may need to be reassigned or reopened to load a modified asset file.
+`run_test` starts a separate runtime from the saved project. Save from the
+editor first to include unsaved scene edits. The inspector and the MCP share
+the scene state. Save pending text edits before editing the same file through
+MCP. Clean open documents are refreshed after a successful MCP file write.
+
 ## Tools
 
 | Tool | Purpose |
@@ -47,12 +88,15 @@ its normal installed dependencies, but authoring does not create an OpenGL conte
 | `list_entities` / `get_entity` | Inspect saved main-scene entities (100 per page). |
 | `list_files` / `read_file` | Discover project files and read text for editing. |
 | `create_model` | Create a unit `cube` or `plane` in `.bmodel` format. |
-| `write_asset` | Author/replace `.bmodel`, `.banim`, `.lua`, `.scene` or `.world`. |
+| `write_asset` | Author/replace `.bmodel`, `.banim`, `.lua`, `.vert`, `.frag`, `.scene` or `.world`. |
 | `compose_scene` | Upsert complete entity records and optionally remove IDs in a single validated save. |
 | `set_main_scene` | Change the manifest's startup scene. |
 | `run_test` | Run the configured runtime, capture a specified frame, then exit. |
 | `test_status` | Return running/timeout status, exit code, logs, capture report and MCP PNG image. |
 | `stop_test` | Terminate the active runtime without deleting project files. |
+
+Entity ID 1 is reserved for the internal editor/runtime camera; the authoring
+guide uses IDs 2 and 3.
 
 Tool discovery supplies complete input schemas. All new tools reject unknown
 arguments. Project paths are workspace-relative; asset/scene paths are relative
@@ -84,8 +128,8 @@ duplicate IDs, missing parents and hierarchy cycles. Deletes that orphan childre
 must update/remove those children in the same call. Clips remain reusable `.banim`
 assets; no animation curves are injected into scene component records.
 
-Editing operates on saved files, not on an open editor's unsaved state or undo
-history. Close the editor or reload its project after MCP edits. Optimistic content
+Standalone mode edits saved files. Reload the project in an open editor after
+standalone MCP edits. Optimistic content
 checks detect prior edits; they are not a filesystem lock against simultaneous
 writers. A pending save transaction is refused until recovered in the editor.
 Text editing is limited to 400000 bytes per file, MCP requests to 1 MiB, JSON depth
@@ -140,3 +184,59 @@ path confinement, nesting limits, invalid hierarchies and fixture-based PNG tran
 `RuntimeProcessTest.PreservedProjectSurvivesNaturalExitAndMissingExecutable`
 protects the project-preserving launch path. Graphical capture validation requires
 a usable OpenGL session; the runtime smoke test is separately opt-in.
+
+## Authenticated local HTTP transport
+
+The optional Python 3 standard-library adapter preserves the C++ stdio server and
+its complete tool catalog. Start it with a randomly generated credential of at
+least 32 ASCII characters in `BENGINE_MCP_TOKEN` (do not commit credentials):
+
+```sh
+export BENGINE_MCP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+python3 apps/mcp/http_transport.py --port 8765 -- \
+  /path/to/build/apps/bengine_mcp --project /path/to/game/project.bengine \
+  --runtime /path/to/build/apps/runtime_app
+```
+
+The endpoint is `http://127.0.0.1:8765/mcp`. Every request requires
+`Authorization: Bearer <credential>`. POST requires `Content-Type: application/json`
+and `Accept: application/json, text/event-stream`. Initialize normally, retain the
+returned `Mcp-Session-Id`, and send it plus `MCP-Protocol-Version: 2025-11-25` on
+subsequent requests, including `notifications/initialized`. Notifications return
+202; requests return JSON. GET returns 405 (no unsolicited SSE stream); DELETE
+ends the session. A second writer receives 409. Session inactivity of five minutes
+is checked on the next POST/DELETE; DELETE or shutdown stops the child runtime.
+Use only one adapter per project. Existing optimistic file checks still apply.
+`compose_scene` preserves untouched legacy records with absolute native asset paths;
+references in every inserted or replaced entity must remain project-relative.
+
+The adapter binds exclusively to IPv4 loopback, checks Host against localhost and
+127.0.0.1 with the actual port, rejects browser Origins unless explicitly allowed
+with repeatable `--origin https://trusted.example`, and compares credentials in
+constant time. It limits concurrent connections, request bytes, response bytes and
+socket/subprocess waits. It does not log credentials or request bodies, and removes
+the token from the environment inherited by engine processes. Only trusted callers
+should receive the credential: tools can write project assets and execute Lua in
+the runtime with the user's permissions.
+
+This is a local bearer authentication mode, **not an OAuth authorization server**.
+Remote ChatGPT connection is not configured by this command. It requires a reachable
+HTTPS endpoint and an OAuth 2.1 resource/authorization gateway implementing MCP
+protected-resource discovery, token audience validation and the client's supported
+registration flow. Configure that gateway to forward authenticated traffic only,
+rewrite Host to the loopback authority, and inject a separate private adapter
+credential; never expose the raw adapter port or reuse a remote access token as its
+local credential. No public URL, TLS certificate or OAuth provider is provisioned
+by this repository. See the [MCP transport specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+and [authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization).
+
+HTTP regression coverage lives in `tests/mcp_http_tests.py` and CTest `mcp_http`.
+HTTP access continues to edit saved files only; it cannot inspect unsaved editor
+state, drive editor commands, save an open scene, or capture the editor viewport.
+
+GLSL `.vert`/`.frag` authoring uses the same confined paths, size limits,
+recoverable transactions and exact `expectedContents` checks. Empty and NUL-bearing
+sources are rejected. The headless MCP server does not compile or certify GLSL;
+compile in the editor/runtime and inspect logs plus the resulting capture. Camera
+filters and renderer material shader references use the existing generic uniform
+controls; see `docs/lua-api/globals-and-shaders.md`.

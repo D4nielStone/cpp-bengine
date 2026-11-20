@@ -29,7 +29,7 @@ continuam pertencendo às árvores de elementos do BGUI.
 - **Animação**: trilhas de propriedades por entidade, arquivos de clipe, gravação automática de alterações e edição de keyframes,
   interpolação, prévia com desfazer e reprodução no runtime. Veja
   [o guia de animação](./ANIMATION.md).
-- **Editor Diagnostics**: métricas locais de frame e renderização.
+- **Profiler**: histórico de frames, CPU/GPU, inspeção e capturas; veja [PROFILER.md](PROFILER.md).
 
 O painel **Game** é ocultado enquanto o runtime externo está executando. O
 runtime roda em outro processo, portanto a prévia não mostra a simulação desse
@@ -185,7 +185,7 @@ A interface usa superfícies e textos em cinza, com roxo nos destaques de foco,
 seleção e ações. Blocos de scripts e o grafo seguem a mesma paleta neutra.
 
 Os presets **View → Layout: Standard / Layout: Wide Scene** agrupam Arquivos,
-Debug e Animação em abas, Scene/Game em outro grupo e Inspector/Editor Diagnostics
+Debug e Animação em abas, Scene/Game em outro grupo e Inspector/Profiler
 à direita. O layout padrão reserva mais espaço para os campos do Inspector e
 para o painel inferior. Os layouts já salvos continuam sendo carregados; use um
 preset ou **Reset UI** para adotar a nova composição sem fechar documentos.
@@ -273,3 +273,18 @@ lista de scripts. Aplicar/remover usa o histórico da cena; excluir arquivo usa
 confirmação explícita e avisa sobre rascunhos e referências. Salve o Lua antes
 de aplicá-lo. Objetos bloqueados e a câmera do editor não aparecem como destinos;
 as operações ficam indisponíveis durante a execução.
+
+### Documentos de texto e docks
+
+O menu **Exibir → Quebra automática de linha** alterna o wrap para todos os
+editores de texto abertos e para os próximos documentos na sessão. Sem wrap,
+as linhas longas têm barra horizontal, aceitam **Shift + roda do mouse** e
+acompanham o cursor ao digitar ou navegar. O conteúdo do arquivo não é alterado
+pela quebra visual de linhas.
+
+Retirar uma tab de um grupo mantém as demais no dock. Janelas soltas conservam
+seu último tamanho flutuante ao serem dockadas e retiradas novamente; na primeira
+retirada usam 480 × 360 unidades de interface. Grupos empilhados verticalmente
+cedem espaço aos vizinhos ao recolher. Ao tentar recolher o último grupo aberto
+de uma região com vários grupos, ele permanece expandido. As tabs laterais têm
+cantos arredondados e um indicador de seleção recuado das bordas.

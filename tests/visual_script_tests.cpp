@@ -153,7 +153,7 @@ TEST(VisualLua, VectorExpressionsWithTrailingCallsStayAsOneValue) {
     EXPECT_EQ(doc.blocks()[0].head.substr(fields[1].begin,fields[1].end-fields[1].begin),"Vector3(1, 2, 3) * factor()");
 }
 TEST(VisualLua, ReadOnlyPropertiesNeverOfferSetterBlocks) {
-    for(const std::string name:{"GameObject.id","GameObject.transform","Camera.viewportWidth","Camera.viewportHeight","Camera.forward","Camera.aspect","SpotLight.worldPosition","SpotLight.worldDirection","Animation.time","Animation.isPlaying","Animation.isBlending","HUD.count"}) {
+    for(const std::string name:{"GameObject.id","GameObject.transform","Camera.viewportWidth","Camera.viewportHeight","Camera.forward","Camera.aspect","SpotLight.worldPosition","SpotLight.worldDirection","SoundPlayer.isPlaying","Animation.time","Animation.isPlaying","Animation.isBlending","HUD.count"}) {
         bool reader=false;
         for(const auto& c:vl::commands()) {
             if(c.title=="Ler "+name) reader=true;
@@ -278,4 +278,51 @@ TEST(VisualLua, CompactGuardsRemainValidAfterRemovingAndMovingTheirBody) {
     ASSERT_TRUE(doc.move(action,parent));
     EXPECT_TRUE(vl::validate(doc.source(),error)) << error;
     ASSERT_TRUE(doc.undo()); EXPECT_EQ(doc.source(),source);
+}
+
+TEST(VisualLua, HudAppearanceAndIdLookupExposeEditableArguments) {
+    for(const std::string title:{"Buscar elemento por ID","Adicionar elemento","Definir HudElement.font","Definir HudElement.image","Definir HudElement.shader","Definir HudElement.opacity","Definir HudElement.relative","Definir HudElement.color","Definir HudElement.background","Definir HudElement.callback"}) {
+        const auto& commands=vl::commands();
+        const auto it=std::find_if(commands.begin(),commands.end(),[&](const auto& c){return c.title==title;});
+        ASSERT_NE(it,commands.end())<<title;
+        auto blocks=vl::parse(it->source);
+        ASSERT_EQ(blocks.size(),1u);
+        EXPECT_EQ(vl::describe(blocks[0]),&*it);
+        EXPECT_FALSE(vl::slots(blocks[0]).empty())<<title;
+    }
+}
+
+TEST(VisualLua, GlobalsAndShaderCommandsHaveEditableArguments) {
+    unsigned count = 0;
+    for (const auto& command : vl::commands()) {
+        if (command.category != "Globais" && command.category != "Shaders") continue;
+        ++count;
+        auto blocks = vl::parse(command.source);
+        ASSERT_EQ(blocks.size(), 1u) << command.title;
+        EXPECT_EQ(vl::describe(blocks[0]), &command) << command.title;
+        const auto fields = vl::slots(blocks[0]);
+        for (const auto& label : command.arguments)
+            EXPECT_NE(std::find_if(fields.begin(), fields.end(), [&](const auto& field) { return field.label == label; }), fields.end()) << command.title << ": " << label;
+        std::string error;
+        EXPECT_TRUE(vl::validate(vl::emit(blocks), error)) << error;
+    }
+    EXPECT_EQ(count, 12u);
+}
+
+TEST(VisualLua, AudioTransportCommandsKeepEditableReceiver) {
+    unsigned count = 0;
+    for (const auto& command : vl::commands()) {
+        if (command.category != "Áudio") continue;
+        vl::document document;
+        document.load(command.source + "\n");
+        ASSERT_EQ(document.blocks().size(), 1u);
+        EXPECT_EQ(vl::title(document.blocks()[0]), command.title);
+        const auto fields = vl::slots(document.blocks()[0]);
+        ASSERT_EQ(fields.size(), 1u);
+        EXPECT_EQ(fields[0].label, "Alvo");
+        EXPECT_TRUE(document.edit(document.blocks()[0].id, 0, "audio"));
+        EXPECT_NE(document.source().find("audio:"), std::string::npos);
+        ++count;
+    }
+    EXPECT_EQ(count, 4u);
 }

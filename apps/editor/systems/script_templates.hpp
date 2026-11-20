@@ -6,7 +6,7 @@
 
 namespace editor::ui {
 
-enum class lua_script_preset { fpp_controller };
+enum class lua_script_preset { blank, fpp_controller };
 
 struct lua_script_template {
     std::string_view name;
@@ -15,6 +15,10 @@ struct lua_script_template {
 
 inline constexpr std::array lua_script_templates{
     lua_script_template{"Arquivo em branco", R"lua(--@property {"name":"my_property","type":"number","default":0}
+-- Compartilhe valores com Globals.Set("pontos", 0) e Globals.Get("pontos").
+-- camera:SetUniform("intensity", "float", 1) configura filtros GLSL.
+-- camera.postProcessPasses = {"shaders/ps1.frag"} adiciona passes após o filtro base.
+-- SoundPlayer oferece Play/Pause/Resume/Stop e isPlaying (somente leitura).
 function setup() end
 
 function update() end
@@ -24,6 +28,9 @@ function update() end
 --@property {"name":"move_speed","type":"number","default":5}
 --@property {"name":"mouse_sensitivity","type":"number","default":0.12}
 
+-- Globals.Set/Get compartilham valores entre scripts da cena.
+-- A câmera aceita postProcessShader, postProcessPasses e SetUniform(nome, tipo, valor).
+-- SoundPlayer:Play/Pause/Resume/Stop controlam áudio 3D no componente de som.
 local enabled = false
 local camera_offset
 

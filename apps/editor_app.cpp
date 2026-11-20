@@ -30,6 +30,8 @@
 #include "editor/panels/debug_view.hpp"
 #include "editor/panels/scene_view.hpp"
 #include "editor/core/editor_api.hpp"
+#include "editor/services/live_scene.hpp"
+#include "mcp/editor_connection.hpp"
 #include "editor/panels/runtime_tools_view.hpp"
 #include "editor/panels/game_view.hpp"
 #include "editor/panels/entities_view.hpp"
@@ -59,6 +61,20 @@
 #include <vector>
 
 namespace {
+class live_editor_poll final : public commons::system {
+public:
+    explicit live_editor_poll(const std::shared_ptr<bubble::mcp::editor_connection>& connection)
+        : m_connection(connection) {}
+
+    void setup(const std::shared_ptr<commons::ecs>&) override {}
+    void update(const std::shared_ptr<commons::ecs>&) override {
+        if (auto connection = m_connection.lock()) connection->poll();
+    }
+
+private:
+    std::weak_ptr<bubble::mcp::editor_connection> m_connection;
+};
+
 void signal_update_ready() {
 #ifdef _WIN32
     const auto* marker = _wgetenv(L"BENGINE_UPDATE_READY");
@@ -764,6 +780,26 @@ public:
     }
 
     int run() {
+        std::shared_ptr<mcp::editor_connection> live;
+        if (const auto* port = std::getenv("BENGINE_EDITOR_MCP_PORT")) {
+            try {
+                const auto token = mcp::editor_token();
+                live = std::make_shared<mcp::editor_connection>(mcp::editor_port(port),
+                    [this, token](std::string_view request) {
+                        if (!m_root->is_enabled())
+                            return std::string(R"({"error":"The project manager is open."})");
+                        const editor::ui::live_document_hooks documents{
+                            [this](const auto& path) { return m_files->has_document_edits(path); },
+                            [this](const auto& path) { m_files->reload_clean_document(path); }
+                        };
+                        return editor::ui::dispatch_live_scene(request, token, m_project_path,
+                            *m_context, *m_project_persistence, documents);
+                    });
+                m_window.add<live_editor_poll>(live);
+            } catch (const std::exception& error) {
+                std::cerr << "[editor] " << error.what() << '\n';
+            }
+        }
         for (;;) {
             m_window.loop(signal_update_ready);
             if (!m_show_manager) break;

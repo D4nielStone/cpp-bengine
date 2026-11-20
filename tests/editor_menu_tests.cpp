@@ -333,7 +333,7 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
     dock.add_window("Debug", bgui::dock_area::right);
     dock.add_window("Game", bgui::dock_area::bottom);
     dock.add_window("Inspector", bgui::dock_area::right);
-    dock.add_window("Editor Diagnostics", bgui::dock_area::right);
+    dock.add_window("Profiler", bgui::dock_area::right);
     click("Layout: Wide Scene");
     auto configuration = dock.get_configuration();
     EXPECT_FLOAT_EQ(configuration.left_ratio, .16f);
@@ -346,7 +346,7 @@ TEST_F(EditorMenuTest, LayoutPresetsDockPanelsInTheirExpectedRegions) {
     }
     ASSERT_EQ(configuration.tab_groups.size(), 3u);
     EXPECT_EQ(configuration.tab_groups[1].windows, (std::vector<std::string>{"Scene", "Game"}));
-    EXPECT_EQ(configuration.tab_groups[2].windows, (std::vector<std::string>{"Inspector", "Editor Diagnostics"}));
+    EXPECT_EQ(configuration.tab_groups[2].windows, (std::vector<std::string>{"Inspector", "Profiler"}));
     EXPECT_EQ(configuration.tab_groups.front().windows, (std::vector<std::string>{editor::ui::tr("Arquivos"), "Debug"}));
     click("Layout: Standard");
     EXPECT_FLOAT_EQ(dock.get_configuration().left_ratio, .18f);
@@ -1620,7 +1620,7 @@ TEST(EditorAppearanceNative, RendersCompactInspectorTabsAndCenteredModeGlyphs) {
 }
 
 TEST(ModelRigEditor, CreatesBindsSavesAndAutomaticallyRecordsBonePose) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     bgui::get_context().m_size = {1200,900};
     const auto directory = std::filesystem::temp_directory_path() /
         ("bengine-rig-editor-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -1789,7 +1789,7 @@ TEST(ModelRigAnimationNative, RendersRigTimelineAndDetailedTooltipAtTwoScales) {
 }
 
 TEST(ModelRigEditor, WeightPaintCommitsOneStrokeCancelsAndRoundTripsHistory) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& io = bgui::get_context();
     io.m_size = {1200,900}; io.m_input_map.clear();
     const auto directory = std::filesystem::temp_directory_path() /

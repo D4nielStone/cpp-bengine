@@ -12,6 +12,9 @@ namespace COMMONS_NS {
 	    bool visible{true};
         bool cast_shadows{true};
         bool receive_shadows{true};
+        bool local_instances{false};
+        bool particle_layer{false};
+        float bounds_padding{0.f};
 		static constexpr mask mask = COMPONENTE_RENDER;
 		renderer(model* mesh) : m_modelo(mesh) {
 		}
@@ -22,12 +25,16 @@ namespace COMMONS_NS {
                 return false;
             value.AddMember("cast_shadows", cast_shadows, allocator);
             value.AddMember("receive_shadows", receive_shadows, allocator);
+            if (local_instances) value.AddMember("local_instances", true, allocator);
+            if (particle_layer) value.AddMember("particle_layer", true, allocator);
             value.AddMember("model", rapidjson::Value(m_modelo->get_source_path().c_str(), allocator), allocator);
             return serialize_rig_pose(value, allocator);
         };
         std::vector<animation_property> animation_properties() const override;
         std::optional<double> read_animation_property(const std::string& path) const override;
         bool write_animation_property(const std::string& path, double value) override;
+        bool analyze_instances(const rapidjson::Value& value);
+        bool serialize_instances(rapidjson::Value&, rapidjson::Document::AllocatorType&) const;
         bool analyze_rig_pose(const rapidjson::Value& value);
         bool serialize_rig_pose(rapidjson::Value&, rapidjson::Document::AllocatorType&) const;
 

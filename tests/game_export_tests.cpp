@@ -315,3 +315,18 @@ TEST_F(GameExportTest, RejectsMissingAnimationClipBeforePublishingPackage) {
     scene(R"({"animation":{"clip":"assets/animations/missing.banim","autoplay":true,"speed":1}})");
     EXPECT_THROW(prepare(),std::runtime_error);
 }
+
+TEST_F(GameExportTest, PackagesHudFontImageAndFragmentShaderReferences) {
+    put(project/"assets/game.ttf","font"); put(project/"assets/pulse.frag","fragment");
+    rapidjson::Document data;
+    data.Parse(R"({"hud":{"elements":[{"kind":"text","parent":-1,"font":"","image":"","shader":""}]}})");
+    auto& e=data["hud"]["elements"][0];
+    for(const auto& [key,path] : {std::pair{"font",project/"assets/game.ttf"},{"image",project/"assets/texture.png"},{"shader",project/"assets/pulse.frag"}})
+        e[key].SetString(path.string().c_str(),data.GetAllocator());
+    game_package::preparation paths(project,repo/"commons/assets"); paths.rewrite(data,data.GetAllocator());
+    EXPECT_STREQ(e["font"].GetString(),"assets/game.ttf");
+    EXPECT_STREQ(e["image"].GetString(),"assets/texture.png");
+    EXPECT_STREQ(e["shader"].GetString(),"assets/pulse.frag");
+    e["font"].SetString("assets/missing.ttf",data.GetAllocator());
+    EXPECT_THROW(paths.rewrite(data,data.GetAllocator()),std::runtime_error);
+}

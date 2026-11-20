@@ -153,6 +153,7 @@ struct uniform {
         std::unordered_map<std::string, uniform> uniforms;
         void usar(shader& shader);
         void apply(shader& shader) const;
+        void apply_uniforms(shader& shader) const;
         bool same_configuration(const material&) const;
     };
     class material_binding {

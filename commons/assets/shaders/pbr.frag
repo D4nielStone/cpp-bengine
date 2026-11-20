@@ -271,13 +271,17 @@ void main() {
         result += visibility * calculateLightLo(L, radiance, N, V, albedo.rgb, metallic, roughness);
     }
 
-    // Cálculo da densidade da névoa
-    if (fogEnabled) {
-        float distanceToCamera = length(viewPos - Position);
-        float fogDistance = clamp(distanceToCamera - fogMinDistance,
-            0.0, fogMaxDistance - fogMinDistance);
-        float visibility = exp(-fogDensity * fogDistance);
-        result = mix(fogColor, result, clamp(visibility, 0.0, 1.0));
+    if (fogEnabled && fogDensity > 0.0) {
+        float start = max(fogMinDistance, 0.0);
+        float range = max(fogMaxDistance - start, 0.0001);
+        float distanceInFog = max(length(viewPos - Position) - start, 0.0);
+        float progress = clamp(distanceInFog / range, 0.0, 1.0);
+        float opticalDepth = max(fogDensity, 0.0) * distanceInFog;
+        float fogAmount = (1.0 - exp(-opticalDepth)) * smoothstep(0.0, 0.1, progress);
+        fogAmount = mix(fogAmount, 1.0, smoothstep(0.8, 1.0, progress));
+        // The configured color is in display space; lighting is still linear here.
+        vec3 linearFogColor = pow(max(fogColor, vec3(0.0)), vec3(2.2));
+        result = mix(result, linearFogColor, fogAmount);
     }
     // Conversão gamma
     float gamma = 2.2;

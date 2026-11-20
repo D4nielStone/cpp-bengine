@@ -7,20 +7,27 @@
     "model_orbital": false,
     "orbital": true,
     "colliders": false,
-    "selected": 279,
+    "selected": 282,
     "inspector": {
-        "Directional Light": true,
-        "Transform": true,
-        "Camera Post-processing": true,
+        "HUD": true,
+        "Sound Listener": true,
+        "Physics": true,
+        "Animation": true,
+        "Camera": true,
         "Renderer": true,
-        "Camera": true
+        "Camera Post-processing": true,
+        "Lua Script 1": true,
+        "Transform": true,
+        "Directional Light": true
     },
     "camera": {
         "post_processing": {
-            "occlusion": 0,
+            "occlusion": 2,
             "radius": 0.75,
             "strength": 1.0,
-            "fragment_shader": ""
+            "fragment_shader": "",
+            "fragment_shaders": [],
+            "uniforms": {}
         },
         "fov": 75.0,
         "zfar": 300.0,
@@ -48,26 +55,26 @@
             0.1599999964237213
         ],
         "skybox": false,
-        "fog_enabled": false,
+        "fog_enabled": true,
         "fog_density": 0.009999999776482582,
         "fog_min_distance": 0.0,
         "fog_max_distance": 300.0,
         "fog_color": [
-            0.4300000071525574,
-            0.7799999713897705,
-            0.8600000143051147,
+            1.0,
+            1.0,
+            1.0,
             1.0
         ]
     },
     "transform": {
         "position": [
-            2.3262557983398438,
-            1.4679489135742188,
-            16.07789421081543
+            0.860302746295929,
+            4.680838108062744,
+            24.5097713470459
         ],
         "rotation": [
-            -1.1500005722045898,
-            -214.5999755859375,
+            -29.20004653930664,
+            -179.34945678710938,
             0.0
         ],
         "scale": [

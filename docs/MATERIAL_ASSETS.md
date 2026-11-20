@@ -31,3 +31,10 @@ remoção automática desses arquivos, pois outros modelos ou cenas podem usá-l
 O runtime usa o mesmo carregador do editor, inclusive para recursos embutidos em
 um executável exportado. A exportação reescreve as referências necessárias para
 que o pacote continue funcionando quando movido para outra pasta.
+
+## Parâmetros de GLSL personalizados
+
+O Inspector consulta os uniforms ativos do shader personalizado e permite editar
+valores escalares, vetores e matrizes `mat4`, com desfazer/refazer. Campos vazios
+removem a substituição. A API Lua e o filtro da câmera reutilizam a mesma
+representação; veja [variáveis compartilhadas e shaders](lua-api/globals-and-shaders.md).

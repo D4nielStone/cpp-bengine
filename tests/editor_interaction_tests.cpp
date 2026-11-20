@@ -959,6 +959,82 @@ TEST_F(EditorInteractionTest, SpotLightColorUsesColorPickerAndSupportsUndoRedo) 
 }
 
 
+TEST_F(EditorInteractionTest, InspectorAddsNavigatesDuplicatesAndRemovesMeshInstances) {
+    auto entity = registry->create();
+    auto geometry = std::make_unique<commons::model>();
+    geometry->meshes.emplace_back(std::vector<commons::vertex>{},
+        std::vector<unsigned int>{}, commons::material{});
+    registry->add<commons::renderer>(entity, geometry.release());
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    auto& mesh = renderer->m_modelo->meshes.front();
+    context->selected_entity = entity.id;
+    auto& dock = bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view panel(context);
+    panel.build(dock);
+    panel.update();
+
+    const auto button = [&](const std::string& action) {
+        return find_element<bgui::button>(dock, [&](auto& item) {
+            return item.id == "instance-" + action + "-0";
+        });
+    };
+    const auto click = [&](const std::string& action) {
+        auto* control = button(action);
+        ASSERT_NE(control, nullptr) << action;
+        control->on_pressed();
+        control->on_released();
+        bgui::on_update();
+        panel.update();
+    };
+    const auto index = [&] {
+        auto* input = find_element<bgui::inputbox>(dock, [](auto& item) { return item.id == "instance-index-0"; });
+        EXPECT_NE(input, nullptr);
+        return input ? input->get_buffer() : std::string{};
+    };
+
+    EXPECT_EQ(button("remove"), nullptr);
+    auto transform = registry->get<commons::transform>(entity.id);
+    transform->set_position({3, 0, 0});
+    click("add");
+    ASSERT_EQ(mesh.instances().size(), 1u);
+    EXPECT_EQ(index(), "1");
+    EXPECT_EQ(mesh.instances()[0].get_position(), (bgui::vec3{3, 0, 0}));
+    transform->set_position({5, 0, 0});
+    click("add");
+    ASSERT_EQ(mesh.instances().size(), 2u);
+    EXPECT_EQ(index(), "2");
+    click("previous");
+    EXPECT_EQ(index(), "1");
+    click("next");
+    EXPECT_EQ(index(), "2");
+    click("next");
+    EXPECT_EQ(index(), "1");
+    auto* input = find_element<bgui::inputbox>(dock, [](auto& item) { return item.id == "instance-index-0"; });
+    ASSERT_NE(input, nullptr);
+    input->m_enter_func("2");
+    panel.update();
+    EXPECT_EQ(index(), "2");
+    click("previous");
+    click("duplicate");
+    ASSERT_EQ(mesh.instances().size(), 3u);
+    EXPECT_EQ(index(), "2");
+    EXPECT_EQ(mesh.instances()[0].get_position(), mesh.instances()[1].get_position());
+    EXPECT_EQ(mesh.instances()[2].get_position(), (bgui::vec3{5, 0, 0}));
+    EXPECT_NE(mesh.instances()[0].target, mesh.instances()[1].target);
+
+    click("remove");
+    ASSERT_EQ(mesh.instances().size(), 2u);
+    EXPECT_EQ(mesh.instances()[1].get_position(), (bgui::vec3{5, 0, 0}));
+    ASSERT_TRUE(context->undo());
+    ASSERT_EQ(mesh.instances().size(), 3u);
+    ASSERT_TRUE(context->undo());
+    ASSERT_EQ(mesh.instances().size(), 2u);
+    ASSERT_TRUE(context->redo());
+    ASSERT_EQ(mesh.instances().size(), 3u);
+    ASSERT_TRUE(context->redo());
+    EXPECT_EQ(mesh.instances().size(), 2u);
+}
+
 TEST_F(EditorInteractionTest, InspectorExposesBodyTypesAndColliderControlsWithHistory) {
     auto entity = registry->create();
     registry->add<commons::physics>(entity);
@@ -1751,4 +1827,24 @@ TEST_F(EditorInteractionTest, HierarchySelectionTraversesLockedNodesAndProtectsT
     registry->get<commons::transform>(root.id)->parent_id = leaf.id;
     api.select_hierarchy(root.id);
     EXPECT_EQ(context->selected_entities.size(), 2u);
+}
+
+TEST_F(EditorInteractionTest, InspectorHudAssetsAndOpacitySupportUndo) {
+    auto entity=registry->create(); registry->add<commons::hud>(entity);
+    auto hud=registry->get<commons::hud>(entity.id);
+    auto parent=hud->add("text","Parent"); parent->id="parent_text";
+    auto widget=hud->add("button","Use",0);
+    widget->font="old.ttf"; widget->image="old.png"; widget->shader="old.frag";
+    context->selected_entity=entity.id; context->selected_hud_widget=widget;
+    auto& dock=bgui::get_layout().add<bgui::dock>();
+    editor::ui::components_view inspector(context); inspector.build(dock); inspector.update();
+    auto* font=find_element<bgui::inputbox>(dock,[](auto& value){return value.get_buffer()=="old.ttf";});
+    ASSERT_NE(font,nullptr); ASSERT_TRUE(font->m_enter_func);
+    font->m_enter_func("new.ttf"); EXPECT_EQ(widget->font,"new.ttf");
+    ASSERT_TRUE(context->undo()); EXPECT_EQ(widget->font,"old.ttf");
+    auto* opacity=find_element<bgui::field>(dock,[](auto& value){return value.get_label().get_buffer()=="Opacity";});
+    ASSERT_NE(opacity,nullptr); ASSERT_TRUE(opacity->get_inputbox().m_enter_func);
+    opacity->get_inputbox().m_enter_func("0.4"); EXPECT_FLOAT_EQ(widget->opacity,.4f);
+    ASSERT_TRUE(context->undo()); EXPECT_FLOAT_EQ(widget->opacity,1.f);
+    EXPECT_NE(find_element<bgui::combo_box>(dock,[](auto& value){return value.get_selected_option()=="parent_text";}),nullptr);
 }

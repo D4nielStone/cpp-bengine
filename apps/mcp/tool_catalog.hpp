@@ -2,9 +2,12 @@
 namespace bubble::mcp {
 inline constexpr auto tool_catalog = R"json({
   "tools": [
+    {"name":"save_live_project","description":"Save the current scene and project from the connected editor.","inputSchema":{"type":"object","additionalProperties":false}},
+    {"name":"undo_live_edit","description":"Undo the most recent command in the connected editor.","inputSchema":{"type":"object","additionalProperties":false}},
+    {"name":"redo_live_edit","description":"Redo the most recent undone command in the connected editor.","inputSchema":{"type":"object","additionalProperties":false}},
     {
       "name": "project_info",
-      "description": "Read the saved Bubble Engine project metadata and main scene entity count.",
+      "description": "Read project metadata and scene entity count from the open editor or saved project.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false
@@ -16,7 +19,7 @@ inline constexpr auto tool_catalog = R"json({
     },
     {
       "name": "list_entities",
-      "description": "List saved main scene entities and their component types in file order.",
+      "description": "List scene entities and component types from the open editor or saved project.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -35,7 +38,7 @@ inline constexpr auto tool_catalog = R"json({
     },
     {
       "name": "get_entity",
-      "description": "Read a saved entity and its serialized components by ID.",
+      "description": "Read an entity and its serialized components by ID.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -155,7 +158,7 @@ inline constexpr auto tool_catalog = R"json({
     },
     {
       "name": "write_asset",
-      "description": "Create or replace Lua scripts (syntax checked), .banim clips, .bmodel meshes, and .scene/.world scenes. Uses native formats and validators. Disk editing only: close the editor or reload after edits. Read authoring_guide for examples.",
+      "description": "Create or replace Lua scripts (syntax checked), GLSL .vert/.frag source (compiled later by editor/runtime), .banim clips, .bmodel meshes, and .scene/.world scenes. Uses native formats and validators. Disk editing only: close the editor or reload after edits. Read authoring_guide for examples.",
       "inputSchema": {
         "type": "object",
         "properties": {

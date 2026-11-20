@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/code_system.hpp"
 #include "debugging/script_log.hpp"
 
@@ -32,6 +33,7 @@ void code_system::setup(const std::shared_ptr<ecs>& registry) {
     if (!registry)
         return;
 
+    registry->script_globals.clear();
     registry->cada<code>([this, &registry](std::uint32_t id) {
         const auto component = registry->get<code>(id);
         if (!component)
@@ -49,6 +51,7 @@ void code_system::setup(const std::shared_ptr<ecs>& registry) {
 }
 
 void code_system::update(const std::shared_ptr<ecs>& registry) {
+    BUBBLE_PROFILE("code", "Lua");
     if (!registry)
         return;
 
@@ -85,6 +88,7 @@ void code_system::update(const std::shared_ptr<ecs>& registry) {
                     auto time = script->estado_lua["Time"].get<sol::table>();
                     time["deltaTime"] = delta_time;
                     time["time"] = time["time"].get<float>() + delta_time;
+                    BUBBLE_PROFILE(script->file.c_str(), "Lua");
                     script->update();
                 } catch (const sol::error& error) {
                     state.failed = true;

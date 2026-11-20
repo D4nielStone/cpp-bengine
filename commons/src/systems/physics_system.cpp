@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/physics_system.hpp"
 
 #include "components/transform.hpp"
@@ -130,6 +131,7 @@ void physics_system::setup(const std::shared_ptr<ecs>& registry) {
 }
 
 void physics_system::update(const std::shared_ptr<ecs>& registry) {
+    BUBBLE_PROFILE("physics", "Physics");
     ensure_world();
     synchronize_entities(registry);
     if (!registry || !dynamic_world)

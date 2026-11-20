@@ -1,7 +1,7 @@
 #version 330 core
 
 in vec2 uv;
-out vec4 FragColor;
+out float visibility;
 
 uniform sampler2D sceneDepth;
 uniform vec2 viewportSize;
@@ -9,7 +9,6 @@ uniform mat4 projection;
 uniform mat4 inverseProjection;
 uniform int mode;
 uniform float radius;
-uniform float strength;
 
 const float PI = 3.14159265359;
 const int STEPS = 6;
@@ -52,12 +51,13 @@ void main() {
     ivec2 size = ivec2(viewportSize);
     ivec2 pixel = ivec2(uv * vec2(size));
     float depth = texelFetch(sceneDepth, pixel, 0).r;
-    if (depth >= 1.0) discard;
+    visibility = 1.0;
+    if (depth >= 1.0) return;
 
     vec3 center = viewPosition(pixel, size, depth);
     vec3 normal = cross(surfaceTangent(pixel, ivec2(1, 0), size, center),
                         surfaceTangent(pixel, ivec2(0, 1), size, center));
-    if (dot(normal, normal) < 1e-20) discard;
+    if (dot(normal, normal) < 1e-20) return;
     normal = normalize(normal);
     bool perspective = projection[3][3] == 0.0;
     vec3 eye = perspective ? normalize(-center) : vec3(0.0, 0.0, 1.0);
@@ -68,8 +68,11 @@ void main() {
 
     float occlusion = 0.0;
     float reference = 0.0;
-    for (int slice = 0; slice < SLICES; ++slice) {
-        float angle = PI * float(slice) / float(SLICES);
+    int slices = mode == 2 ? 8 : SLICES;
+    int steps = mode == 2 ? 8 : STEPS;
+    float rotation = fract(dot(vec2(pixel % 4), vec2(0.75487766, 0.56984029)));
+    for (int slice = 0; slice < slices; ++slice) {
+        float angle = PI * (float(slice) + rotation) / float(slices);
         vec2 direction = vec2(cos(angle), sin(angle));
         vec3 axis = vec3(direction, 0.0);
         axis = normalize(axis - eye * dot(axis, eye));
@@ -77,11 +80,12 @@ void main() {
             float normalAngle = atan(dot(normal, axis) * float(side), max(dot(normal, eye), 1e-5));
             float tangent = normalAngle + 0.5 * PI;
             float horizon = cos(tangent);
+            float horizonIntegral = 0.0;
             vec2 ray = direction * float(side) * pixelRadius;
-            ray *= min(1.0, 64.0 / max(length(ray), 1.0));
+            ray *= min(1.0, length(vec2(size)) / max(length(ray), 1.0));
             ivec2 previous = pixel;
-            for (int stepIndex = 1; stepIndex <= STEPS; ++stepIndex) {
-                float fraction = float(stepIndex) / float(STEPS);
+            for (int stepIndex = 1; stepIndex <= steps; ++stepIndex) {
+                float fraction = float(stepIndex) / float(steps);
                 ivec2 samplePixel = pixel + ivec2(round(ray * fraction * fraction));
                 if (samplePixel == previous) continue;
                 previous = samplePixel;
@@ -90,7 +94,7 @@ void main() {
                 if (distanceToSample < 1e-5 || distanceToSample >= radius) continue;
                 float weight = 1.0 - smoothstep(0.0, radius, distanceToSample);
                 float elevation = dot(normal, delta);
-                float bias = radius * 0.025;
+                float bias = radius * (mode == 2 ? 0.008 : 0.025);
                 if (elevation <= bias) continue;
 
                 if (mode == 1) {
@@ -98,12 +102,16 @@ void main() {
                 } else {
                     vec3 biasedDelta = delta - normal * bias;
                     float slope = dot(normalize(biasedDelta), eye);
-                    horizon = max(horizon, mix(cos(tangent), slope, weight));
+                    if (mode == 2) {
+                        float raisedHorizon = max(horizon, slope);
+                        horizonIntegral += (raisedHorizon - horizon) * weight;
+                        horizon = raisedHorizon;
+                    } else horizon = max(horizon, mix(cos(tangent), slope, weight));
                 }
             }
 
             if (mode == 2) {
-                occlusion += horizon - cos(tangent);
+                occlusion += horizonIntegral;
             } else if (mode == 3) {
                 float projectedNormal = length(vec2(dot(normal, eye), dot(normal, axis)));
                 float baseline = arcIntegral(tangent, normalAngle);
@@ -115,6 +123,6 @@ void main() {
     }
 
     float normalization = mode == 3 ? max(reference, 1e-5) :
-        float(2 * SLICES) * (mode == 1 ? float(STEPS) : 1.0);
-    FragColor = vec4(vec3(1.0 - strength * clamp(occlusion / normalization, 0.0, 1.0)), 1.0);
+        float(2 * slices) * (mode == 1 ? float(steps) : 1.0);
+    visibility = 1.0 - clamp(occlusion / normalization, 0.0, 1.0);
 }

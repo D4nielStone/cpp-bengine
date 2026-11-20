@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/rig_entities.hpp"
 #include "systems/animation_system.hpp"
 #include "components/transform.hpp"
@@ -12,7 +13,6 @@
 #include "components/hud.hpp"
 #include "components/code.hpp"
 #include "components/properties.hpp"
-#include "components/text.hpp"
 
 namespace commons {
 namespace {
@@ -96,7 +96,6 @@ template<class Visit> void channels(component& c, Visit visit) {
         for (std::size_t i = 0; i < v->scripts.size(); ++i) if (v->scripts[i])
             properties(*v->scripts[i], "script[" + v->scripts[i]->file + "].");
     } else if (auto* v = dynamic_cast<properties*>(&c)) scalar("active", v->ativo);
-    else if (auto* v = dynamic_cast<text*>(&c)) { scalar("screen_position", v->pf_ativa); vector("padding", v->padding, 2, 0, 10000); }
 }
 }
 std::vector<animation_property> animation_properties(component& c) {
@@ -140,6 +139,7 @@ void sample_animation(ecs& registry, uint32_t entity, const animation_clip& clip
         target->m_modelo->apply_pose();
 }
 void animation_system::update(const std::shared_ptr<ecs>& registry) {
+    BUBBLE_PROFILE("animation", "Animation");
     const auto dt = m_delta();
     if (!registry || !std::isfinite(dt) || dt < 0) return;
     std::erase_if(m_playback, [&](const auto& entry) {

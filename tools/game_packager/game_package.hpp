@@ -212,7 +212,7 @@ public:
     void rewrite(rapidjson::Value& value, rapidjson::Document::AllocatorType& allocator,
                  const std::string& role = "") const {
         if (value.IsString() && (role == "scene" || role == "model" || role == "directory" || role == "scripts" ||
-                                role == "maps" || role == "file" || role == "skybox_faces" || role == "skybox_image" || role == "image" || role == "sound_clip" || role == "animation_clip")) {
+                                role == "fragment_shader" || role == "vertex_shader" || role == "fragment_shaders" || role == "maps" || role == "file" || role == "skybox_faces" || role == "skybox_image" || role == "image" || role == "sound_clip" || role == "animation_clip" || role == "hud_asset")) {
             const auto path = asset(value.GetString(), role == "model");
             value.SetString(path.c_str(), static_cast<rapidjson::SizeType>(path.size()), allocator);
         } else if (value.IsArray()) {
@@ -220,9 +220,11 @@ public:
         } else if (value.IsObject()) {
             const bool image = value.HasMember("type") && value["type"].IsString() &&
                 std::string(value["type"].GetString()) == "image";
+            const bool hud_element=value.HasMember("kind") && value["kind"].IsString() &&
+                value.HasMember("parent") && value["parent"].IsInt();
             for (auto& member : value.GetObject()) {
                 const std::string key(member.name.GetString());
-                rewrite(member.value, allocator, role == "maps" ? "maps" :
+                rewrite(member.value, allocator, hud_element && (key=="font" || key=="image" || key=="shader") ? "hud_asset" : role == "maps" ? "maps" :
                     image && key == "value" ? "image" :
                     role == "sound_player" && key == "clip" ? "sound_clip" :
                     role == "animation" && key == "clip" ? "animation_clip" : key);

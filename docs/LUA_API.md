@@ -50,7 +50,13 @@ reflete os componentes que existem no código; ela não cria luzes nem entidades
 ## HUD
 
 `gameObject:AddHUD()` cria ou recupera a HUD; `GetComponent("HUD")` consulta.
-Veja [HUD modular](HUD.md) para tipos, layout, botões e exemplos.
+Veja [HUD modular](HUD.md) para hierarquia em qualquer widget, posições relativas,
+`HUD:Find(id)`/`Get(id ou índice)`, fontes TTF/OTF, imagens, cores, opacidade
+e fragmentos GLSL. `Add(tipo,texto,pai)` aceita índice ou ID do pai; omitir
+o pai cria na raiz. `SetScreenPosition` mantém coordenadas do viewport.
+Novos widgets usam layout livre relativo ao pai e tamanho 160 × 40; use
+`absolute=false` para fluxo BGUI. Cenas antigas preservam seus padrões salvos.
+Novos campos de aparência e `id`/`callback` estão documentados no guia.
 
 ## Animações e consulta no editor
 
@@ -68,3 +74,25 @@ O modo **Gestão de cenas → Script em blocos** também oferece a API em uma
 paleta por categorias, com busca e argumentos editáveis. Por exemplo,
 `Translate(Vector3(x, y, z))` aparece como **Mover**, com alvo e três campos.
 Veja [edição visual de scripts](./SCENE_WORKFLOW.md#script-em-blocos).
+
+## Variáveis compartilhadas e uniforms GLSL
+
+`Globals.Set/Get/Has/Remove/Clear` compartilham valores entre arquivos Lua da mesma
+cena. `Renderer:SetShader/SetUniform/RemoveUniform`, `Camera.postProcessShader`,
+`Camera:SetUniform/RemoveUniform` e `Shader.GetUniforms` expõem parâmetros de
+materiais e filtros. Veja [contratos, exemplos, persistência e limites](lua-api/globals-and-shaders.md).
+
+O [guia ilustrado de efeitos visuais](lua-api/visual-effects.md) mostra como
+configurar god rays, neblina volumétrica, flare radial, GTAO, bloom e pólen
+instanciado no Inspector e em Lua.
+
+## Controle de áudio
+
+`SoundPlayer:Play()`, `Pause()`, `Resume()` e `Stop()` solicitam transporte ao
+backend espacial existente; `isPlaying` é somente leitura. Consulte o contrato
+[de áudio](./lua-api/components.md#áudio) e o [exemplo](./lua-api/examples/spatial_audio.lua).
+
+## HUD: alinhamento de texto
+
+`HudElement.alignment` aplica Start/Center/End também ao texto renderizado,
+com os mesmos valores 0/1/2 já disponíveis. Veja [HUD](HUD.md).

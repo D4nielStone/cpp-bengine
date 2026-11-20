@@ -42,12 +42,28 @@ montados dinamicamente pelo script.
   arbitrários.
 - Não existe binding Lua genérico para criar entidade, adicionar componentes,
   instanciar prefab ou enumerar todas as entidades.
-- A [API de HUD](../HUD.md) oferece widgets de layout, texto e botão.
-- `SoundPlayer` permite editar propriedades, mas não iniciar/interromper áudio
-  por Lua.
+- A [API de HUD](../HUD.md) oferece widgets de layout, texto, botão e imagem, todos com filhos.
+  Novos widgets usam posições livres relativas ao pai (`absolute=true`,
+  `relative=true`) e tamanho inicial 160 × 40. Para criar em fluxo, defina
+  `absolute=false`; para tamanho natural, use dimensões zero. Cenas antigas
+  sem esse campo preservam a referência ao viewport. O fluxo BGUI e
+  `SetScreenPosition` mantêm os contratos anteriores. `Find(id)` e `Get(id)`
+  retornam nil quando ausentes. Fragmentos personalizados exigem OpenGL 3.3.
+- `SoundPlayer` oferece Play/Pause/Resume/Stop e isPlaying. Não oferece seek
+  nem sobreposição de vozes no mesmo componente; erros de dispositivo/arquivo
+  são registrados pelo backend.
 - Os componentes `Text`, `Image` e `Terrain` não estão entre os nomes aceitos
   por `GetComponent`.
 - Os estados Lua abrem `base` e `math`; não presuma outras bibliotecas padrão.
 
 Essas limitações descrevem os bindings atuais e não são promessas sobre versões
 futuras.
+
+## Globals e GLSL
+
+Os estados Lua continuam separados. `Globals` compartilha cópias de dados na
+mesma cena e é limpo quando o sistema de scripts inicia novamente; não é um save
+game. A API GLSL nova mantém os formatos de materiais e aceita cenas antigas sem
+`post_processing.uniforms`. O suporte de edição cobre `float/int/bool`,
+`vec2/vec3/vec4` e `mat4`; samplers extras e uniform blocks não são vinculados
+pela API nova. Veja [contratos completos](globals-and-shaders.md).

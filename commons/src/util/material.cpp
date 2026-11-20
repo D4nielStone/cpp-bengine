@@ -68,14 +68,8 @@ void material::usar(shader& shader) {
     apply(shader);
 }
 
-void material::apply(shader& shader) const {
+void material::apply_uniforms(shader& shader) const {
     shader.use();
-
-    // Reset optional state for each draw: materials share the shader program.
-    shader.setBool("uvMundo", false);
-    for (const auto& factor : texture_factors)
-        shader.setFloat(std::string("material.") + factor.name, pbr_value(*this, factor));
-
     for (const auto& [nome, prop] : uniforms) {
         switch (prop.m_type) {
             case uniform::type::Float:
@@ -119,6 +113,17 @@ void material::apply(shader& shader) const {
                 shader.setMat4(nome, glm::value_ptr(*prop.ponteiro.mat4_ptr)); break;
         }
     }
+}
+
+void material::apply(shader& shader) const {
+    shader.use();
+
+    // Reset optional state for each draw: materials share the shader program.
+    shader.setBool("uvMundo", false);
+    for (const auto& factor : texture_factors)
+        shader.setFloat(std::string("material.") + factor.name, pbr_value(*this, factor));
+
+    apply_uniforms(shader);
 
     for (const auto& map : pbr_maps)
         if (!textures.contains(map.name))

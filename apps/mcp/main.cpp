@@ -1,6 +1,8 @@
+#include <ranges>
 #include "engine_version.hpp"
 #include "project_snapshot.hpp"
 #include "creative_service.hpp"
+#include "editor_connection.hpp"
 #include "tool_catalog.hpp"
 #include <rapidjson/schema.h>
 #include <fstream>
@@ -74,14 +76,12 @@ Value tool_result(Value data, allocator& memory, const char* error = nullptr) {
     return result;
 }
 
-Value inspect_project(const fs::path& path, std::string_view tool, unsigned argument, allocator& memory) {
-    const project_snapshot snapshot(path);
-    const auto& entities = snapshot.entities();
+Value inspect_project(const Value& manifest, const Value& entities, std::string_view tool, unsigned argument, allocator& memory) {
     Value data(rapidjson::kObjectType);
     if (tool == "project_info") {
         for (const auto key : {"format", "version", "project_version", "engine_version",
                 "minimum_engine_version", "scene", "settings"})
-            copy_field(data, snapshot.manifest, key, memory);
+            copy_field(data, manifest, key, memory);
         data.AddMember("entityCount", entities.Size(), memory);
     } else if (tool == "list_entities") {
         Value page(rapidjson::kArrayType);
@@ -93,7 +93,7 @@ Value inspect_project(const fs::path& path, std::string_view tool, unsigned argu
             for (const auto key : {"id", "name", "parent", "hidden", "locked"})
                 copy_field(summary, entity, key, memory);
             Value types(rapidjson::kArrayType);
-            for (const auto& component : entity["components"].GetObject())
+            for (const auto& component : std::ranges::subrange(entity["components"].MemberBegin(), entity["components"].MemberEnd()))
                 types.PushBack(Value(component.name, memory), memory);
             summary.AddMember("componentTypes", types, memory);
             page.PushBack(summary, memory);
@@ -116,8 +116,8 @@ enum class phase { connecting, initializing, ready };
 
 class server {
 public:
-    server(fs::path project, fs::path workspace, fs::path runtime)
-        : m_service(std::move(project), std::move(workspace), std::move(runtime)) {}
+    server(fs::path project, fs::path workspace, fs::path runtime, unsigned port)
+        : m_service(std::move(project), std::move(workspace), std::move(runtime), port) {}
 
     void dispatch(std::string_view line) {
         unsigned depth = 0;
@@ -195,6 +195,13 @@ public:
         } else if (as_text(method) == "tools/list") {
             Document catalog;
             catalog.Parse(tool_catalog);
+            if (!m_service.connected()) {
+                auto& items = catalog["tools"];
+                for (auto it = items.Begin(); it != items.End();) {
+                    if (as_text((*it)["name"]).find("_live_") != std::string_view::npos) it = items.Erase(it);
+                    else ++it;
+                }
+            }
             response.AddMember("result", Value(catalog, memory), memory);
         } else if (as_text(method) == "tools/call") {
             const auto tool = as_text(field(params, "name"));
@@ -216,8 +223,14 @@ public:
                     Value result;
                     if (tool == "project_info" || tool == "list_entities" || tool == "get_entity") {
                         const auto& argument = field(input, tool == "get_entity" ? "id" : "offset");
-                        result = inspect_project(m_service.project(), tool,
-                            argument.IsUint() ? argument.GetUint() : 0u, memory);
+                        const auto index = argument.IsUint() ? argument.GetUint() : 0u;
+                        if (m_service.connected()) {
+                            auto snapshot = m_service.live_snapshot();
+                            result = inspect_project(snapshot["manifest"], snapshot["scene"]["entities"], tool, index, memory);
+                        } else {
+                            const project_snapshot snapshot(m_service.project());
+                            result = inspect_project(snapshot.manifest, snapshot.entities(), tool, index, memory);
+                        }
                     } else {
                         struct redirect {
                             std::streambuf* previous = std::cout.rdbuf(std::cerr.rdbuf());
@@ -271,16 +284,20 @@ private:
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     fs::path project, workspace, runtime;
-    for (int i = 1; i < argc; i += 2) {
-        if (i + 1 >= argc) return 2;
-        const std::string_view key(argv[i]);
-        if (key == "--project" && project.empty()) project = argv[i + 1];
-        else if (key == "--workspace" && workspace.empty()) workspace = argv[i + 1];
-        else if (key == "--runtime" && runtime.empty()) runtime = argv[i + 1];
-        else return 2;
-    }
+    unsigned port{};
     try {
-        if (project.empty() && workspace.empty()) throw std::runtime_error("Configure --project or --workspace.");
+        for (int i = 1; i < argc; i += 2) {
+            if (i + 1 >= argc) return 2;
+            const std::string_view key(argv[i]);
+            if (key == "--project" && project.empty()) project = argv[i + 1];
+            else if (key == "--workspace" && workspace.empty()) workspace = argv[i + 1];
+            else if (key == "--runtime" && runtime.empty()) runtime = argv[i + 1];
+            else if (key == "--editor-port" && port == 0) port = bubble::mcp::editor_port(argv[i + 1]);
+            else return 2;
+        }
+        if (port) bubble::mcp::editor_token();
+        if (!port && project.empty() && workspace.empty())
+            throw std::runtime_error("Configure --editor-port, --project or --workspace.");
         if (!project.empty()) {
             project = fs::canonical(project);
             if (project.extension() != ".bengine" || !fs::is_regular_file(project))
@@ -299,7 +316,7 @@ int main(int argc, char** argv) {
             if (!fs::is_regular_file(runtime)) throw std::runtime_error("Expected a runtime executable.");
         }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
-    bubble::mcp::server server(project, workspace, runtime);
+    bubble::mcp::server server(project, workspace, runtime, port);
     constexpr std::size_t max_message_bytes = 1024 * 1024;
     std::string buffer(max_message_bytes + 2, '\0');
     while (std::cout && std::cin.getline(buffer.data(), buffer.size())) {

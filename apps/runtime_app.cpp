@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/animation_system.hpp"
 #include "ui/hud_view.hpp"
 #include "components/camera.hpp"
@@ -115,54 +116,6 @@ private:
     int m_width{}, m_height{};
 };
 
-class runtime_profiler_text final : public bgui::text {
-public:
-    runtime_profiler_text(
-        commons::window& window,
-        std::shared_ptr<commons::render_system> render_system,
-        std::shared_ptr<commons::ecs> registry
-    )
-        : bgui::text("", 0.3f),
-          m_window(window),
-          m_render_system(std::move(render_system)),
-          m_registry(std::move(registry)) {}
-
-    void on_update() override {
-        const double frame_time = m_window.delta_time();
-        m_fps_elapsed += frame_time;
-        ++m_frame_count;
-        if (m_fps_elapsed >= 1.0) {
-            m_fps = static_cast<double>(m_frame_count) / m_fps_elapsed;
-            m_fps_elapsed = 0.0;
-            m_frame_count = 0;
-
-            std::ostringstream stats;
-            const double render_time = m_render_system->last_render_time_ms();
-            const std::size_t render_count =
-                m_render_system->last_rendered_entity_count();
-            const std::size_t camera_count = m_render_system->last_camera_count();
-            stats << std::fixed << std::setprecision(2)
-                  << "Runtime | " << frame_time * 1000.0 << " ms | "
-                  << std::setprecision(0) << m_fps << " FPS | Render "
-                  << std::setprecision(2)
-                  << render_time << " ms | "
-                  << render_count << " draws | "
-                  << m_registry->entities.size() << " entities | "
-                  << camera_count << " cameras";
-            set_buffer(stats.str());
-        }
-        bgui::text::on_update();
-    }
-
-private:
-    commons::window& m_window;
-    std::shared_ptr<commons::render_system> m_render_system;
-    std::shared_ptr<commons::ecs> m_registry;
-    double m_fps_elapsed{0.0};
-    double m_fps{0.0};
-    std::size_t m_frame_count{0};
-};
-
 }
 
 namespace {
@@ -184,12 +137,14 @@ struct runtime_collision_overlay final : commons::system {
 }
 
 int main(const int argc, char** argv) {
-    std::string project_path, script_log_path, test_spec_path;
+    std::string project_path, script_log_path, test_spec_path, profile_json, profile_trace;
     for (int i = 1; i < argc; i += 2) {
         if (i + 1 >= argc) return 2;
         const std::string option = argv[i];
         if (option == "--project" && project_path.empty()) project_path = argv[i + 1];
         else if (option == "--script-log" && script_log_path.empty()) script_log_path = argv[i + 1];
+        else if (option == "--profile-json" && profile_json.empty()) profile_json = argv[i + 1];
+        else if (option == "--profile-trace" && profile_trace.empty()) profile_trace = argv[i + 1];
         else if (option == "--test-spec" && test_spec_path.empty()) test_spec_path = argv[i + 1];
         else return 2;
     }
@@ -287,17 +242,6 @@ int main(const int argc, char** argv) {
     render_system->set_camera_filter([&game_camera](std::uint32_t entity) {
         return entity == game_camera->my_object;
     });
-    if (diagnostics) {
-    auto& profiler = root.add<runtime_profiler_text>(
-        window,
-        render_system,
-        registry
-    );
-    profiler.style.layout.require_mode(
-        bgui::mode::wrap_content,
-        bgui::mode::wrap_content
-    );
-    }
     auto& game_view = root.add<bgui::image>();
     game_view.style.layout.require_mode(
         bgui::mode::match_parent,
@@ -393,6 +337,13 @@ int main(const int argc, char** argv) {
     window.loop();
 
     if (registry->scenes) registry->scenes->load = {};
+    for (const auto& [path, chrome] : {std::pair{profile_json, false}, std::pair{profile_trace, true}}) {
+        if (path.empty()) continue;
+        std::string error;
+        if (!Bubble::profiler::instance().export_capture(path, chrome, error)) {
+            std::cerr << "[profiler] " << error << '\n'; test_failed = true;
+        }
+    }
     return test_failed ? 1 : 0;
     } catch (const std::exception& error) {
         std::cerr << "[runtime] " << error.what() << '\n';

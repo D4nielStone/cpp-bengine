@@ -1,0 +1,1 @@
+GLFW_ICON ICON "@CMAKE_SOURCE_DIR@/tools/release/bubble-engine.ico"

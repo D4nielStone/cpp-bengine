@@ -12,12 +12,16 @@ struct hud_element {
         float depth{0.f};
     };
     std::string kind, text, id, callback;
-    bool absolute{false};
+    std::string font, image, shader;
+    bool relative{true};
+    float opacity{1.f}, border_size{0.f}, border_radius{0.f};
+    bgui::vec4 background{0.f}, hover_color{0.f}, pressed_color{0.f}, border_color{0.f};
+    bool absolute{true};
     float padding{0}, margin{0};
     int alignment{0};
     bgui::vec4 color{1.f,1.f,1.f,1.f};
     int parent{-1};
-    float width{0}, height{0}, scale{0.35f};
+    float width{160}, height{40}, scale{0.35f};
     bool visible{true};
     bgui::vec3 position{0.f};
     std::optional<legacy_world_text> legacy_text;
@@ -28,8 +32,10 @@ struct hud_element {
 struct hud : component {
     static constexpr component::mask mask = component::COMPONENTE_HUD;
     bool enabled{true};
+    std::string asset_root;
     std::vector<std::shared_ptr<hud_element>> elements;
     std::shared_ptr<hud_element> add(const std::string& kind, const std::string& text, int parent = -1);
+    std::shared_ptr<hud_element> find(const std::string& id) const;
     bool analyze(const rapidjson::Value&) override;
     bool serialize(rapidjson::Value&, rapidjson::Document::AllocatorType&) const override;
 };

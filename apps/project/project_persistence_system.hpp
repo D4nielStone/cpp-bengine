@@ -64,10 +64,15 @@ public:
     const std::filesystem::path& active_scene() const noexcept { return m_scene_path; }
     bool has_project_manifest() const noexcept { return !m_project_path.empty(); }
     void set_migration_writes_enabled(bool enabled) noexcept { m_migration_writes_enabled = enabled; }
+    bool live_documents(const std::string& path, rapidjson::Document& manifest,
+        rapidjson::Document& scene, std::string& error) const;
+    bool apply_live_scene(const std::string& path, const rapidjson::Document& scene,
+        const rapidjson::Value& before, std::string& error) const;
     bool has_unsaved_changes(const std::string& path) const;
 
 private:
-    bool load_impl(const std::string& path, const std::filesystem::path& scene, std::string& error, bool runtime = false) const;
+    bool load_impl(const std::string& path, const std::filesystem::path& scene, std::string& error, bool runtime = false,
+        const rapidjson::Document* live_scene = nullptr, const rapidjson::Value* live_before = nullptr) const;
     bool serialize_project(const std::string& path, std::string& error,
         bool write_files, std::string& snapshot, bool update_paths = true, std::optional<std::uint32_t> prefab_root = {}) const;
     struct saved_state {

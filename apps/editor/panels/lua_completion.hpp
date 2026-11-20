@@ -103,7 +103,7 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
             else if (value.find("GetComponent") != std::string::npos && value.find("Animation") != std::string::npos) type = "animation";
             else if (value.find("GetComponent") != std::string::npos && value.find("HUD") != std::string::npos) type = "hud";
             else if (value.find(":AddHUD(") != std::string::npos) type = "hud";
-            else if (std::regex_search(value, std::regex(R"(^[A-Za-z_][A-Za-z0-9_]*:(Add|Get)\()"))) {
+            else if (std::regex_search(value, std::regex(R"(^[A-Za-z_][A-Za-z0-9_]*:(Add|Get|Find)\()"))) {
                 const auto receiver = value.substr(0, value.find(':'));
                 const std::regex hud_assignment("\\b" + receiver + R"(\s*=\s*[^\n;]*(AddHUD\(|GetComponent\(["']HUD["']))");
                 type = std::regex_search(before, hud_assignment) ? "hudElement" : "";
@@ -117,8 +117,15 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
     }
     std::vector<std::string> names;
     if (!member) {
-        names = {"Color", "Debug", "Destroy", "GameObject", "Input", "SceneManager", "Time", "Vector3", "bubble",
+        names = {"Color", "Debug", "Destroy", "GameObject", "Globals", "Shader", "Input", "SceneManager", "Time", "Vector3", "bubble",
             "gameObject", "transform", "print", "setup", "update"};
+    } else if (type == "Globals" && !methods) {
+        names = {"Set", "Get", "Has", "Remove", "Clear"};
+    } else if (type == "Shader" && !methods) {
+        names = {"GetUniforms"};
+    } else if (type == "renderer") {
+        names = {"SetShader", "SetUniform", "RemoveUniform"};
+        if (!methods) names.insert(names.end(), {"enabled", "visible", "castShadows", "receiveShadows"});
     } else if (type == "SceneManager" && !methods) {
         names = {"LoadScene", "ReloadScene", "GetActiveScene", "GetLastError", "IsLoading"};
     } else if (type == "pathfinder") {
@@ -127,11 +134,11 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
         names = {"Play", "Pause", "Stop", "Seek", "CrossFade", "SetSpeed"};
         if (!methods) names.insert(names.end(), {"time", "isPlaying", "isBlending", "speed"});
     } else if (type == "hud") {
-        names = {"Add", "Get"};
+        names = {"Add", "Get", "Find"};
         if (!methods) names.insert(names.end(), {"enabled", "count"});
     } else if (type == "hudElement") {
         names = {"ConsumeClick", "SetScreenPosition"};
-        if (!methods) names.insert(names.end(), {"text", "visible", "width", "height", "scale", "position", "absolute"});
+        if (!methods) names.insert(names.end(), {"text", "visible", "width", "height", "scale", "position", "absolute", "id", "callback", "font", "image", "shader", "relative", "opacity", "padding", "margin", "alignment", "borderSize", "borderRadius", "color", "background", "hoverColor", "pressedColor", "borderColor"});
     } else if (type == "color" && !methods) {
         names = {"r", "g", "b", "a"};
     } else if (type == "transform") {
@@ -144,8 +151,8 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
         names = {"AddHUD", "GetComponent", "IsCollidingWith", "IsDescendantOf", "IsOverlappingTrigger", "SetParent"};
         if (!methods) names.insert(names.end(), {"id", "transform"});
     } else if (type == "camera") {
-        names = {"screenToWorld", "traceRay", "worldToScreen"};
-        if (!methods) names.insert(names.end(), {"forward", "fieldOfView", "aspect", "nearClipPlane",
+        names = {"screenToWorld", "traceRay", "worldToScreen", "SetUniform", "RemoveUniform"};
+        if (!methods) names.insert(names.end(), {"postProcessShader", "postProcessPasses", "forward", "fieldOfView", "aspect", "nearClipPlane",
             "farClipPlane", "orthographic", "orthographicSize", "backgroundColor", "useSkybox",
             "viewportWidth", "viewportHeight", "skyboxImage", "fogEnabled", "fogColor", "fogDensity"});
     } else if (type == "rigidbody") {
@@ -158,8 +165,7 @@ inline std::optional<lua_completion> complete_lua(std::string_view source, std::
         else if (type == "pointLight") names = {"position", "color", "intensity", "constant", "linear", "quadratic"};
         else if (type == "spotLight") names = {"position", "worldPosition", "direction", "worldDirection", "color", "intensity", "constant", "linear", "quadratic", "innerCutoff", "outerCutoff", "shadows", "shadowDistance", "shadowBias", "shadowStrength"};
         else if (type == "soundListener") names = {"enabled"};
-        else if (type == "soundPlayer") names = {"clip", "volume", "pitch", "radius", "looping", "playOnAwake"};
-        else if (type == "renderer") names = {"enabled", "visible", "castShadows", "receiveShadows"};
+        else if (type == "soundPlayer") names = {"clip", "volume", "pitch", "radius", "looping", "playOnAwake", "Play", "Pause", "Resume", "Stop", "isPlaying"};
         else if (type == "GameObject") names = {"Find"};
         else if (type == "Time") names = {"deltaTime", "time"};
         else if (type == "Input") names = {"GetAxis", "GetKey", "GetMouseDelta", "SetMouseCaptured"};

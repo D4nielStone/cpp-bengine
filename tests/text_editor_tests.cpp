@@ -136,3 +136,42 @@ TEST(TextEditor, MouseDragSelectsTextForReplacement) {
     input.on_update();
     EXPECT_EQ(input.get_buffer(), "Xdef");
 }
+
+TEST(TextEditor, LongLineScrollsHorizontallyAndFollowsCaretInBothDirections) {
+    bgui::scoped_interface ui_scope;
+    bgui::font font;
+    font.ascent = 8.f; font.descent = 2.f;
+    for (char32_t c = 32; c < 127; ++c) {
+        bgui::character glyph;
+        glyph.size = {8, 10}; glyph.bearing = {0, 8}; glyph.advance = 8;
+        font.chs.emplace(c, glyph);
+    }
+    constexpr auto resolution = bgui::font_manager::m_default_resolution;
+    bgui::asset_manager::get_instance().store_font("horizontal-editor", resolution, std::move(font));
+    bgui::font_manager::get_instance().set_default_font("horizontal-editor", resolution);
+    auto& io = bgui::get_context();
+    io.m_size = {800, 600};
+    auto& input = bgui::get_layout().add<bgui::inputbox>(
+        std::string(200, 'a'), "", 1.f, nullptr, bgui::input_mode::multiline);
+    input.style.layout.require_size(200, 100);
+    input.set_wrap(false);
+    input.set_scrollable(true);
+    input.set_focused(true);
+    for (int i = 0; i < 4; ++i) bgui::on_update();
+    EXPECT_TRUE(input.get_horizontal_scrollbar_element().is_enabled());
+    io.m_input_map[bgui::input_key::end] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear();
+    bgui::on_update();
+    EXPECT_GT(input.get_horizontal_scroll_offset(), 0);
+    io.m_input_map[bgui::input_key::home] = bgui::input_action::press;
+    bgui::on_update();
+    io.m_input_map.clear();
+    bgui::on_update();
+    EXPECT_EQ(input.get_horizontal_scroll_offset(), 0);
+    input.set_wrap(true);
+    for (int i = 0; i < 4; ++i) bgui::on_update();
+    EXPECT_FALSE(input.get_horizontal_scrollbar_element().is_enabled());
+    EXPECT_GT(input.get_label().get_content_size().y, 10);
+    EXPECT_LT(input.get_label().get_vertical_cursor_position(0, 1), 30u);
+}

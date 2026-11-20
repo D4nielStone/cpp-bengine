@@ -10,6 +10,7 @@
 #include <bgui_backend_freetype.hpp>
 #include <gtest/gtest.h>
 #include "components/camera.hpp"
+#include "api/lua.hpp"
 #include "components/code.hpp"
 #include "systems/code_system.hpp"
 #include "systems/physics_system.hpp"
@@ -23,6 +24,7 @@
 #include "viewport_sync.hpp"
 #include "camera_viewport.hpp"
 #include "material_thumbnail.hpp"
+#include "shader_uniform_editor.hpp"
 #include "guizmo/grid_gizmo.hpp"
 #include "components/physics.hpp"
 #include "project_creation_system.hpp"
@@ -996,6 +998,8 @@ TEST_F(EditorRenderTest, AtmosphereIsGradientAndMissingCubemapFallsBack) {
     auto entity = registry->create(1);
     registry->add<commons::camera>(entity);
     auto camera = registry->get<commons::camera>(entity.id);
+    camera->config.sky_solid_color = {.2f, .6f, .8f, 1.f};
+    camera->config.atmosphere_zenith = {.02f, .1f, .3f};
     camera->viewportFBO = {64, 64};
     camera->createFB();
     registry->get<commons::transform>(entity.id)->set_rotation({0.f, -90.f, 0.f});
@@ -1042,6 +1046,8 @@ TEST_F(EditorRenderTest, CubemapOverridesAtmosphereAndDisableRestoresIt) {
     auto entity = registry->create(1);
     registry->add<commons::camera>(entity);
     auto camera = registry->get<commons::camera>(entity.id);
+    camera->config.sky_solid_color = {.2f, .6f, .8f, 1.f};
+    camera->config.atmosphere_zenith = {.02f, .1f, .3f};
     camera->viewportFBO = {64, 64};
     camera->createFB();
     camera->skybox_faces = paths;
@@ -1548,11 +1554,12 @@ TEST_F(EditorRenderTest, CustomShaderFailurePreservesLastValidProgram) {
 TEST_F(EditorRenderTest, CameraFragmentPostProcessingWritesPixelsAndSurvivesResize) {
     const auto fragment = std::filesystem::temp_directory_path() / ("bengine-post-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".frag");
-    std::ofstream(fragment) << "#version 330 core\nout vec4 color;void main(){color=vec4(0,1,0,1);}";
+    std::ofstream(fragment) << "#version 330 core\nuniform vec3 tint; out vec4 color;void main(){color=vec4(tint,1);}";
     auto registry = std::make_shared<commons::ecs>();
     auto entity = registry->create(); registry->add<commons::camera>(entity);
     auto camera = registry->get<commons::camera>(entity.id);
     camera->config.post_processing.fragment_shader = fragment.string();
+    camera->config.post_processing.parameters.set_uniform("tint", bgui::vec3{0,1,0});
     camera->viewport({32,32}); camera->createFB();
     commons::render_system renderer;
     for (const int size : {32,48}) {
@@ -1565,4 +1572,269 @@ TEST_F(EditorRenderTest, CameraFragmentPostProcessingWritesPixelsAndSurvivesResi
         EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
     }
     std::filesystem::remove(fragment);
+}
+
+TEST_F(EditorRenderTest, CameraPostLayersShareOpaqueDepthAcrossResize) {
+    const auto folder = std::filesystem::temp_directory_path() / ("bengine-depth-layers-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(folder);
+    struct cleanup {
+        std::filesystem::path folder;
+        ~cleanup() { std::filesystem::remove_all(folder); }
+    } remove{folder};
+    std::ofstream(folder / "depth.frag") << R"(#version 330 core
+in vec2 uv;
+out vec4 color;
+uniform sampler2D sceneDepth;
+uniform bool hasSceneDepth;
+void main(){color=vec4(hasSceneDepth && texture(sceneDepth,uv).r<1.0?1.0:0.0,0,0,1);})";
+    std::ofstream(folder / "compose.frag") << R"(#version 330 core
+in vec2 uv;
+out vec4 color;
+uniform sampler2D sceneColor;
+uniform sampler2D sceneDepth;
+void main(){color=vec4(texture(sceneColor,uv).r,0,texture(sceneDepth,uv).r==1.0?1.0:0.0,1);})";
+    auto registry = std::make_shared<commons::ecs>();
+    auto camera_entity = registry->create();
+    registry->add<commons::camera>(camera_entity);
+    registry->get<commons::transform>(camera_entity.id)->set_rotation({0, -90, 0});
+    auto camera = registry->get<commons::camera>(camera_entity.id);
+    auto entity = registry->create();
+    registry->get<commons::transform>(entity.id)->set_position({0, 0, -4});
+    const auto cube = (std::filesystem::path(BENGINE_SOURCE_DIR) / "commons/assets/models/cube.obj").string();
+    registry->add<commons::renderer>(entity, cube.c_str());
+    auto renderer = registry->get<commons::renderer>(entity.id);
+    renderer->local_instances = true;
+    std::vector<commons::transform> instances(129);
+    for (std::size_t i = 0; i + 1 < instances.size(); ++i)
+        instances[i].set_position({100, 0, 0});
+    for (auto& mesh : renderer->m_modelo->meshes)
+        mesh.setInstances(instances);
+    auto& post = camera->config.post_processing;
+    post.occlusion = commons::ambient_occlusion_mode::gtao;
+    post.fragment_shader = (folder / "depth.frag").string();
+    post.fragment_shaders = {(folder / "compose.frag").string()};
+    commons::render_system render;
+    for (const auto& size : {bgui::vec2i{64, 48}, bgui::vec2i{40, 80}}) {
+        camera->request_framebuffer_size(size);
+        render.update(registry);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, camera->fbo);
+        std::array<unsigned char, 4> center{}, corner{};
+        glReadPixels(size.x / 2, size.y / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, center.data());
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, corner.data());
+        EXPECT_EQ(center, (std::array<unsigned char, 4>{255, 0, 0, 255}));
+        EXPECT_EQ(corner, (std::array<unsigned char, 4>{0, 0, 255, 255}));
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    }
+}
+
+TEST_F(EditorRenderTest, FogConvergesToDisplayColorAndZeroDensityPreservesLighting) {
+    glViewport(0, 0, 64, 64);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_FRAMEBUFFER_SRGB);
+    commons::shader shader;
+    ASSERT_NE(shader.ID, 0u);
+    shader.use();
+    const auto identity = glm::mat4(1.f);
+    shader.setMat4("view", glm::value_ptr(identity));
+    shader.setMat4("projection", glm::value_ptr(identity));
+    shader.setMat4("model", glm::value_ptr(identity));
+    shader.setBool("shadowEnabled", false);
+    shader.setVec3("viewPos", {0, 0, 30});
+    shader.setVec3("dirLight.ambient", {1, 1, 1});
+    shader.setVec3("dirLight.color", {0, 0, 0});
+    shader.setVec3("dirLight.direction", {0, 0, -1});
+    shader.setFloat("dirLight.intensity", 1.f);
+    shader.setInt("pointLightCount", 0);
+    shader.setInt("spotLightCount", 0);
+    commons::material material;
+    material.set_uniform("material.albedo", commons::color{1, 0, 0, .7f});
+    material.set_uniform("material.ao", 1.f);
+    material.set_uniform("material.roughness", .5f);
+    material.set_uniform("material.metallic", 0.f);
+    commons::mesh plane({
+        {{-1,-1,0}, {0,0,1}, {0,0}}, {{1,-1,0}, {0,0,1}, {1,0}},
+        {{1,1,0}, {0,0,1}, {1,1}}, {{-1,1,0}, {0,0,1}, {0,1}}
+    }, {0,1,2,0,2,3}, material);
+    plane.load();
+    auto render = [&] {
+        glClear(GL_COLOR_BUFFER_BIT);
+        plane.draw(shader);
+        std::array<unsigned char, 4> pixel{};
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+        return pixel;
+    };
+    shader.setBool("fogEnabled", false);
+    const auto original = render();
+    shader.setBool("fogEnabled", true);
+    shader.setVec3("fogColor", {.2f, .4f, .6f});
+    shader.setFloat("fogMinDistance", 5.f);
+    shader.setFloat("fogMaxDistance", 20.f);
+    shader.setFloat("fogDensity", 0.f);
+    EXPECT_EQ(render(), original);
+    shader.setFloat("fogDensity", .001f);
+    const auto fogged = render();
+    EXPECT_NEAR(fogged[0], 51, 2);
+    EXPECT_NEAR(fogged[1], 102, 2);
+    EXPECT_NEAR(fogged[2], 153, 2);
+    EXPECT_EQ(fogged[3], original[3]);
+    shader.setFloat("fogMinDistance", 40.f);
+    shader.setFloat("fogMaxDistance", 80.f);
+    EXPECT_EQ(render(), original);
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+}
+
+TEST(CameraSettings, PostProcessUniformsRoundTripAndMalformedInputIsAtomic) {
+    commons::camera source;
+    source.config.post_processing.fragment_shader = "shaders/post.frag";
+    source.config.post_processing.parameters.set_uniform("exposure", 1.25f);
+    source.config.post_processing.parameters.set_uniform("tint", bgui::vec4{1, .5f, .25f, 1});
+    rapidjson::Document document(rapidjson::kObjectType);
+    ASSERT_TRUE(source.serialize(document, document.GetAllocator()));
+    commons::camera restored;
+    ASSERT_TRUE(restored.analyze(document));
+    EXPECT_EQ(restored.config.post_processing.fragment_shader, "shaders/post.frag");
+    EXPECT_TRUE(restored.config.post_processing.parameters.same_configuration(source.config.post_processing.parameters));
+    document["post_processing"]["uniforms"]["exposure"]["value"].SetString("invalid");
+    EXPECT_FALSE(restored.analyze(document));
+    EXPECT_FLOAT_EQ(restored.config.post_processing.parameters.getUniforme("exposure").valor.f, 1.25f);
+    document["post_processing"].RemoveMember("uniforms");
+    ASSERT_TRUE(restored.analyze(document));
+    EXPECT_TRUE(restored.config.post_processing.parameters.uniforms.empty());
+}
+
+TEST_F(EditorRenderTest, ShaderReflectionExposesLinkedUniformTypesAndArraySizesWithoutBinding) {
+    const auto root = std::filesystem::temp_directory_path() / ("bengine-uniforms-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    std::ofstream(root / "test.frag") << "#version 330 core\nuniform vec3 tint = vec3(0.25,0.5,0.75); uniform float weights[2]; out vec4 color; void main(){color=vec4(tint*(weights[0]+weights[1]),1);}";
+    commons::shader program("ambient_occlusion.vert", (root / "test.frag").c_str());
+    ASSERT_NE(program.ID, 0u);
+    GLint before = 0, after = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &before);
+    auto uniforms = program.active_uniforms();
+    glGetIntegerv(GL_CURRENT_PROGRAM, &after);
+    EXPECT_EQ(before, after);
+    EXPECT_NE(std::find_if(uniforms.begin(), uniforms.end(), [](const auto& u) { return u.name == "tint" && u.type == "vec3" && u.size == 1; }), uniforms.end());
+    EXPECT_NE(std::find_if(uniforms.begin(), uniforms.end(), [](const auto& u) { return u.name == "weights[0]" && u.type == "float" && u.size == 2; }), uniforms.end());
+    program.use();
+    program.setVec3("tint", {1, 1, 1});
+    program.setFloat("weights[0]", 3);
+    program.setFloat("weights[1]", 4);
+    program.reset_uniforms();
+    program.setFloat("tint", 9.f); // A stale override from another shader must not issue an invalid GL upload.
+    float restored[3]{};
+    glGetUniformfv(program.ID, glGetUniformLocation(program.ID, "tint"), restored);
+    EXPECT_FLOAT_EQ(restored[0], .25f); EXPECT_FLOAT_EQ(restored[1], .5f); EXPECT_FLOAT_EQ(restored[2], .75f);
+    glGetUniformfv(program.ID, glGetUniformLocation(program.ID, "weights[1]"), restored);
+    EXPECT_FLOAT_EQ(restored[0], 0.f);
+    sol::state lua;
+    lua.open_libraries(sol::lib::base);
+    auto registry = std::make_shared<commons::ecs>();
+    commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
+    commons::api::setUpApi(lua, registry, 0);
+    lua["fragment"] = (root / "test.frag").string();
+    EXPECT_TRUE(lua.safe_script("local list = Shader.GetUniforms('ambient_occlusion.vert', fragment); assert(#list == 2)", sol::script_pass_on_error).valid());
+    EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+    std::filesystem::remove_all(root);
+}
+
+TEST_F(EditorRenderTest, CustomShaderInspectorEditsValidatesAndRemovesUniformValues) {
+    bgui::scoped_interface ui_scope;
+    const auto fragment = std::filesystem::temp_directory_path() / ("bengine-uniform-inspector-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".frag");
+    std::ofstream(fragment) << "#version 330 core\nuniform float exposure = 1.0; out vec4 color; void main(){color=vec4(exposure);}";
+    commons::material material;
+    bgui::linear content(bgui::orientation::vertical);
+    unsigned commits = 0;
+    std::string message;
+    editor::ui::build_shader_uniform_editor(content, "ambient_occlusion.vert", fragment.string(),
+        [&] { return material; }, [&](const commons::material& next) { material = next; ++commits; return true; },
+        [&](std::string text) { message = std::move(text); });
+    bgui::inputbox* input = nullptr;
+    for (auto& [layer, children] : content.get_elements())
+        for (auto& child : children)
+            if (auto* candidate = dynamic_cast<bgui::inputbox*>(child.get())) input = candidate;
+    ASSERT_NE(input, nullptr);
+    input->m_enter_func("2.5");
+    EXPECT_EQ(commits, 1u);
+    EXPECT_FLOAT_EQ(material.getUniforme("exposure").valor.f, 2.5f);
+    input->m_enter_func("not a number");
+    EXPECT_EQ(commits, 1u);
+    EXPECT_FALSE(message.empty());
+    input->m_enter_func("");
+    EXPECT_EQ(commits, 2u);
+    EXPECT_FALSE(material.uniforms.contains("exposure"));
+    std::filesystem::remove(fragment);
+}
+
+TEST_F(EditorRenderTest, ReusableBloomGradePreservesNeutralColorAndExposesControls) {
+    auto registry = std::make_shared<commons::ecs>();
+    auto entity = registry->create();
+    registry->add<commons::camera>(entity);
+    auto camera = registry->get<commons::camera>(entity.id);
+    camera->config.sky_solid_color = commons::color{.3f, .4f, .5f, 1.f};
+    camera->config.post_processing.fragment_shader = "bloom_grade.frag";
+    camera->config.post_processing.parameters.set_uniform("bloomStrength", 0.f);
+    camera->viewport({32, 32});
+    camera->createFB();
+    commons::render_system renderer;
+    renderer.update(registry);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, camera->fbo);
+    unsigned char neutral[4]{};
+    glReadPixels(16,16,1,1,GL_RGBA,GL_UNSIGNED_BYTE,neutral);
+    camera->config.post_processing.parameters.set_uniform("exposure", .5f);
+    renderer.update(registry);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, camera->fbo);
+    unsigned char dimmed[4]{};
+    glReadPixels(16,16,1,1,GL_RGBA,GL_UNSIGNED_BYTE,dimmed);
+    EXPECT_GT(neutral[0], 0);
+    for (int i=0;i<3;++i) EXPECT_NEAR(dimmed[i], neutral[i]*.5, 2);
+    camera->config.post_processing.parameters.set_uniform("fadeToBlack", 1.f);
+    renderer.update(registry);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, camera->fbo);
+    unsigned char black[4]{};glReadPixels(16,16,1,1,GL_RGBA,GL_UNSIGNED_BYTE,black);
+    EXPECT_EQ(black[0],0);EXPECT_EQ(black[1],0);EXPECT_EQ(black[2],0);
+    commons::shader emission("pbr.vert", "emissive.frag");
+    ASSERT_NE(emission.ID, 0u);
+    EXPECT_GE(glGetUniformLocation(emission.ID, "emissionColor"), 0);
+    EXPECT_GE(glGetUniformLocation(emission.ID, "emissionStrength"), 0);
+    EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+}
+
+TEST_F(EditorRenderTest, InstancingBatchesBeyond128AndCullsUsingInstanceBounds) {
+    struct probe {
+        static auto& original() { static PFNGLDRAWELEMENTSINSTANCEDPROC fn=nullptr; return fn; }
+        static auto& counts() { static std::vector<int> value; return value; }
+        static void GLAPIENTRY draw(GLenum mode, GLsizei count, GLenum type, const void* indices, GLsizei instances) {
+            counts().push_back(instances);original()(mode,count,type,indices,instances);
+        }
+        probe() { original()=glad_glDrawElementsInstanced;counts().clear();glad_glDrawElementsInstanced=draw; }
+        ~probe() { glad_glDrawElementsInstanced=original(); }
+    } calls;
+    auto registry=std::make_shared<commons::ecs>();
+    auto eye=registry->create();registry->add<commons::camera>(eye);
+    auto camera=registry->get<commons::camera>(eye.id);
+    registry->get<commons::transform>(eye.id)->set_position({0,0,3});
+    registry->get<commons::transform>(eye.id)->set_rotation({0,-90,0});
+    camera->config.sky_solid_color={0,0,0,1};camera->viewport({64,64});camera->createFB();
+    auto entity=registry->create();registry->add<commons::renderer>(entity);
+    auto renderer=registry->get<commons::renderer>(entity.id);renderer->m_modelo=new commons::model();
+    commons::material material;material.fragment_shader="emissive.frag";material.set_uniform("emissionColor",bgui::vec3{1,0,0});
+    renderer->m_modelo->meshes.emplace_back(std::vector<commons::vertex>{
+        {{-1,-1,0},{0,0,1},{0,0}},{{1,-1,0},{0,0,1},{1,0}},{{0,1,0},{0,0,1},{.5,1}}
+    },std::vector<unsigned>{0,1,2},material);
+    std::vector<commons::transform> instances(257);
+    for (auto& instance:instances) instance.set_position({1000,0,0});
+    instances.back().set_position({0,0,0});
+    renderer->m_modelo->meshes[0].setInstances(std::move(instances));
+    registry->get<commons::transform>(entity.id)->set_position({1000,0,0});
+    commons::render_system rendering;rendering.update(registry);
+    EXPECT_EQ(calls.counts(),(std::vector<int>{128,128,1}));
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,camera->fbo);
+    unsigned char pixel[4]{};glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+    EXPECT_GT(pixel[0],200);EXPECT_EQ(pixel[1],0);
+    EXPECT_EQ(glGetError(),static_cast<GLenum>(GL_NO_ERROR));
 }

@@ -1,3 +1,4 @@
+#include "profiling/profiler.hpp"
 #include "systems/sound_system.hpp"
 
 #include "components/sound_listener.hpp"
@@ -22,6 +23,7 @@ struct voice {
     bgui::resource_files::bytes encoded;
     ma_decoder decoder{};
     ma_sound sound{};
+    std::uint64_t restart_revision{};
     bool decoder_ready{false};
     bool sound_ready{false};
 
@@ -80,12 +82,14 @@ sound_system::~sound_system() = default;
 void sound_system::setup(const std::shared_ptr<ecs>&) {}
 
 void sound_system::update(const std::shared_ptr<ecs>& registry) {
+    BUBBLE_PROFILE("sound", "Audio");
     if (m_device_attempted && !m_playback) return;
 
     if (m_playback) {
         std::erase_if(m_playback->voices, [&](const auto& entry) {
             const auto player = registry->get<sound_player>(entry.first);
-            return !player || !player->play_on_awake || !registry->has<transform>(entry.first) ||
+            return !player || (player->playback_request() == sound_player::transport::stopped ||
+                (player->playback_request() == sound_player::transport::automatic && !player->play_on_awake)) || !registry->has<transform>(entry.first) ||
                 player != entry.second->owner.lock() || player->clip != entry.second->clip;
         });
     }
@@ -120,7 +124,13 @@ void sound_system::update(const std::shared_ptr<ecs>& registry) {
 
     registry->cada<sound_player>([&](std::uint32_t id) {
         const auto player = registry->get<sound_player>(id);
-        if (!player->play_on_awake || player->clip.empty()) return;
+        player->report_playing(false);
+        const auto request = player->playback_request();
+        if (request == sound_player::transport::stopped ||
+            (request == sound_player::transport::automatic && !player->play_on_awake) ||
+            player->clip.empty()) return;
+        if (request == sound_player::transport::paused &&
+            (!m_playback || !m_playback->voices.contains(id))) return;
         const auto pose = registry->get<transform>(id);
         if (!pose) return;
 
@@ -161,7 +171,19 @@ void sound_system::update(const std::shared_ptr<ecs>& registry) {
         ma_sound_set_volume(&slot->sound, listener ? bounded(player->volume, 0.f, 1.f, 1.f) : 0.f);
         ma_sound_set_pitch(&slot->sound, bounded(player->pitch, 0.1f, 3.f, 1.f));
         ma_sound_set_looping(&slot->sound, player->looping);
-        if (first_update) ma_sound_start(&slot->sound);
+        if (request == sound_player::transport::paused) {
+            ma_sound_stop(&slot->sound);
+        } else {
+            if (slot->restart_revision != player->restart_revision()) {
+                ma_sound_seek_to_pcm_frame(&slot->sound, 0);
+                slot->restart_revision = player->restart_revision();
+                ma_sound_start(&slot->sound);
+            } else if (first_update || !ma_sound_is_playing(&slot->sound)) {
+                // A completed one-shot remains completed until Play requests a rewind.
+                if (!ma_sound_at_end(&slot->sound)) ma_sound_start(&slot->sound);
+            }
+            player->report_playing(ma_sound_is_playing(&slot->sound));
+        }
     });
 }
 
