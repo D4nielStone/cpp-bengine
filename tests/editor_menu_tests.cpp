@@ -1624,7 +1624,7 @@ TEST(EditorAppearanceNative, RendersCompactInspectorTabsAndCenteredModeGlyphs) {
 }
 
 TEST(ModelRigEditor, CreatesBindsSavesAndAutomaticallyRecordsBonePose) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     bgui::get_context().m_size = {1200,900};
     const auto directory = std::filesystem::temp_directory_path() /
         ("bengine-rig-editor-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -1793,7 +1793,7 @@ TEST(ModelRigAnimationNative, RendersRigTimelineAndDetailedTooltipAtTwoScales) {
 }
 
 TEST(ModelRigEditor, WeightPaintCommitsOneStrokeCancelsAndRoundTripsHistory) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& io = bgui::get_context();
     io.m_size = {1200,900}; io.m_input_map.clear();
     const auto directory = std::filesystem::temp_directory_path() /

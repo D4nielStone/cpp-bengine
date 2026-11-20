@@ -134,7 +134,7 @@ TEST_F(AnimationTest, RecentProjectsUsesLastSuccessAndSkipsMissingPaths) {
     ASSERT_EQ(recent.last(),first.string());
 }
 TEST_F(AnimationTest, AnimationPanelSurvivesClosingAndReopening) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock=bgui::get_layout().add<bgui::dock>();
     editor::ui::animation_view panel(context); panel.build(dock); panel.update();
     bgui::window* window = nullptr;
@@ -161,7 +161,7 @@ TEST_F(AnimationTest, ClipboardPreservesAnimationTracks) {
 }
 
 TEST_F(AnimationTest, TimelineRulerLeavesRoomForKeyframeEditors) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     ASSERT_TRUE(editor.commit(target.id,clip()));
     editor::ui::animation_view panel(context);
@@ -394,7 +394,7 @@ TEST_F(AnimationTest, ReloadingAClipPreservesLocalEditsInUndoHistory) {
 }
 
 TEST_F(AnimationTest, PanelRecordsInspectorChangesWithoutAPropertyPicker) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     context->project_root=root;
     std::string error;
     ASSERT_TRUE(editor.create(target.id,"Panel",error)) << error;
@@ -424,7 +424,7 @@ TEST_F(AnimationTest, PanelRecordsInspectorChangesWithoutAPropertyPicker) {
 }
 
 TEST_F(AnimationTest, ClipPathAndActionsRemainSeparatedAtEditorPanelWidths) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& styles = bgui::style_manager::get_instance();
     struct restore_theme {
         bgui::theme previous;
@@ -514,7 +514,7 @@ TEST_F(AnimationTest, PanelPreviewPlaysPausesLoopsStopsAndDoesNotRecordKeys) {
     data->duration = 2;
     data->loop = false;
     editor.player(target.id)->speed = 2;
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::animation_view::clock::time_point now{};
     editor::ui::animation_view panel(context, [&] { return now; });
@@ -626,7 +626,7 @@ TEST_F(AnimationTest, MovingKeysSortsWithoutLosingValuesAndSupportsUndo) {
 
 TEST_F(AnimationTest, TimelineDragCommitsOnceOnRelease) {
     ASSERT_TRUE(editor.commit(target.id, clip()));
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::animation_view panel(context); panel.build(dock); panel.update();
     std::vector<bgui::element*> plots;
@@ -757,7 +757,7 @@ TEST_F(AnimationTest, CrossFadeHandlesDiscreteMissingAndReplacedTargetsAndInterr
 TEST_F(AnimationTest, SelectionRoundTripRestoresCursorAndRecordingWithoutCapturingOtherEntity) {
     ASSERT_TRUE(editor.commit(target.id, clip()));
     const auto other = registry->create();
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::animation_view::clock::time_point now{};
     editor::ui::animation_view panel(context, [&] { return now; });
@@ -823,7 +823,7 @@ T* find_animation_widget(bgui::element& root, Predicate predicate) {
 }
 TEST_F(AnimationTest, TimelineScrubbingKeepsWidgetsAndGroupsHistoryWithoutRecordingPreview) {
     ASSERT_TRUE(editor.commit(target.id, clip()));
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::animation_view panel(context); panel.build(dock); panel.update();
     auto* plot = find_animation_widget<bgui::element>(dock, [](auto& value) { return value.type == "animation-timeline"; });
@@ -849,7 +849,7 @@ TEST_F(AnimationTest, TimelineScrubbingKeepsWidgetsAndGroupsHistoryWithoutRecord
 
 TEST_F(AnimationTest, TimelineScrollsHorizontallyAndZoomPreservesTheCanvas) {
     ASSERT_TRUE(editor.commit(target.id, clip()));
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::animation_view panel(context); panel.build(dock); panel.update();
     auto* scroll = find_animation_widget<bgui::linear>(dock, [](auto& value) { return value.has_class("animation-timeline-scroll"); });
