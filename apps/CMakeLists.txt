@@ -60,9 +60,9 @@ if(BUILD_RUNTIME)
     if(BENGINE_SINGLE_FILE_RUNTIME AND UNIX)
         target_link_options(runtime_app PRIVATE -static-libstdc++ -static-libgcc)
     endif()
-    if(COMMONS_USE_RELATIVE_ASSET_PATHS AND UNIX)
+    if((COMMONS_USE_RELATIVE_ASSET_PATHS OR BUILD_EDITOR) AND UNIX AND NOT APPLE)
         set_target_properties(runtime_app PROPERTIES BUILD_RPATH "$ORIGIN/lib"
-            INSTALL_RPATH "$ORIGIN/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+            INSTALL_RPATH "$ORIGIN/lib" BUILD_WITH_INSTALL_RPATH "${COMMONS_USE_RELATIVE_ASSET_PATHS}")
         # DT_RPATH also resolves bundled transitive dependencies.
         target_link_options(runtime_app PRIVATE "LINKER:--disable-new-dtags")
     endif()
@@ -89,10 +89,30 @@ if(BUILD_EDITOR)
     )
     target_include_directories(editor_app PRIVATE ${EDITOR_INCLUDE_DIRS})
     find_package(CURL REQUIRED)
-    target_link_libraries(editor_app PRIVATE project_persistence editor_services CURL::libcurl)
+    target_link_libraries(editor_app PRIVATE project_persistence editor_services editor_connection CURL::libcurl)
     add_dependencies(editor_app game_packager)
     if(TARGET runtime_app)
         add_dependencies(editor_app runtime_app)
+        if(NOT BENGINE_DISTRIBUTION_BUILD AND NOT CMAKE_CROSSCOMPILING AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+           CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND
+           (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+            if(WIN32)
+                set(export_target windows)
+            else()
+                set(export_target linux)
+            endif()
+            add_custom_target(native_export_template
+                COMMAND ${CMAKE_COMMAND}
+                    "-DBINARY=$<TARGET_FILE:runtime_app>"
+                    "-DPACKAGER=$<TARGET_FILE:game_packager>"
+                    "-DREPOSITORY=${CMAKE_SOURCE_DIR}"
+                    "-DTARGET_PLATFORM=${export_target}"
+                    -P "${CMAKE_SOURCE_DIR}/scripts/create_native_template.cmake"
+                DEPENDS runtime_app game_packager
+                COMMENT "Preparing the native project export template"
+                VERBATIM)
+            add_dependencies(editor_app native_export_template)
+        endif()
     endif()
     target_compile_definitions(editor_app PRIVATE BENGINE_PACKAGER_PATH="$<TARGET_FILE:game_packager>")
     target_compile_definitions(editor_app PRIVATE BENGINE_REPOSITORY_ROOT="${CMAKE_SOURCE_DIR}")

@@ -5,6 +5,7 @@
 #include <bgui_backend_freetype.hpp>
 #include <bgui_backend_gl3.hpp>
 #include <bgui_backend_glfw.hpp>
+#include <os/resource_files.hpp>
 
 #include "debugging/debug.hpp"
 
@@ -21,9 +22,10 @@ void ui_system::setup(const std::shared_ptr<ecs>&)
     bgui::set_font_antialiasing(true);
     bgui::set_up_freetype();
     constexpr const char* interface_font = "Hack Nerd Font";
-    const auto interface_font_path =
-        std::filesystem::path(COMMONS_ASSET_DIR) /
-        "fonts/HackNerdFont-Regular.ttf";
+    const auto font_file = "fonts/HackNerdFont-Regular.ttf";
+    auto interface_font_path = std::filesystem::path("assets") / font_file;
+    if (!bgui::resource_files::exists(interface_font_path))
+        interface_font_path = std::filesystem::path(COMMONS_ASSET_DIR) / font_file;
     bgui::ft_load_font(
         interface_font,
         interface_font_path.string(),

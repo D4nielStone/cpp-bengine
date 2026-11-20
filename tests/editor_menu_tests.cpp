@@ -1322,6 +1322,7 @@ TEST(EditorSceneManagement, CreatesOpensAndDeletesScenesThroughTheWorkspace) {
     editor::ui::ui_persistence_system layout;
     editor::ui::editor_ui editor(dock, models, management, menu, side, layout, persistence,
         registry, project.string(), folder);
+    editor.set_editor_context(std::make_shared<editor::ui::editor_context>(registry));
     auto& files = editor.add_panel<editor::ui::files_view>(project);
     int scene_changes = 0;
     editor.setup_scene_management(files, [&] { ++scene_changes; });
@@ -1337,7 +1338,8 @@ TEST(EditorSceneManagement, CreatesOpensAndDeletesScenesThroughTheWorkspace) {
         std::string available;
         auto* button = find<bgui::button>(scope, [&](auto& item) {
             available += "[" + item.get_label().get_buffer() + "] ";
-            return item.get_tooltip() == editor::ui::tr(label);
+            return item.get_label().get_buffer() == editor::ui::tr(label) ||
+                   item.get_tooltip() == editor::ui::tr(label);
         });
         ASSERT_NE(button, nullptr) << label << "; available: " << available;
         button->on_pressed();
@@ -1501,6 +1503,8 @@ TEST(EditorScriptingNative, RendersDedicatedWorkspaceAndOneFullSizedDragCard) {
 }
 
 TEST_F(EditorMenuTest, SidebarCentersButtonsAndIconsAtDifferentScales) {
+    scoped_editor_features visual_scripting{true};
+    editor.refresh_feature_settings();
     for (float scale : {1.f, 1.5f}) {
         bgui::set_global_scale(scale);
         for (int frame=0; frame<3; ++frame) bgui::on_update();

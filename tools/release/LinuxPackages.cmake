@@ -1,0 +1,23 @@
+set(CPACK_PACKAGE_NAME "bubble-engine")
+set(CPACK_PACKAGE_VENDOR "Bubble Engine")
+set(CPACK_PACKAGE_CONTACT "Bubble Engine <136137847+D4nielStone@users.noreply.github.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Bubble Engine 3D game editor and runtime")
+set(CPACK_PACKAGE_DESCRIPTION "Create, run and export 3D projects with a native editor and a precompiled Linux runtime.")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/D4nielStone/cpp-bengine")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/")
+
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.35), libstdc++6 (>= 11), libgcc-s1, libgl1")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "zenity | kdialog")
+
+set(CPACK_RPM_PACKAGE_ARCHITECTURE "x86_64")
+set(CPACK_RPM_PACKAGE_RELEASE "1")
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
+set(CPACK_RPM_PACKAGE_RELOCATABLE OFF)
+set(CPACK_RPM_PACKAGE_AUTOREQPROV "no")
+set(CPACK_RPM_PACKAGE_REQUIRES "/bin/sh, coreutils, glibc >= 2.35, libstdc++ >= 11, libgcc, libglvnd-glx")
+set(CPACK_RPM_PACKAGE_RECOMMENDS "zenity")
+# Keep the editor, its runtime template and private shared libraries byte-for-byte.
+set(CPACK_RPM_SPEC_MORE_DEFINE "%define __os_install_post %{nil}")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/share/applications")

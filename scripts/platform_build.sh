@@ -16,28 +16,41 @@ staging="${workspace}/package"
 output="${output_root}/${target}"
 mkdir -p "$workspace" "$(dirname "$progress_file")"
 printf '1|Preparing game export...\n' > "$progress_file"
+missing_precompiled() {
+    printf '0|%s\n' "$1" > "$progress_file"
+    printf '%s\n' "$1" >&2
+    exit 6
+}
 if [ ! "$packager" ]; then
+    if [ "${BENGINE_EXPORT_ALLOW_BUILD:-}" != 1 ] || [ "${BENGINE_PORTABLE:-}" = 1 ]; then
+        missing_precompiled 'The precompiled game packager is required. Supply its path or set BENGINE_PACKAGER.'
+    fi
     cmake -S "${repository_root}/tools/game_packager" -B "${workspace}/packager" -DCMAKE_BUILD_TYPE=Release
     cmake --build "${workspace}/packager" --config Release --parallel 2
     packager="${workspace}/packager/game_packager"
 fi
-"$packager" prepare "$repository_root" "$project_file" "$staging" "$output"
 key=$("$packager" template-key "$repository_root" "$target" "$format")
 cache=${BENGINE_TEMPLATE_CACHE:-"${XDG_CACHE_HOME:-"${HOME}/.cache"}/cpp-bengine/export-templates"}
-template="${cache}/${target}/${format}/${key}"
+cached="${cache}/${target}/${format}/${key}"
 if [ "$provided_template" ]; then
     template=$provided_template
     "$packager" template-validate "$template" "$key" "$target" "$format"
-elif ! "$packager" template-validate "$template" "$key" "$target" "$format" >/dev/null 2>&1; then
-    shipped="${BENGINE_EXPORT_TEMPLATES:-"${repository_root}/export_templates"}/${target}/${format}"
-    if [ -f "${shipped}/${key}/template.json" ]; then shipped="${shipped}/${key}"; fi
-    if "$packager" template-validate "$shipped" "$key" "$target" "$format" >/dev/null 2>&1; then
-        template=$shipped
-    else
-        if [ "${BENGINE_PORTABLE:-}" = 1 ]; then
-            printf 'This portable release includes folder export for its own platform only. No compatible bundled template was found.\n' >&2
-            exit 6
+else
+    template=
+    packager_directory=$(dirname "$(command -v "$packager")")
+    for root in "${BENGINE_EXPORT_TEMPLATES:-"${repository_root}/export_templates"}" "${packager_directory}/export_templates" "$cache"; do
+        candidate="${root}/${target}/${format}"
+        if [ -f "${candidate}/${key}/template.json" ]; then candidate="${candidate}/${key}"; fi
+        if "$packager" template-check "$candidate" "$key" "$target" "$format"; then
+            template=$candidate
+            break
         fi
+    done
+    if [ ! "$template" ]; then
+        if [ "${BENGINE_EXPORT_ALLOW_BUILD:-}" != 1 ] || [ "${BENGINE_PORTABLE:-}" = 1 ]; then
+            missing_precompiled "No compatible precompiled runtime for $target/$format. Choose folder export for the host platform or supply a matching template."
+        fi
+        template=$cached
         printf 'No compatible precompiled template; building it once.\n'
         runtime_root="${workspace}/runtime-${format}-${key}"
         sh "${repository_root}/scripts/compile_runtime.sh" "$target" "$repository_root" "$runtime_root" "$progress_file" packaging "$format"
@@ -55,6 +68,7 @@ elif ! "$packager" template-validate "$template" "$key" "$target" "$format" >/de
     fi
 fi
 printf 'Using precompiled runtime template: %s\n' "$template"
+"$packager" prepare "$repository_root" "$project_file" "$staging" "$output"
 binary="${template}/runtime_app"
 if [ "$target" = windows ]; then binary="${binary}.exe"; fi
 printf '96|Packaging game and dependencies...\n' > "$progress_file"

@@ -1166,6 +1166,7 @@ TEST(LuaApi, NewCamerasExposeNeutralGrayWithoutOverridingSavedColors) {
     lua.open_libraries(sol::lib::base, sol::lib::math);
     commons::api::setClasses(lua);
     commons::api::setNamespaces(lua);
+    lua["bubble"]["input"] = lua.create_table();
     commons::api::setUpApi(lua, registry, entity.id);
     auto result = lua.safe_script(R"(
         local camera = gameObject:GetComponent("Camera")

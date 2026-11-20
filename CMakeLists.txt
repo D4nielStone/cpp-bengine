@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
     BubbleEngine
-    VERSION 1.5.0
+    VERSION 0.1.5
     LANGUAGES C CXX
 )
 

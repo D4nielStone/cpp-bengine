@@ -252,8 +252,7 @@ TEST(RigOverlay, InterpolatesWeightColorsAndClipsTriangles) {
 }
 
 TEST_F(ModelRigTest, ExposingSkeletonIsOneUndoableActionWithStableIds) {
-    auto context = std::make_shared<editor::ui::editor_context>();
-    context->registry = std::make_shared<commons::ecs>();
+    auto context = std::make_shared<editor::ui::editor_context>(std::make_shared<commons::ecs>());
     auto owner = context->registry->create();
     context->registry->add<commons::renderer>(owner, load().release());
     ASSERT_TRUE(editor::ui::expose_rig_entities(context, owner.id));

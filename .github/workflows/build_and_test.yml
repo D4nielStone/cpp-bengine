@@ -97,7 +97,10 @@ jobs:
       run: |
         python3 tests/create_smoke_project.py "$PWD/out/release-smoke"
         sh scripts/platform_build.sh linux "$PWD" "$PWD/game-build" "$PWD/game-build.progress" "$PWD/out/release-smoke/project.bengine" "$PWD/game-work" folder "" "$PWD/out/apps/game_packager"
-        sh scripts/platform_build.sh linux "$PWD" "$PWD/game-single" "$PWD/game-single.progress" "$PWD/out/release-smoke/project.bengine" "$PWD/game-single-work" single "" "$PWD/out/apps/game_packager"
+        BENGINE_EXPORT_ALLOW_BUILD=1 sh scripts/platform_build.sh linux "$PWD" "$PWD/game-single" "$PWD/game-single.progress" "$PWD/out/release-smoke/project.bengine" "$PWD/game-single-work" single "" "$PWD/out/apps/game_packager"
+        key=$(out/apps/game_packager template-key "$PWD" linux folder)
+        mkdir -p "$BENGINE_TEMPLATE_CACHE/linux/folder/$key"
+        cp -a out/apps/export_templates/linux/folder/. "$BENGINE_TEMPLATE_CACHE/linux/folder/$key/"
 
     - name: Run exported Linux games
       if: runner.os == 'Linux'
@@ -114,6 +117,11 @@ jobs:
         ./scripts/platform_build.ps1 -Target windows -RepositoryRoot "$PWD" -BuildDirectory "$PWD/game-build" -ProgressFile "$PWD/game-build.progress" -ProjectFile "$PWD/out/release-smoke/project.bengine" -Packager "$PWD/out/apps/Release/game_packager.exe"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         if (-not (Test-Path game-build/windows/release-smoke.exe)) { throw "Game executable missing" }
+        $key = & "$PWD/out/apps/Release/game_packager.exe" template-key "$PWD" windows folder
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $destination = Join-Path $env:BENGINE_TEMPLATE_CACHE "windows/folder/$key"
+        New-Item -ItemType Directory -Force $destination | Out-Null
+        Copy-Item -Recurse out/apps/Release/export_templates/windows/folder/* $destination
 
     - name: Upload native Windows game package
       if: runner.os == 'Windows'
@@ -154,6 +162,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential curl git pkg-config zip unzip ninja-build binutils-mingw-w64-x86-64 zlib1g-dev
     - name: Export generated smoke project for Windows on Linux
+      env:
+        BENGINE_EXPORT_ALLOW_BUILD: '1'
       run: |
         python3 tests/create_smoke_project.py "$PWD/release-smoke"
         mkdir -p game-build

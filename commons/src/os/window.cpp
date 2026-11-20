@@ -49,9 +49,10 @@ namespace {
     }
 
     void apply_editor_theme_overrides(bgui::theme& theme) {
-        const auto override_path =
-            std::filesystem::path(COMMONS_ASSET_DIR) /
-            "themes/editor-dark.theme";
+        const auto theme_file = "themes/editor-dark.theme";
+        auto override_path = std::filesystem::path("assets") / theme_file;
+        if (!bgui::resource_files::exists(override_path))
+            override_path = std::filesystem::path(COMMONS_ASSET_DIR) / theme_file;
         if (!bgui::resource_files::exists(override_path))
             throw std::runtime_error(
                 "[ui] Could not find editor theme overrides: " +

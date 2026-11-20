@@ -1,3 +1,4 @@
+#include <ranges>
 #include <gtest/gtest.h>
 #include "localization.hpp"
 #include "api_reference.hpp"
@@ -42,7 +43,7 @@ TEST(Localization, ShippedCatalogsCoverSameKeysAndMarkdownCatalogIsSearchable) {
     en.Parse(project_files::read(root / "en-US.json").c_str());
     pt.Parse(project_files::read(root / "pt-BR.json").c_str());
     ASSERT_FALSE(en.HasParseError()); ASSERT_FALSE(pt.HasParseError());
-    for (const auto& entry : en["strings"].GetObject())
+    for (const auto& entry : std::ranges::subrange(en["strings"].MemberBegin(), en["strings"].MemberEnd()))
         EXPECT_TRUE(pt["strings"].HasMember(entry.name));
     const auto documents = markdown_catalog(api_reference_documentation_root());
     ASSERT_FALSE(documents.empty());
@@ -153,7 +154,7 @@ TEST_F(LocalizationTest, MarkdownRendererDisplaysDiscoveredDocument) {
     std::ofstream(document_path) << "# Guide\n\n```lua\nDebug.Log(\"ready\")\n```";
     const auto documents = markdown_catalog(root);
     ASSERT_EQ(documents.size(), 1u);
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     bgui::linear body(bgui::orientation::vertical);
     const auto paragraphs = editor::ui::render_markdown(body, documents.front().contents);
     ASSERT_FALSE(paragraphs.empty());
@@ -171,7 +172,7 @@ TEST_F(LocalizationTest, MarkdownRendererDisplaysDiscoveredDocument) {
 }
 
 TEST(Localization, ApiReferenceClosesAfterUsingBothFilters) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     auto& root = bgui::get_layout();
     editor::ui::open_api_reference();
     auto* modal = dynamic_cast<bgui::modal*>(root.get_elements().at(bgui::layer::overlay).front().get());
@@ -197,7 +198,7 @@ TEST(Localization, ApiReferenceClosesAfterUsingBothFilters) {
 }
 
 TEST(Localization, ApiReferencePreservesSelectionAndResizesBothPanes) {
-    bgui::scoped_interface interface;
+    bgui::scoped_interface scope;
     bgui::get_context().m_size = {1366, 702};
     open_api_reference();
     bgui::inputbox* search = nullptr;

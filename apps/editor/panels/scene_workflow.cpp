@@ -1,3 +1,4 @@
+#include <ranges>
 #include "editor_features.hpp"
 #include <glad.h>
 #include "scene_workflow.hpp"
@@ -615,7 +616,7 @@ public:
             if(!same && fs::is_regular_file(file)) {
                 rapidjson::Document doc; const auto text=project_files::read(file); doc.Parse(text.data(),text.size());
                 if(!doc.HasParseError() && doc.IsObject() && doc.HasMember("positions") && doc["positions"].IsObject())
-                    for(const auto& p:doc["positions"].GetObject())
+                    for(const auto& p:std::ranges::subrange(doc["positions"].MemberBegin(), doc["positions"].MemberEnd()))
                         if(p.value.IsArray() && p.value.Size()==2 && p.value[0].IsNumber() && p.value[1].IsNumber()) {
                             const float x=p.value[0].GetFloat(), y=p.value[1].GetFloat();
                             if(std::isfinite(x) && std::isfinite(y) && std::abs(x)<1.e6f && std::abs(y)<1.e6f) positions[(root/p.name.GetString()).lexically_normal()]={x,y};
