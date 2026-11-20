@@ -77,8 +77,9 @@ inline bool attach_lua_script(const std::shared_ptr<editor_context>& context,
             return false;
         }
         if (!next->load_properties(error)) return false;
-        const auto relative = path.lexically_relative(context->project_root);
-        next->file = !relative.empty() && *relative.begin() != ".."
+        std::error_code relative_error;
+        const auto relative = std::filesystem::relative(path, context->project_root, relative_error);
+        next->file = !relative_error && !relative.empty() && *relative.begin() != ".."
             ? relative.generic_string() : path.string();
         next->arquivoCompleto = path.string();
         next->asset_root = context->project_root.string();
