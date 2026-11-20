@@ -132,6 +132,16 @@ TEST_F(RuntimeProcessTest, FppTemplateStartsAndRestartsThroughEditorProcess) {
     std::string error;
     ASSERT_TRUE(editor::ui::create_project_files(template_directory, error,
         editor::ui::project_template::fpp)) << error;
+    {
+        std::ofstream controller(template_directory / "scripts" / "fpp_controller.lua", std::ios::app);
+        ASSERT_TRUE(controller << R"lua(
+local setup_controller = setup
+function setup()
+    setup_controller()
+    if enabled then Debug.Log("FPP player body ready.") end
+end
+)lua");
+    }
     const auto template_project = template_directory / "project.bengine";
     const auto original = fs::file_size(template_project);
     commons::window window("Editor runtime snapshot test", 100, 100);
