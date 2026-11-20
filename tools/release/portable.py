@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,6 +70,10 @@ def run(root, arguments):
         verify(root)
         return 0
     if arguments == ['--smoke-test']:
+        if sys.platform == 'win32' and os.environ.get('BENGINE_SMOKE_OPENGL'):
+            driver = Path(os.environ['BENGINE_SMOKE_OPENGL'])
+            for name in ('opengl32.dll', 'libgallium_wgl.dll'):
+                shutil.copy2(driver / name, root / name)
         with tempfile.TemporaryDirectory(prefix='bubble-smoke-') as directory:
             state = Path(directory)
             ready = state / 'ready'

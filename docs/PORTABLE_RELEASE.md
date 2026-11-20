@@ -60,3 +60,6 @@ runs `--smoke-test` under Xvfb/software OpenGL with an empty `PATH`. The editor 
 signal first-frame readiness within 30 seconds. The same workflow extracts
 both native packages, checks that the installed launcher activates a trial
 update, exports using only basic shell tools and launches each exported game.
+
+The Windows workflow supplies software OpenGL only for the startup check of
+the extracted portable application.

@@ -140,9 +140,22 @@ jobs:
       - name: Smoke test portable Linux editor without external tools
         if: runner.os == 'Linux'
         run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tools/release/smoke.py release
-      - name: Smoke test portable Windows editor without external tools
+      - name: Smoke test portable Windows editor with software OpenGL
         if: runner.os == 'Windows'
-        run: python tools/release/smoke.py release
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "mesa3d-25.2.8-release-msvc.7z"
+          $driver = Join-Path $env:RUNNER_TEMP "bubble-engine-mesa"
+          curl.exe --fail --location --retry 3 --output $archive "https://github.com/pal1000/mesa-dist-win/releases/download/25.2.8/mesa3d-25.2.8-release-msvc.7z"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -ne "e47cfe0be35f0c40c3d488c0e965d10656154ed55cfdfe4f4d79d4395672dc02") {
+            throw "Mesa software OpenGL archive checksum mismatch."
+          }
+          & "$env:ProgramFiles/7-Zip/7z.exe" x $archive "-o$driver" x64/opengl32.dll x64/libgallium_wgl.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:BENGINE_SMOKE_OPENGL = Join-Path $driver "x64"
+          $env:GALLIUM_DRIVER = "llvmpipe"
+          python tools/release/smoke.py release
       - name: Smoke test native Linux packages and precompiled export
         if: runner.os == 'Linux'
         run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tools/release/smoke.py release --native-linux
