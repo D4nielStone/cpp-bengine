@@ -15,6 +15,7 @@ inline std::vector<bgui::element*> render_markdown(bgui::linear& parent, const s
     std::string line;
     bool in_code_block = false;
     while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         std::string display = line;
         int heading = 0;
         while (heading < static_cast<int>(line.size()) && heading < 6 && line[heading] == '#') ++heading;

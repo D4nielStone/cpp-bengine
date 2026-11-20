@@ -1137,7 +1137,7 @@ TEST_F(EditorAssetWorkflowTest, MaterialEditPreservesInlineTextureAndRejectsStal
         "format":"bengine-material","version":1,"uniforms":{},
         "textures":{"tex_albedo":{"path":"","filtering":2,"width":1,"height":1,"rgba":"ff0000ff"}}
     })";
-    std::ofstream(path) << original;
+    std::ofstream(path, std::ios::binary) << original;
     commons::material material;
     std::string error;
     ASSERT_TRUE(commons::load_material_asset(path, material, error)) << error;
@@ -1164,7 +1164,7 @@ TEST_F(EditorAssetWorkflowTest, KeepsUnsavedMaterialDraftFromAnOlderTextEditorSe
     std::ostringstream encoded;
     encoded << std::quoted(entry) << " 1 " << std::quoted(draft) << '\n';
     std::ofstream(material) << "{}";
-    std::ofstream(session) << "bengine-session-1\n1\n" << std::quoted(folder.string())
+    std::ofstream(session, std::ios::binary) << "bengine-session-1\n1\n" << std::quoted(folder.string())
         << '\n' << std::quoted(entry) << '\n' << encoded.str();
     auto& dock = bgui::get_layout().add<bgui::dock>();
     editor::ui::files_view files(folder);

@@ -47,7 +47,7 @@ TEST_F(SceneWorkflowTest, SharedTextBufferConflictDetectionAndDraftSession) {
     ASSERT_TRUE(document); dock.remove_window(document); files.update();
     EXPECT_TRUE(files.save_session(root/"session"));
     EXPECT_NE(editor::ui::project_files::read(root/"session").find("visual draft"),std::string::npos);
-    std::ofstream(path)<<"-- external change\n";
+    std::ofstream(path, std::ios::binary)<<"-- external change\n";
     EXPECT_THROW(files.save_script_source(path,next),std::runtime_error);
     EXPECT_EQ(files.script_source(path),next);
     EXPECT_EQ(editor::ui::project_files::read(path),"-- external change\n");
@@ -323,7 +323,7 @@ TEST_F(SceneWorkflowTest, SceneOutlineRespectsPlayGuardAndSourceControlHasNoGitS
 
 TEST_F(SceneWorkflowTest, GeneralFppOpensAsNestedBlocksWithoutOpaqueScript) {
     const std::string source(editor::ui::script_template(editor::ui::lua_script_preset::fpp_controller).source);
-    std::ofstream(root/"enemy.lua") << source;
+    std::ofstream(root/"enemy.lua", std::ios::binary) << source;
     auto& text_dock=bgui::get_layout().add<bgui::dock>(); text_dock.set_enable(false);
     auto& dock=bgui::get_layout().add<bgui::dock>();
     editor::ui::files_view files(root); files.build(text_dock);

@@ -36,7 +36,7 @@ struct workflow_state {
         try {
             if(flush && before_open && !before_open()) return;
             const auto source=files.script_source(path);
-            current_root=root(); script=path; buffer=source; document.load(source); selected=0; ++revision;
+            current_root=root(); script=fs::canonical(path); buffer=source; document.load(source); selected=0; ++revision;
             status="Arraste blocos para reordenar; use os encaixes para aninhar.";
         } catch(const std::exception& error) { status=error.what(); ++revision; }
     }
@@ -142,12 +142,17 @@ context_actions script_actions(const std::shared_ptr<workflow_state>& state,cons
     actions.emplace_back("Excluir arquivo de script...",[weak,root,path] {
         const auto s=weak.lock();if(!s || s->root()!=root || !s->editable()) return;
         if(s->before_open && !s->before_open()) return;
-        try {s->files.request_delete_script(path,[weak,root,path] {
-            if(auto s=weak.lock();s && s->root()==root) {
-                if(s->script==path) {s->script.clear();s->buffer.clear();s->document.load("");s->selected=0;}
-                s->status="Arquivo de script excluído.";++s->revision;++s->graph_revision;++s->scripts_revision;
-            }
-        });} catch(const std::exception& e) {s->status=e.what();++s->revision;}
+        try {
+            const auto file=asset_files::editable_file(path,root);
+            s->files.request_delete_script(file,[weak,root,file] {
+                if(auto s=weak.lock();s && s->root()==root) {
+                    if(s->script==file) {
+                        s->script.clear();s->buffer.clear();s->document.load("");s->selected=0;
+                    }
+                    s->status="Arquivo de script excluído.";++s->revision;++s->graph_revision;++s->scripts_revision;
+                }
+            });
+        } catch(const std::exception& e) {s->status=e.what();++s->revision;}
     });
     return actions;
 }

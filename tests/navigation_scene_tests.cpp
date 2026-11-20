@@ -108,7 +108,7 @@ TEST(SceneManagement, RuntimeSwitchPreservesManifestAndRejectsInvalidScene) {
     rapidjson::Document metadata;
     const auto encoded=bgui::resource_files::text(snapshot); metadata.Parse(encoded.c_str());
     ASSERT_TRUE(metadata.HasMember("runtime_source_project"));
-    EXPECT_EQ(std::string(metadata["runtime_source_project"].GetString()),manifest);
+    EXPECT_EQ(fs::path(metadata["runtime_source_project"].GetString()),fs::path(manifest));
     editor::ui::project_persistence_system play(registry,17);
     play.set_migration_writes_enabled(false);
     ASSERT_TRUE(play.load(snapshot,error)) << error;

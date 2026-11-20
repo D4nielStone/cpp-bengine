@@ -130,7 +130,7 @@ public:
 
     std::string document_contents(const std::filesystem::path& path) {
         update_document_editor();
-        if(const auto found=m_documents.find(path);found!=m_documents.end()) return found->second.buffer;
+        if(const auto found=m_documents.find(document_key(path));found!=m_documents.end()) return found->second.buffer;
         return project_files::read(path);
     }
     const std::string& text_source(const std::filesystem::path& requested) {
@@ -196,7 +196,7 @@ public:
 
     bool has_document_edits(const std::filesystem::path& path) {
         update_document_editor();
-        const auto found = m_documents.find(path);
+        const auto found = m_documents.find(document_key(path));
         return found != m_documents.end() && found->second.buffer != found->second.original;
     }
 
@@ -219,7 +219,7 @@ public:
     void refresh_files() { m_refresh_requested = true; }
 
     void reload_clean_document(const std::filesystem::path& path) {
-        const auto found = m_documents.find(path);
+        const auto found = m_documents.find(document_key(path));
         if (found == m_documents.end() || has_document_edits(path)) return;
         auto& doc = found->second;
         doc.original = project_files::read(path);
@@ -232,8 +232,9 @@ public:
             throw std::runtime_error("Pare a execução antes de excluir arquivos.");
         if (is_scene_file(file) && m_check_scene_delete)
             m_check_scene_delete(file);
+        const auto key = document_key(file);
         asset_files::erase(file, m_project_root);
-        if (auto found = m_documents.find(file); found != m_documents.end()) {
+        if (auto found = m_documents.find(key); found != m_documents.end()) {
             auto& doc = found->second;
             if (m_active_document == &doc) m_active_document = nullptr;
             if (m_document_window == doc.window) {
@@ -485,7 +486,7 @@ public:
             }
             if (!std::filesystem::is_regular_file(value.file, error)) continue;
             open_document(value.file);
-            auto found = m_documents.find(value.file);
+            auto found = m_documents.find(document_key(value.file));
             if (found != m_documents.end() && value.dirty && found->second.editor) {
                 found->second.buffer = value.buffer;
                 found->second.editor->set_buffer(value.buffer);
@@ -494,7 +495,7 @@ public:
         }
         if (!m_legacy_material_drafts.empty())
             m_asset_status = "Rascunhos de materiais do editor de texto foram preservados no arquivo da sessão.";
-        if (auto found = m_documents.find(active); found != m_documents.end() && found->second.window)
+        if (auto found = m_documents.find(document_key(active)); found != m_documents.end() && found->second.window)
             activate_document(active);
         request_refresh();
     }
@@ -680,7 +681,14 @@ private:
 
     }
 
-    void open_document(const std::filesystem::path& path) {
+    static std::filesystem::path document_key(const std::filesystem::path& path) {
+        std::error_code error;
+        const auto canonical = std::filesystem::weakly_canonical(path, error);
+        return error ? path : canonical;
+    }
+
+    void open_document(const std::filesystem::path& requested) {
+        const auto path = document_key(requested);
         if (is_model_file(path) || is_material_file(path)) return;
         if (!m_dock) return;
         auto found = m_documents.find(path);
@@ -716,7 +724,8 @@ private:
         activate_document(path);
     }
 
-    void activate_document(const std::filesystem::path& path) {
+    void activate_document(const std::filesystem::path& requested) {
+        const auto path = document_key(requested);
         const auto found = m_documents.find(path);
         if (found == m_documents.end()) return;
         if (m_active_document && m_active_document->editor)

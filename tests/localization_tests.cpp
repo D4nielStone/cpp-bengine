@@ -124,7 +124,15 @@ TEST_F(LocalizationTest, SavedLayoutsKeepLegacyIdentities) {
 
 TEST_F(LocalizationTest, PreferenceAcceptsRelativeDevelopmentPaths) {
     const auto absolute = root / "relative.json";
-    const auto relative = std::filesystem::relative(absolute, std::filesystem::current_path());
+    struct restore_directory {
+        std::filesystem::path saved = std::filesystem::current_path();
+        ~restore_directory() {
+            std::error_code ignored;
+            std::filesystem::current_path(saved, ignored);
+        }
+    } restore;
+    std::filesystem::current_path(root);
+    const auto relative = absolute.filename();
     std::string error;
     ASSERT_TRUE(localization::save_preference(relative, "pt-BR", error)) << error;
     EXPECT_EQ(localization::read_preference(absolute), "pt-BR");
@@ -132,7 +140,7 @@ TEST_F(LocalizationTest, PreferenceAcceptsRelativeDevelopmentPaths) {
 
 TEST_F(LocalizationTest, MarkdownCatalogRecursivelyOrganizesAndSearchesFiles) {
     std::filesystem::create_directories(root / "guides" / "input");
-    std::ofstream(root / "overview.MD") << "# Overview\r\nWelcome to the editor.";
+    std::ofstream(root / "overview.MD", std::ios::binary) << "# Overview\r\nWelcome to the editor.";
     std::ofstream(root / "guides" / "input" / "keys.markdown")
         << "# Keyboard input\nUse Input.GetKey(\"Space\").";
     std::ofstream(root / "ignored.txt") << "# Not Markdown";
@@ -151,7 +159,7 @@ TEST_F(LocalizationTest, MarkdownCatalogRecursivelyOrganizesAndSearchesFiles) {
 
 TEST_F(LocalizationTest, MarkdownRendererDisplaysDiscoveredDocument) {
     const auto document_path = root / "guide.md";
-    std::ofstream(document_path) << "# Guide\n\n```lua\nDebug.Log(\"ready\")\n```";
+    std::ofstream(document_path, std::ios::binary) << "# Guide\r\n\r\n```lua\r\nDebug.Log(\"ready\")\r\n```";
     const auto documents = markdown_catalog(root);
     ASSERT_EQ(documents.size(), 1u);
     bgui::scoped_interface scope;
