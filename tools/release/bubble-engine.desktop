@@ -3,5 +3,6 @@ Type=Application
 Name=Bubble Engine
 Comment=Create and export 3D games
 Exec=bubble-engine
+Icon=bubble-engine
 Terminal=false
 Categories=Development;

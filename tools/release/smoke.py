@@ -76,6 +76,10 @@ def smoke_native(artifact):
                 subprocess.run(['rpm2cpio', str(artifact)], stdout=payload, check=True)
                 payload.seek(0)
                 subprocess.run(['cpio', '-id', '--quiet'], stdin=payload, cwd=installation, check=True)
+        desktop = installation / 'usr/share/applications/bubble-engine.desktop'
+        icon = installation / 'usr/share/icons/hicolor/256x256/apps/bubble-engine.png'
+        if 'Icon=bubble-engine' not in desktop.read_text().splitlines() or not icon.is_file():
+            raise RuntimeError(f'Desktop icon is missing from {artifact.name}')
         engine = installation / 'usr/lib/bubble-engine'
         launcher = installation / 'usr/bin/bubble-engine'
         if not os.access(launcher, os.X_OK) or not os.access(engine / 'engine_updater', os.X_OK):

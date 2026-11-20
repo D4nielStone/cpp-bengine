@@ -20,4 +20,9 @@ set(CPACK_RPM_PACKAGE_REQUIRES "/bin/sh, coreutils, glibc >= 2.35, libstdc++ >= 
 set(CPACK_RPM_PACKAGE_RECOMMENDS "zenity")
 # Keep the editor, its runtime template and private shared libraries byte-for-byte.
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define __os_install_post %{nil}")
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/share/applications")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    "/usr/share/applications"
+    "/usr/share/icons"
+    "/usr/share/icons/hicolor"
+    "/usr/share/icons/hicolor/256x256"
+    "/usr/share/icons/hicolor/256x256/apps")

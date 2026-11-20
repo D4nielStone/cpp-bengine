@@ -44,6 +44,9 @@ def linux_packages(stage, output, name, version, work):
     desktop = root / 'usr/share/applications/bubble-engine.desktop'
     desktop.parent.mkdir(parents=True)
     shutil.copyfile(ROOT / 'tools/release/bubble-engine.desktop', desktop)
+    icon = root / 'usr/share/icons/hicolor/256x256/apps/bubble-engine.png'
+    icon.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / 'tools/release/bubble-engine.png', icon)
     for generator in ('DEB', 'RPM'):
         subprocess.run(['cpack', '--config', str(ROOT / 'tools/release/LinuxPackages.cmake'),
                         '-G', generator, '-B', str(work / 'cpack'), '-D', f'CPACK_PACKAGE_VERSION={version}',
@@ -139,10 +142,11 @@ def package(build, output, tag, library_dir=None, updater=None, portable=False, 
                     if path.is_file():
                         bundle.write(path, Path('engine') / path.relative_to(stage))
             portable_dist = Path(work) / 'portable'
+            icon = ['--icon', str(ROOT / 'tools/release/bubble-engine.ico')] if windows else []
             subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                             '--onefile', '--name', 'BubbleEngine', '--hidden-import', 'tkinter.filedialog',
                             '--distpath', str(portable_dist), '--workpath', str(Path(work) / 'pyinstaller'),
-                            '--specpath', work, '--add-data', str(payload) + ':.',
+                            '--specpath', work, '--add-data', str(payload) + ':.', *icon,
                             str(ROOT / 'tools/release/portable.py')], check=True)
             portable_binary = portable_dist / ('BubbleEngine' + suffix)
             subprocess.run([str(portable_binary), '--verify-package'], cwd=work,
